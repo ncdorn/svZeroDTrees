@@ -1,0 +1,5 @@
+{"name": "AS1_SU0308_r_steady_7.27.23",
+ "repair type": "extensive",
+ "repair degrees": [1.0]
+}
+

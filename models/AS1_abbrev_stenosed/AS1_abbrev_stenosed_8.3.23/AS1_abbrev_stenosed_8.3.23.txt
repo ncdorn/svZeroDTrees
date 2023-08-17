@@ -1,0 +1,5 @@
+{"name": "AS1_abbrev_stenosed_8.3.23",
+ "repair type": "extensive",
+ "repair degrees": [0.5, 1.0]
+}
+

@@ -1,0 +1,5 @@
+{"name": "optimization_test_7.27.23",
+ "repair type": "proximal",
+ "repair degrees": [1.0]
+}
+

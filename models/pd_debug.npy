@@ -1,0 +1,1 @@
+{"name": "results", "data": {"name": {"0": "V0", "1": "V0"}, "flow_in": {"0": 10, "1": 1}, "flow_out": {"0": 1, "1": 10}, "pressure_in": {"0": 100, "1": 1}, "pressure_out": {"0": 1, "1": 100}}}

@@ -1,0 +1,16 @@
+Experiment directory and log file created. Beginning experiment recursive_tree_test_7.26.23...  
+Outlets have already been optimized. Constructing trees...  
+** building tree for resistance: 572.577249987894 ** 
+     the optimized radius is [0.15]     the number of vessels is 489
+** building tree for resistance: 171.88775652102456 ** 
+     the optimized radius is [0.19442747]     the number of vessels is 975
+     LPA and RPA branches identified: [1, 4]** repairing stenoses in vessels [1, 4] ** 
+     vessel 1 has been repaired 
+     vessel 4 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [50.596051528770786, 46.703948471229225]
+     pre-adaptation outlet flowrates: [50.55939037427066, 46.74060962572935]
+     post-adaptation outlet flowrates: [56.15256088846057, 41.14743911153531]
+ 
+Simulation completed!

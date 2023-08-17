@@ -1,0 +1,28 @@
+Experiment directory and log file created. Beginning experimentAS1_reduced_steady_proximal_7.27.23...  
+Getting clinical target values... 
+RCR BCs converted to R, Pd = None
+Optimizing preop outlet resistance... 
+Outlet resistances optimized! [3732.91074261 4032.77651199 4303.07097939 3494.98878212 3706.37547638
+ 1636.78098807]
+** building tree for resistance: 3732.9107426138626 ** 
+     the number of vessels is 139
+** building tree for resistance: 4032.776511985944 ** 
+     the number of vessels is 119
+** building tree for resistance: 4303.070979389396 ** 
+     the number of vessels is 119
+** building tree for resistance: 3494.9887821167404 ** 
+     the number of vessels is 157
+** building tree for resistance: 3706.3754763848087 ** 
+     the number of vessels is 139
+** building tree for resistance: 1636.780988067988 ** 
+     the number of vessels is 279
+** repairing stenoses in vessels [1, 6] ** 
+     vessel 1 has been repaired 
+     vessel 6 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [14.37962702213885, 13.578404573412731, 12.866806914610125, 14.876074957252397, 14.29341350449756, 27.305673028085184]
+     pre-adaptation outlet flowrates: [14.379626943279176, 13.578404498221769, 12.866806843028842, 14.876075020711795, 14.293413565879112, 27.30567312887617]
+     post-adaptation outlet flowrates: [14.218618297012998, 13.356793424386765, 12.619511289227216, 14.82747673852743, 14.1780371923568, 28.099563058491064]
+ 
+Simulation completed!

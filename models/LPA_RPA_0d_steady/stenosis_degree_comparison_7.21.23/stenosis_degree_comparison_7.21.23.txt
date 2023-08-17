@@ -1,0 +1,5 @@
+{"name": "stenosis_degree_comparison_7.21.23",
+ "repair type": "extensive",
+ "repair degrees": [0.75]
+}
+

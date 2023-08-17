@@ -1,0 +1,242 @@
+Experiment directory and log file created. Beginning experimentstenosis_degree_comparison_7.21.23...  
+Getting clinical target values... 
+RCR BCs converted to R, Pd = None
+Optimizing preop outlet resistance... 
+Outlet resistances optimized! [572.57832733 171.88607516]
+** building tree for resistance: 572.5783273271281 ** 
+     the optimized radius is [0.2709433]     the number of vessels is 31
+** building tree for resistance: 171.8860751591582 ** 
+     the optimized radius is [0.46766671]     the number of vessels is 63
+** repairing all stenoses ** 
+     vessel 1 has been repaired 
+     vessel 2 has been repaired 
+     vessel 3 has been repaired 
+     vessel 4 has been repaired 
+     vessel 5 has been repaired 
+     vessel 6 has been repaired 
+Writing result to file... 
+Experiment directory and log file created. Beginning experimentstenosis_degree_comparison_7.21.23...  
+Getting clinical target values... 
+RCR BCs converted to R, Pd = None
+Optimizing preop outlet resistance... 
+Outlet resistances optimized! [572.57832733 171.88607516]
+** building tree for resistance: 572.5783273271281 ** 
+     the optimized radius is [0.2709433]     the number of vessels is 31
+** building tree for resistance: 171.8860751591582 ** 
+     the optimized radius is [0.46766671]     the number of vessels is 63
+** repairing all stenoses ** 
+     vessel 1 has been repaired 
+     vessel 2 has been repaired 
+     vessel 3 has been repaired 
+     vessel 4 has been repaired 
+     vessel 5 has been repaired 
+     vessel 6 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [50.59599913949437, 46.70400086050566]
+     pre-adaptation outlet flowrates: [41.19440421256483, 56.10559578743472]
+     post-adaptation outlet flowrates: [39.51545383795516, 57.78454616204413]
+ 
+Simulation completed!Experiment directory and log file created. Beginning experimentstenosis_degree_comparison_7.21.23...  
+Getting clinical target values... 
+RCR BCs converted to R, Pd = None
+Optimizing preop outlet resistance... 
+Outlet resistances optimized! [  40.64276201 6530.21644779]
+** building tree for resistance: 40.642762008763796 ** 
+     the optimized radius is [0.56989136]     the number of vessels is 63
+** building tree for resistance: 6530.216447790666 ** 
+     the optimized radius is [0.15836931]     the number of vessels is 15
+** repairing all stenoses ** 
+     vessel 1 has been repaired 
+     vessel 2 has been repaired 
+     vessel 3 has been repaired 
+     vessel 4 has been repaired 
+     vessel 5 has been repaired 
+     vessel 6 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [90.99514861546068, 6.304851384543916]
+     pre-adaptation outlet flowrates: [94.39962209236114, 2.900377907637295]
+     post-adaptation outlet flowrates: [95.77283020236614, 1.5271697976361758]
+ 
+Simulation completed!Experiment directory and log file created. Beginning experimentstenosis_degree_comparison_7.21.23...  
+Getting clinical target values... 
+RCR BCs converted to R, Pd = None
+Optimizing preop outlet resistance... 
+Outlet resistances optimized! [  40.64276201 6530.21644779]
+** building tree for resistance: 40.642762008763796 ** 
+     the optimized radius is [0.56989136]     the number of vessels is 63
+** building tree for resistance: 6530.216447790666 ** 
+     the optimized radius is [0.15836931]     the number of vessels is 15
+** repairing all stenoses ** 
+     vessel 1 has been repaired 
+     vessel 2 has been repaired 
+     vessel 3 has been repaired 
+     vessel 4 has been repaired 
+     vessel 5 has been repaired 
+     vessel 6 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [90.99514861546068, 6.304851384543916]
+     pre-adaptation outlet flowrates: [94.39962209236114, 2.900377907637295]
+     post-adaptation outlet flowrates: [95.77283020236614, 1.5271697976361758]
+ 
+Simulation completed!Experiment directory and log file created. Beginning experimentstenosis_degree_comparison_7.21.23...  
+Getting clinical target values... 
+RCR BCs converted to R, Pd = None
+Optimizing preop outlet resistance... 
+Experiment directory and log file created. Beginning experimentstenosis_degree_comparison_7.21.23...  
+Getting clinical target values... 
+RCR BCs converted to R, Pd = None
+Optimizing preop outlet resistance... 
+Outlet resistances optimized! [572.57832733 171.88607516]
+** building tree for resistance: 572.5783273271281 ** 
+     the optimized radius is [0.2709433]     the number of vessels is 31
+** building tree for resistance: 171.8860751591582 ** 
+     the optimized radius is [0.46766671]     the number of vessels is 63
+** repairing all stenoses ** 
+     vessel 1 has been repaired 
+     vessel 2 has been repaired 
+     vessel 3 has been repaired 
+     vessel 4 has been repaired 
+     vessel 5 has been repaired 
+     vessel 6 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [50.59599913949437, 46.70400086050566]
+     pre-adaptation outlet flowrates: [41.19440421256483, 56.10559578743472]
+     post-adaptation outlet flowrates: [39.51545383795516, 57.78454616204413]
+ 
+Simulation completed!Experiment directory and log file created. Beginning experimentstenosis_degree_comparison_7.21.23...  
+Getting clinical target values... 
+RCR BCs converted to R, Pd = None
+Optimizing preop outlet resistance... 
+Outlet resistances optimized! [572.57832733 171.88607516]
+** building tree for resistance: 572.5783273271281 ** 
+     the optimized radius is [0.2709433]     the number of vessels is 31
+** building tree for resistance: 171.8860751591582 ** 
+     the optimized radius is [0.46766671]     the number of vessels is 63
+** repairing all stenoses ** 
+     vessel 1 has been repaired 
+     vessel 2 has been repaired 
+     vessel 3 has been repaired 
+     vessel 4 has been repaired 
+     vessel 5 has been repaired 
+     vessel 6 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [50.59599913949437, 46.70400086050566]
+     pre-adaptation outlet flowrates: [41.19440421256483, 56.10559578743472]
+     post-adaptation outlet flowrates: [39.51545383795516, 57.78454616204413]
+ 
+Simulation completed!Experiment directory and log file created. Beginning experimentstenosis_degree_comparison_7.21.23...  
+Getting clinical target values... 
+RCR BCs converted to R, Pd = None
+Optimizing preop outlet resistance... 
+Outlet resistances optimized! [572.57832733 171.88607516]
+** building tree for resistance: 572.5783273271281 ** 
+     the optimized radius is [0.2709433]     the number of vessels is 31
+** building tree for resistance: 171.8860751591582 ** 
+     the optimized radius is [0.46766671]     the number of vessels is 63
+** repairing all stenoses ** 
+     vessel 1 has been repaired 
+     vessel 2 has been repaired 
+     vessel 3 has been repaired 
+     vessel 4 has been repaired 
+     vessel 5 has been repaired 
+     vessel 6 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [50.59599913949437, 46.70400086050566]
+     pre-adaptation outlet flowrates: [41.19440421256483, 56.10559578743472]
+     post-adaptation outlet flowrates: [39.51545383795516, 57.78454616204413]
+ 
+Simulation completed!Experiment directory and log file created. Beginning experimentstenosis_degree_comparison_7.21.23...  
+Getting clinical target values... 
+RCR BCs converted to R, Pd = None
+Optimizing preop outlet resistance... 
+Outlet resistances optimized! [572.57832733 171.88607516]
+** building tree for resistance: 572.5783273271281 ** 
+     the optimized radius is [0.2709433]     the number of vessels is 31
+** building tree for resistance: 171.8860751591582 ** 
+     the optimized radius is [0.46766671]     the number of vessels is 63
+** repairing all stenoses ** 
+     vessel 1 has been repaired 
+     vessel 2 has been repaired 
+     vessel 3 has been repaired 
+     vessel 4 has been repaired 
+     vessel 5 has been repaired 
+     vessel 6 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [50.59599913949437, 46.70400086050566]
+     pre-adaptation outlet flowrates: [41.19440421256483, 56.10559578743472]
+     post-adaptation outlet flowrates: [39.51545383795516, 57.78454616204413]
+ 
+Simulation completed!Experiment directory and log file created. Beginning experimentstenosis_degree_comparison_7.21.23...  
+Getting clinical target values... 
+RCR BCs converted to R, Pd = None
+Optimizing preop outlet resistance... 
+Outlet resistances optimized! [572.57832733 171.88607516]
+** building tree for resistance: 572.5783273271281 ** 
+     the optimized radius is [0.2709433]     the number of vessels is 31
+** building tree for resistance: 171.8860751591582 ** 
+     the optimized radius is [0.46766671]     the number of vessels is 63
+** repairing all stenoses ** 
+     vessel 1 has been repaired 
+     vessel 2 has been repaired 
+     vessel 3 has been repaired 
+     vessel 4 has been repaired 
+     vessel 5 has been repaired 
+     vessel 6 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [50.59599913949437, 46.70400086050566]
+     pre-adaptation outlet flowrates: [41.19440421256483, 56.10559578743472]
+     post-adaptation outlet flowrates: [39.51545383795516, 57.78454616204413]
+ 
+Simulation completed!Experiment directory and log file created. Beginning experimentstenosis_degree_comparison_7.21.23...  
+Getting clinical target values... 
+RCR BCs converted to R, Pd = None
+Optimizing preop outlet resistance... 
+Outlet resistances optimized! [572.57832733 171.88607516]
+** building tree for resistance: 572.5783273271281 ** 
+     the optimized radius is [0.2709433]     the number of vessels is 31
+** building tree for resistance: 171.8860751591582 ** 
+     the optimized radius is [0.46766671]     the number of vessels is 63
+** repairing all stenoses ** 
+     vessel 1 has been repaired 
+     vessel 2 has been repaired 
+     vessel 3 has been repaired 
+     vessel 4 has been repaired 
+     vessel 5 has been repaired 
+     vessel 6 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [50.59599913949437, 46.70400086050566]
+     pre-adaptation outlet flowrates: [41.19440421256483, 56.10559578743472]
+     post-adaptation outlet flowrates: [39.51545383795516, 57.78454616204413]
+ 
+Simulation completed!Experiment directory and log file created. Beginning experimentstenosis_degree_comparison_7.21.23...  
+Getting clinical target values... 
+RCR BCs converted to R, Pd = None
+Optimizing preop outlet resistance... 
+Outlet resistances optimized! [572.57832733 171.88607516]
+** building tree for resistance: 572.5783273271281 ** 
+     the optimized radius is [0.2709433]     the number of vessels is 31
+** building tree for resistance: 171.8860751591582 ** 
+     the optimized radius is [0.46766671]     the number of vessels is 63
+** repairing all stenoses ** 
+     vessel 1 has been repaired 
+     vessel 2 has been repaired 
+     vessel 3 has been repaired 
+     vessel 4 has been repaired 
+     vessel 5 has been repaired 
+     vessel 6 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [50.59599913949437, 46.70400086050566]
+     pre-adaptation outlet flowrates: [41.19440421256483, 56.10559578743472]
+     post-adaptation outlet flowrates: [39.51545383795516, 57.78454616204413]
+ 
+Simulation completed!

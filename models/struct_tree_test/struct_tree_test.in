@@ -1,0 +1,49 @@
+{
+    "simulation_parameters": {
+        "density": 1.06,
+        "model_name": "LPA_RPA",
+        "number_of_cardiac_cycles": 1,
+        "number_of_time_pts_per_cardiac_cycle": 10,
+        "viscosity": 0.04
+    },
+    "boundary_conditions": [
+    	{
+    	"bc_name": "RESISTANCE_0",
+	"bc_values": {
+		"R": 1000
+    		}
+    	}
+    ],
+    "vessels": [
+        {
+            "boundary_conditions": {
+                "inlet": "INFLOW"
+            },
+            "vessel_id": 0,
+            "vessel_length": 0.8309320942564549,
+            "vessel_name": "branch0_seg0",
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "C": 3.3902249513274184e-07,
+                "L": 0.3238170229801931,
+                "R_poiseuille": 0.11290727824157562,
+                "stenosis_coefficient": 0.0
+            }
+        },
+        {
+            "boundary_conditions": {
+                "outlet": "RESISTANCE_0"
+            },
+            "vessel_id": 3,
+            "vessel_length": 3.531353740931037,
+            "vessel_name": "branch1_seg2",
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "C": 2.48164301775649e-07,
+                "L": 7.989880113872991,
+                "R_poiseuille": 16.17437182162761,
+                "stenosis_coefficient": 0.8034345943457993
+            }
+        }
+    ]
+}

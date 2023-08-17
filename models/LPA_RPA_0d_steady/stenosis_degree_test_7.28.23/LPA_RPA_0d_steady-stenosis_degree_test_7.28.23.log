@@ -1,0 +1,59 @@
+Experiment directory and log file created. Beginning experiment stenosis_degree_test_7.28.23...  
+Outlets have already been optimized. Constructing trees...  
+** building tree for resistance: 572.5783273271281 ** 
+     the optimized radius is [0.17950162]     the number of vessels is 859
+** building tree for resistance: 171.8860751591582 ** 
+     the optimized radius is [0.2718144]     the number of vessels is 2611
+     LPA and RPA branches identified: [1, 4]** repairing all stenoses ** 
+     vessel 1 has been repaired 
+     vessel 2 has been repaired 
+     vessel 3 has been repaired 
+     vessel 4 has been repaired 
+     vessel 5 has been repaired 
+     vessel 6 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [50.59599913949437, 46.70400086050566]
+     pre-adaptation outlet flowrates: [48.58733504311358, 48.71266495688605]
+     post-adaptation outlet flowrates: [45.384024341568804, 51.9159756584316]
+ 
+Simulation completed!     LPA and RPA branches identified: [1, 4]** repairing all stenoses ** 
+     vessel 1 has been repaired 
+     vessel 2 has been repaired 
+     vessel 3 has been repaired 
+     vessel 4 has been repaired 
+     vessel 5 has been repaired 
+     vessel 6 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [50.59599913949437, 46.70400086050566]
+     pre-adaptation outlet flowrates: [45.711887960746466, 51.58811203925316]
+     post-adaptation outlet flowrates: [41.683887482080905, 55.616112517919866]
+ 
+Simulation completed!     LPA and RPA branches identified: [1, 4]** repairing all stenoses ** 
+     vessel 1 has been repaired 
+     vessel 2 has been repaired 
+     vessel 3 has been repaired 
+     vessel 4 has been repaired 
+     vessel 5 has been repaired 
+     vessel 6 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [50.59599913949437, 46.70400086050566]
+     pre-adaptation outlet flowrates: [41.19440421256483, 56.10559578743472]
+     post-adaptation outlet flowrates: [35.80617703142915, 61.49382296857017]
+ 
+Simulation completed!     LPA and RPA branches identified: [1, 4]** repairing all stenoses ** 
+     vessel 1 has been repaired 
+     vessel 2 has been repaired 
+     vessel 3 has been repaired 
+     vessel 4 has been repaired 
+     vessel 5 has been repaired 
+     vessel 6 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [50.59599913949437, 46.70400086050566]
+     pre-adaptation outlet flowrates: [32.75508920698241, 64.54491079301768]
+     post-adaptation outlet flowrates: [24.8515369412236, 72.44846305877651]
+ 
+Simulation completed!

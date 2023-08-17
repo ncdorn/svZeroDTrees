@@ -1,0 +1,41 @@
+Experiment directory and log file created. Beginning experiment AS1_reduced_steady_extensive_8.2.23...  
+Getting clinical target values... 
+RCR BCs converted to R, Pd = None
+Optimizing preop outlet resistance... 
+0D optimizationoptimization completed! 
+     Optimization solution: [3732.91074261 4032.77651199 4303.07097939 3494.98878212 3706.37547638
+ 1636.78098807]
+     Objective function value: 544.6108511284752
+     Number of iterations: 53
+Outlet resistances optimized! [3732.91074261 4032.77651199 4303.07097939 3494.98878212 3706.37547638
+ 1636.78098807]
+** building tree for resistance: 3732.9107426138626 ** 
+     the optimized radius is [0.09403907]     the number of vessels is 139
+** building tree for resistance: 4032.776511985944 ** 
+     the optimized radius is [0.09156666]     the number of vessels is 119
+** building tree for resistance: 4303.070979389396 ** 
+     the optimized radius is [0.08954088]     the number of vessels is 119
+** building tree for resistance: 3494.9887821167404 ** 
+     the optimized radius is [0.09619907]     the number of vessels is 157
+** building tree for resistance: 3706.3754763848087 ** 
+     the optimized radius is [0.09427061]     the number of vessels is 139
+** building tree for resistance: 1636.780988067988 ** 
+     the optimized radius is [0.12496169]     the number of vessels is 279
+     LPA and RPA branches identified: [1, 6]** repairing all stenoses ** 
+     vessel 1 has been repaired 
+     vessel 2 has been repaired 
+     vessel 3 has been repaired 
+     vessel 4 has been repaired 
+     vessel 6 has been repaired 
+     vessel 7 has been repaired 
+     vessel 8 has been repaired 
+     vessel 9 has been repaired 
+     vessel 10 has been repaired 
+     vessel 12 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [14.37962702213885, 13.578404573412731, 12.866806914610125, 14.876074957252397, 14.29341350449756, 27.305673028085184]
+     pre-adaptation outlet flowrates: [13.754065433825726, 12.860020229153688, 12.1294895766955, 14.156733099981171, 13.511292973941217, 30.888398686392012]
+     post-adaptation outlet flowrates: [13.42141902760045, 12.456362157635924, 11.701631840833533, 13.920392031026402, 13.200361854888849, 32.5998330880171]
+ 
+Simulation completed!

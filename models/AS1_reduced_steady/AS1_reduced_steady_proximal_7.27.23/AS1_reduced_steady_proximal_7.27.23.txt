@@ -1,0 +1,5 @@
+{"name": "AS1_reduced_steady_proximal_7.27.23",
+ "repair type": "proximal",
+ "repair degrees": [1.0]
+}
+

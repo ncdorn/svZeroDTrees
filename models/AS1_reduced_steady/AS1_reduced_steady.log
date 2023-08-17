@@ -1,0 +1,25 @@
+Getting clinical target values... 
+Optimizing preop outlet resistance... 
+Outlet resistances optimized! 
+** building tree for resistance: 3732.9107426138626 ** 
+     the optimized radius is [0.19177373]     the number of vessels is 15
+** building tree for resistance: 4032.776511985944 ** 
+     the optimized radius is [0.12151435]     the number of vessels is 7
+** building tree for resistance: 4303.070979389396 ** 
+     the optimized radius is [0.10047781]     the number of vessels is 7
+** building tree for resistance: 3494.9887821167404 ** 
+     the optimized radius is [0.12242507]     the number of vessels is 7
+** building tree for resistance: 3706.3754763848087 ** 
+     the optimized radius is [0.10212685]     the number of vessels is 7
+** building tree for resistance: 1636.780988067988 ** 
+     the optimized radius is [0.27287719]     the number of vessels is 31
+** repairing stenoses in vessels [2, 5] ** 
+     vessel 2 has been repaired 
+     vessel 5 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [14.37962702213885, 13.578404573412731, 12.866806914610125, 14.876074957252397, 14.29341350449756, 27.305673028085184]
+     pre-adaptation outlet flowrates: [14.557156897550282, 13.547923001874757, 12.837788967132692, 14.842882344531493, 14.261308190872002, 27.25294059804064]
+     post-adaptation outlet flowrates: [14.32816589015052, 14.630417800190918, 13.978995543866587, 15.495145308738953, 15.081633243117176, 23.78564221392047]
+ 
+Simulation completed!

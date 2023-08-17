@@ -1,0 +1,23 @@
+Experiment directory and log file created. Beginning experiment optimization_test_7.27.23...  
+Getting clinical target values... 
+RCR BCs converted to R, Pd = None
+Optimizing preop outlet resistance... 
+0D optimizationoptimization completed! 
+     Optimization solution: [572.57832733 171.88607516]
+     Objective function value: 7.804211958906642e-13
+     Number of iterations: 77
+Outlet resistances optimized! [572.57832733 171.88607516]
+** building tree for resistance: 572.5783273271281 ** 
+     the optimized radius is [0.17950162]     the number of vessels is 859
+** building tree for resistance: 171.8860751591582 ** 
+     the optimized radius is [0.2718144]     the number of vessels is 2611
+     LPA and RPA branches identified: [1, 4]** repairing stenoses in vessels [1, 4] ** 
+     vessel 1 has been repaired 
+     vessel 4 has been repaired 
+Writing result to file... 
+** RESULT COMPARISON ** 
+     preop outlet flowrates: [50.59599913949437, 46.70400086050566]
+     pre-adaptation outlet flowrates: [50.55896705061221, 46.7410329493878]
+     post-adaptation outlet flowrates: [47.89912142165889, 49.40087857834115]
+ 
+Simulation completed!
