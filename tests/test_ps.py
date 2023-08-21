@@ -12,6 +12,7 @@ from svzerodtrees.structured_tree_simulation import *
 from scipy.optimize import minimize
 import svzerodplus
 
+
 def build_tree(config):
     simparams = config["simulation_parameters"]
 
@@ -43,15 +44,16 @@ def run_from_file(input_file, output_file):
     """
     with open(input_file) as ff:
         config = json.load(ff)
-
-    solver = svzerodplus.Solver(input_file)
-    result = solver.run()
+    # print(config)
+    solver = svzerodplus.Solver(config)
+    solver.run()
+    # 
     #     result = dict(result = result.to_dict())
     # with open(output_file, "w") as ff:
     #     json.dump(result, ff)
 
     # get the outlet flowrate
-    q_outs = get_outlet_data(config, result, 'flow_out', steady=True)
+    q_outs = [solver.get_single_result_avg("flow:OUTFLOW:branch1_seg2")]
 
     outlet_trees = build_tree(config)
 
@@ -73,8 +75,10 @@ def run_from_file(input_file, output_file):
 
 
 if __name__ == '__main__':
-    input_file = 'models/LPA_RPA_0d_steady/LPA_RPA_0d_steady.in'
-    output_file = 'models/LPA_RPA_0d_steady/LPA_RPA_0d_steady.out'
+    input_file = 'models/ps_tree_test/ps_tree_test.json'
+    # input_file ='tests/cases/steadyFlow_bifurcationR_R1.json'
+    output_file = 'models/ps_tree_test/ps_tree_test.out'
+
 
 
     result = run_from_file(input_file, output_file)
