@@ -1,6 +1,6 @@
 import copy
 
-from svzerodsolver import runner
+import svzerodplus
 import csv
 from pathlib import Path
 import numpy as np

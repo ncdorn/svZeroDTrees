@@ -1,7 +1,8 @@
 import numpy as np
 import random
 from scipy.optimize import minimize, Bounds, LinearConstraint
-from treevessel import TreeVessel
+from svzerodtrees.treevessel import TreeVessel
+from svzerodtrees.utils import *
 import math
 
 class StructuredTreeOutlet():
@@ -342,42 +343,3 @@ class StructuredTreeOutlet():
         }
 
         return tree_solver_config
-# 
-# 
-
-# method to generate vesselDlist if tree config already exists
-# class VesselD:
-#     # class to construct binary tree of vesselD if tree config already exists
-#     def __init__(self, val):
-#         self.val = val
-#         self.left = None
-#         self.right = None
-
-# def create_vesselDlist(vessels):
-#     # takes in the list of vessels in a tree config dictionary
-#     n_vessels = len(vessels)
-#     vesselDlist = []
-#     vesselDlayer = []
-#     root = VesselD(vessels[0].get("vessel_D"))
-#     current_layer = [root]
-#     next_layer = []
-#     i = 1
-#     while i < n_vessels:
-#         for vessel in current_layer:
-#             vesselDlayer.append(vessel.val)
-#             if i < n_vessels:
-#                 vessel.left = VesselD(vessels[i].get("vessel_D"))
-#                 next_layer.append(vessel.left)
-#             i += 1
-
-#             if i < n_vessels:
-#                 vessel.right = VesselD(vessels[i].get("vessel_D"))
-#                 next_layer.append(vessel.right)
-#             i += 1
-
-#         vesselDlist.append(vesselDlayer)
-#         vesselDlayer = []
-#         current_layer = next_layer
-#         next_layer = []
-
-#     return vesselDlist

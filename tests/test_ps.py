@@ -2,12 +2,12 @@ import json
 import sys
 sys.path.append('/home/ndorn/Documents/Stanford/PhD/Simvascular/svZeroDPlus/structured_trees/src')
 # print(sys.path)
-from structuredtreebc import StructuredTreeOutlet
+from svzerodtrees.structuredtreebc import StructuredTreeOutlet
 from pathlib import Path
-from post_processing.stree_visualization import *
+from svzerodtrees.post_processing.stree_visualization import *
 import matplotlib.pyplot as plt
-from struct_tree_utils import *
-from structured_tree_simulation import *
+from svzerodtrees.utils import *
+from svzerodtrees.structured_tree_simulation import *
 from scipy.optimize import minimize
 import svzerodplus
 
