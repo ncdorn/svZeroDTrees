@@ -1,5 +1,5 @@
 from svzerodtrees.utils import *
-from post_processing.stree_visualization import *
+from svzerodtrees.post_processing.stree_visualization import *
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt

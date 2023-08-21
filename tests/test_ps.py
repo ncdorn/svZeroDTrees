@@ -1,5 +1,6 @@
 import json
 import sys
+import os
 sys.path.append('/home/ndorn/Documents/Stanford/PhD/Simvascular/svZeroDPlus/structured_trees/src')
 # print(sys.path)
 from svzerodtrees.structuredtreebc import StructuredTreeOutlet
@@ -42,8 +43,9 @@ def run_from_file(input_file, output_file):
     """
     with open(input_file) as ff:
         config = json.load(ff)
-        solver = svzerodplus.Solver(config)
-        result = solver.run()
+
+    solver = svzerodplus.Solver(input_file)
+    result = solver.run()
     #     result = dict(result = result.to_dict())
     # with open(output_file, "w") as ff:
     #     json.dump(result, ff)
@@ -71,8 +73,9 @@ def run_from_file(input_file, output_file):
 
 
 if __name__ == '__main__':
-    input_file = 'structured_tree_tuning/models/LPA_RPA_0d_steady/LPA_RPA_0d_steady.in'
-    output_file = 'structured_tree_tuning/models/LPA_RPA_0d_steady/LPA_RPA_0d_steady.out'
+    input_file = 'models/LPA_RPA_0d_steady/LPA_RPA_0d_steady.in'
+    output_file = 'models/LPA_RPA_0d_steady/LPA_RPA_0d_steady.out'
+
 
     result = run_from_file(input_file, output_file)
 

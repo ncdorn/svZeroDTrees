@@ -5,11 +5,11 @@ import csv
 from pathlib import Path
 import numpy as np
 import json
-from struct_tree_utils import *
-from post_processing.stree_data_processing import *
-from post_processing.stree_visualization import *
+from svzerodtrees.utils import *
+from svzerodtrees.post_processing.stree_data_processing import *
+from svzerodtrees.post_processing.stree_visualization import *
 from scipy.optimize import minimize, Bounds
-from structuredtreebc import StructuredTreeOutlet
+from svzerodtrees.structuredtreebc import StructuredTreeOutlet
 import os
 import matplotlib.pyplot as plt
 
