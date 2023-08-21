@@ -1,4 +1,4 @@
-from struct_tree_utils import *
+from svzerodtrees.utils import *
 from post_processing.stree_visualization import *
 import pandas as pd
 import numpy as np

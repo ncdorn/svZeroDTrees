@@ -1,7 +1,7 @@
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
-from svzerodtrees.struct_tree_utils import *
+from svzerodtrees.utils import *
 import json
 from math import trunc
 import seaborn as sns
