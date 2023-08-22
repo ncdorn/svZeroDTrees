@@ -41,7 +41,7 @@ class TreeVessel:
             viscosity = .012 * (1 + (u_45 - 1) * (((1 - H_d) ** C - 1) / ((1 - 0.45) ** C - 1)) * (diameter / (diameter - 1.1)) ** 2) * (diameter / (diameter - 1.1)) ** 2
         R, C, L, l = cls.calc_zero_d_values(cls, diameter, viscosity)
         # print(R, C, L, l)
-        name = " "  # to implement later
+        name = "branch" + str(id) + "seg0"  # match input config file
 
         # generate essentially a config file for the BloodVessel instances
         vessel_info = {"vessel_id": id,  # mimic input json file
@@ -207,3 +207,17 @@ class TreeVessel:
 
 
         return self.dD
+
+    def count_vessels(self):
+        def get_vessel_ids(vessel, largest_vessel_id):
+            if vessel:
+                largest_vessel_id = get_vessel_ids(vessel.left, largest_vessel_id)
+                largest_vessel_id = get_vessel_ids(vessel.right, largest_vessel_id)
+                if vessel.id > largest_vessel_id:
+                    largest_vessel_id = vessel.id
+            
+            return largest_vessel_id
+        
+        largest_vessel_id = get_vessel_ids(self, 0)
+
+        return largest_vessel_id

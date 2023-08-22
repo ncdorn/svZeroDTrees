@@ -1,7 +1,7 @@
 README.md
 setup.py
 svzerodtrees/__init__.py
-svzerodtrees/run_stree_experiment.py
+svzerodtrees/ps_adapt.py
 svzerodtrees/structured_tree_simulation.py
 svzerodtrees/structuredtreebc.py
 svzerodtrees/treevessel.py

@@ -2,35 +2,38 @@ import csv
 import numpy as np
 import matplotlib.pyplot as plt
 import math
-from svzerodsolver import runner
+from io import StringIO
+import pandas as pd
+import svzerodplus
 
 # utilities for working with structured trees
 
 
-def get_mpa_pressure(result_df, branch_name):
-    # get the mpa pressure array for a given branch name from a zerod solver output file
-    pressures = get_df_data(result_df, 'pressure_in', branch_name)
+def get_pressure(result_array, branch_name):
+    # returns the time series, systolic, diastolic and mean pressure 
+    # for a given branch name from a zerod result_array output file
+    pressures = get_result(result_array, 'pressure_in', branch_name, steady=False)
     systolic_p = np.min(pressures)
     diastolic_p = np.max(pressures)
     mean_p = np.mean(pressures)
     return pressures, systolic_p, diastolic_p, mean_p
 
 
-def get_outlet_data(config, result_df, data_name, steady=False):
-    # get data at the outlets of a model
+def get_outlet_data(config: dict, result_array, data_name: str, steady=False):
+    # get a data array at the outlets of a model
     outlet_vessels, outlet_d = find_outlets(config)
 
     if 'wss' in data_name:
         data_out = []
-        for i, branch_name in enumerate(outlet_vessels):
-            q_out = get_df_data(result_df, 'flow_out', branch_name, steady=steady)
+        for i, branch in enumerate(outlet_vessels):
+            q_out = get_result(result_array, 'flow_out', branch, steady)
             if steady:
                 data_out.append(q_out * 4 * config["simulation_parameters"]["viscosity"] / (np.pi * outlet_d[i]))
             else:
                 data_out.append([q * 4 * config["simulation_parameters"]["viscosity"] / (np.pi * outlet_d[i]) for q in q_out])
                 
     else:
-        data_out = [get_df_data(result_df, data_name, branch_name, steady=steady) for branch_name in outlet_vessels]
+        data_out = [get_result(result_array, data_name, branch, steady) for branch in outlet_vessels]
 
     return data_out
 
@@ -41,23 +44,21 @@ def find_outlets(config):
     for vessel_config in config["vessels"]:
         if "boundary_conditions" in vessel_config:
             if "outlet" in vessel_config["boundary_conditions"]:
-                outlet_vessels.append('V' + str(vessel_config["vessel_id"]))
+                branch_id, seg_id = vessel_config["vessel_name"].split("_")
+                branch_id = int(branch_id[6:])
+                outlet_vessels.append(branch_id)
                 d = ((128 * config["simulation_parameters"]["viscosity"] * vessel_config["vessel_length"]) /
                      (np.pi * vessel_config["zero_d_element_values"].get("R_poiseuille"))) ** (1 / 4)
                 outlet_d.append(d)
     return outlet_vessels, outlet_d
 
 
-def get_df_data(result_df, data_name, branch_name, steady=False):
-    # get data from a dataframe based on a data name and branch name
-    data = []
-    for idx, name in enumerate(result_df['name']):
-        if str(branch_name) == name:
-            data.append(result_df.loc[idx, data_name])
+def get_result(result_array, data_name: str, branch: int, steady: bool=False):
+    # get data from a dataframe based on a data name, branch id and timestep
     if steady:
-        return data[-1]
+        return result_array[data_name][branch][-1]
     else:
-        return data
+        return result_array[data_name][branch]
 
 
 
@@ -123,7 +124,7 @@ def repair_stenosis(config, vessels: str or list = None, degree: float = 1.0, lo
     '''
     Repair the stenoses in a pulmonary arterial tree
     Args:
-        config: dict. solver input dictionary
+        config: dict. result_array input dictionary
         vessels: str or list of ints. stenosis repair strategy. 'proximal' repairs just the LPA and RPA. 'extensive'
         repairs all stenosis coefficients. an array of integers will repair those vessels
         degree: float. the degree to which the stenosis is repaired
@@ -240,17 +241,18 @@ def calculate_tree_flow(simparams: dict, tree_config: dict, flow_out: float, P_d
         "vessels": tree_config["vessels"]
     }
 
-    tree_result = runner.run_from_config(tree_calc_config)
+    tree_result_array = svzerodplus.result_array(tree_calc_config)
+    tree_result_array.run()
 
-    return tree_result
+    return tree_result_array
 
-def assign_flow_to_root(result, root, steady=False):
+def assign_flow_to_root(result_array, root, steady=False):
     # assign flow values to the TreeVessel recursion object
     def assign_flow(vessel):
         if vessel:
             # assign flow values to the vessel
-            vessel.Q = get_df_data(result, 'flow_out', 'V' + str(vessel.id), steady=steady)
-            vessel.P_in = get_df_data(result, 'pressure_in', 'V' + str(vessel.id), steady=steady)
+            vessel.Q = get_result(result_array, 'flow_in', vessel.id, steady=steady)
+            vessel.P_in = get_result(result_array, 'pressure_in', vessel.id, steady=steady)
             vessel.t_w = vessel.Q * 4 * vessel.eta / (np.pi * vessel.d)
             # recursive step
             assign_flow(vessel.left)
@@ -259,52 +261,54 @@ def assign_flow_to_root(result, root, steady=False):
     assign_flow(root)
 
 
-def optimize_pries_secomb(ps_params, trees, q_outs, dt=0.01, P_d=1333.2, steady=True):
-    
-    # initialize and calculate the Pries and Secomb parameters in the TreeVessel objects via a postorder traversal
-    dD_list = [] # initialize the list of dDs for the outlet calculation
-    for i, tree in enumerate(trees):
-        SS_dD = 0.0 # sum of squared dDs initial guess
-        converged = False
-        threshold = 10 ** -5
-        while not converged:
-            tree_solver_config = tree.tree_solver_input([q_outs[i]], P_d)
-            tree_result = runner.run_from_config(tree_solver_config)
-            assign_flow_to_root(tree_result, tree.root, steady=steady)
+def run_svzerodplus(config):
+    """Run the svzerodplus result_array and return a dict of results.
 
-            next_SS_dD = 0.0 # initializing sum of squared dDs, value to minimize
-            def stimulate(vessel):
-                if vessel:
-                    stimulate(vessel.left)
-                    stimulate(vessel.right)
-                    vessel_dD = vessel.adapt_pries_secomb(ps_params, dt)
-                    nonlocal next_SS_dD
-                    next_SS_dD += vessel_dD ** 2
-            stimulate(tree.root)
+    Args:
+        name: Name of the test case.
+        testdir: Directory for performing the simulation.
+    Returns:
+        output: the result of the simulation as a dict of dicts with each array denoted by its branch id
+    """
 
-            dD_diff = abs(next_SS_dD ** 2 - SS_dD ** 2)
-            if dD_diff < threshold:
-                converged = True
-            
-            SS_dD = next_SS_dD
-            print(dD_diff)
-        print('Pries and Secomb integration completed!')
-        dD_list.append(next_SS_dD)
+    output = svzerodplus.simulate(config)
+    result = pd.read_csv(StringIO(output))
 
-    SSE = sum(dD ** 2 for dD in dD_list)
+    output = {
+        "pressure_in": {},
+        "pressure_out": {},
+        "flow_in": {},
+        "flow_out": {},
+    }
 
-    return SSE
+    last_seg_id = 0
 
+    for vessel in config["vessels"]:
+        name = vessel["vessel_name"]
+        branch_id, seg_id = name.split("_")
+        branch_id, seg_id = int(branch_id[6:]), int(seg_id[3:])
 
+        if seg_id == 0:
+            output["pressure_in"][branch_id] = np.array(
+                result[result.name == name]["pressure_in"]
+            )
+            output["flow_in"][branch_id] = np.array(
+                result[result.name == name]["flow_in"]
+            )
+            output["pressure_out"][branch_id] = np.array(
+                result[result.name == name]["pressure_out"]
+            )
+            output["flow_out"][branch_id] = np.array(
+                result[result.name == name]["flow_out"]
+            )
+        elif seg_id > last_seg_id:
+            output["pressure_out"][branch_id] = np.array(
+                result[result.name == name]["pressure_out"]
+            )
+            output["flow_out"][branch_id] = np.array(
+                result[result.name == name]["flow_out"]
+            )
 
+        last_seg_id = seg_id
 
-'''
-def scale_inflow(config, Q_target):
-for bc_config in config['boundary_conditions']:
-        if bc_config["bc_name"] == 'inflow':
-
-    Q_avg = np.mean(inflow_wave)
-    scale_ratio = Q_target / Q_avg
-    scaled_inflow = scale_ratio * inflow_wave
-    return scaled_inflow
-'''
+    return output

@@ -4,6 +4,7 @@ from scipy.optimize import minimize, Bounds, LinearConstraint
 from svzerodtrees.treevessel import TreeVessel
 from svzerodtrees.utils import *
 import math
+import svzerodplus
 
 class StructuredTreeOutlet():
     """Structured tree microvascular adaptation to upstream changes
@@ -311,7 +312,7 @@ class StructuredTreeOutlet():
 
         return r_final.x[0], R_final
     
-    def tree_solver_input(self, flow_out: float, P_d: float):
+    def create_solver_config(self, flow_out: float, P_d: float):
     # create a config file for the tree and calculate flow through it
         if len(flow_out) == 1:
             flow_out = [flow_out[0],] * 2
