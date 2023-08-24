@@ -31,10 +31,8 @@ class StructuredTreeOutlet():
             self.block_dict = {'name': name, 
                                'origin_d': self.initialD, 
                                'P_in': self.params["P_in"],
-                               'boundary_conditions': [
-                                   
-
-                               ],
+                               'Q_in': self.params["Q_in"],
+                               'boundary_conditions': [],
                                'simulation_parameters': simparams,
                                'vessels': [], 
                                'junctions': [], 
@@ -289,13 +287,14 @@ class StructuredTreeOutlet():
             Returns:
                 optimized radius, total resistance
                 """
-
         r_guess = self.initialD / 2
 
         def r_min_objective(radius):
             self.build_tree(radius[0], optimizing=True)
             R = self.root.R_eq
             R_diff = (Resistance - R)**2
+            if radius < 0.15:
+                print(radius, R, self.count_vessels())
             return R_diff
 
         bounds = Bounds(lb=0.005) # minimum is r_min
@@ -308,7 +307,7 @@ class StructuredTreeOutlet():
         if log_file is not None:
             with open(log_file, "a") as log:
                 log.write("     the optimized radius is " + str(r_final.x))
-        return r_final.x, R_final
+        return r_final.x, r_final.fun, R_final
 
     def optimize_alpha_beta(self, Resistance=5.0, log_file=None):
         """ use constrained optimization to optimize the diameter and alpha and beta
@@ -399,18 +398,7 @@ class StructuredTreeOutlet():
         '''
             count the number vessels in the tree
         '''
-        def get_vessel_ids(vessel, largest_vessel_id):
-            if vessel:
-                largest_vessel_id = get_vessel_ids(vessel.left, largest_vessel_id)
-                largest_vessel_id = get_vessel_ids(vessel.right, largest_vessel_id)
-                if vessel.id > largest_vessel_id:
-                    largest_vessel_id = vessel.id
-            
-            return largest_vessel_id
-        
-        largest_vessel_id = get_vessel_ids(self.root, 0)
-
-        return largest_vessel_id
+        return(len(self.block_dict["vessels"]))
     
     def R(self):
         # return the resistance of the tree

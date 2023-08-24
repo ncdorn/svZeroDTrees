@@ -9,10 +9,10 @@ import svzerodplus
 # utilities for working with structured trees
 
 
-def get_pressure(result_array, branch_name):
+def get_pressure(result_array, branch):
     # returns the time series, systolic, diastolic and mean pressure 
     # for a given branch name from a zerod result_array output file
-    pressures = get_result(result_array, 'pressure_in', branch_name, steady=False)
+    pressures = get_branch_result(result_array, 'pressure_in', branch, steady=False)
     systolic_p = np.min(pressures)
     diastolic_p = np.max(pressures)
     mean_p = np.mean(pressures)
@@ -26,14 +26,14 @@ def get_outlet_data(config: dict, result_array, data_name: str, steady=False):
     if 'wss' in data_name:
         data_out = []
         for i, branch in enumerate(outlet_vessels):
-            q_out = get_result(result_array, 'flow_out', branch, steady)
+            q_out = get_branch_result(result_array, 'flow_out', branch, steady)
             if steady:
                 data_out.append(q_out * 4 * config["simulation_parameters"]["viscosity"] / (np.pi * outlet_d[i]))
             else:
                 data_out.append([q * 4 * config["simulation_parameters"]["viscosity"] / (np.pi * outlet_d[i]) for q in q_out])
                 
     else:
-        data_out = [get_result(result_array, data_name, branch, steady) for branch in outlet_vessels]
+        data_out = [get_branch_result(result_array, data_name, branch, steady) for branch in outlet_vessels]
 
     return data_out
 
@@ -53,7 +53,7 @@ def find_outlets(config):
     return outlet_vessels, outlet_d
 
 
-def get_result(result_array, data_name: str, branch: int, steady: bool=False):
+def get_branch_result(result_array, data_name: str, branch: int, steady: bool=False):
     # get data from a dataframe based on a data name, branch id and timestep
     if steady:
         return result_array[data_name][branch][-1]
@@ -251,8 +251,8 @@ def assign_flow_to_root(result_array, root, steady=False):
     def assign_flow(vessel):
         if vessel:
             # assign flow values to the vessel
-            vessel.Q = get_result(result_array, 'flow_in', vessel.id, steady=steady)
-            vessel.P_in = get_result(result_array, 'pressure_in', vessel.id, steady=steady)
+            vessel.Q = get_branch_result(result_array, 'flow_in', vessel.id, steady=steady)
+            vessel.P_in = get_branch_result(result_array, 'pressure_in', vessel.id, steady=steady)
             vessel.t_w = vessel.Q * 4 * vessel.eta / (np.pi * vessel.d)
             # recursive step
             assign_flow(vessel.left)
@@ -311,3 +311,13 @@ def run_svzerodplus(config):
         last_seg_id = seg_id
 
     return output
+
+
+def write_to_log(log_file, message: str, write=False):
+    if log_file is not None:
+        if write:
+            with open(log_file, "w") as log:
+                log.write(message +  "\n")
+        else:
+            with open(log_file, "a") as log:
+                log.write(message +  "\n")

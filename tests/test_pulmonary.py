@@ -9,7 +9,7 @@ def test_pulmonary():
         config = json.load(ff)
     
     result = run_svzerodplus(config)
-    arr = get_result(result, 'pressure_in', 50)
+    arr = get_branch_result(result, 'pressure_in', 50)
     print(arr)
 
 

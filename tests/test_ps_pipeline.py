@@ -1,6 +1,7 @@
 import json
 import sys
 import os
+import numpy as np
 sys.path.append('/home/ndorn/Documents/Stanford/PhD/Simvascular/svZeroDPlus/structured_trees/src')
 # print(sys.path)
 from svzerodtrees.structuredtreebc import StructuredTreeOutlet
@@ -11,6 +12,8 @@ from svzerodtrees.utils import *
 from svzerodtrees.structured_tree_simulation import *
 from scipy.optimize import minimize
 from svzerodtrees.adaptation import integrate_pries_secomb
+import svzerodtrees.preop as preop
+import pickle
 
 
 def build_tree(config, result):
@@ -26,9 +29,7 @@ def build_tree(config, result):
                 for bc_config in config["boundary_conditions"]:
                     if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
                         outlet_stree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, simparams, bc_config, Q_outlet=[np.mean(q_outs[outlet_idx])])
-                for bc in config["boundary_conditions"]:
-                    if vessel_config["boundary_conditions"]["outlet"] in bc["bc_name"]:
-                        R = bc["bc_values"]["R"]
+                        R = bc_config["bc_values"]["R"]
                 # outlet_stree.optimize_tree_radius(R)
                 outlet_stree.build_tree()
                 outlet_idx += 1 # track the outlet idx for more than one outlet
@@ -36,6 +37,61 @@ def build_tree(config, result):
     
     return outlet_trees
 
+def test_preop():
+    '''
+    test the preop optimization scheme
+    '''
+    input_file = 'tests/cases/LPA_RPA_0d_steady/LPA_RPA_0d_steady.json'
+    log_file = 'tests/cases/LPA_RPA_0d_steady/LPA_RPA_0d_steady.log'
+    working_dir = 'tests/cases/LPA_RPA_0d_steady'
+
+    preop_config, preop_result = preop.optimize_outlet_bcs(
+        'tests/cases/LPA_RPA_0d_steady/clinical_targets.csv',
+        input_file,
+        working_dir,
+        log_file=log_file,
+        show_optimization=False
+    )
+
+    with open('tests/cases/LPA_RPA_0d_steady/preop_result.out', 'wb') as ff:
+        pickle.dump(preop_result, ff)
+        
+
+
+def test_tree_construction():
+    '''
+    test the tree construction algorithm
+    '''
+    
+    with open('tests/cases/LPA_RPA_0d_steady/preop_config.in') as ff:
+        preop_config = json.load(ff)
+
+    with open('tests/cases/LPA_RPA_0d_steady/preop_result.out', 'rb') as ff:
+        preop_result = pickle.load(ff)
+    
+    log_file = 'tests/cases/LPA_RPA_0d_steady/LPA_RPA_0d_steady.log'
+
+    write_to_log(log_file, 'testing tree construction', write=True)
+
+    roots = preop.construct_trees(preop_config, preop_result, log_file)
+
+    R_bc = []
+    for bc_config in preop_config["boundary_conditions"]:
+        if 'RESISTANCE' in bc_config["bc_type"]:
+            R_bc.append(bc_config["bc_values"]["R"])
+    
+    np.array(R_bc)
+    R_opt = np.array([root.R_eq for root in roots])
+
+    SSE = sum((R_bc - R_opt) ** 2)
+    print(SSE)
+
+    assert SSE < 0.1
+
+
+def test_build_tree():
+    # build tree with radius below 0.15 and observe wtf is happening
+    pass
 
 def run_from_file(input_file, output_file):
     """Run svZeroDPlus from file. 
@@ -90,6 +146,7 @@ if __name__ == '__main__':
 
 
 
-    result = run_from_file(input_file, output_file)
+    # result = run_from_file(input_file, output_file)
+    test_tree_construction()
 
 
