@@ -265,8 +265,7 @@ def run_svzerodplus(config):
     """Run the svzerodplus result_array and return a dict of results.
 
     Args:
-        name: Name of the test case.
-        testdir: Directory for performing the simulation.
+        config: svzerodplus config file
     Returns:
         output: the result of the simulation as a dict of dicts with each array denoted by its branch id
     """
