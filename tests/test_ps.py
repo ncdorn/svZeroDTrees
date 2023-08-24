@@ -16,16 +16,19 @@ import svzerodplus
 from svzerodsolver import runner
 
 
-def build_tree(config):
+def build_tree(config, result):
     simparams = config["simulation_parameters"]
-
+    # get the outlet flowrate
+    q_outs = get_outlet_data(config, result, "flow_out", steady=True)
     outlet_trees = []
     outlet_idx = 0 # need this when iterating through outlets 
     # get the outlet vessel
     for vessel_config in config["vessels"]:
         if "boundary_conditions" in vessel_config:
             if "outlet" in vessel_config["boundary_conditions"]:
-                outlet_stree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, simparams)
+                for bc_config in config["boundary_conditions"]:
+                    if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
+                        outlet_stree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, simparams, bc_config, Q_outlet=[q_outs[outlet_idx]])
                 for bc in config["boundary_conditions"]:
                     if vessel_config["boundary_conditions"]["outlet"] in bc["bc_name"]:
                         R = bc["bc_values"]["R"]
@@ -54,21 +57,21 @@ def run_from_file(input_file, output_file):
     # with open(output_file, "w") as ff:
     #     json.dump(result, ff)
 
-    # get the outlet flowrate
-    q_outs = get_outlet_data(config, result, "flow_in", steady=True)
-    outlet_trees = build_tree(config)
-    print(outlet_trees[0].root.count_vessels())
 
-    tree_config = outlet_trees[0].create_solver_config([q_outs[0]], 1333.2)
-    # with open('tests/cases/ps_tree_example_2.json', "w") as ff:
+    outlet_trees = build_tree(config, result)
+    print(outlet_trees[0].count_vessels())
+
+    # tree_config = outlet_trees[0].create_solver_config(1333.2)
+    # with open('tests/cases/ps_tree_example_1.json', "w") as ff:
     #     json.dump(tree_config, ff)
-    tree_result = svzerodplus.simulate(tree_config)
 
-    print(tree_result)
+    # tree_result = svzerodplus.simulate(tree_config)
+    outlet_trees[0].create_bcs()
+    tree_result = svzerodplus.simulate(outlet_trees[0].block_dict)
 
     # ps_params = [k_p, k_m, k_c, k_s, S_0, tau_ref, Q_ref, L]
     ps_params = [1.24, .229, 2.20, .885, .219, 9.66 * 10 ** -7, 1.9974, 5.9764 * 10 ** -4]
-    SSE = ps.optimize(ps_params, outlet_trees, q_outs)
+    SSE = ps.optimize(ps_params, outlet_trees)
     print(SSE)
     # result = minimize(optimize_pries_secomb,
     #                   ps_params,
