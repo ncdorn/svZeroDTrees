@@ -67,8 +67,6 @@ def run_from_file(input_file, output_file):
 
     # tree_result = svzerodplus.simulate(tree_config)
     outlet_trees[0].create_bcs()
-    tree_result = svzerodplus.simulate(outlet_trees[0].block_dict)
-
     # ps_params = [k_p, k_m, k_c, k_s, S_0, tau_ref, Q_ref, L]
     ps_params = [1.24, .229, 2.20, .885, .219, 9.66 * 10 ** -7, 1.9974, 5.9764 * 10 ** -4]
     SSE = ps.optimize(ps_params, outlet_trees)

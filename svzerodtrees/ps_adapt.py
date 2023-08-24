@@ -5,7 +5,7 @@ def optimize(ps_params, trees, dt=0.01, P_d=1333.2, steady=True):
     
     # initialize and calculate the Pries and Secomb parameters in the TreeVessel objects via a postorder traversal
     dD_list = [] # initialize the list of dDs for the outlet calculation
-    for i, tree in enumerate(trees):
+    for tree in trees:
         SS_dD = 0.0 # sum of squared dDs initial guess
         converged = False
         threshold = 10 ** -5
