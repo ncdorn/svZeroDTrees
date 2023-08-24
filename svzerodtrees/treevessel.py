@@ -35,10 +35,8 @@ class TreeVessel:
         if diameter > .3:
             viscosity = eta
         else: # Implemented Fahraeus-Lindqvist effect according to empirical relationship in Lan et al. and Pries and Secomb
-            H_d = 0.45 # hematocrit
-            u_45 = 6 * math.exp(-0.085 * diameter) + 3.2 - 2.44 * math.exp(-0.06 * diameter ** 0.645)
-            C = (0.8 + math.exp(-0.075 * diameter)) * (-1 + (1 + 10 ** -11 * diameter ** 12) ** -1) + (1 + 10 ** -11 * diameter ** 12) ** -1
-            viscosity = .012 * (1 + (u_45 - 1) * (((1 - H_d) ** C - 1) / ((1 - 0.45) ** C - 1)) * (diameter / (diameter - 1.1)) ** 2) * (diameter / (diameter - 1.1)) ** 2
+            viscosity = cls.fl_visc(cls, diameter)
+        
         R, C, L, l = cls.calc_zero_d_values(cls, diameter, viscosity)
         # print(R, C, L, l)
         name = "branch" + str(id) + "_seg0"  # match input config file
@@ -128,6 +126,9 @@ class TreeVessel:
         return R, C, L, l
 
     def update_vessel_info(self):
+        if self._d < .3:
+            self.eta = self.fl_visc(self.d)
+            self.info["viscosity"] = self.eta
         R, C, L, l = self.calc_zero_d_values(self._d, self.eta)
         self.info["vessel_length"] = l
         self.info["vessel_D"] = self.d
@@ -143,26 +144,6 @@ class TreeVessel:
         
             "outlet": "P_d" + str(self.id)
         }
-
-    # def initialize_pries_secomb(self, ps_params, H_d=0.45):
-    #     # intialize the pries and secomb parameters which are required for upstream adaptation calculations
-    #     # namely, S_m = f(k_m, Q_ref, H_D)
-    #     # this will have to be done in a postorder traversal
-    #     # ps_params in the following form [k_p, k_m, k_c, k_s, S_0, tau_ref, Q_ref, L]
-    #     self.k_p, self.k_m, self.k_c, self.k_s, self.S_0, self.tau_ref, self.Q_ref, self.L = tuple(ps_params)
-    #     self. H_d = H_d # hematocrit
-    #
-    #
-    #     self.S_m = self.k_m * math.log(self.Q_ref / (self.Q * self.H_d) + 1)
-    #     self.Sbar_c = 0.0 # initialize sbar_c
-    #
-    #     if not self.collapsed:
-    #         if self.left.Sbar_c > 0:
-    #             self.Sbar_c = self.left.S_m + self.right.S_m + self.left.Sbar_c * math.exp(-self.left.l / self.L) + self.right.Sbar_c * math.exp(-self.right.l / self.L)
-    #         else:
-    #             self.Sbar_c = self.left.S_m + self.right.S_m
-
-
 
     def adapt_pries_secomb(self, ps_params, dt, H_d=0.45):
         # calculate the pries and secomb parameters for microvascular adaptation
@@ -209,3 +190,11 @@ class TreeVessel:
 
 
         return self.dD
+
+    def fl_visc(self, diameter):
+        H_d = 0.45 # hematocrit
+        u_45 = 6 * math.exp(-0.085 * diameter) + 3.2 - 2.44 * math.exp(-0.06 * diameter ** 0.645)
+        C = (0.8 + math.exp(-0.075 * diameter)) * (-1 + (1 + 10 ** -11 * diameter ** 12) ** -1) + (1 + 10 ** -11 * diameter ** 12) ** -1
+        viscosity = .012 * (1 + (u_45 - 1) * (((1 - H_d) ** C - 1) / ((1 - 0.45) ** C - 1)) * (diameter / (diameter - 1.1)) ** 2) * (diameter / (diameter - 1.1)) ** 2
+
+        return viscosity
