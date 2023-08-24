@@ -380,7 +380,7 @@ class StructuredTreeOutlet():
                         }
                     )
 
-    def create_solver_config(self, P_d: float):
+    def create_solver_config(self):
     # create a config file for the tree and calculate flow through it
 
         self.create_bcs()
@@ -411,3 +411,7 @@ class StructuredTreeOutlet():
         largest_vessel_id = get_vessel_ids(self.root, 0)
 
         return largest_vessel_id
+    
+    def R(self):
+        # return the resistance of the tree
+        return self.root.R_eq
