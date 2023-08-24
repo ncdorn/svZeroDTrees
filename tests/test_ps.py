@@ -10,10 +10,7 @@ import matplotlib.pyplot as plt
 from svzerodtrees.utils import *
 from svzerodtrees.structured_tree_simulation import *
 from scipy.optimize import minimize
-import svzerodtrees.ps_adapt as ps
-from io import StringIO
-import svzerodplus
-from svzerodsolver import runner
+from svzerodtrees.adaptation import integrate_pries_secomb
 
 
 def build_tree(config, result):
@@ -28,11 +25,12 @@ def build_tree(config, result):
             if "outlet" in vessel_config["boundary_conditions"]:
                 for bc_config in config["boundary_conditions"]:
                     if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
-                        outlet_stree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, simparams, bc_config, Q_outlet=[q_outs[outlet_idx]])
+                        outlet_stree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, simparams, bc_config, Q_outlet=[np.mean(q_outs[outlet_idx])])
                 for bc in config["boundary_conditions"]:
                     if vessel_config["boundary_conditions"]["outlet"] in bc["bc_name"]:
                         R = bc["bc_values"]["R"]
-                outlet_stree.optimize_tree_radius(R)
+                # outlet_stree.optimize_tree_radius(R)
+                outlet_stree.build_tree()
                 outlet_idx += 1 # track the outlet idx for more than one outlet
                 outlet_trees.append(outlet_stree)
     
@@ -69,8 +67,9 @@ def run_from_file(input_file, output_file):
     outlet_trees[0].create_bcs()
     # ps_params = [k_p, k_m, k_c, k_s, S_0, tau_ref, Q_ref, L]
     ps_params = [1.24, .229, 2.20, .885, .219, 9.66 * 10 ** -7, 1.9974, 5.9764 * 10 ** -4]
-    SSE = ps.optimize(ps_params, outlet_trees)
-    print(SSE)
+    print('R = ' + str(outlet_trees[0].R()))
+    SSE = integrate_pries_secomb(ps_params, outlet_trees)
+    print('R = ' + str(outlet_trees[0].R()))
     # result = minimize(optimize_pries_secomb,
     #                   ps_params,
     #                   args=(outlet_trees, config["simulation_parameters"], q_outs),

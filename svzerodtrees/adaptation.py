@@ -1,7 +1,7 @@
 from svzerodtrees.utils import *
 # module for Pries and Secomb adaptation
 
-def optimize(ps_params, trees, dt=0.01, P_d=1333.2, steady=True):
+def integrate_pries_secomb(ps_params, trees, dt=0.01, time_avg_q=True):
     
     # initialize and calculate the Pries and Secomb parameters in the TreeVessel objects via a postorder traversal
     dD_list = [] # initialize the list of dDs for the outlet calculation
@@ -12,7 +12,7 @@ def optimize(ps_params, trees, dt=0.01, P_d=1333.2, steady=True):
         while not converged:
             tree.create_bcs()
             tree_result = run_svzerodplus(tree.block_dict)
-            assign_flow_to_root(tree_result, tree.root, steady=steady)
+            assign_flow_to_root(tree_result, tree.root, steady=time_avg_q)
             next_SS_dD = 0.0 # initializing sum of squared dDs, value to minimize
             def stimulate(vessel):
                 if vessel:
@@ -27,7 +27,6 @@ def optimize(ps_params, trees, dt=0.01, P_d=1333.2, steady=True):
                 converged = True
             
             SS_dD = next_SS_dD
-            print(dD_diff)
         print('Pries and Secomb integration completed!')
         dD_list.append(next_SS_dD)
 
