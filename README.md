@@ -6,7 +6,8 @@ This is a package to generate structured and morphometric trees to simulate micr
 1. Run `git clone https://github.com/ncdorn/svZeroDTrees.git`
 2. In desired python environment run `pip install -e .`
 
-To use the svZeroDPlus solver (required), it must be installed separately. 
+To use the svZeroDPlus solver (required), it must be installed separately.
+
 3. Install solver following directions at https://stanfordcbcl.github.io/svZeroDPlus/cpp/
 
 ## Overview
