@@ -32,7 +32,9 @@ class TreeVessel:
 
     @classmethod
     def create_vessel(cls, id, gen, diameter, eta):
-        if diameter > .3:
+        if diameter > .3 or id == 0:
+        # if we allow the first vessel to experience FL effects, the optimization does not work as the resistance is decreased
+        # by an order of magnitude
             viscosity = eta
         else: # Implemented Fahraeus-Lindqvist effect according to empirical relationship in Lan et al. and Pries and Secomb
             viscosity = cls.fl_visc(cls, diameter)
@@ -118,7 +120,7 @@ class TreeVessel:
     def calc_zero_d_values(self, vesselD, eta):
         # calculate zero_d values based on an arbitrary vessel diameter
         r = vesselD / 2
-        l = 12.4 * r ** 1.1  # from ingrid's paper, does this remain constant throughout adaptation?
+        l = 12.4 * r ** 1.1  # from ingrid's paper - does this remain constant throughout adaptation?
         R = 8 * eta * l / (np.pi * r ** 4)
         C = 0.0  # to implement later
         L = 0.0  # to implement later
@@ -126,7 +128,9 @@ class TreeVessel:
         return R, C, L, l
 
     def update_vessel_info(self):
-        if self._d < .3:
+        if self._d < .3 and self.id > 0: 
+        # if we allow the first vessel to experience FL effects, the optimization does not work as the resistance is decreased
+        # by an order of magnitude
             self.eta = self.fl_visc(self.d)
             self.info["viscosity"] = self.eta
         R, C, L, l = self.calc_zero_d_values(self._d, self.eta)
