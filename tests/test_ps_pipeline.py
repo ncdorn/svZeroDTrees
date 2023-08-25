@@ -58,7 +58,7 @@ def test_preop():
         
 
 
-def test_tree_construction():
+def test_cwss_tree_construction():
     '''
     test the tree construction algorithm
     '''
@@ -73,7 +73,7 @@ def test_tree_construction():
 
     write_to_log(log_file, 'testing tree construction', write=True)
 
-    roots = preop.construct_trees(preop_config, preop_result, log_file)
+    roots = preop.construct_cwss_trees(preop_config, preop_result, log_file)
 
     R_bc = []
     for bc_config in preop_config["boundary_conditions"]:
@@ -89,9 +89,15 @@ def test_tree_construction():
     assert SSE < 0.1
 
 
-def test_build_tree():
-    # build tree with radius below 0.15 and observe wtf is happening
-    pass
+def test_pries_tree_construction():
+    # test pries and secomb tree building
+    with open('tests/cases/LPA_RPA_0d_steady/preop_config.in') as ff:
+        preop_config = json.load(ff)
+
+    with open('tests/cases/LPA_RPA_0d_steady/preop_result.out', 'rb') as ff:
+        preop_result = pickle.load(ff)
+
+    roots = preop.construct_pries_trees(preop_config, preop_result)
 
 def run_from_file(input_file, output_file):
     """Run svZeroDPlus from file. 
@@ -147,6 +153,6 @@ if __name__ == '__main__':
 
 
     # result = run_from_file(input_file, output_file)
-    test_tree_construction()
+    test_pries_tree_construction()
 
 
