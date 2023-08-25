@@ -150,12 +150,21 @@ class TreeVessel:
         }
 
     def adapt_pries_secomb(self, ps_params, dt, H_d=0.45):
-        # calculate the pries and secomb parameters for microvascular adaptation
-        # this will have to be done in a postorder traversal
-        # ps_params in the following form [k_p, k_m, k_c, k_s, S_0, tau_ref, Q_ref, L]
-        # adapt the tree based the pries and secomb model for diameter change
+        '''
+        calculate the pries and secomb parameters for microvascular adaptation
+        this will have to be done in a postorder traversal
+        ps_params in the following form [k_p, k_m, k_c, k_s, L (cm), S_0, tau_ref, Q_ref]
+        adapt the tree based the pries and secomb model for diameter change
+        input units:
+            k_p, k_m, k_c, k_s [=] dimensionless
+            L [=] cm
+            J0 [=] dimensionless
+            tau_ref [=] dyn/cm2
+            Q_ref [=] cm3/s
+        '''
 
-        self.k_p, self.k_m, self.k_c, self.k_s, self.S_0, self.tau_ref, self.Q_ref, self.L = tuple(ps_params)
+
+        self.k_p, self.k_m, self.k_c, self.k_s, self.L, self.S_0, self.tau_ref, self.Q_ref = tuple(ps_params)
         self. H_d = H_d # hematocrit
 
         self.S_m = self.k_m * math.log(self.Q_ref / (self.Q * self.H_d) + 1)

@@ -293,8 +293,6 @@ class StructuredTreeOutlet():
             self.build_tree(radius[0], optimizing=True)
             R = self.root.R_eq
             R_diff = (Resistance - R)**2
-            # if radius < 0.15:
-            print(radius, R, self.root.R, self.count_vessels())
             return R_diff
 
         bounds = Bounds(lb=0.005) # minimum is r_min
