@@ -2,6 +2,7 @@ README.md
 setup.py
 svzerodtrees/__init__.py
 svzerodtrees/adaptation.py
+svzerodtrees/preop.py
 svzerodtrees/structured_tree_simulation.py
 svzerodtrees/structuredtreebc.py
 svzerodtrees/treevessel.py
@@ -15,7 +16,7 @@ svzerodtrees/post_processing/stree_data_processing.py
 svzerodtrees/post_processing/stree_visualization.py
 svzerodtrees/post_processing/stree_visualization_OLD.py
 tests/test_nx_axes.py
-tests/test_ps.py
+tests/test_ps_pipeline.py
 tests/test_pulmonary.py
 tests/test_struct_tree.py
 tests/test_vis_tree.py
