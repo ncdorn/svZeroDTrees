@@ -4,6 +4,7 @@ from scipy.optimize import minimize, Bounds, LinearConstraint
 from svzerodtrees.treevessel import TreeVessel
 from svzerodtrees.utils import *
 import math
+import svzerodplus
 
 class StructuredTreeOutlet():
     """Structured tree microvascular adaptation to upstream changes
@@ -30,6 +31,9 @@ class StructuredTreeOutlet():
             self.block_dict = {'name': name, 
                                'origin_d': self.initialD, 
                                'P_in': self.params["P_in"],
+                               'Q_in': self.params["Q_in"],
+                               'boundary_conditions': [],
+                               'simulation_parameters': simparams,
                                'vessels': [], 
                                'junctions': [], 
                                'adaptations': 0}
@@ -45,15 +49,32 @@ class StructuredTreeOutlet():
 
 
     @classmethod
-    def from_outlet_vessel(cls, config: dict, simparams: dict, tree_exists=False, root: TreeVessel = None, P_outlet: float=0.0) -> "StructuredTreeOutlet":
+    def from_outlet_vessel(cls, 
+                           config: dict, 
+                           simparams: dict,
+                           bc_config: dict,
+                           tree_exists=False, 
+                           root: TreeVessel = None, 
+                           P_outlet: list=[0.0], 
+                           Q_outlet: list=[97.3]) -> "StructuredTreeOutlet":
         """Creates instance from config dictionary of outlet vessel
             Args:
                 config file of outlet vessel
                 config file of simulation parameters to get viscosity
+                config file of the outlet boundary condition
                 tree config file, if the tree already exists
             Returns:
                 instance of structured tree
         """
+        # if steady state, make the Q_outlet and P_outlet into a list of length two for
+        # svzerodplus config BC compatibility
+        if len(Q_outlet) == 1:
+            Q_outlet = [Q_outlet[0],] * 2
+        
+        if len(P_outlet) == 1:
+            P_outlet = [P_outlet[0],] * 2
+        
+
         params = dict(
             # need vessel length to determine vessel diameter
             l=config.get("vessel_length"),
@@ -65,7 +86,9 @@ class StructuredTreeOutlet():
                 "stenosis_coefficient", 0.0
             ),
             eta=simparams.get("viscosity"),
-            P_in = P_outlet
+            P_in = P_outlet,
+            Q_in = Q_outlet,
+            bc_values = bc_config["bc_values"]
         )
         if tree_exists:
             return cls(params=params, config = config["tree"], simparams=simparams, root=root)
@@ -143,14 +166,17 @@ class StructuredTreeOutlet():
             current_vessel = queue.pop(q_id)
             creating_vessels = True
             while current_vessel.collapsed:
+                # remove the collapsed vessels without creating new ones
                 if len(queue) == 0:
                     creating_vessels = False
                     break
                 current_vessel = queue.pop(q_id)
             if not creating_vessels:
+                # end the loop
                 break
 
             if not current_vessel.collapsed:
+                # create new left and right vessels
                 next_gen = current_vessel.gen + 1
                 # create left vessel
                 vessel_id += 1
@@ -175,10 +201,15 @@ class StructuredTreeOutlet():
                 
 
                 # add a junction
-                junction_info = {"inlet_vessels": [current_vessel.id],
-                                 "junction_type": "internal_junction",
-                                 "junction_name": "J" + str(junc_id),
-                                 "outlet_vessels": [current_vessel.left.id, current_vessel.right.id]}
+                junction_info = {"junction_name": "J" + str(junc_id),
+                                 "junction_type": "NORMAL_JUNCTION",
+                                 "inlet_vessels": [current_vessel.id],
+                                 "outlet_vessels": [current_vessel.left.id, current_vessel.right.id],
+                                 "junction_values": {"C": [0, 0, 0], 
+                                                     "L": [0, 0, 0], 
+                                                     "R_poiseuille": [0, 0, 0], 
+                                                     "stenosis_coefficient": [0, 0, 0]},
+                                 }
                 self.block_dict["junctions"].append(junction_info)
                 junc_id += 1
 
@@ -256,7 +287,6 @@ class StructuredTreeOutlet():
             Returns:
                 optimized radius, total resistance
                 """
-
         r_guess = self.initialD / 2
 
         def r_min_objective(radius):
@@ -275,7 +305,8 @@ class StructuredTreeOutlet():
         if log_file is not None:
             with open(log_file, "a") as log:
                 log.write("     the optimized radius is " + str(r_final.x))
-        return r_final.x, R_final
+        return r_final.x, r_final.fun, R_final
+    
 
     def optimize_alpha_beta(self, Resistance=5.0, log_file=None):
         """ use constrained optimization to optimize the diameter and alpha and beta
@@ -311,35 +342,63 @@ class StructuredTreeOutlet():
 
         return r_final.x[0], R_final
     
-    def tree_solver_input(self, flow_out: float, P_d: float):
-    # create a config file for the tree and calculate flow through it
-        if len(flow_out) == 1:
-            flow_out = [flow_out[0],] * 2
-        tree_solver_config = {
-            "boundary_conditions": [
-                {
+    def create_bcs(self):
+        ''''
+        create the inflow and distal pressure BCs
+        Args: 
+            Pd: distal pressure for outflow pressure BC
+        Returns:
+            updated self.block_dict
+        '''
+        self.block_dict["boundary_conditions"] = [] # erase the previous boundary conditions
+        timesteps = len(self.params["Q_in"]) # identify the number of timesteps in the flow boundary condition
+
+        self.block_dict["boundary_conditions"].append(
+            {
                     "bc_name": "INFLOW",
                     "bc_type": "FLOW",
                     "bc_values": {
-                        "Q": flow_out,
-                        "t": np.linspace(0.0, 1.0, num=len(flow_out)).tolist()
+                        "Q": self.params["Q_in"],
+                        "t": np.linspace(0.0, 1.0, num=timesteps).tolist()
                     }
                 },
-                {
-                    "bc_name": "P_d",
-                    "bc_type": "PRESSURE",
-                    "bc_values": {
-                        "P": [P_d,] * 2,
-                        "t": [
-                            0.0,
-                            1.0
-                        ]
-                    }
-                },
-            ],
+        )
+
+        for vessel_config in self.block_dict["vessels"]:
+            if "boundary_conditions" in vessel_config:
+                if "outlet" in vessel_config["boundary_conditions"]:
+                    self.block_dict["boundary_conditions"].append(
+                        {
+                        "bc_name": "P_d" + str(vessel_config["vessel_id"]),
+                        "bc_type": "PRESSURE",
+                        "bc_values": {
+                            "P": [self.params["bc_values"].get("Pd"),] * 2,
+                            "t": [0.0, 1.0]
+                            }
+                        }
+                    )
+
+    def create_solver_config(self):
+    # create a config file for the tree and calculate flow through it
+
+        self.create_bcs()
+
+        tree_solver_config = {
+            "simulation_parameters": self.block_dict["simulation_parameters"],
+            "vessels": self.block_dict["vessels"],
             "junctions": self.block_dict["junctions"],
-            "simulation_parameters": self.simparams,
-            "vessels": self.block_dict["vessels"]
+            "boundary_conditions": self.block_dict["boundary_conditions"]
         }
 
         return tree_solver_config
+    
+
+    def count_vessels(self):
+        '''
+            count the number vessels in the tree
+        '''
+        return(len(self.block_dict["vessels"]))
+    
+    def R(self):
+        # return the resistance of the tree
+        return self.root.R_eq

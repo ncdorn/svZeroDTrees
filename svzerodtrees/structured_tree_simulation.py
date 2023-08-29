@@ -1,6 +1,4 @@
 import copy
-
-import svzerodplus
 import csv
 from pathlib import Path
 import numpy as np
@@ -10,6 +8,7 @@ from svzerodtrees.post_processing.stree_data_processing import *
 from svzerodtrees.post_processing.stree_visualization import *
 from scipy.optimize import minimize, Bounds
 from svzerodtrees.structuredtreebc import StructuredTreeOutlet
+import svzerodtrees.preop as preop
 import os
 import matplotlib.pyplot as plt
 
@@ -63,7 +62,7 @@ def optimize_preop_0d(clinical_targets: csv,
     # get resistances from the zerod input file
     resistance = get_resistances(zeroD_config)
     # get the LPA and RPA branch numbers
-    lpa_rpa_branch = ["V" + str(idx) for idx in zeroD_config["junctions"][0]["outlet_vessels"]]
+    lpa_rpa_branch = zeroD_config["junctions"][0]["outlet_vessels"]
 
     # scale the inflow
     # objective function value as global variable
@@ -79,14 +78,14 @@ def optimize_preop_0d(clinical_targets: csv,
         # r = abs(r)
         # r = [r, r]
         write_resistances(input_config, r)
-        zerod_result = runner.run_from_config(input_config)
-        mpa_pressures, mpa_sys_p, mpa_dia_p, mpa_mean_p  = get_mpa_pressure(zerod_result, branch_name='V0') # get mpa pressure
+        zerod_result = run_svzerodplus(input_config)
+        mpa_pressures, mpa_sys_p, mpa_dia_p, mpa_mean_p  = get_pressure(zerod_result, branch_name='V0') # get mpa pressure
 
         # lpa_rpa_branch = ["V" + str(idx) for idx in input_config["junctions"][0]["outlet_vessels"]]
 
-        q_MPA = get_df_data(zerod_result, branch_name='V0', data_name='flow_in')
-        q_RPA = get_df_data(zerod_result, branch_name=lpa_rpa_branch[0], data_name='flow_in')
-        q_LPA = get_df_data(zerod_result, branch_name=lpa_rpa_branch[1], data_name='flow_in')
+        q_MPA = get_branch_result(zerod_result, branch0=0, data_name='flow_in')
+        q_RPA = get_branch_result(zerod_result, branch0=lpa_rpa_branch[0], data_name='flow_in')
+        q_LPA = get_branch_result(zerod_result, branch0=lpa_rpa_branch[1], data_name='flow_in')
         if unsteady:
             pred_p = np.array([
                 mpa_sys_p,
@@ -131,7 +130,7 @@ def optimize_preop_0d(clinical_targets: csv,
 
 def construct_trees(config: dict, log_file=None, vis_trees=False, fig_dir=None):
     roots = []
-    zerod_result = runner.run_from_config(config)
+    zerod_result = run_svzer(config)
     q_out = get_outlet_data(config, zerod_result, 'flow_out', steady=True)
     for vessel_config in config["vessels"]:
         if "boundary_conditions" in vessel_config:
@@ -154,8 +153,8 @@ def construct_trees(config: dict, log_file=None, vis_trees=False, fig_dir=None):
                 vessel_config["tree"] = outlet_tree.block_dict
                 roots.append(outlet_tree.root)
 
-    # if vis_trees:
-    #     visualize_trees(config, roots, fig_dir=fig_dir, fig_name='_preop')
+    if vis_trees:
+        visualize_trees(config, roots, fig_dir=fig_dir, fig_name='_preop')
 
     return roots
 
@@ -279,7 +278,7 @@ def run_simulation(model_dir: str, expname: str, optimized: bool=False, vis_tree
 
     '''
     # make path variable, starting from script dir
-    os.chdir('structured_trees/models') # cd into models dir
+    os.chdir('models') # cd into models dir
     modeldir=Path(model_dir) # make pathlib variable
     # experiment name
     exp_filename = expname + '.txt'
@@ -309,10 +308,10 @@ def run_simulation(model_dir: str, expname: str, optimized: bool=False, vis_tree
         log.write("Experiment directory and log file created. Beginning experiment " + expname +"...  \n")
 
     if not optimized:
-        preop_config, R_final = optimize_preop_0d('clinical_targets.csv',
+        preop_config, preop_flow = preop.optimize_outlet_bcs('clinical_targets.csv',
                                             input_file,
-                                            log_file,
                                             exp_dir,
+                                            log_file,
                                             make_steady=False,
                                             unsteady=False,
                                             change_to_R=True)
