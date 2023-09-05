@@ -190,7 +190,7 @@ def construct_pries_trees(config: dict, result, ps_params=[0.68, .70, 2.45, 1.72
     # get the outlet flowrate
     q_outs = get_outlet_data(config, result, "flow_out", steady=True)
     p_outs = get_outlet_data(config, result, "pressure_out", steady=True)
-    outlet_trees = []
+    trees = []
     outlet_idx = 0 # need this when iterating through outlets 
     # get the outlet vessel
     for vessel_config in config["vessels"]:
@@ -203,15 +203,24 @@ def construct_pries_trees(config: dict, result, ps_params=[0.68, .70, 2.45, 1.72
                                                                                bc_config, 
                                                                                Q_outlet=[np.mean(q_outs[outlet_idx])],
                                                                                P_outlet=[np.mean(p_outs[outlet_idx])])
-                outlet_stree.build_tree(initial_r=.2)
-                outlet_idx += 1 # track the outlet idx for more than one outlet
-                outlet_trees.append(outlet_stree)
-                print(outlet_stree.count_vessels())
-    print('integrating pries and secomb')
-    integrate_pries_secomb(ps_params, outlet_trees)
+                        R = bc_config["bc_values"]["R"]
+                # write to log file for debugging
+                write_to_log(log_file, "** building tree for resistance: " + str(R) + " **")
+                # outlet_tree.optimize_tree_radius(R)
+                x, fun, R_final = outlet_stree.optimize_tree_radius(R, log_file)
+                print('integrating pries and secomb')
+                outlet_stree.integrate_pries_secomb()
+                # write to log file for debugging
+                write_to_log(log_file, "     the number of vessels is " + str(outlet_stree.count_vessels()))
+                vessel_config["tree"] = outlet_stree.block_dict
+                trees.append(outlet_stree)
+                outlet_idx += 1
+    
+    # integrate_pries_secomb(ps_params, trees)
 
-    roots = [outlet_tree.root for outlet_tree in outlet_trees]
-
-    return roots
+    return trees
 
     
+    def optimize_ps_params():
+
+        pass

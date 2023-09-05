@@ -39,7 +39,7 @@ def repair_stenosis_coefficient(preop_config: dict, repair_config=None, log_file
 
     postop_result = run_svzerodplus(postop_config)
 
-    return postop_result, postop_config
+    return postop_config, postop_result
 
 
 def repair_stenosis_resistance(preop_config: dict, repair_config=None, log_file=None):

@@ -4,7 +4,6 @@ from scipy.optimize import minimize, Bounds, LinearConstraint
 from svzerodtrees.treevessel import TreeVessel
 from svzerodtrees.utils import *
 import math
-import svzerodplus
 
 class StructuredTreeOutlet():
     """Structured tree microvascular adaptation to upstream changes
@@ -374,4 +373,35 @@ class StructuredTreeOutlet():
     
     def R(self):
         # return the resistance of the tree
+        return self.root.R_eq
+    
+    def integrate_pries_secomb(self, ps_params=[0.68, .70, 2.45, 1.72, 1.73, 27.9, .103, 3.3 * 10 ** -8], dt=0.01, time_avg_q=True):
+        # initialize and calculate the Pries and Secomb parameters in the TreeVessel objects via a postorder traversal
+        SS_dD = 0.0 # sum of squared dDs initial guess
+        converged = False
+        threshold = 10 ** -5
+        while not converged:
+            self.create_bcs()
+            tree_result = run_svzerodplus(self.block_dict)
+            # tree_result = run_svzerodplus(tree.create_solver_config())
+            print('ran svzerodplus')
+            assign_flow_to_root(tree_result, self.root, steady=time_avg_q)
+            next_SS_dD = 0.0 # initializing sum of squared dDs, value to minimize
+            def stimulate(vessel):
+                if vessel:
+                    stimulate(vessel.left)
+                    stimulate(vessel.right)
+                    vessel_dD = vessel.adapt_pries_secomb(ps_params, dt)
+                    nonlocal next_SS_dD
+                    next_SS_dD += vessel_dD ** 2
+            stimulate(self.root)
+            dD_diff = abs(next_SS_dD ** 2 - SS_dD ** 2)
+            print(dD_diff)
+            if dD_diff < threshold:
+                converged = True
+            
+            SS_dD = next_SS_dD
+            
+        print('Pries and Secomb integration completed! R = ' + str(self.root.R_eq))
+    
         return self.root.R_eq
