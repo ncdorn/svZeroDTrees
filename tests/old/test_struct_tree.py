@@ -1,7 +1,7 @@
 import json
-from svzerodsolver.model.structuredtreebc import StructuredTreeOutlet
+from svzerodtrees.structuredtreebc import StructuredTreeOutlet
 from pathlib import Path
-from stree_visualization import *
+from svzerodtrees.post_processing.stree_visualization import *
 import matplotlib.pyplot as plt
 
 def test_tree_build(config):

@@ -44,8 +44,7 @@ def find_outlets(config):
     for vessel_config in config["vessels"]:
         if "boundary_conditions" in vessel_config:
             if "outlet" in vessel_config["boundary_conditions"]:
-                branch_id, seg_id = vessel_config["vessel_name"].split("_")
-                branch_id = int(branch_id[6:])
+                branch_id = get_branch_id(vessel_config)
                 outlet_vessels.append(branch_id)
                 d = ((128 * config["simulation_parameters"]["viscosity"] * vessel_config["vessel_length"]) /
                      (np.pi * vessel_config["zero_d_element_values"].get("R_poiseuille"))) ** (1 / 4)
@@ -59,7 +58,6 @@ def get_branch_result(result_array, data_name: str, branch: int, steady: bool=Fa
         return result_array[data_name][branch][-1]
     else:
         return result_array[data_name][branch]
-
 
 
 def get_resistances(config):
@@ -133,22 +131,19 @@ def repair_stenosis(config, vessels: str or list = None, degree: float = 1.0, lo
     Returns:
         edited config file and log file
     '''
+
     if vessels is None:
-        with open(log_file, "a") as log:
-            log.write("** repairing all stenoses ** \n")
+        write_to_log(log_file, "** repairing all stenoses **")
         for vessel_config in config["vessels"]:
             if vessel_config["zero_d_element_values"]["stenosis_coefficient"] > 0:
                 vessel_config["zero_d_element_values"]["stenosis_coefficient"] = vessel_config["zero_d_element_values"].get("stenosis_coefficient") * (1-degree)
-                with open(log_file, "a") as log:
-                    log.write("     vessel " + str(vessel_config["vessel_id"]) + " has been repaired \n")
+                write_to_log(log_file, "     vessel " + str(vessel_config["vessel_id"]) + " has been repaired")
     else:
-        with open(log_file, "a") as log:
-            log.write("** repairing stenoses in vessels " + str(vessels) + " ** \n")
+        write_to_log(log_file, "** repairing stenoses in vessels " + str(vessels) + " **")
         for vessel_config in config["vessels"]:
             if vessel_config["vessel_id"] in vessels:
                 vessel_config["zero_d_element_values"]["stenosis_coefficient"] = vessel_config["zero_d_element_values"].get("stenosis_coefficient") * (1-degree)
-                with open(log_file, "a") as log:
-                    log.write("     vessel " + str(vessel_config["vessel_id"]) + " has been repaired \n")
+                write_to_log(log_file, "     vessel " + str(vessel_config["vessel_id"]) + " has been repaired")
 
 
 def make_inflow_steady(config, Q=97.3):
@@ -321,3 +316,9 @@ def write_to_log(log_file, message: str, write=False):
         else:
             with open(log_file, "a") as log:
                 log.write(message +  "\n")
+
+
+def get_branch_id(vessel_config):
+    branch_id, seg_id = vessel_config["vessel_name"].split("_")
+
+    return int(branch_id[6:])

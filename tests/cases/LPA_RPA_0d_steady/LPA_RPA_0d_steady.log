@@ -1,5 +1,19 @@
 testing tree construction
-** building tree for resistance: 572.5744121727547 **
-     the optimized radius is [0.12246235]     the number of vessels is 279
-** building tree for resistance: 171.89218542899346 **
+** building tree for resistance: 572.5773333192275 **
+     the optimized radius is [0.12246353]     the number of vessels is 279
+** building tree for resistance: 171.88762646439702 **
      the optimized radius is [0.19442747]     the number of vessels is 975
+** repairing stenoses in vessels [] **
+     vessel 1 has been repaired
+     vessel 2 has been repaired
+     vessel 3 has been repaired
+     vessel 4 has been repaired
+     vessel 5 has been repaired
+     vessel 6 has been repaired
+all stenosis repairs completed
+** adaptation results for OutletTree3 **
+    R_new = 765.2175793895426, R_old = 572.5819336820143
+    The change in resistance is 192.63564570752828
+** adaptation results for OutletTree6 **
+    R_new = 144.55182133268374, R_old = 171.89373917218694
+    The change in resistance is -27.341917839503196

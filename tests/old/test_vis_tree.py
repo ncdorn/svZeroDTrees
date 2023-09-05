@@ -1,4 +1,4 @@
-from stree_visualization import *
+from svzerodtrees.post_processing.stree_visualization import *
 from pathlib import Path
 
 if __name__ == '__main__':
