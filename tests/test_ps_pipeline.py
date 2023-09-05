@@ -97,7 +97,7 @@ def test_pries_tree_construction():
     with open('tests/cases/LPA_RPA_0d_steady/preop_result.out', 'rb') as ff:
         preop_result = pickle.load(ff)
 
-    roots = preop.construct_pries_trees(preop_config, preop_result)
+    trees = preop.construct_pries_trees(preop_config, preop_result)
 
 
 def test_repair_stenosis():
@@ -111,13 +111,13 @@ def test_repair_stenosis():
         repair_dict = json.load(ff)
 
     # proximal repair case
-    postop_res_prox, postop_config_prox = repair_stenosis_coefficient(preop_config, repair_dict['proximal'])
+    postop_config_prox, postop_res_prox = operation.repair_stenosis_coefficient(preop_config, repair_dict['proximal'])
 
     # extensive repair case
-    postop_res_ext, postop_config_ext = repair_stenosis_coefficient(preop_config, repair_dict['extensive'])
+    postop_config_ext, postop_res_ext = operation.repair_stenosis_coefficient(preop_config, repair_dict['extensive'])
 
     # custom repair case
-    postop_res_cust, postop_config_cust = repair_stenosis_coefficient(preop_config, repair_dict['custom'])
+    postop_config_cust, postop_res_cust = operation.repair_stenosis_coefficient(preop_config, repair_dict['custom'])
 
 
 def test_cwss_adaptation():
@@ -141,9 +141,36 @@ def test_cwss_adaptation():
 
     trees = preop.construct_cwss_trees(preop_config, preop_result, log_file)
 
-    postop_result, postop_config = operation.repair_stenosis_coefficient(preop_config, repair_config, log_file)
+    postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, repair_config, log_file)
 
-    adapted_result, adapted_config = adapt_constant_wss(postop_config, trees, preop_result, postop_result, log_file)
+    adapted_config, adapted_result, trees = adapt_constant_wss(postop_config, trees, preop_result, postop_result, log_file)
+
+
+def test_pries_adaptation():
+    '''
+    test the constant wss tree adaptation algorithm
+    '''
+    
+    with open('tests/cases/LPA_RPA_0d_steady/preop_config.in') as ff:
+        preop_config = json.load(ff)
+
+    with open('tests/cases/LPA_RPA_0d_steady/preop_result.out', 'rb') as ff:
+        preop_result = pickle.load(ff)
+    
+    with open('tests/cases/repair.json') as ff:
+        repair_dict = json.load(ff)
+    repair_config = repair_dict['proximal']
+
+    log_file = 'tests/cases/LPA_RPA_0d_steady/LPA_RPA_0d_steady.log'
+
+    write_to_log(log_file, 'testing tree construction', write=True)
+
+    trees = preop.construct_cwss_trees(preop_config, preop_result, log_file)
+
+    postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, repair_config, log_file)
+
+    adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_file)
+
 
 
 def run_from_file(input_file, output_file):
@@ -200,6 +227,6 @@ if __name__ == '__main__':
 
 
     # result = run_from_file(input_file, output_file)
-    test_cwss_adaptation()
+    test_pries_tree_construction()
 
 
