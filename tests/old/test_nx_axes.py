@@ -1,8 +1,8 @@
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
-from stree_visualization import *
-from structured_tree_simulation import *
+from svzerodtrees.post_processing.stree_visualization import *
+from svzerodtrees.structured_tree_simulation import *
 
 def test_axes_nx(input_file):
     G = nx.path_graph(10)

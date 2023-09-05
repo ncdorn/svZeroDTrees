@@ -130,7 +130,7 @@ def optimize_preop_0d(clinical_targets: csv,
 
 def construct_trees(config: dict, log_file=None, vis_trees=False, fig_dir=None):
     roots = []
-    zerod_result = run_svzer(config)
+    zerod_result = run_svzerodsolver(config)
     q_out = get_outlet_data(config, zerod_result, 'flow_out', steady=True)
     for vessel_config in config["vessels"]:
         if "boundary_conditions" in vessel_config:
@@ -162,7 +162,7 @@ def construct_trees(config: dict, log_file=None, vis_trees=False, fig_dir=None):
 def calculate_flow(preop_config: dict, repair=None, repair_degree=1, log_file=None):
     preop_result = runner.run_from_config(preop_config)
     postop_config = copy.deepcopy(preop_config)  # make sure not to edit the preop_config
-    lpa_rpa_branch = [idx for idx in preop_config["junctions"][0]["outlet_vessels"]]
+    lpa_rpa_branch = preop_config["junctions"][0]["outlet_vessels"]
     with open(log_file, "a") as log:
         log.write("     LPA and RPA branches identified: " + str(lpa_rpa_branch))
     repair_vessels=None
@@ -183,7 +183,7 @@ def adapt_trees(config, preop_roots, preop_result, postop_result, pries_secomb =
     preop_q = get_outlet_data(config, preop_result, 'flow_out', steady=True)
     postop_q = get_outlet_data(config, postop_result, 'flow_out', steady=True)
     # q_diff = [postop_q[i] - q_old for i, q_old in enumerate(preop_q)]
-    adapted_config = config
+    adapted_config = copy.deepcopy(config)
     outlet_idx = 0 # index through outlets
     R_new = []
     roots = copy.deepcopy(preop_roots)
@@ -194,19 +194,14 @@ def adapt_trees(config, preop_roots, preop_result, postop_result, pries_secomb =
                 for root in roots:
                     if root.name in vessel_config["tree"]["name"]:
                         outlet_tree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, config["simulation_parameters"], tree_exists=True, root=root)
-                        if pries_secomb:
-                            # ps_params in the form
-                            pass
-                        else: # constant wss adaptation
-                            R_new.append(outlet_tree.adapt_constant_wss(preop_q[outlet_idx], postop_q[outlet_idx], disp=False))
-                        
-
+                        R_new.append(outlet_tree.adapt_constant_wss(preop_q[outlet_idx], postop_q[outlet_idx], disp=False))
                         adapted_roots.append(outlet_tree.root)
                         vessel_config["tree"] = outlet_tree.block_dict
                         outlet_idx +=1
                         # adapted_roots.append(outlet_tree.root)
 
     write_resistances(adapted_config, R_new)
+    
     return adapted_config, adapted_roots
 
 

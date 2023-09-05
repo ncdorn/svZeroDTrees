@@ -253,33 +253,6 @@ class StructuredTreeOutlet():
         return R_new
 
 
-    def pries_secomb(self, root, wss, Q):
-        '''
-        empirical model of microvascular adaptation from Pries et al. implemented by Lan et al. (2022)
-        Arguments:
-            root: TreeVessel instance which contains info about daughter segments relevant to adaptation
-            wss: wall shear stress at that vessel
-            q: flowrate at that vessel
-
-        '''
-        calculate_tree_flow()
-
-        H_D = 0.45 # hematocrit
-        # adapt the tree based the pries and secomb model for diameter change
-
-        tau_e = 50 / 86 * (100 - 86 * math.exp(-5000 * math.log(math.log(4.5 * P + 10)) ** 5.4) - 14) + 1
-
-        S_tau = math.log(wss + tau_ref)
-        S_p = -k_p * math.log(tau_e)
-        S_m = k_m * math.log((Q_ref / (q * H_D)) + 1) # H_D is the hematocrit
-        Sbar_c = 0 # this is a recursive value that depends on the values of S_C in the daughter segments
-        S_c = k_c * (Sbar_c / (Sbar_c + S_0))
-        S_s = -k_s
-
-        S_tot = S_tau + S_p + S_m + S_c + S_s
-        pass
-
-
     def optimize_tree_radius(self, Resistance=5.0, log_file=None):
         """ use nelder-mead to optimize the radius of the tree vessels with respect to the desired resistance
             Args:

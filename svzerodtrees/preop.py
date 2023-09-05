@@ -139,7 +139,7 @@ def construct_cwss_trees(config: dict, result, log_file=None, vis_trees=False, f
     :return roots: return the root TreeVessel objects of the outlet trees
 
     '''
-    roots = []
+    trees = []
     q_outs = get_outlet_data(config, result, 'flow_out', steady=True)
     p_outs = get_outlet_data(config, result, 'pressure_out', steady=True)
     outlet_idx = 0
@@ -161,13 +161,13 @@ def construct_cwss_trees(config: dict, result, log_file=None, vis_trees=False, f
                 # write to log file for debugging
                 write_to_log(log_file, "     the number of vessels is " + str(outlet_tree.count_vessels()))
                 vessel_config["tree"] = outlet_tree.block_dict
-                roots.append(outlet_tree.root)
+                trees.append(outlet_tree)
                 outlet_idx += 1
 
-    if vis_trees:
-        visualize_trees(config, roots, fig_dir=fig_dir, fig_name='_preop')
+    # if vis_trees:
+    #     visualize_trees(config, roots, fig_dir=fig_dir, fig_name='_preop')
 
-    return roots
+    return trees
 
 
 def construct_pries_trees(config: dict, result, ps_params=[0.68, .70, 2.45, 1.72, 1.73, 27.9, .103, 3.3 * 10 ** -8], log_file=None, vis_trees=False, fig_dir=None):
