@@ -165,57 +165,11 @@ def test_pries_adaptation():
 
     write_to_log(log_file, 'testing tree construction', write=True)
 
-    trees = preop.construct_cwss_trees(preop_config, preop_result, log_file)
+    trees = preop.construct_pries_trees(preop_config, preop_result, log_file)
 
     postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, repair_config, log_file)
 
     adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_file)
-
-
-
-def run_from_file(input_file, output_file):
-    """Run svZeroDPlus from file. 
-    This is going to be a very reduced, simple model for the purposes of creating a tree with flow values
-    and then testing pries and secomb
-
-    Args:
-        input_file: Input file with configuration.
-        output_file: Output file with configuration.
-    """
-    with open(input_file) as ff:
-        config = json.load(ff)
-    # print(config)
-    result = run_svzerodplus(config)
-    # 
-    #     result = dict(result = result.to_dict())
-    # with open(output_file, "w") as ff:
-    #     json.dump(result, ff)
-
-
-    outlet_trees = build_tree(config, result)
-    print(outlet_trees[0].count_vessels())
-
-    # tree_config = outlet_trees[0].create_solver_config(1333.2)
-    # with open('tests/cases/ps_tree_example_1.json', "w") as ff:
-    #     json.dump(tree_config, ff)
-
-    # tree_result = svzerodplus.simulate(tree_config)
-    outlet_trees[0].create_bcs()
-    # ps_params = [k_p, k_m, k_c, k_s, S_0, tau_ref, Q_ref, L]
-    ps_params = [1.24, .229, 2.20, .885, .219, 9.66 * 10 ** -7, 1.9974, 5.9764 * 10 ** -4]
-    print('R = ' + str(outlet_trees[0].R()))
-    SSE = integrate_pries_secomb(ps_params, outlet_trees)
-    print('R = ' + str(outlet_trees[0].R()))
-    # result = minimize(optimize_pries_secomb,
-    #                   ps_params,
-    #                   args=(outlet_trees, config["simulation_parameters"], q_outs),
-    #                   method='Nelder-Mead')
-    # SSE = optimize_pries_secomb(ps_params, [outlet_tree], config["simulation_parameters"], [q_out])
-    # print(result)
-    # root.adapt_diameter()
-
-
-    return result
 
 
 if __name__ == '__main__':
@@ -227,6 +181,6 @@ if __name__ == '__main__':
 
 
     # result = run_from_file(input_file, output_file)
-    test_pries_tree_construction()
+    test_pries_adaptation()
 
 

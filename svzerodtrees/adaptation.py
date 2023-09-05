@@ -1,44 +1,13 @@
 from svzerodtrees.utils import *
 import copy
 from svzerodtrees.structuredtreebc import StructuredTreeOutlet
-# module for Pries and Secomb adaptation
-
-# def integrate_pries_secomb(ps_params=[0.68, .70, 2.45, 1.72, 1.73, 27.9, .103, 3.3 * 10 ** -8], tree, dt=0.01, time_avg_q=True):
-#     # initialize and calculate the Pries and Secomb parameters in the TreeVessel objects via a postorder traversal
-#     dD_list = [] # initialize the list of dDs for the outlet calculation
-#     SS_dD = 0.0 # sum of squared dDs initial guess
-#     converged = False
-#     threshold = 10 ** -5
-#     while not converged:
-#         tree.create_bcs()
-#         tree_result = run_svzerodplus(tree.block_dict)
-#         # tree_result = run_svzerodplus(tree.create_solver_config())
-#         print('ran svzerodplus')
-#         assign_flow_to_root(tree_result, tree.root, steady=time_avg_q)
-#         next_SS_dD = 0.0 # initializing sum of squared dDs, value to minimize
-#         def stimulate(vessel):
-#             if vessel:
-#                 stimulate(vessel.left)
-#                 stimulate(vessel.right)
-#                 vessel_dD = vessel.adapt_pries_secomb(ps_params, dt)
-#                 nonlocal next_SS_dD
-#                 next_SS_dD += vessel_dD ** 2
-#         stimulate(tree.root)
-#         dD_diff = abs(next_SS_dD ** 2 - SS_dD ** 2)
-#         print(dD_diff)
-#         if dD_diff < threshold:
-#             converged = True
-        
-#         SS_dD = next_SS_dD
-#         print('Pries and Secomb integration completed! R = ' + str(tree.root.R_eq))
-
-#     return tree
 
 
 def adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_file=None):
     preop_q = get_outlet_data(postop_config, preop_result, 'flow_out', steady=True)
     # get the postop outlet flowrate and pressure
     postop_q = get_outlet_data(postop_config, postop_result, 'flow_out', steady=True)
+    print(preop_q, postop_q)
     postop_p = get_outlet_data(postop_config, postop_result, 'pressure_out', steady=True)
 
     adapted_config = copy.deepcopy(postop_config)
@@ -63,7 +32,10 @@ def adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_fi
                         outlet_stree.integrate_pries_secomb()
                         R_new.append(outlet_stree.root.R_eq)
 
-    print(R_old, R_new)
+    write_resistances(adapted_config, R_new)
+    adapted_result = run_svzerodplus(adapted_config)
+
+    return adapted_config, adapted_result, trees
 
 
 def adapt_constant_wss(postop_config, trees, preop_result, postop_result, log_file=None):
