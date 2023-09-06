@@ -5,10 +5,11 @@ from svzerodtrees import preop, operation, adaptation, postop
 from svzerodtrees.utils import *
 
 def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=False):
-    # begin in an experiments directory within the model directory containing input files and experiment config
     '''
-    :param exp_config: name of the experiment config file
-    :param optimized: if the outlet bcs have previously been optimized, use the optimized config (preop_config.in)
+    run the structured tree optimization pipeline from an experiment config file
+
+    :param exp_config_file: path to the experiment config file
+    :param optimized: True if the outlet bcs have previously been optimized. Use the optimized config (preop_config.in)
     :param vis_trees: if true, make tree visualization figures
     '''
     
@@ -104,6 +105,18 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
         
     
 def run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir):
+    '''
+    run the pries and secomb adaptation scheme from preop config to result
+
+    :param preop_config: preop config dict
+    :param preop_result: preop result array
+    :param repair_config: config specifying repair (usually contained in the experiment config file)
+    :param log_file: path to log file
+    :param vis_trees: True if trees are to be visualized
+    :param fig_dir: path to directory to save figures if vis_trees is true
+
+    :return result: summarized results
+    '''
 
     # construct trees
     trees = preop.construct_pries_trees(preop_config, 
@@ -131,6 +144,18 @@ def run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_f
 
 
 def run_cwss_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir):
+    '''
+    run the constant wall shear stress adaptation scheme from preop config to result
+
+    :param preop_config: preop config dict
+    :param preop_result: preop result array
+    :param repair_config: config specifying repair (usually contained in the experiment config file)
+    :param log_file: path to log file
+    :param vis_trees: True if trees are to be visualized
+    :param fig_dir: path to directory to save figures if vis_trees is true
+
+    :return result: summarized results
+    '''
 
     # construct trees
     trees = preop.construct_cwss_trees(preop_config,
