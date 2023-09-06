@@ -1,7 +1,6 @@
 import csv
 import numpy as np
 import matplotlib.pyplot as plt
-import math
 from io import StringIO
 import pandas as pd
 import svzerodplus

@@ -1,0 +1,12 @@
+beginning experiment exp_config_test_9.5.23
+Getting clinical target values...
+Optimizing preop outlet resistance...
+0D optimizationoptimization completed! 
+     Optimization solution: [572.57441217 171.89218543]
+     Objective function value: 3.592080702280684e-08
+     Number of iterations: 128
+Outlet resistances optimized! [572.57441217 171.89218543]
+** building tree for resistance: 572.5744121727547 **
+     the optimized radius is [0.12246235]     the number of vessels is 279
+** building tree for resistance: 171.89218542899346 **
+     the optimized radius is [0.19442747]     the number of vessels is 975

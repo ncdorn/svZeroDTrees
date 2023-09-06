@@ -11,9 +11,8 @@ from svzerodtrees.structuredtreebc import StructuredTreeOutlet
 from svzerodtrees.adaptation import *
 
 
-def optimize_outlet_bcs(clinical_targets: csv,
-                        input_file,
-                        working_dir,
+def optimize_outlet_bcs(input_file,
+                        clinical_targets: csv,
                         log_file=None,
                         make_steady=False,
                         unsteady=False,
@@ -117,9 +116,6 @@ def optimize_outlet_bcs(clinical_targets: csv,
     R_final = result.x # get the array of optimized resistances
     write_resistances(preop_config, R_final)
 
-    with open(str(working_dir) + '/preop_config.in', "w") as ff:
-        json.dump(preop_config, ff)
-
     preop_flow = run_svzerodplus(preop_config)
 
     return preop_config, preop_flow
@@ -170,7 +166,7 @@ def construct_cwss_trees(config: dict, result, log_file=None, vis_trees=False, f
     return trees
 
 
-def construct_pries_trees(config: dict, result, ps_params=[0.68, .70, 2.45, 1.72, 1.73, 27.9, .103, 3.3 * 10 ** -8], log_file=None, vis_trees=False, fig_dir=None):
+def construct_pries_trees(config: dict, result, log_file=None, vis_trees=False, fig_dir=None):
     '''
     construct trees for pries and secomb adaptation and perform initial integration
     :param config: 0D solver preop config
