@@ -12,8 +12,7 @@ from svzerodtrees.utils import *
 from svzerodtrees.structured_tree_simulation import *
 from scipy.optimize import minimize
 from svzerodtrees.adaptation import *
-import svzerodtrees.operation as operation
-import svzerodtrees.preop as preop
+from svzerodtrees import operation, preop, interface
 import pickle
 
 
@@ -172,15 +171,15 @@ def test_pries_adaptation():
     adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_file)
 
 
+def test_run_from_file():
+    expfile = 'exp_config_test.json'
+    os.chdir('tests/cases/LPA_RPA_0d_steady/experiments')
+
+    interface.run_from_file(expfile)
+
+
 if __name__ == '__main__':
-    # input_file = 'tests/cases/ps_tree_test.json'
-    output_file = 'tests/cases/ps_tree_test.out'
 
-    input_file = 'tests/cases/ps_tree_test.json'
-
-
-
-    # result = run_from_file(input_file, output_file)
-    test_pries_adaptation()
+    test_run_from_file()
 
 
