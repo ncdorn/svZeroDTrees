@@ -16,5 +16,5 @@ There are currently two microvascular adaptation schemes:
 * constant wall shear stress assumption (Yang et al. 2016)
 * Pries and Secomb model (Pries et al. 1998)
 
-
+## More documentation to come...
 
