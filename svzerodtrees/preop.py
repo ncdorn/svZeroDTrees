@@ -19,13 +19,20 @@ def optimize_outlet_bcs(input_file,
                         change_to_R=False,
                         show_optimization=True):
     '''
+    optimize the outlet boundary conditions of a 0D model by conjugate gradient method
 
-    :param clinical_targets: clinical targets input csv
     :param input_file: 0d solver json input file name string
-    :param output_file: 0d solver json output file name string
+    :param clinical_targets: clinical targets input csv
+    :param log_file: str with path to log_file
+    :param make_steady: if the input file has an unsteady inflow, make the inflow steady
+    :param unsteady: True if the input file has unsteady inflow
+    :param change_to_R: True if you want to change the input config from RCR to R boundary conditions
+    :param show_optimization: True if you want to display a track of the optimization results
+
     :return preop_config: 0D config with optimized BCs
     :return preop_flow: flow result with optimized preop BCs
     '''
+
     # get the clinical target values
     write_to_log(log_file, "Getting clinical target values...")
     bsa = float(get_value_from_csv(clinical_targets, 'bsa'))
@@ -46,58 +53,74 @@ def optimize_outlet_bcs(input_file,
     with open(input_file) as ff:
         preop_config = json.load(ff)
 
+    # make inflow steady
     if make_steady:
         make_inflow_steady(preop_config)
         write_to_log(log_file, "inlet BCs converted to steady")
 
+    # change boundary conditions to R
     if change_to_R:
         Pd = convert_RCR_to_R(preop_config)
         write_to_log(log_file, "RCR BCs converted to R, Pd = " + str(Pd))
+
     # get resistances from the zerod input file
     resistance = get_resistances(preop_config)
     # get the LPA and RPA branch numbers
-    lpa_rpa_branch = [1, 2] # in general, this should be the branch of LPA and RPA based on the simvascular 0d algorithm
 
     # scale the inflow
     # objective function value as global variable
     global obj_fun
     obj_fun = [] # for plotting the objective function, maybe there is a better way to do this
     # run zerod simulation to reach clinical targets
-    def zerod_optimization_objective(r,
+    def zerod_optimization_objective(resistances,
                                      input_config=preop_config,
                                      target_ps=None,
                                      unsteady=unsteady,
-                                     lpa_rpa_branch=lpa_rpa_branch
+                                     lpa_rpa_branch= [1, 2] # in general, this should be [1, 2]
                                      ):
-        # r = abs(r)
-        # r = [r, r]
-        write_resistances(input_config, r)
+        '''
+        objective function for 0D boundary condition optimization
+
+        :param R: list of resistances, given by the optimizer
+        :param input_config: config of the simulation to be optimized
+        :param target_ps: target pressures to optimize against
+        :param unsteady: True if the model to be optimized has an unsteady inflow condition
+        :param lpa_rpa_branch: lpa and rpa branch ids (should always be [1, 2]) 
+
+        :return: sum of SSE of pressure targets and flow split targets
+        '''
+
+        # write the optimization iteration resistances to the config
+        write_resistances(input_config, resistances)
         zerod_result = run_svzerodplus(input_config)
-        mpa_pressures, mpa_sys_p, mpa_dia_p, mpa_mean_p  = get_pressure(zerod_result, branch=0) # get mpa pressure
 
-        # lpa_rpa_branch = ["V" + str(idx) for idx in input_config["junctions"][0]["outlet_vessels"]]
+        # get mean, systolic and diastolic pressures
+        mpa_pressures, mpa_sys_p, mpa_dia_p, mpa_mean_p  = get_pressure(zerod_result, branch=0)
 
+        # get the MPA, RPA, LPA flow rates
         q_MPA = get_branch_result(zerod_result, branch=0, data_name='flow_in')
         q_RPA = get_branch_result(zerod_result, branch=lpa_rpa_branch[0], data_name='flow_in')
         q_LPA = get_branch_result(zerod_result, branch=lpa_rpa_branch[1], data_name='flow_in')
-        if unsteady:
+
+        if unsteady: # if unsteady, take sum of squares of mean, sys, dia pressure
             pred_p = np.array([
                 mpa_sys_p,
                 mpa_dia_p,
                 mpa_mean_p
             ])
             p_diff = np.sum(np.square(np.subtract(pred_p, target_ps)))
-        else:
+        else: # just the mean pressure
             p_diff = abs(target_ps[2] - mpa_mean_p) ** 2
-        # SSE = np.sum(np.square(np.subtract(pred_p, target_p)))
-        # MSE = np.square(np.subtract(pred_p, target_p)).mean()
 
+        # add flow split to optimization by checking RPA flow against flow split
         RPA_diff = abs((q_RPA[-1] - (0.52 * q_MPA[-1]))) ** 2
         
+        # minimize sum of pressure SSE and flow split SSE
         min_obj = p_diff + RPA_diff
         if show_optimization:
             obj_fun.append(min_obj)
             plot_optimization_progress(obj_fun)
+
         return min_obj
 
     # write to log file for debugging
@@ -218,5 +241,7 @@ def construct_pries_trees(config: dict, result, log_file=None, vis_trees=False, 
 
     
     def optimize_ps_params():
-
+        '''
+        method to optimize the pries and secomb parameters to compare with Ingrid's. To be implemented
+        '''
         pass

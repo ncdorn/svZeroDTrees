@@ -66,6 +66,8 @@ def get_resistances(config):
     for bc_config in config["boundary_conditions"]:
         if bc_config["bc_type"] == 'RESISTANCE':
             resistance.append(bc_config['bc_values'].get('R'))
+        if bc_config["bc_type"] == 'RCR':
+            resistance.append(bc_config['bc_values'].get('Rp') + bc_config['bc_values'].get('Rd'))
     np.array(resistance)
     return resistance
 
@@ -171,7 +173,7 @@ def convert_RCR_to_R(config, Pd=10 * 1333.22):
     '''
     for bc_config in config["boundary_conditions"]:
         if "RCR" in bc_config["bc_type"]:
-            R = bc_config["bc_values"].get("Rp")
+            R = bc_config["bc_values"].get("Rp") + bc_config["bc_values"].get("Rd")
             bc_config["bc_type"] = "RESISTANCE"
             bc_config["bc_values"] = {"R": R, "Pd": Pd}
 
