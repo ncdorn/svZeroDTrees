@@ -18,7 +18,9 @@ There are currently two microvascular adaptation schemes:
 
 ## todo
 [] document all code
+
 [] robustify documentation
+
 [] robustify tree and data visualization methods
 
 ## More documentation to come...
