@@ -6,20 +6,25 @@ from svzerodtrees.utils import *
 import math
 
 class StructuredTreeOutlet():
-    """Structured tree microvascular adaptation to upstream changes
-    input: R, length of a vessel with an outlet BC
-    output: structured tree of BloodVessels and Junctions
-
-    need to restructure this class, as it is not a block but rather a collection of blocks
-
+    """
+    Structured tree which represents microvascular adaptation at the outlets of a 0D Windkessel model.
+    utilizes the TreeVessel class which is recursive by nature to handle recursive tasks
     """
     def __init__(self, params: dict = None, name: str = None, config: dict = None, simparams: dict = None, root: TreeVessel = None):
-        """Create a new structured tree instance
-        Args:
-            params: The configuration paramaters of the block. Mostly comprised
-                of constants for element contribution calculation.
-            name: Optional name of the block.
         """
+        Create a new StructuredTreeOutlet instance
+        
+        :param params: dict of 0D Windkessel parameters for the StructuredTreeOutlet class. 
+            contains lenght, R, C, L, stenosis coeff, viscosity, inlet pressure and flow, bc values
+        :param name: name of the StructuredTreeOutlet instance, e.g. OutletTree3
+        :param config: optional tree config dict, used to create a StructuredTreeOutlet instance from a pre-existing tree which has
+            been saved in the model 0D config dict
+        :param simparams: simulation parameters from the 0D model config file
+        :param root: TreeVessel instance, required if the StructuredTreeOutlet instance is built from a pre-existing tree
+
+        :return: None
+        """
+        # parameter attributes
         self.params = params
         self.simparams = simparams
         # initial diameter of the vessel from which the tree starts
@@ -39,9 +44,14 @@ class StructuredTreeOutlet():
             # initialize the root of the structured tree
             self.root = None
         else:
+            # set up parameters from pre-existing tree config
             self.name = config["name"]
             self.block_dict = config
             # initialize the root of the structured tree
+            if root is None:
+                # if no TreeVessel instance is provided to create the new tree
+                raise Exception('No root TreeVessel instance provided!')
+            # add the root instance to the StructuredTreeOutlet
             self.root = root
 
 
@@ -56,17 +66,21 @@ class StructuredTreeOutlet():
                            root: TreeVessel = None, 
                            P_outlet: list=[0.0], 
                            Q_outlet: list=[97.3]) -> "StructuredTreeOutlet":
-        """Creates instance from config dictionary of outlet vessel
-            Args:
-                config file of outlet vessel
-                config file of simulation parameters to get viscosity
-                config file of the outlet boundary condition
-                tree config file, if the tree already exists
-            Returns:
-                instance of structured tree
         """
-        # if steady state, make the Q_outlet and P_outlet into a list of length two for
-        # svzerodplus config BC compatibility
+        Class method to creat an instance from the config dictionary of an outlet vessel
+
+        :param config: config file of outlet vessel
+        :param simparams: config file of simulation parameters to get viscosity
+        :param bc_config: config file of the outlet boundary condition
+        :param tree_exists: True if the StructuredTreeOutlet is being created from a pre-existing tree (applicable in the adaptation 
+            and postop steps of the simulation pipeline)
+        :param root: TreeVessel instance, required if tree_exists = True
+        :param P_outlet: pressure at the outlet of the 0D model, which is the inlet of this StructuredTreeOutlet instance
+        :param Q_outlet: flow at the outlet of the 0D model, which is the inlet of this StructuredTreeOutlet instance
+
+        :return: StructuredTreeOutlet instance
+        """
+        # if steady state, make the Q_outlet and P_outlet into a list of length two for svzerodplus config BC compatibility
         if len(Q_outlet) == 1:
             Q_outlet = [Q_outlet[0],] * 2
         
@@ -77,6 +91,7 @@ class StructuredTreeOutlet():
         params = dict(
             # need vessel length to determine vessel diameter
             l=config.get("vessel_length"),
+            # windkessel element values
             R=config["zero_d_element_values"].get("R_poiseuille"),
             # Probably don't need C and L, just getting them for the sake of due diligence I guess
             C=config["zero_d_element_values"].get("C", 0.0),
@@ -98,8 +113,8 @@ class StructuredTreeOutlet():
     def reset_tree(self, keep_root=False):
         """
         reset the block dict if you are generating many iterations of the structured tree to optimize the radius
-        Returns: empty block_dict
 
+        :param keep_root: bool to decide whether to keep the root TreeVessel instance
         """
         if keep_root:
             pass
@@ -132,6 +147,16 @@ class StructuredTreeOutlet():
 
 
     def build_tree(self, initial_r=None, d_min=0.049, optimizing=False, alpha=0.9, beta=0.6):
+        '''
+        recursively build the structured tree
+
+        :param initial_r: root vessel radius
+        :param d_min: diameter at which the vessel is considered "collapsed" and the tree terminates
+        :param optimizing: True if the tree is being built as part of an optimization scheme, so the block_dict will be
+            reset for each optimization iteration
+        :param alpha: left vessel scaling factor (see Olufsen et al. 2012)
+        :param beta: right vessel scaling factor
+        '''
 
         if optimizing:
             self.reset_tree() # reset block dict if making the tree many times
@@ -213,114 +238,162 @@ class StructuredTreeOutlet():
                 junc_id += 1
 
 
-    def update_zero_d_params(self):
-        # update the zero_d parameters of the block based on a change in vessel diameter
-        for vessel in self.block_dict["vessels"]:
-            R, C, L, l = self.calc_zero_d_values(vessel.get("vessel_D"))
-            vessel["zero_d_element_values"]["R_poiseulle"] = R
-            vessel["zero_d_element_values"]["C"] = C
-            vessel["zero_d_element_values"]["L"] = L
-            vessel["vessel_length"] = l
+    # def update_zero_d_params(self):
+    #     # update the zero_d parameters of the block based on a change in vessel diameter
+    #     for vessel in self.block_dict["vessels"]:
+    #         R, C, L, l = self.calc_zero_d_values(vessel.get("vessel_D"))
+    #         vessel["zero_d_element_values"]["R_poiseulle"] = R
+    #         vessel["zero_d_element_values"]["C"] = C
+    #         vessel["zero_d_element_values"]["L"] = L
+    #         vessel["vessel_length"] = l
 
 
-    def adapt_constant_wss(self, Q, Q_new, disp=False):
+    def adapt_constant_wss(self, Q, Q_new):
         R_old = self.root.R_eq  # calculate pre-adaptation resistance
 
         def constant_wss(d, Q=Q, Q_new=Q_new):
+            '''
+            function for recursive algorithm to update the vessel diameter based on constant wall shear stress assumption
+
+            :param d: diameter of the vessel
+            :param Q: original flowrate through the vessel
+            :param Q_new: post-operative flowrate through the model
+            
+            :return: length of the updated diameter
+            '''
             # adapt the radius of the vessel based on the constant shear stress assumption
             return (Q_new / Q) ** (1 / 3) * d
 
         def update_diameter(vessel, update_func):
-            # preorder traversal to update the diameters of all the vessels in the tree
+            '''
+            preorder traversal to update the diameters of all the vessels in the tree  
+            
+            :param vessel: TreeVessel instance
+            :param update_func: function to update vessel diameter based on constant wall shear stress asssumption
+            '''
             if vessel:
-
                 vessel.d = update_func(vessel.d)
                 vessel.update_vessel_info()
+                # recursive step
                 update_diameter(vessel.left, update_func)
                 update_diameter(vessel.right, update_func)
-
+        
+        # recursive step
         update_diameter(self.root, constant_wss)
 
         self.create_block_dict()
-        # self.root.update_vessel_info()
 
         R_new = self.root.R_eq
-        if disp: # display change in resistance if necessary
-            print("R_new = " + str(R_new) + ", R_old = " + str(R_old) + "\n")
-            print("the change in resistance is "+ str(R_new - R_old))
 
-        return R_new
+        return R_old, R_new
 
 
     def optimize_tree_radius(self, Resistance=5.0, log_file=None):
-        """ use nelder-mead to optimize the radius of the tree vessels with respect to the desired resistance
-            Args:
-                desired tree resistance, radius guess
-            Returns:
-                optimized radius, total resistance
-                """
+        """ 
+        Use Nelder-Mead to optimize the radius and number of vessels with respect to the desired resistance
+        
+        :param Resistance: resistance value to optimize against
+        :param log_file: optional path to log file
+        """
+
+        # initial guess is oulet r
         r_guess = self.initialD / 2
 
+        # define the objective function to be minimized
         def r_min_objective(radius):
+            '''
+            objective function for optimization
+
+            :param radius: inlet radius of the structured tree
+
+            :return: squared difference between target resistance and built tree resistance
+            '''
+            # build tree
             self.build_tree(radius[0], optimizing=True)
+
+            # get equivalent resistance
             R = self.root.R_eq
+
+            # calculate squared difference
             R_diff = (Resistance - R)**2
+
             return R_diff
 
-        bounds = Bounds(lb=0.005) # minimum is r_min
+        # define optimization bound (lower bound = r_min, which is the termination diameter)
+        bounds = Bounds(lb=0.005)
+
+        # perform Nelder-Mead optimization
         r_final = minimize(r_min_objective,
                            r_guess,
                            options={"disp": True},
                            method='Nelder-Mead',
-                           bounds=bounds) # Nelder mead doesn't seem to work here
+                           bounds=bounds)
+        
         R_final = self.root.R_eq
-        if log_file is not None:
-            with open(log_file, "a") as log:
-                log.write("     the optimized radius is " + str(r_final.x))
-        return r_final.x, r_final.fun, R_final
+
+        write_to_log(log_file, "     Resistance after optimization is " + str(R_final) + "\n")
+        write_to_log(log_file, "     the optimized radius is " + str(r_final.x[0]) + "\n")
+
+        return r_final.x, R_final
     
 
     def optimize_alpha_beta(self, Resistance=5.0, log_file=None):
-        """ use constrained optimization to optimize the diameter and alpha and beta
-            Args:
-                desired tree resistance, radius guess
-            Returns:
-                optimized radius, total resistance
+        """ 
+        use constrained optimization to optimize the diameter, alpha and beta values of the tree
+        
+        :param Resistance: resistance value to optimize against
+        :param log_file: optional path to log file
         """
 
         def r_min_objective(params):
+            '''
+            objective function for optimization
+
+            :param radius: inlet radius of the structured tree
+
+            :return: squared difference between target resistance and built tree resistance
+            '''
+
+            # build structured tree
             self.build_tree(params[0], optimizing=True, alpha=params[1], beta=params[2])
+            
+            # get the equivalent resistance
             R = self.root.R_eq
+            
+            # calculate squared difference to minimize
             R_diff = (Resistance - R) ** 2
+
             return R_diff
 
+        # initial guess is outlet r and alpha, beta values from literature
         r_guess = self.initialD / 2
         params_guess = np.array([r_guess, 0.9, 0.6]) # r, alpha, beta initial guess
+
+        # define optimization constraints
         param_constraints = LinearConstraint([[0, 0, 0], [0, 1, 1], [0, 1, -1.5]], [0.0, 1, 0], [np.inf, np.inf, 0])
         param_bounds = Bounds(lb=[0.049, 0, 0], ub=[np.inf, 1, 1], keep_feasible=True)
+
+        # optimization step: use trust-constr since the optimization is constrained
         r_final = minimize(r_min_objective,
                            params_guess,
                            options={"disp": True},
                            method='trust-constr',
                            constraints=param_constraints,
                            bounds=param_bounds)
+        
         R_final = self.root.R_eq
-        # write a log file of the optimization results
-        with open(log_file, "a") as log:
-            log.write("     Resistance after optimization is " + str(R_final) + "\n")
-            log.write("     the optimized radius is " + str(r_final.x[0]) + "\n")
-            log.write("     the optimized alpha value is " + str(r_final.x[1]) + "\n")
-            log.write("     the optimized alpha value is " + str(r_final.x[2]) + "\n")
+
+        # write the optimization results to log file
+        write_to_log(log_file, "     Resistance after optimization is " + str(R_final) + "\n")
+        write_to_log(log_file, "     the optimized radius is " + str(r_final.x[0]) + "\n")
+        write_to_log(log_file, "     the optimized alpha value is " + str(r_final.x[1])  + "\n")
+        write_to_log(log_file, "     the optimized alpha value is " + str(r_final.x[2])  + "\n")
 
         return r_final.x[0], R_final
     
     def create_bcs(self):
         ''''
-        create the inflow and distal pressure BCs
-        Args: 
-            Pd: distal pressure for outflow pressure BC
-        Returns:
-            updated self.block_dict
+        create the inflow and distal pressure BCs. This function will prepare a block_dict to be run by svzerodplus
         '''
         self.block_dict["boundary_conditions"] = [] # erase the previous boundary conditions
         timesteps = len(self.params["Q_in"]) # identify the number of timesteps in the flow boundary condition
@@ -350,58 +423,88 @@ class StructuredTreeOutlet():
                         }
                     )
 
-    def create_solver_config(self):
-    # create a config file for the tree and calculate flow through it
-
-        self.create_bcs()
-
-        tree_solver_config = {
-            "simulation_parameters": self.block_dict["simulation_parameters"],
-            "vessels": self.block_dict["vessels"],
-            "junctions": self.block_dict["junctions"],
-            "boundary_conditions": self.block_dict["boundary_conditions"]
-        }
-
-        return tree_solver_config
-    
 
     def count_vessels(self):
         '''
             count the number vessels in the tree
         '''
-        return(len(self.block_dict["vessels"]))
+        return len(self.block_dict["vessels"])
     
     def R(self):
-        # return the resistance of the tree
+        '''
+        :return: the equivalent resistance of the tree
+
+        tree.root.R_eq may work better in most cases since that is a value rather than a method
+        '''
         return self.root.R_eq
     
-    def integrate_pries_secomb(self, ps_params=[0.68, .70, 2.45, 1.72, 1.73, 27.9, .103, 3.3 * 10 ** -8], dt=0.01, time_avg_q=True):
-        # initialize and calculate the Pries and Secomb parameters in the TreeVessel objects via a postorder traversal
-        SS_dD = 0.0 # sum of squared dDs initial guess
+    def integrate_pries_secomb(self, ps_params=[0.68, .70, 2.45, 1.72, 1.73, 27.9, .103, 3.3 * 10 ** -8], dt=0.01, tol = 10 ** -5, time_avg_q=True):
+        '''
+        integrate pries and secomb diff eq by Euler integration for the tree until dD reaches some tolerance (default 10^-5)
+
+        :param ps_params: pries and secomb empirical parameters. in the form [k_p, k_m, k_c, k_s, L (cm), S_0, tau_ref, Q_ref]
+            units:
+                k_p, k_m, k_c, k_s [=] dimensionless
+                L [=] cm
+                J0 [=] dimensionless
+                tau_ref [=] dyn/cm2
+                Q_ref [=] cm3/s
+        :param dt: time step for explicit euler integration
+        :param tol: tolerance for euler integration convergence
+        :param time_avg_q: True if the flow in the vessels is assumed to be steady
+
+        :return: equivalent resistance of the tree
+        '''
+
+        # initialize sum of squared dD
+        SS_dD = 0.0
+
+        # initialize converged stop condition
         converged = False
-        threshold = 10 ** -5
+
+        # begin euler integration
         while not converged:
+            
+            # create solver config from StructuredTreeOutlet and get tree flow result
             self.create_bcs()
             tree_result = run_svzerodplus(self.block_dict)
-            # tree_result = run_svzerodplus(tree.create_solver_config())
-            print('ran svzerodplus')
+
+            # assign flow result to TreeVessel instances to allow for pries and secomb downstream calculation
             assign_flow_to_root(tree_result, self.root, steady=time_avg_q)
-            next_SS_dD = 0.0 # initializing sum of squared dDs, value to minimize
+
+            # initialize sum of squared dDs, to check dD against tolerance
+            next_SS_dD = 0.0 
             def stimulate(vessel):
+                '''
+                postorder traversal to adapt each vessel according to Pries and Secomb equations
+
+                :param vessel: TreeVessel instance
+                '''
                 if vessel:
+
+                    # postorder traversal step
                     stimulate(vessel.left)
                     stimulate(vessel.right)
+
+                    # adapt vessel diameter
                     vessel_dD = vessel.adapt_pries_secomb(ps_params, dt)
+
+                    # update sum of squared dD
                     nonlocal next_SS_dD
                     next_SS_dD += vessel_dD ** 2
+            
+            # begin traversal
             stimulate(self.root)
+
+            # check if dD is below the tolerance. if so, end integration
             dD_diff = abs(next_SS_dD ** 2 - SS_dD ** 2)
             print(dD_diff)
-            if dD_diff < threshold:
+            if dD_diff < tol:
                 converged = True
             
+            # if not converged, continue integration
             SS_dD = next_SS_dD
-            
+
         print('Pries and Secomb integration completed! R = ' + str(self.root.R_eq))
-    
+
         return self.root.R_eq
