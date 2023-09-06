@@ -10,3 +10,14 @@ Outlet resistances optimized! [572.57441217 171.89218543]
      the optimized radius is [0.12246235]     the number of vessels is 279
 ** building tree for resistance: 171.89218542899346 **
      the optimized radius is [0.19442747]     the number of vessels is 975
+** repairing stenoses in vessels [] **
+     vessel 1 has been repaired
+     vessel 2 has been repaired
+     vessel 3 has been repaired
+     vessel 4 has been repaired
+     vessel 5 has been repaired
+     vessel 6 has been repaired
+all stenosis repairs completed
+pries and secomb integration completed for OutletTree3
+pries and secomb integration completed for OutletTree6
+pries and secomb adaptation completed for all trees. R_old = [649.6509945694346, 323.50790203714456] R_new = [740.5782067608651, 790.1035509629734]

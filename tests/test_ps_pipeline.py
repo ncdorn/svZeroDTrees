@@ -43,14 +43,15 @@ def test_preop():
     '''
     input_file = 'tests/cases/LPA_RPA_0d_steady/LPA_RPA_0d_steady.json'
     log_file = 'tests/cases/LPA_RPA_0d_steady/LPA_RPA_0d_steady.log'
+    clinical_targets = 'tests/cases/LPA_RPA_0d_steady/clinical_targets.csv'
     working_dir = 'tests/cases/LPA_RPA_0d_steady'
 
     preop_config, preop_result = preop.optimize_outlet_bcs(
-        'tests/cases/LPA_RPA_0d_steady/clinical_targets.csv',
         input_file,
-        working_dir,
-        log_file=log_file,
-        show_optimization=False
+        clinical_targets,
+        log_file,
+        show_optimization=False,
+        
     )
 
     with open('tests/cases/LPA_RPA_0d_steady/preop_result.out', 'wb') as ff:
