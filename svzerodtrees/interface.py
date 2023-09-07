@@ -47,12 +47,15 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
 
     # if visualizing trees, make a figures directory
     if vis_trees:
+
+        # define figure directory path
         fig_dir = expdir_path + '/figures'
+
+        # make figure direcotry if it does not exist
+        if not os.path.exists(fig_dir):
+            os.system('mkdir ' + fig_dir)
     else:
         fig_dir=None
-
-    # print working directory to confirm
-    os.system('pwd')
 
     # delineate important file names
     input_file = modelname + '.in'
