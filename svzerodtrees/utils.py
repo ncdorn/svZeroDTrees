@@ -9,17 +9,36 @@ import svzerodplus
 
 
 def get_pressure(result_array, branch):
-    # returns the time series, systolic, diastolic and mean pressure 
-    # for a given branch name from a zerod result_array output file
+    '''
+    get the time series, systolic, diastolic and mean pressure for a given branch
+
+    :param result_array: result array from svzerodplus
+    :param branch: branch number
+
+    :return pressures: time series of pressure
+    :return systolic_p: systolic pressure
+    :return diastolic_p: diastolic pressure value
+    :return mean_p: time average pressure
+    '''
     pressures = get_branch_result(result_array, 'pressure_in', branch, steady=False)
     systolic_p = np.min(pressures)
     diastolic_p = np.max(pressures)
     mean_p = np.mean(pressures)
+
     return pressures, systolic_p, diastolic_p, mean_p
 
 
 def get_outlet_data(config: dict, result_array, data_name: str, steady=False):
-    # get a data array at the outlets of a model
+    '''
+    get a result at the outlets of a model
+
+    :param config: svzerodplus config file
+    :param result_array: svzerodplus result array
+    :param data_name: data type to get out of the result array (q, p, wss)
+    :param steady: True if the model has steady inflow
+
+    :return data_out: list of lists of outlet data
+    '''
     outlet_vessels, outlet_d = find_outlets(config)
 
     if 'wss' in data_name:
@@ -37,7 +56,14 @@ def get_outlet_data(config: dict, result_array, data_name: str, steady=False):
     return data_out
 
 def find_outlets(config):
-    # find the outlet vessels in a model, return the vessel id and diameter
+    '''
+    find the outlet vessels in a model, return the vessel id and diameter
+
+    :param config: svzerodplus config dict
+
+    :return outlet_vessels: list of outlet vessel branch ids
+    :return outlet_d: list of diameters corresponding to outlet_vessels
+    '''
     outlet_vessels = []
     outlet_d = []
     for vessel_config in config["vessels"]:
@@ -45,14 +71,25 @@ def find_outlets(config):
             if "outlet" in vessel_config["boundary_conditions"]:
                 branch_id = get_branch_id(vessel_config)
                 outlet_vessels.append(branch_id)
+                # calculate the diameter
                 d = ((128 * config["simulation_parameters"]["viscosity"] * vessel_config["vessel_length"]) /
                      (np.pi * vessel_config["zero_d_element_values"].get("R_poiseuille"))) ** (1 / 4)
                 outlet_d.append(d)
+
     return outlet_vessels, outlet_d
 
 
 def get_branch_result(result_array, data_name: str, branch: int, steady: bool=False):
-    # get data from a dataframe based on a data name, branch id and timestep
+    '''
+    get the flow, pressure or wss result for a model branch
+
+    :param result_array: svzerodplus result array
+    :param data_name: q, p or wss
+    :param branch: branch id to get result for
+    :param steady: True if the model inflow is steady
+
+    :return: result array for branch and QoI
+    '''
     if steady:
         return result_array[data_name][branch][-1]
     else:
@@ -60,8 +97,13 @@ def get_branch_result(result_array, data_name: str, branch: int, steady: bool=Fa
 
 
 def get_resistances(config):
-    # get the resistances from an input config file
-    # return a list of resistances
+    '''
+    get the outlet bc resistances from a svzerodplus config
+
+    :param config: svzerodplus config dict
+
+    :return resistance: list of outflow bc resistances
+    '''
     resistance = []
     for bc_config in config["boundary_conditions"]:
         if bc_config["bc_type"] == 'RESISTANCE':
@@ -73,7 +115,12 @@ def get_resistances(config):
 
 
 def write_resistances(config, resistances):
-    # write resistances to the config file
+    '''
+    write a list of resistances to the outlet bcs of a config dict
+
+    :param config: svzerodplus config dict
+    :param resistances: list of resistances, ordered by outlet in the config
+    '''
     idx = 0
     for bc_config in config["boundary_conditions"]:
         if bc_config["bc_type"] == 'RESISTANCE':
@@ -84,11 +131,11 @@ def write_resistances(config, resistances):
 def get_value_from_csv(csv_file, name):
     '''
     get a value from a csv file with a name in the same row
-    Args:
-        csv_file: path to csv file
-        name: name of the value in the same row as the int or float value
 
-    Returns:
+    :param csv_file: path to csv file
+    :param name: name of the value in the same row as the int or float value
+
+    ;return: value from csv
 
     '''
     with open(csv_file, 'r') as file:
@@ -103,11 +150,10 @@ def get_value_from_csv(csv_file, name):
 def get_resistance_idx(vessel_config):
     '''
     get the index of a resistance boundary condition
-    Args:
-        vessel_config: config dict of the vessel (taken from the master config in a for loop)
 
-    Returns:
-        integer index of the resistance boundary condition
+    :param vessel_config: config dict of the vessel (taken from the master config in a for loop)
+
+    :return: integer index of the resistance boundary condition
     '''
     name = vessel_config["boundary_conditions"]["outlet"]
     str_idx = 10
@@ -119,42 +165,12 @@ def get_resistance_idx(vessel_config):
     return int(idx)
 
 
-def repair_stenosis(config, vessels: str or list = None, degree: float = 1.0, log_file=None):
-    '''
-    Repair the stenoses in a pulmonary arterial tree
-    Args:
-        config: dict. result_array input dictionary
-        vessels: str or list of ints. stenosis repair strategy. 'proximal' repairs just the LPA and RPA. 'extensive'
-        repairs all stenosis coefficients. an array of integers will repair those vessels
-        degree: float. the degree to which the stenosis is repaired
-        log_file: path to log file for output observation and debugging
-
-    Returns:
-        edited config file and log file
-    '''
-
-    if vessels is None:
-        write_to_log(log_file, "** repairing all stenoses **")
-        for vessel_config in config["vessels"]:
-            if vessel_config["zero_d_element_values"]["stenosis_coefficient"] > 0:
-                vessel_config["zero_d_element_values"]["stenosis_coefficient"] = vessel_config["zero_d_element_values"].get("stenosis_coefficient") * (1-degree)
-                write_to_log(log_file, "     vessel " + str(vessel_config["vessel_id"]) + " has been repaired")
-    else:
-        write_to_log(log_file, "** repairing stenoses in vessels " + str(vessels) + " **")
-        for vessel_config in config["vessels"]:
-            if vessel_config["vessel_id"] in vessels:
-                vessel_config["zero_d_element_values"]["stenosis_coefficient"] = vessel_config["zero_d_element_values"].get("stenosis_coefficient") * (1-degree)
-                write_to_log(log_file, "     vessel " + str(vessel_config["vessel_id"]) + " has been repaired")
-
-
 def make_inflow_steady(config, Q=97.3):
     '''
     convert unsteady inflow to steady
-    Args:
-        config: input config dict
-        Q: mean inflow value, default is 97.3
-    Returns:
-        updated bc_config
+
+    :param config: input config dict
+    :param Q: mean inflow value, default is 97.3
     '''
     for bc_config in config["boundary_conditions"]:
         if bc_config["bc_name"] == "INFLOW":
@@ -165,11 +181,11 @@ def make_inflow_steady(config, Q=97.3):
 def convert_RCR_to_R(config, Pd=10 * 1333.22):
     '''
     Convert RCR boundary conditions to Resistance.
-    Args:
-        config: input config dict
-        Pd: distal pressure value for resistance bc. default value is 10 mmHg (converted to barye)
-    Returns:
-        Pd and updated config
+
+    :param config: input config dict
+    :param Pd: distal pressure value for resistance bc. default value is 10 mmHg (converted to barye)
+
+    :return: Pd and updated config
     '''
     for bc_config in config["boundary_conditions"]:
         if "RCR" in bc_config["bc_type"]:
@@ -180,22 +196,40 @@ def convert_RCR_to_R(config, Pd=10 * 1333.22):
             return Pd
 
 def add_Pd(config, Pd = 10 * 1333.22):
-    # add the distal pressure to the boundary conditions of a config file
+    '''
+    add the distal pressure to the boundary conditions of a config file
+
+    :param config: svzerodplus config dict
+    :param Pd: distal pressure value [=] barye
+    '''
     for bc_config in config["boundary_conditions"]:
         if "RESISTANCE" in bc_config["bc_type"]:
             bc_config["bc_values"]["Pd"] = Pd
 
-# this is some random code that may need to be used in the non-steady state case
-def log_optimization_results(log_file, result, name: str=None):
 
-    with open(log_file, "a") as log:
-        log.write(name + "optimization completed! \n")
-        log.write("     Optimization solution: " + str(result.x) + "\n")
-        log.write("     Objective function value: " + str(result.fun) + "\n")
-        log.write("     Number of iterations: " + str(result.nit) + "\n")
+def log_optimization_results(log_file, result, name: str=None):
+    '''
+    print optimization result to a log file
+
+    :param log_file: path to log file
+    :param result: optimizer result
+    :param name: optimization name
+    '''
+
+    write_to_log(log_file, name + " optimization completed! \n")
+    write_to_log(log_file, "     Optimization solution: " + str(result.x) + "\n")
+    write_to_log(log_file, "     Objective function value: " + str(result.fun) + "\n")
+    write_to_log(log_file, "     Number of iterations: " + str(result.nit) + "\n")
 
 
 def plot_optimization_progress(fun, save=False, path=None):
+    '''
+    plot optimization progress by objective function value
+
+    :param fun: list of objective function values to plot
+    :param save: save the plot after optimization is complete
+    :param path: path to figures directory to save the optimization plot
+    '''
     plt.clf()
     plt.plot(range(len(fun)), fun, marker='o')
     plt.xlabel('Iterations')
@@ -206,44 +240,15 @@ def plot_optimization_progress(fun, save=False, path=None):
     if save:
         plt.savefig(str(path) + '/optimization_result.png')
 
-def calculate_tree_flow(simparams: dict, tree_config: dict, flow_out: float, P_d: float):
-    # create a config file for the tree and calculate flow through it
-    if len(flow_out) == 1:
-        flow_out = [flow_out[0],] * 2
-    tree_calc_config = {
-        "boundary_conditions": [
-            {
-                "bc_name": "INFLOW",
-                "bc_type": "FLOW",
-                "bc_values": {
-                    "Q": flow_out,
-                    "t": np.linspace(0.0, 1.0, num=len(flow_out)).tolist()
-                }
-            },
-            {
-                "bc_name": "P_d",
-                "bc_type": "PRESSURE",
-                "bc_values": {
-                    "P": [P_d,] * 2,
-                    "t": [
-                        0.0,
-                        1.0
-                    ]
-                }
-            },
-        ],
-        "junctions": tree_config["junctions"],
-        "simulation_parameters": simparams,
-        "vessels": tree_config["vessels"]
-    }
-
-    tree_result_array = svzerodplus.result_array(tree_calc_config)
-    tree_result_array.run()
-
-    return tree_result_array
 
 def assign_flow_to_root(result_array, root, steady=False):
-    # assign flow values to the TreeVessel recursion object
+    '''
+    assign flow values to each TreeVessel instance in a StructuredTreOutlet tree
+
+    :param result_array: svzerodplus result array of the structured tree
+    :param root: root TreeVessel instance
+    :param steady: True if the model has steady inflow
+    '''
     def assign_flow(vessel):
         if vessel:
             # assign flow values to the vessel
@@ -258,12 +263,11 @@ def assign_flow_to_root(result_array, root, steady=False):
 
 
 def run_svzerodplus(config):
-    """Run the svzerodplus result_array and return a dict of results.
+    """Run the svzerodplus solver and return a dict of results.
 
-    Args:
-        config: svzerodplus config file
-    Returns:
-        output: the result of the simulation as a dict of dicts with each array denoted by its branch id
+    :param config: svzerodplus config dict
+
+    :return output: the result of the simulation as a dict of dicts with each array denoted by its branch id
     """
 
     output = svzerodplus.simulate(config)
@@ -310,6 +314,13 @@ def run_svzerodplus(config):
 
 
 def write_to_log(log_file, message: str, write=False):
+    '''
+    write a message to a log file
+
+    :param log_file: path to log file
+    :param message: message to print to the log file
+    :param write: True if you would like to write to the log file (erasing previous log file data)
+    '''
     if log_file is not None:
         if write:
             with open(log_file, "w") as log:
@@ -320,6 +331,13 @@ def write_to_log(log_file, message: str, write=False):
 
 
 def get_branch_id(vessel_config):
+    '''
+    get the integer id of a branch for a given vessel
+
+    :param vessel_config: config dict of a vessel
+
+    :return: integer branch id
+    '''
     branch_id, seg_id = vessel_config["vessel_name"].split("_")
 
     return int(branch_id[6:])
