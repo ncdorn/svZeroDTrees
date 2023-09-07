@@ -1,15 +1,31 @@
 beginning experiment exp_config_test_9.5.23
 Getting clinical target values...
 Optimizing preop outlet resistance...
-0D optimizationoptimization completed! 
-     Optimization solution: [572.57441217 171.89218543]
-     Objective function value: 3.592080702280684e-08
-     Number of iterations: 128
-Outlet resistances optimized! [572.57441217 171.89218543]
-** building tree for resistance: 572.5744121727547 **
-     the optimized radius is [0.12246235]     the number of vessels is 279
-** building tree for resistance: 171.89218542899346 **
-     the optimized radius is [0.19442747]     the number of vessels is 975
+0D optimization optimization completed! 
+
+     Optimization solution: [572.57733332 171.88762646]
+
+     Objective function value: 2.254105523199175e-09
+
+     Number of iterations: 121
+
+Outlet resistances optimized! [572.57733332 171.88762646]
+** building tree for resistance: 572.5773333192275 **
+     Resistance after optimization is 572.5819336820143
+
+     the optimized radius is 0.12246353278676572
+
+    integrating pries and secomb...
+    pries and secomb integration completed, R_tree = 649.6424758812342
+     the number of vessels is 279
+** building tree for resistance: 171.88762646439702 **
+     Resistance after optimization is 171.89373917218694
+
+     the optimized radius is 0.19442746949579648
+
+    integrating pries and secomb...
+    pries and secomb integration completed, R_tree = 323.48799714658423
+     the number of vessels is 975
 ** repairing stenoses in vessels [] **
      vessel 1 has been repaired
      vessel 2 has been repaired
@@ -20,4 +36,4 @@ Outlet resistances optimized! [572.57441217 171.89218543]
 all stenosis repairs completed
 pries and secomb integration completed for OutletTree3
 pries and secomb integration completed for OutletTree6
-pries and secomb adaptation completed for all trees. R_old = [649.6509945694346, 323.50790203714456] R_new = [740.5782067608651, 790.1035509629734]
+pries and secomb adaptation completed for all trees. R_old = [649.6424758812342, 323.48799714658423] R_new = [740.5690383707556, 790.0940587827508]

@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import json
 from svzerodtrees.utils import *
-from svzerodtrees.post_processing.stree_data_processing import *
+from svzerodtrees.post_processing.plotting import *
 from svzerodtrees.post_processing.stree_visualization import *
 from scipy.optimize import minimize
 from svzerodtrees.structuredtreebc import StructuredTreeOutlet
@@ -223,19 +223,22 @@ def construct_pries_trees(config: dict, result, log_file=None, vis_trees=False, 
                                                                                Q_outlet=[np.mean(q_outs[outlet_idx])],
                                                                                P_outlet=[np.mean(p_outs[outlet_idx])])
                         R = bc_config["bc_values"]["R"]
-                # write to log file for debugging
+
                 write_to_log(log_file, "** building tree for resistance: " + str(R) + " **")
-                # outlet_tree.optimize_tree_radius(R)
-                x, fun, R_final = outlet_stree.optimize_tree_radius(R, log_file)
-                print('integrating pries and secomb')
+
+                outlet_stree.optimize_tree_radius(R, log_file)
+
+                write_to_log(log_file, "    integrating pries and secomb...")
                 outlet_stree.integrate_pries_secomb()
-                # write to log file for debugging
+                write_to_log(log_file, "    pries and secomb integration completed, R_tree = " + str(outlet_stree.root.R_eq))
+
                 write_to_log(log_file, "     the number of vessels is " + str(outlet_stree.count_vessels()))
                 vessel_config["tree"] = outlet_stree.block_dict
                 trees.append(outlet_stree)
                 outlet_idx += 1
-    
-    # integrate_pries_secomb(ps_params, trees)
+                
+                # the question is, do we write the adapted resistance to the config and recalculate the flow...
+
 
     return trees
 
