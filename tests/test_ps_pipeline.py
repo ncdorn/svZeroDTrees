@@ -181,6 +181,6 @@ def test_run_from_file():
 
 if __name__ == '__main__':
 
-    test_run_from_file()
+    test_repair_stenosis()
 
 
