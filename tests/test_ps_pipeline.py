@@ -9,7 +9,6 @@ from pathlib import Path
 from svzerodtrees.post_processing.stree_visualization import *
 import matplotlib.pyplot as plt
 from svzerodtrees.utils import *
-from svzerodtrees.structured_tree_simulation import *
 from scipy.optimize import minimize
 from svzerodtrees.adaptation import *
 from svzerodtrees import operation, preop, interface

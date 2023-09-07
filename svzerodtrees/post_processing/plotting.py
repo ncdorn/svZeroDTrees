@@ -6,8 +6,18 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 
-def plot_LPA_RPA_changes(summary_values, title, ylabel, xlabel=None, ax=None, condition=None):
+def plot_LPA_RPA_changes_subfig(summary_values, title, ylabel, xlabel=None, ax=None):
+    '''
+    plot the changes in the LPA and RPA flow, pressure and wss as a grouped bar graph
 
+    :param summary_values: summarized results dict for a given QOI, from postop.summarize_results
+    :param title: figure title
+    :param ylabel: figure ylabel
+    :param xlabel: figure xlabel
+    :param ax: figure ax object
+    :param condition: experimental condition name
+
+    '''
     # takes in a set of values from the summary results dict
     names = list(summary_values.keys())
     values = []
@@ -37,29 +47,40 @@ def plot_LPA_RPA_changes(summary_values, title, ylabel, xlabel=None, ax=None, co
     # plt.show()
 
 
-def plot_LPA_RPA_changes_subfigs(fig_dir: Path, condensed_results, title, condition=None):
+def plot_LPA_RPA_changes(fig_dir: Path, condensed_results, title, condition=None):
+    '''
+    plot LPA and RPA changes in q, p, wss as three subfigures
 
+    :param fig_dir: path to directory to save figures
+    :param condensed_results: summarized results dict
+    :param title: figure title
+    :param condition: experimental condition name
+    
+    '''
     fig = plt.figure()
     ax = fig.subplots(1, 3)
+
+    # check if the experimental condition is valid
+    if condition not in condensed_results:
+        raise Exception('this is an invalid condition. The conditions for this experiment are ' + str([key for key in condensed_results]))
+    
     # plot the changes in q, p, wss in subfigures
-    plot_LPA_RPA_changes(condensed_results[condition]['q'],
+    plot_LPA_RPA_changes_subfig(condensed_results[condition]['q'],
                          'outlet flowrate',
                          'q (cm3/s)',
-                         ax=ax[0],
-                         condition=condition)
-    plot_LPA_RPA_changes(condensed_results[condition]['p'],
+                         ax=ax[0])
+    plot_LPA_RPA_changes_subfig(condensed_results[condition]['p'],
                          'outlet pressure',
                          'p (barye)',
-                         ax=ax[1],
-                         condition=condition)
-    plot_LPA_RPA_changes(condensed_results[condition]['wss'],
+                         ax=ax[1])
+    plot_LPA_RPA_changes_subfig(condensed_results[condition]['wss'],
                          'wall shear stress',
                          'tau (dyne/cm2)',
-                         ax=ax[2], condition=condition)
+                         ax=ax[2])
 
     plt.suptitle(title + ' ' + condition)
     plt.tight_layout()
-    plt.savefig(str(fig_dir / condition) + '_' + title + '.png')
+    plt.savefig(str(fig_dir + '/' + condition) + '_' + title + '.png')
 
 
 
