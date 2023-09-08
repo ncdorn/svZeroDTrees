@@ -1,0 +1,39 @@
+beginning experiment LPA_RPA_ps_adapt_9.8.23
+Getting clinical target values...
+Optimizing preop outlet resistance...
+0D optimization optimization completed! 
+
+     Optimization solution: [572.55766651 171.85585464]
+
+     Objective function value: 9.703146345231794e-11
+
+     Number of iterations: 87
+
+Outlet resistances optimized! [572.55766651 171.85585464]
+** building tree for resistance: 572.5576665136075 **
+     Resistance after optimization is 572.5507836095538
+
+     the optimized radius is 0.12246471128392962
+
+    integrating pries and secomb...
+    pries and secomb integration completed, R_tree = 649.6072991093201
+     the number of vessels is 279
+** building tree for resistance: 171.85585463692246 **
+     Resistance after optimization is 171.85163299171757
+
+     the optimized radius is 0.19444187153057396
+
+    integrating pries and secomb...
+    pries and secomb integration completed, R_tree = 323.40763606404136
+     the number of vessels is 975
+** repairing stenoses in vessels [] **
+     vessel 1 has been repaired
+     vessel 2 has been repaired
+     vessel 3 has been repaired
+     vessel 4 has been repaired
+     vessel 5 has been repaired
+     vessel 6 has been repaired
+all stenosis repairs completed
+pries and secomb integration completed for OutletTree3
+pries and secomb integration completed for OutletTree6
+pries and secomb adaptation completed for all trees. R_old = [649.6072991093201, 323.40763606404136] R_new = [740.5298431786445, 790.0527329842168]

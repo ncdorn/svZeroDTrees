@@ -34,20 +34,7 @@ def optimize_outlet_bcs(input_file,
     '''
 
     # get the clinical target values
-    write_to_log(log_file, "Getting clinical target values...")
-    bsa = float(get_value_from_csv(clinical_targets, 'bsa'))
-    cardiac_index = float(get_value_from_csv(clinical_targets, 'cardiac index'))
-    q = bsa * cardiac_index * 16.667 # cardiac output in L/min. convert to cm3/s
-    mpa_pressures = get_value_from_csv(clinical_targets, 'mpa pressures') # mmHg
-    mpa_sys_p_target = int(mpa_pressures[0:2])
-    mpa_dia_p_target = int(mpa_pressures[3:5])
-    mpa_mean_p_target = int(get_value_from_csv(clinical_targets, 'mpa mean pressure'))
-    target_ps = np.array([
-        mpa_sys_p_target,
-        mpa_dia_p_target,
-        mpa_mean_p_target
-    ])
-    target_ps = target_ps * 1333.22 # convert to barye
+    q, cardiac_index, mpa_pressures, target_ps = get_clinical_targets(clinical_targets, log_file)
 
     # load input json as a config dict
     with open(input_file) as ff:
@@ -62,6 +49,9 @@ def optimize_outlet_bcs(input_file,
     if change_to_R:
         Pd = convert_RCR_to_R(preop_config)
         write_to_log(log_file, "RCR BCs converted to R, Pd = " + str(Pd))
+
+    # add clinical flow values to the zerod input file
+    config_flow(preop_config, q)
 
     # get resistances from the zerod input file
     resistance = get_resistances(preop_config)
@@ -144,6 +134,63 @@ def optimize_outlet_bcs(input_file,
     return preop_config, preop_flow
 
 
+def optimize_pa_bcs(input_file,
+                    clinical_targets: csv,
+                    log_file=None,
+                    make_steady=False,
+                    unsteady=False,
+                    change_to_R=False,
+                    show_optimization=True):
+    '''
+    optimize the outlet boundary conditions of a pulmonary arterial model by splitting the LPA and RPA
+    into two RCR blocks. Using Nelder-Mead optimization method.
+
+    :param input_file: 0d solver json input file name string
+    :param clinical_targets: clinical targets input csv
+    :param log_file: str with path to log_file
+    :param make_steady: if the input file has an unsteady inflow, make the inflow steady
+    :param unsteady: True if the input file has unsteady inflow
+    :param change_to_R: True if you want to change the input config from RCR to R boundary conditions
+    :param show_optimization: True if you want to display a track of the optimization results
+
+    :return preop_config: 0D config with optimized BCs
+    :return preop_flow: flow result with optimized preop BCs
+    '''
+
+    # get the clinical target values
+    q, cardiac_index, mpa_pressures, target_ps = get_clinical_targets(clinical_targets)
+
+    # load input json as a config dict
+    with open(input_file) as ff:
+        preop_config = json.load(ff)
+
+    # make inflow steady
+    if make_steady:
+        make_inflow_steady(preop_config)
+        write_to_log(log_file, "inlet BCs converted to steady")
+
+    # change boundary conditions to R
+    if change_to_R:
+        Pd = convert_RCR_to_R(preop_config)
+        write_to_log(log_file, "RCR BCs converted to R, Pd = " + str(Pd))
+
+    # add clinical flow values to the zerod input file
+    config_flow(preop_config, q)
+
+    # get resistances from the zerod input file
+    resistance = get_resistances(preop_config)
+
+    # create the PA optimizer config
+    pa_optimizer_config = create_pa_optimizer_config(preop_config)
+
+    pass
+
+
+
+
+
+
+
 def construct_cwss_trees(config: dict, result, log_file=None, vis_trees=False, fig_dir=None):
     '''
     construct structured trees at every outlet of the 0d model optimized against the outflow BC resistance,
@@ -176,7 +223,7 @@ def construct_cwss_trees(config: dict, result, log_file=None, vis_trees=False, f
                 # write to log file for debugging
                 write_to_log(log_file, "** building tree for resistance: " + str(R) + " **")
                 # outlet_tree.optimize_tree_radius(R)
-                x, fun, R_final = outlet_tree.optimize_tree_radius(R, log_file)
+                outlet_tree.optimize_tree_radius(R, log_file)
                 # write to log file for debugging
                 write_to_log(log_file, "     the number of vessels is " + str(outlet_tree.count_vessels()))
                 vessel_config["tree"] = outlet_tree.block_dict

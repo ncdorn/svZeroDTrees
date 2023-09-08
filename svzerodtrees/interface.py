@@ -2,6 +2,7 @@ import os
 import json
 import pickle
 from svzerodtrees import preop, operation, adaptation, postop
+from svzerodtrees.post_processing import plotting
 from svzerodtrees.utils import *
 
 def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=False):
@@ -58,7 +59,7 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
         fig_dir=None
 
     # delineate important file names
-    input_file = modelname + '.in'
+    input_file = modelname + '.json'
     clinical_targets = 'clinical_targets.csv'
     log_file = expdir_path + expname + '.log'
 
@@ -105,6 +106,9 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
     
     with open(expdir_path + 'summary_results.out', 'w') as ff:
         json.dump(result, ff)
+    
+    if vis_trees:
+        plotting.plot_LPA_RPA_changes(fig_dir, result, modelname, 'repair')
         
     
 def run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir):

@@ -47,7 +47,7 @@ def plot_LPA_RPA_changes_subfig(summary_values, title, ylabel, xlabel=None, ax=N
     # plt.show()
 
 
-def plot_LPA_RPA_changes(fig_dir: Path, condensed_results, title, condition=None):
+def plot_LPA_RPA_changes(fig_dir: Path, condensed_results, title, condition='repair'):
     '''
     plot LPA and RPA changes in q, p, wss as three subfigures
 
@@ -57,6 +57,10 @@ def plot_LPA_RPA_changes(fig_dir: Path, condensed_results, title, condition=None
     :param condition: experimental condition name
     
     '''
+    if isinstance(condensed_results, str):
+        with open(condensed_results) as ff:
+            condensed_results = json.load(ff)
+
     fig = plt.figure()
     ax = fig.subplots(1, 3)
 
@@ -81,7 +85,6 @@ def plot_LPA_RPA_changes(fig_dir: Path, condensed_results, title, condition=None
     plt.suptitle(title + ' ' + condition)
     plt.tight_layout()
     plt.savefig(str(fig_dir + '/' + condition) + '_' + title + '.png')
-
 
 
 if __name__ == '__main__':
