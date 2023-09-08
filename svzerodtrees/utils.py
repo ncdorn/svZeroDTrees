@@ -341,3 +341,52 @@ def get_branch_id(vessel_config):
     branch_id, seg_id = vessel_config["vessel_name"].split("_")
 
     return int(branch_id[6:])
+
+def get_clinical_targets(clinical_targets: csv, log_file: str):
+    '''
+    get the clinical target values from a csv file
+
+    :param clinical_targets: path to csv file with clinical targets
+    :param log_file: path to log file
+    '''
+    write_to_log(log_file, "Getting clinical target values...")
+
+    bsa = float(get_value_from_csv(clinical_targets, 'bsa'))
+    cardiac_index = float(get_value_from_csv(clinical_targets, 'cardiac index'))
+    q = bsa * cardiac_index * 16.667 # cardiac output in L/min. convert to cm3/s
+    mpa_pressures = get_value_from_csv(clinical_targets, 'mpa pressures') # mmHg
+    mpa_sys_p_target = int(mpa_pressures[0:2])
+    mpa_dia_p_target = int(mpa_pressures[3:5])
+    mpa_mean_p_target = int(get_value_from_csv(clinical_targets, 'mpa mean pressure'))
+    target_ps = np.array([
+        mpa_sys_p_target,
+        mpa_dia_p_target,
+        mpa_mean_p_target
+    ])
+    target_ps = target_ps * 1333.22 # convert to barye
+
+    return q, cardiac_index, mpa_pressures, target_ps
+
+
+def config_flow(preop_config, q):
+    for bc_config in preop_config["boundary_conditions"]:
+        if bc_config["bc_name"] == "INFLOW":
+            bc_config["bc_values"]["Q"] = [q, q]
+            bc_config["bc_values"]["t"] = [0.0, 1.0]
+
+
+def create_pa_optimizer_config(preop_config, log_file, clinical_targets):
+    '''
+    create a config dict for the pa optimizer
+    
+    :param preop_config: preoperative config dict
+    :param log_file: path to log file
+    :param clinical_targets: path to csv file with clinical targets
+    
+    :return pa_config: config dict for the pa optimizer
+    '''
+    pa_config = copy.deepcopy(preop_config)
+
+    
+
+    pass
