@@ -55,6 +55,53 @@ def get_outlet_data(config: dict, result_array, data_name: str, steady=False):
 
     return data_out
 
+
+def get_wss(config: dict, result_array, branch, steady=False):
+    '''
+    get the wss of a branch
+
+    :param config: svzerodplus config dict
+    :param result_array: svzerodplus result array
+    :param branch: branch id
+    :param steady: True if the model has steady inflow
+
+    :return wss: wss array for the branch
+    '''
+    
+    d = get_branch_d(config, branch)
+
+    q_out = get_branch_result(result_array, 'flow_out', branch, steady)
+    if steady:
+        wss = q_out * 4 * config["simulation_parameters"]["viscosity"] / (np.pi * d)
+    else:
+        wss = [q * 4 * config["simulation_parameters"]["viscosity"] / (np.pi * d) for q in q_out]
+
+    return wss
+
+
+def get_branch_d(config, branch):
+    '''
+    get the diameter of a branch
+
+    :param config: svzerodplus config dict
+    :param branch: branch id
+
+    :return d: branch diameter
+    '''
+    R = 0
+    l = 0
+    for vessel_config in config["vessels"]:
+        if get_branch_id(vessel_config) == branch:
+            # get total resistance of branch
+            R += vessel_config["zero_d_element_values"].get("R_poiseuille")
+            l += vessel_config["vessel_length"]
+            break
+
+    d = ((128 * config["simulation_parameters"]["viscosity"] * l) / (np.pi * R)) ** (1 / 4)
+
+    return d
+
+
 def find_outlets(config):
     '''
     find the outlet vessels in a model, return the vessel id and diameter
@@ -90,6 +137,7 @@ def get_branch_result(result_array, data_name: str, branch: int, steady: bool=Fa
 
     :return: result array for branch and QoI
     '''
+
     if steady:
         return result_array[data_name][branch][-1]
     else:
