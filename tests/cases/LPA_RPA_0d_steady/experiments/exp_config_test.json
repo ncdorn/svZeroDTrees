@@ -1,7 +1,7 @@
 {   "name": "exp_config_test_9.5.23",
     "model": "LPA_RPA_0d_steady",
-    "adapt": "ps",
-    "optimized": false,
+    "adapt": "cwss",
+    "optimized": true,
     "repair": [
         {
         "location": "proximal",
