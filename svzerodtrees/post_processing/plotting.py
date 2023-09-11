@@ -117,4 +117,28 @@ def plot_MPA_changes(fig_dir, result, title, condition='repair'):
         raise Exception('this is an invalid condition. The conditions for this experiment are ' + str([key for key in result]))
     
     # plot the changes in q, p, wss in subfigures
-
+    plot_changes_subfig(result[condition],
+                        ['mpa'],
+                        'q_out',
+                        title='outlet flowrate',
+                        ylabel='q (cm3/s)',
+                        ax=ax[0])
+    
+    plot_changes_subfig(result[condition],
+                        ['mpa'],
+                        'p_out',
+                        title='outlet pressure',
+                        ylabel='p (mmHg)',
+                        ax=ax[1])
+    
+    plot_changes_subfig(result[condition],
+                        ['mpa'],
+                        'wss',
+                        title='wss',
+                        ylabel='wss (dynes/cm2)',
+                        ax=ax[2])
+    
+    plt.suptitle(title + ' ' + condition)
+    plt.tight_layout()
+    plt.savefig(str(fig_dir + '/' + condition) + '_' + title + '.png')
+    

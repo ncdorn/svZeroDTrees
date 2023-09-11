@@ -108,7 +108,8 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
         json.dump(result, ff)
     
     if vis_trees:
-        plotting.plot_LPA_RPA_changes(fig_dir, result, modelname, 'repair')
+        plotting.plot_LPA_RPA_changes(fig_dir, result, modelname + ' LPA, RPA', 'repair')
+        plotting.plot_MPA_changes(fig_dir, result, modelname + ' MPA', 'repair')
         
     
 def run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir):
