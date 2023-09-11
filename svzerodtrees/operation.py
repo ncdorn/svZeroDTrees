@@ -12,6 +12,8 @@ def repair_stenosis_coefficient(preop_config: dict, repair_config=None, log_file
     :return postop_result: postop flow result
     '''
 
+    write_to_log(log_file, 'making repair according to repair config: ' + str(repair_config))
+                 
     postop_config = copy.deepcopy(preop_config)  # deepcopy in order to not mess with the preop config
 
     # initialize list of vessels to repair

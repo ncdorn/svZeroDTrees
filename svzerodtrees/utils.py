@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from io import StringIO
 import pandas as pd
+import copy
 import svzerodplus
 
 # utilities for working with structured trees

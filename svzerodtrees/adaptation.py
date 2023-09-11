@@ -28,6 +28,8 @@ def adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_fi
     R_new = []
     outlet_idx = 0 # index through outlets
 
+    write_to_log(log_file, "** adapting trees based on Pries and Secomb model **")
+
     # loop through the vessels and create StructuredTreeOutlet instances at the outlets, from the pre-adaptation tree instances
     for vessel_config in postop_config["vessels"]:
         if "boundary_conditions" in vessel_config:
@@ -80,6 +82,8 @@ def adapt_constant_wss(postop_config, trees, preop_result, postop_result, log_fi
 
     R_adapt = []
     outlet_idx = 0 # index through outlets
+
+    write_to_log(log_file, "** adapting trees based on constant wall shear stress assumption **")
 
     for tree in trees: # loop through a list of outlet trees
         # adapt the diameter of each vessel in the tree

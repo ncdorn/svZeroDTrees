@@ -26,6 +26,7 @@ Outlet resistances optimized! [572.55766651 171.85585464]
     integrating pries and secomb...
     pries and secomb integration completed, R_tree = 323.40763606404136
      the number of vessels is 975
+making repair according to repair config: {'location': 'proximal', 'degree': [0.9, 0.9]}
 ** repairing stenoses in vessels [] **
      vessel 1 has been repaired
      vessel 2 has been repaired
@@ -34,6 +35,7 @@ Outlet resistances optimized! [572.55766651 171.85585464]
      vessel 5 has been repaired
      vessel 6 has been repaired
 all stenosis repairs completed
+** adapting trees based on Pries and Secomb model **
 pries and secomb integration completed for OutletTree3
 pries and secomb integration completed for OutletTree6
-pries and secomb adaptation completed for all trees. R_old = [649.6072991093201, 323.40763606404136] R_new = [740.5298431786445, 790.0527329842168]
+pries and secomb adaptation completed for all trees. R_old = [649.6072991093201, 323.40763606404136] R_new = [741.063122464933, 790.9030080439044]
