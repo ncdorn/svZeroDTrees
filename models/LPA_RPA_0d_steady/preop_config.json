@@ -5,12 +5,12 @@
             "bc_type": "FLOW",
             "bc_values": {
                 "Q": [
-                    97.3,
-		            97.3
+                    97.30194600000002,
+                    97.30194600000002
                 ],
                 "t": [
                     0.0,
-		            1.0
+                    1.0
                 ]
             }
         },
@@ -19,7 +19,7 @@
             "bc_type": "RESISTANCE",
             "bc_values": {
                 "Pd": 13332.0,
-                "R": 1000.0
+                "R": 572.5576665136075
             }
         },
         {
@@ -27,7 +27,7 @@
             "bc_type": "RESISTANCE",
             "bc_values": {
                 "Pd": 13332.0,
-                "R": 1000.0
+                "R": 171.85585463692246
             }
         }
     ],
@@ -88,7 +88,7 @@
         "density": 1.06,
         "model_name": "LPA_RPA",
         "number_of_cardiac_cycles": 1,
-        "number_of_time_pts_per_cardiac_cycle": 10,
+        "number_of_time_pts_per_cardiac_cycle": 100,
         "viscosity": 0.04
     },
     "vessels": [

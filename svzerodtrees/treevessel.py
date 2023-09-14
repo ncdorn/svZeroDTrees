@@ -236,6 +236,7 @@ class TreeVessel:
             self.d += self.dD
         else:
             pass
+            # potentially add collapsed 
 
         return self.dD
 
