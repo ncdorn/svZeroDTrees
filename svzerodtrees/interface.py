@@ -14,6 +14,7 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
     :param vis_trees: if true, make tree visualization figures
     '''
     
+    # start off somewhere in the models directory, same level as the experiment config file
     with open(exp_config_file) as ff:
         exp_config = json.load(ff)
 
@@ -27,6 +28,11 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
     # check if we are in an experiments directory, if not assume we are in it
     if os.path.exists('../experiments'): # we are in the experiments directory already
 
+        os.system('mkdir ' + expname)
+
+    elif os.path.exists('experiments'): # we are ond directory above the experiments directory
+
+        os.chdir('experiments')
         os.system('mkdir ' + expname)
 
     else: # we are not in the experiments directory and need to create one

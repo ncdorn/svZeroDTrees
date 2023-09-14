@@ -178,8 +178,29 @@ def test_run_from_file():
     interface.run_from_file(expfile)
 
 
+def test_pa_optimizer():
+    # test the pa optimizer pipeline
+
+    os.chdir('tests/cases/LPA_RPA_0d_steady')
+    input_file = 'LPA_RPA_0d_steady.json'
+    log_file = 'LPA_RPA_0d_steady.log'
+    clinical_targets = 'clinical_targets.csv'
+
+    optimized_pa_config = preop.optimize_pa_bcs(
+        input_file,
+        clinical_targets,
+        log_file,
+        show_optimization=False,
+    )
+
+    # save the optimized pa config
+    with open('optimized_pa_config.json', 'w') as ff:
+        json.dump(optimized_pa_config, ff)
+
+
+
 if __name__ == '__main__':
 
-    test_repair_stenosis()
+    test_pa_optimizer()
 
 

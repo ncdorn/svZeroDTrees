@@ -6,7 +6,7 @@ import json
 from svzerodtrees.utils import *
 from svzerodtrees.post_processing.plotting import *
 from svzerodtrees.post_processing.stree_visualization import *
-from scipy.optimize import minimize
+from scipy.optimize import minimize, Bounds
 from svzerodtrees.structuredtreebc import StructuredTreeOutlet
 from svzerodtrees.adaptation import *
 
@@ -15,7 +15,7 @@ def optimize_outlet_bcs(input_file,
                         clinical_targets: csv,
                         log_file=None,
                         make_steady=False,
-                        unsteady=False,
+                        steady=True,
                         change_to_R=False,
                         show_optimization=True):
     '''
@@ -25,7 +25,7 @@ def optimize_outlet_bcs(input_file,
     :param clinical_targets: clinical targets input csv
     :param log_file: str with path to log_file
     :param make_steady: if the input file has an unsteady inflow, make the inflow steady
-    :param unsteady: True if the input file has unsteady inflow
+    :param steady: False if the input file has unsteady inflow
     :param change_to_R: True if you want to change the input config from RCR to R boundary conditions
     :param show_optimization: True if you want to display a track of the optimization results
 
@@ -33,8 +33,9 @@ def optimize_outlet_bcs(input_file,
     :return preop_flow: flow result with optimized preop BCs
     '''
 
-    # get the clinical target values
-    q, cardiac_index, mpa_pressures, target_ps = get_clinical_targets(clinical_targets, log_file)
+    # get the clinical target values, pressures in mmHg
+    q, target_ps, rpa_ps, lpa_ps, wedge_p, rpa_split = get_clinical_targets(clinical_targets, log_file) 
+    print(target_ps)
 
     # load input json as a config dict
     with open(input_file) as ff:
@@ -51,10 +52,15 @@ def optimize_outlet_bcs(input_file,
         write_to_log(log_file, "RCR BCs converted to R, Pd = " + str(Pd))
 
     # add clinical flow values to the zerod input file
-    config_flow(preop_config, q)
+    if steady:
+        config_flow(preop_config, q)
 
     # get resistances from the zerod input file
-    resistance = get_resistances(preop_config)
+    if steady:
+        resistance = get_resistances(preop_config)
+    else:
+        rcr = get_rcrs(preop_config)
+        
     # get the LPA and RPA branch numbers
 
     # scale the inflow
@@ -65,13 +71,14 @@ def optimize_outlet_bcs(input_file,
     def zerod_optimization_objective(resistances,
                                      input_config=preop_config,
                                      target_ps=None,
-                                     unsteady=unsteady,
-                                     lpa_rpa_branch= [1, 2] # in general, this should be [1, 2]
+                                     steady=steady,
+                                     lpa_rpa_branch= [1, 2], # in general, this should be [1, 2]
+                                     rpa_split=rpa_split
                                      ):
         '''
         objective function for 0D boundary condition optimization
 
-        :param R: list of resistances, given by the optimizer
+        :param resistances: list of resistances or RCR values, given by the optimizer
         :param input_config: config of the simulation to be optimized
         :param target_ps: target pressures to optimize against
         :param unsteady: True if the model to be optimized has an unsteady inflow condition
@@ -79,34 +86,45 @@ def optimize_outlet_bcs(input_file,
 
         :return: sum of SSE of pressure targets and flow split targets
         '''
-
+        # print("resistances: ", resistances)
         # write the optimization iteration resistances to the config
-        write_resistances(input_config, resistances)
+        if steady:
+            write_resistances(input_config, resistances)
+        else:
+            write_rcrs(input_config, resistances)
+            
         zerod_result = run_svzerodplus(input_config)
 
         # get mean, systolic and diastolic pressures
-        mpa_pressures, mpa_sys_p, mpa_dia_p, mpa_mean_p  = get_pressure(zerod_result, branch=0)
+        mpa_pressures, mpa_sys_p, mpa_dia_p, mpa_mean_p  = get_pressure(zerod_result, branch=0, convert_to_mmHg=True)
 
         # get the MPA, RPA, LPA flow rates
-        q_MPA = get_branch_result(zerod_result, branch=0, data_name='flow_in')
-        q_RPA = get_branch_result(zerod_result, branch=lpa_rpa_branch[0], data_name='flow_in')
-        q_LPA = get_branch_result(zerod_result, branch=lpa_rpa_branch[1], data_name='flow_in')
+        q_MPA = get_branch_result(zerod_result, branch=0, data_name='flow_in', steady=steady)
+        q_RPA = get_branch_result(zerod_result, branch=lpa_rpa_branch[0], data_name='flow_in', steady=steady)
+        q_LPA = get_branch_result(zerod_result, branch=lpa_rpa_branch[1], data_name='flow_in', steady=steady)
 
-        if unsteady: # if unsteady, take sum of squares of mean, sys, dia pressure
-            pred_p = np.array([
-                mpa_sys_p,
-                mpa_dia_p,
-                mpa_mean_p
-            ])
-            p_diff = np.sum(np.square(np.subtract(pred_p, target_ps)))
-        else: # just the mean pressure
+        if steady: # take the mean pressure only
             p_diff = abs(target_ps[2] - mpa_mean_p) ** 2
+        else: # if unsteady, take sum of squares of mean, sys, dia pressure
+            pred_p = np.array([
+                -mpa_sys_p,
+                -mpa_dia_p,
+                -mpa_mean_p
+            ])
+            print("pred_p: ", pred_p)
+            # p_diff = np.sum(np.square(np.subtract(pred_p, target_ps)))
+            p_diff = (pred_p[0] - target_ps[0]) ** 2
+
+        # penalty = 0
+        # for i, p in enumerate(pred_p):
+        #     penalty += loss_function_bound_penalty(p, target_ps[i])
+            
 
         # add flow split to optimization by checking RPA flow against flow split
-        RPA_diff = abs((q_RPA[-1] - (0.52 * q_MPA[-1]))) ** 2
+        RPA_diff = abs((np.mean(q_RPA) - (rpa_split * np.mean(q_MPA)))) ** 2
         
         # minimize sum of pressure SSE and flow split SSE
-        min_obj = p_diff + RPA_diff
+        min_obj = p_diff + RPA_diff # + penalty
         if show_optimization:
             obj_fun.append(min_obj)
             plot_optimization_progress(obj_fun)
@@ -116,12 +134,23 @@ def optimize_outlet_bcs(input_file,
     # write to log file for debugging
     write_to_log(log_file, "Optimizing preop outlet resistance...")
     # run the optimization algorithm
-    result = minimize(zerod_optimization_objective,
-                      resistance,
-                      args=(preop_config, target_ps),
-                      method="CG",
-                      options={"disp": False},
-                      )
+    if steady:
+        result = minimize(zerod_optimization_objective,
+                        resistance,
+                        args=(preop_config, target_ps),
+                        method="CG",
+                        options={"disp": False},
+                        )
+    else:
+        bounds = Bounds(lb=0)
+        result = minimize(zerod_optimization_objective,
+                          rcr,
+                          args=(preop_config, target_ps, steady),
+                          method="CG",
+                          options={"disp": False},
+                          bounds=bounds
+                          )
+        
     log_optimization_results(log_file, result, '0D optimization')
     # write to log file for debugging
     write_to_log(log_file, "Outlet resistances optimized! " + str(result.x))
@@ -130,6 +159,8 @@ def optimize_outlet_bcs(input_file,
     write_resistances(preop_config, R_final)
 
     preop_flow = run_svzerodplus(preop_config)
+    print(R_final)
+    plot_pressure(preop_flow,branch=0)
 
     return preop_config, preop_flow
 
@@ -138,7 +169,7 @@ def optimize_pa_bcs(input_file,
                     clinical_targets: csv,
                     log_file=None,
                     make_steady=False,
-                    unsteady=False,
+                    steady=False,
                     change_to_R=False,
                     show_optimization=True):
     '''
@@ -153,12 +184,23 @@ def optimize_pa_bcs(input_file,
     :param change_to_R: True if you want to change the input config from RCR to R boundary conditions
     :param show_optimization: True if you want to display a track of the optimization results
 
-    :return preop_config: 0D config with optimized BCs
-    :return preop_flow: flow result with optimized preop BCs
+    :return optimized_pa_config: 0D pa config with optimized BCs
+    :return pa_flow: flow result with optimized preop BCs
     '''
 
     # get the clinical target values
-    q, cardiac_index, mpa_pressures, target_ps = get_clinical_targets(clinical_targets)
+    q, mpa_ps, rpa_ps, lpa_ps, wedge_p, rpa_split = get_clinical_targets(clinical_targets, log_file)
+
+    # collect the optimization targets [Q_RPA, P_MPA, P_RPA, P_LPA]
+    optimization_targets = np.array([q * rpa_split, mpa_ps[2], rpa_ps[2], lpa_ps[2]])
+
+    write_to_log(log_file, "*** clinical targets ****")
+    write_to_log(log_file, "Q: " + str(q))
+    write_to_log(log_file, "MPA pressure: " + str(mpa_ps[2]))
+    write_to_log(log_file, "RPA pressure: " + str(rpa_ps[2]))
+    write_to_log(log_file, "LPA pressure: " + str(lpa_ps[2]))
+    write_to_log(log_file, "wedge pressure: " + str(wedge_p))
+    write_to_log(log_file, "RPA flow split: " + str(rpa_split))
 
     # load input json as a config dict
     with open(input_file) as ff:
@@ -174,16 +216,65 @@ def optimize_pa_bcs(input_file,
         Pd = convert_RCR_to_R(preop_config)
         write_to_log(log_file, "RCR BCs converted to R, Pd = " + str(Pd))
 
-    # add clinical flow values to the zerod input file
-    config_flow(preop_config, q)
-
-    # get resistances from the zerod input file
-    resistance = get_resistances(preop_config)
-
     # create the PA optimizer config
-    pa_optimizer_config = create_pa_optimizer_config(preop_config)
+    pa_config = create_pa_optimizer_config(preop_config, q, wedge_p)
 
-    pass
+    # resitance initial guess
+    R_0 = get_pa_config_resistances(pa_config)
+
+    # define optimization bounds [0, inf)
+    bounds = Bounds(lb=0)
+
+    result = minimize(pa_opt_loss_fcn, R_0, args=(pa_config, optimization_targets), method="Nelder-Mead", bounds=bounds)
+
+    # get optimized resistances [R_RPA_proximal, R_LPA_proximal, R_RPA_distal, R_LPA_distal, R_RPA_BC, R_LPA_BC]
+    # attempt 1: [263.27670986 542.12291993  50.79584318  48.28270255 265.38882281 37.34419714]
+    # attempt 2: 
+    R = result.x
+    write_to_log(log_file, "optimized resistances: " + str(R))
+    print('RPA, LPA distal resistance: ' + str(R[2:]))
+
+    # write optimized resistances to config
+    write_pa_config_resistances(pa_config, R)
+
+    # get outlet areas
+
+    # calculate proportional outlet resistances
+
+    
+
+
+
+    return pa_config
+
+
+
+
+
+def pa_opt_loss_fcn(R, pa_config, targets):
+    '''
+    loss function for the PA optimization
+    '''
+
+    # write the optimization iteration resistances to the config
+    write_pa_config_resistances(pa_config, R)
+
+    # run the 0D solver
+    pa_result = run_svzerodplus(pa_config)
+
+    # get the result values to compare against targets [Q_rpa, P_mpa, P_rpa, P_lpa]
+    pa_eval = get_pa_optimization_values(pa_result)
+
+    loss = np.sum((pa_eval - targets) ** 2)
+
+    # print for debugging
+    # print(loss, pa_eval, targets)
+    return loss
+
+
+
+
+    
 
 
 

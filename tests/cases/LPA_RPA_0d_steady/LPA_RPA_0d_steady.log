@@ -35,3 +35,286 @@ Optimizing preop outlet resistance...
      Objective function value: 3.592080702280684e-08
      Number of iterations: 128
 Outlet resistances optimized! [572.57441217 171.89218543]
+Getting clinical target values...
+Optimizing preop outlet resistance...
+Getting clinical target values...
+Optimizing preop outlet resistance...
+0D optimization optimization completed! 
+
+     Optimization solution: [572.55646089 171.8577365 ]
+
+     Objective function value: 2.5357501948254155e-09
+
+     Number of iterations: 110
+
+Outlet resistances optimized! [572.55646089 171.8577365 ]
+Getting clinical target values...
+Optimizing preop outlet resistance...
+Getting clinical target values...
+Optimizing preop outlet resistance...
+0D optimization optimization completed! 
+
+     Optimization solution: [572.55297417 171.85963572]
+
+     Objective function value: 2.6536392361180665e-08
+
+     Number of iterations: 10
+
+Outlet resistances optimized! [572.55297417 171.85963572]
+Getting clinical target values...
+Optimizing preop outlet resistance...
+0D optimization optimization completed! 
+
+     Optimization solution: [572.55297417 171.85963572]
+
+     Objective function value: 2.6536392361180665e-08
+
+     Number of iterations: 10
+
+Outlet resistances optimized! [572.55297417 171.85963572]
+Getting clinical target values...
+Optimizing preop outlet resistance...
+0D optimization optimization completed! 
+
+     Optimization solution: [572.55297417 171.85963572]
+
+     Objective function value: 2.6536392361180665e-08
+
+     Number of iterations: 10
+
+Outlet resistances optimized! [572.55297417 171.85963572]
+Getting clinical target values...
+Getting clinical target values...
+Getting clinical target values...
+Getting clinical target values...
+Getting clinical target values...
+Getting clinical target values...
+Getting clinical target values...
+Getting clinical target values...
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: [90 18 42]
+RPA pressure: [50 18 32]
+LPA pressure: [35 15 23]
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 23
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 32
+wedge pressure: 20
+RPA flow split: 0.52
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 32
+wedge pressure: 20
+RPA flow split: 0.52
+optimized resistances: [263.2766457  285.21640819 316.1847237  342.53343352]
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 32
+wedge pressure: 20
+RPA flow split: 0.52
+optimized resistances: [263.2766457  285.21640819 316.1847237  342.53343352]
+Getting clinical target values...
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressure: 42
+RPA pressure: 32
+LPA pressure: 32
+wedge pressure: 20
+RPA flow split: 0.52
+optimized resistances: [263.2766457  285.21640819 316.1847237  342.53343352]
