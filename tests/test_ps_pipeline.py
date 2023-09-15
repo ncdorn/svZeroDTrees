@@ -185,9 +185,11 @@ def test_pa_optimizer():
     input_file = 'LPA_RPA_0d_steady.json'
     log_file = 'LPA_RPA_0d_steady.log'
     clinical_targets = 'clinical_targets.csv'
+    mesh_surfaces_path = '/home/ndorn/Documents/Stanford/PhD/PPAS/svPPAS/models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces'
 
     optimized_pa_config = preop.optimize_pa_bcs(
         input_file,
+        mesh_surfaces_path,
         clinical_targets,
         log_file,
         show_optimization=False,
