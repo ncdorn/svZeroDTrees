@@ -55,7 +55,7 @@ def plot_pressure(result_array, branch, save=False, fig_dir=None):
         plt.show()
 
 
-def get_outlet_data(config: dict, result_array, data_name: str, steady=False):
+def get_outlet_data(config: dict, result_array, data_name: str, steady=True):
     '''
     get a result at the outlets of a model
 
