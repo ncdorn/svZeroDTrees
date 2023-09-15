@@ -119,7 +119,7 @@ def get_branch_d(config, branch):
     l = 0
     for vessel_config in config["vessels"]:
         if get_branch_id(vessel_config) == branch:
-            # get total resistance of branch
+            # get total resistance of branch if it is split into multiple segments
             R += vessel_config["zero_d_element_values"].get("R_poiseuille")
             l += vessel_config["vessel_length"]
             break
@@ -160,13 +160,13 @@ def get_branch_result(result_array, data_name: str, branch: int, steady: bool=Fa
     :param result_array: svzerodplus result array
     :param data_name: q, p or wss
     :param branch: branch id to get result for
-    :param steady: True if the model inflow is steady
+    :param steady: True if the model inflow is steady or youw want to get the average value
 
     :return: result array for branch and QoI
     '''
 
     if steady:
-        return [result_array[data_name][branch][-1]]
+        return np.mean(result_array[data_name][branch])
     else:
         return result_array[data_name][branch]
 
@@ -749,65 +749,50 @@ def get_pa_optimization_values(result):
     '''
 
     # rpa flow, for flow split optimization
-    Q_rpa = get_branch_result(result, 'flow_in', 1, steady=True)[0]
+    Q_rpa = get_branch_result(result, 'flow_in', 1, steady=True)
 
     # mpa pressure
-    P_mpa = get_branch_result(result, 'pressure_in', 0, steady=True)[0] /  1333.2 
+    P_mpa = get_branch_result(result, 'pressure_in', 0, steady=True) /  1333.2 
 
     # rpa pressure
-    P_rpa = get_branch_result(result, 'pressure_out', 1, steady=True)[0] / 1333.2
+    P_rpa = get_branch_result(result, 'pressure_out', 1, steady=True) / 1333.2
 
     # lpa pressure
-    P_lpa = get_branch_result(result, 'pressure_out', 2, steady=True)[0] / 1333.2
+    P_lpa = get_branch_result(result, 'pressure_out', 2, steady=True) / 1333.2
 
     return np.array([Q_rpa, P_mpa, P_rpa, P_lpa])
 
 
-def assign_outlet_pa_bcs(config, rpa_info, lpa_info, R_rpa, R_lpa):
-    '''
-    assign resistances proportional to outlet area to the RPA and LPA outlet bcs.
-    this assumes that the rpa and lpa cap info has not changed info since export from simvascular.
-    In the case of AS1, this is LPA outlets first, and then RPA. This will also convert all outlet BCs to resistance BCs.
 
+def find_rpa_lpa_branches(config):
+    '''
+    find the LPA and RPA branches in a config dict. 
+    We assume that this is the first junction in the config with 2 distinct outlet vessels.
+    
     :param config: svzerodplus config dict
-    :param rpa_info: dict with rpa outlet info from vtk
-    :param lpa_info: dict with lpa outlet info from vtk
-    :param R_rpa: RPA outlet resistance value
-    :param R_lpa: LPA outlet resistance value
+    
+    :return rpa_lpa_branch: list of ints of RPA, LPA branch id
     '''
-
-    def Ri(Ai, A, R):
-        return R * (A / Ai)
     
-    # get RPA and LPA total area
-    a_RPA = sum(rpa_info.values())
-    a_LPA = sum(lpa_info.values())
+    junction_id = 0
+    junction_found = False
+    # search for the junction with 2 outlet vessels (LPA and RPA)
+    while not junction_found:
+        if len(config["junctions"][junction_id]["outlet_vessels"]) == 2:
+            rpa_lpa_id = config["junctions"][junction_id]["outlet_vessels"]
+            junction_found = True
+        
+        elif len(config["junctions"][junction_id]["outlet_vessels"]) != 2:
+            junction_id += 1
 
-    # initialize list of resistances
-    all_R = {}
+    rpa_lpa_branch = [1, 2]
+    for i, id in enumerate(rpa_lpa_id):
+        for vessel_config in config["vessels"]:
+            if vessel_config["vessel_id"] == id:
+                rpa_lpa_branch[i] = get_branch_id(vessel_config)
+                
 
-    for name, val in lpa_info:
-        all_R[name] = Ri(val, a_LPA, R_lpa)
-    
-    for name, val in rpa_info:
-        all_R[name] = Ri(val, a_RPA, R_rpa)
-    
-    # write the resistances to the config
-    bc_idx = 0
-    for bc_config in config["boundary_conditions"]:
-
-        # add resistance to resistance boundary conditions
-        if bc_config["bc_type"] == 'RESISTANCE':
-            bc_config['bc_values']['R'] = all_R.values()[bc_idx]
-            bc_idx += 1
-
-        # change RCR boundary conditions to resistance
-        if bc_config["bc_type"] == 'RCR':
-            # change type to resistance
-            bc_config["bc_type"] = 'RESISTANCE'
-            bc_config['bc_values']['R'] = all_R.values()[bc_idx]
-            bc_idx += 1
-    
+    return rpa_lpa_branch
 
 
     
