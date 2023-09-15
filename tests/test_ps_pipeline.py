@@ -74,6 +74,7 @@ def test_cwss_tree_construction():
     write_to_log(log_file, 'testing tree construction', write=True)
 
     trees = preop.construct_cwss_trees(preop_config, preop_result, log_file)
+    print("n_vessels = " + str([tree.count_vessels() for tree in trees]))
     R_bc = []
     for bc_config in preop_config["boundary_conditions"]:
         if 'RESISTANCE' in bc_config["bc_type"]:
@@ -181,13 +182,13 @@ def test_run_from_file():
 def test_pa_optimizer():
     # test the pa optimizer pipeline
 
-    os.chdir('tests/cases/LPA_RPA_0d_steady')
-    input_file = 'LPA_RPA_0d_steady.json'
-    log_file = 'LPA_RPA_0d_steady.log'
+    os.chdir('tests/cases/full_pa_test')
+    input_file = 'AS1_SU0308_prestent.json'
+    log_file = 'full_pa_test.log'
     clinical_targets = 'clinical_targets.csv'
     mesh_surfaces_path = '/home/ndorn/Documents/Stanford/PhD/PPAS/svPPAS/models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces'
 
-    optimized_pa_config = preop.optimize_pa_bcs(
+    optimized_pa_config, preop_result = preop.optimize_pa_bcs(
         input_file,
         mesh_surfaces_path,
         clinical_targets,
@@ -199,10 +200,12 @@ def test_pa_optimizer():
     with open('optimized_pa_config.json', 'w') as ff:
         json.dump(optimized_pa_config, ff)
 
+    # save the preop_Result
+    with open('preop_result.out', 'wb') as ff:
+        pickle.dump(preop_result, ff)
+
 
 
 if __name__ == '__main__':
 
-    test_pa_optimizer()
-
-
+    test_cwss_tree_construction()

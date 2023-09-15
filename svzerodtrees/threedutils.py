@@ -21,6 +21,7 @@ def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_
 
     # Isolate just the .vtp's from all files in the mesh-surfaces directory
     filelist_raw = glob.glob(mesh_surfaces_path)
+    filelist_raw.sort()               # sort alphabetically, LPA's first, then RPA's
     filelist = []
     for trial in filelist_raw:
         if (trial[-4 : ] == ".vtp"):

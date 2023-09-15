@@ -22,7 +22,7 @@ def repair_stenosis_coefficient(preop_config: dict, repair_config=None, log_file
     # proximal stenosis repair case
     if repair_config['location'] == 'proximal': 
         # repair only the LPA and RPA (should be the outlets of the first junction in the config file)
-        repair_config['vessels'] = [1, 2]
+        repair_config['vessels'] = find_rpa_lpa_branches(preop_config)
 
         # if an improper number of repair degrees are specified
         if len(repair_config['degree']) != 2: 

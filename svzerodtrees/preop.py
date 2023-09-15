@@ -73,7 +73,7 @@ def optimize_outlet_bcs(input_file,
                                      input_config=preop_config,
                                      target_ps=None,
                                      steady=steady,
-                                     lpa_rpa_branch= [1, 2], # in general, this should be [1, 2]
+                                     rpa_lpa_branch= [1, 2], # in general, this should be [1, 2]
                                      rpa_split=rpa_split
                                      ):
         '''
@@ -101,8 +101,8 @@ def optimize_outlet_bcs(input_file,
 
         # get the MPA, RPA, LPA flow rates
         q_MPA = get_branch_result(zerod_result, branch=0, data_name='flow_in', steady=steady)
-        q_RPA = get_branch_result(zerod_result, branch=lpa_rpa_branch[0], data_name='flow_in', steady=steady)
-        q_LPA = get_branch_result(zerod_result, branch=lpa_rpa_branch[1], data_name='flow_in', steady=steady)
+        q_RPA = get_branch_result(zerod_result, branch=rpa_lpa_branch[0], data_name='flow_in', steady=steady)
+        q_LPA = get_branch_result(zerod_result, branch=rpa_lpa_branch[1], data_name='flow_in', steady=steady)
 
         if steady: # take the mean pressure only
             p_diff = abs(target_ps[2] - mpa_mean_p) ** 2
@@ -134,11 +134,15 @@ def optimize_outlet_bcs(input_file,
 
     # write to log file for debugging
     write_to_log(log_file, "Optimizing preop outlet resistance...")
+
+    # find rpa and lpa branches
+    rpa_lpa_branch = find_rpa_lpa_branches(preop_config)
+
     # run the optimization algorithm
     if steady:
         result = minimize(zerod_optimization_objective,
                         resistance,
-                        args=(preop_config, target_ps),
+                        args=(preop_config, target_ps, steady, rpa_lpa_branch, rpa_split),
                         method="CG",
                         options={"disp": False},
                         )
@@ -146,7 +150,7 @@ def optimize_outlet_bcs(input_file,
         bounds = Bounds(lb=0)
         result = minimize(zerod_optimization_objective,
                           rcr,
-                          args=(preop_config, target_ps, steady),
+                          args=(preop_config, target_ps, steady, rpa_lpa_branch, rpa_split),
                           method="CG",
                           options={"disp": False},
                           bounds=bounds
@@ -247,10 +251,11 @@ def optimize_pa_bcs(input_file,
     print('LPA total area: ' + str(sum(lpa_info.values())) + '\n')
 
     # distribute amongst all resistance conditions in the config
-    assign_outlet_pa_bcs(preop_config, rpa_info, lpa_info, R[2], R[3])
+    assign_outlet_pa_bcs(preop_config, rpa_info, lpa_info, R[2], R[3], wedge_p)
 
+    preop_result = run_svzerodplus(preop_config)
 
-    return preop_config
+    return preop_config, preop_result
 
 
 def pa_opt_loss_fcn(R, pa_config, targets):
@@ -279,15 +284,64 @@ def pa_opt_loss_fcn(R, pa_config, targets):
     # print(loss, pa_eval, targets)
     return loss
 
+def assign_outlet_pa_bcs(config, rpa_info, lpa_info, R_rpa, R_lpa, wedge_p=13332.2):
+    '''
+    assign resistances proportional to outlet area to the RPA and LPA outlet bcs.
+    this assumes that the rpa and lpa cap info has not changed info since export from simvascular.
+    In the case of AS1, this is LPA outlets first, and then RPA (alphabetical). This will also convert all outlet BCs to resistance BCs.
 
+    :param config: svzerodplus config dict
+    :param rpa_info: dict with rpa outlet info from vtk
+    :param lpa_info: dict with lpa outlet info from vtk
+    :param R_rpa: RPA outlet resistance value
+    :param R_lpa: LPA outlet resistance value
+    '''
 
-
+    def Ri(Ai, A, R):
+        return R * (A / Ai)
     
+    # get RPA and LPA total area
+    a_RPA = sum(rpa_info.values())
+    a_LPA = sum(lpa_info.values())
 
+    # initialize list of resistances
+    all_R = {}
 
+    for name, val in lpa_info.items():
+        all_R[name] = Ri(val, a_LPA, R_lpa)
+    
+    for name, val in rpa_info.items():
+        all_R[name] = Ri(val, a_RPA, R_rpa)
+    
+    # write the resistances to the config
+    bc_idx = 0
 
+    # get all resistance values
+    R_list = list(all_R.values())
 
+    # loop through boundary conditions to assign resistance values
+    for bc_config in config["boundary_conditions"]:
 
+        # add resistance to resistance boundary conditions
+        if bc_config["bc_type"] == 'RESISTANCE':
+            bc_config["bc_values"] = {
+                "R": R_list[bc_idx],
+                "Pd": wedge_p * 1333.22 # convert to barye
+            } 
+
+            bc_idx += 1
+
+        # change RCR boundary conditions to resistance
+        if bc_config["bc_type"] == 'RCR':
+            # change type to resistance
+            bc_config["bc_type"] = 'RESISTANCE'
+            # reset bc_values
+            bc_config["bc_values"] = {
+                "R": R_list[bc_idx],
+                "Pd": wedge_p * 1333.22 # convert to barye
+            } 
+
+            bc_idx += 1
 
 
 def construct_cwss_trees(config: dict, result, log_file=None, vis_trees=False, fig_dir=None):
@@ -311,6 +365,7 @@ def construct_cwss_trees(config: dict, result, log_file=None, vis_trees=False, f
     for vessel_config in config["vessels"]:
         if "boundary_conditions" in vessel_config:
             if "outlet" in vessel_config["boundary_conditions"]:
+                print("** building tree for outlet " + str(outlet_idx) + " of " + str(len(q_outs)) + " **")
                 for bc_config in config["boundary_conditions"]:
                     if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
                         outlet_tree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, 
@@ -318,11 +373,12 @@ def construct_cwss_trees(config: dict, result, log_file=None, vis_trees=False, f
                                                                             bc_config, 
                                                                             P_outlet=[p_outs[outlet_idx]],
                                                                             Q_outlet=[q_outs[outlet_idx]])
+
                         R = bc_config["bc_values"]["R"]
                 # write to log file for debugging
                 write_to_log(log_file, "** building tree for resistance: " + str(R) + " **")
-                # outlet_tree.optimize_tree_radius(R)
-                outlet_tree.optimize_tree_radius(R, log_file)
+
+                outlet_tree.optimize_tree_diameter(R, log_file)
                 # write to log file for debugging
                 write_to_log(log_file, "     the number of vessels is " + str(outlet_tree.count_vessels()))
                 vessel_config["tree"] = outlet_tree.block_dict
@@ -372,7 +428,7 @@ def construct_pries_trees(config: dict, result, log_file=None, vis_trees=False, 
 
                 write_to_log(log_file, "** building tree for resistance: " + str(R) + " **")
 
-                outlet_stree.optimize_tree_radius(R, log_file)
+                outlet_stree.optimize_tree_diameter(R, log_file)
 
                 write_to_log(log_file, "    integrating pries and secomb...")
                 outlet_stree.integrate_pries_secomb()
