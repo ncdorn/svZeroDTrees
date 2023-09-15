@@ -278,7 +278,7 @@ class StructuredTreeOutlet():
         return R_old, R_new
 
 
-    def optimize_tree_diameter(self, Resistance=5.0, log_file=None):
+    def optimize_tree_diameter(self, Resistance=5.0,  log_file=None, d_min=0.0049):
         """ 
         Use Nelder-Mead to optimize the diameter and number of vessels with respect to the desired resistance
         
@@ -290,7 +290,7 @@ class StructuredTreeOutlet():
         d_guess = self.initialD / 2
 
         # define the objective function to be minimized
-        def r_min_objective(diameter):
+        def r_min_objective(diameter, d_min):
             '''
             objective function for optimization
 
@@ -299,7 +299,7 @@ class StructuredTreeOutlet():
             :return: squared difference between target resistance and built tree resistance
             '''
             # build tree
-            self.build_tree(diameter[0], optimizing=True)
+            self.build_tree(diameter[0], d_min=d_min, optimizing=True)
 
             # get equivalent resistance
             R = self.root.R_eq
@@ -315,6 +315,7 @@ class StructuredTreeOutlet():
         # perform Nelder-Mead optimization
         d_final = minimize(r_min_objective,
                            d_guess,
+                           args=(d_min),
                            options={"disp": True},
                            method='Nelder-Mead',
                            bounds=bounds)
@@ -428,7 +429,7 @@ class StructuredTreeOutlet():
         '''
         return self.root.R_eq
     
-    def integrate_pries_secomb(self, ps_params=[0.68, .70, 2.45, 1.72, 1.73, 27.9, .103, 3.3 * 10 ** -8], dt=0.01, tol = 10 ** -5, time_avg_q=True):
+    def integrate_pries_secomb(self, ps_params=[0.68, .70, 2.45, 1.72, 1.73, 27.9, .103, 3.3 * 10 ** -8], dt=0.01, tol = .01, time_avg_q=True):
         '''
         integrate pries and secomb diff eq by Euler integration for the tree until dD reaches some tolerance (default 10^-5)
 
@@ -440,7 +441,7 @@ class StructuredTreeOutlet():
                 tau_ref [=] dyn/cm2
                 Q_ref [=] cm3/s
         :param dt: time step for explicit euler integration
-        :param tol: tolerance for euler integration convergence
+        :param tol: tolerance (relative difference in function value) for euler integration convergence
         :param time_avg_q: True if the flow in the vessels is assumed to be steady
 
         :return: equivalent resistance of the tree
@@ -451,6 +452,9 @@ class StructuredTreeOutlet():
 
         # initialize converged stop condition
         converged = False
+
+        # intialize iteration count
+        iter = 0
 
         # begin euler integration
         while not converged:
@@ -488,12 +492,18 @@ class StructuredTreeOutlet():
 
             # check if dD is below the tolerance. if so, end integration
             dD_diff = abs(next_SS_dD ** 2 - SS_dD ** 2)
-            print(dD_diff)
-            if dD_diff < tol:
+            if iter == 0:
+                first_dD = dD_diff
+            
+            print(dD_diff / first_dD)
+            if dD_diff / first_dD < tol:
                 converged = True
             
             # if not converged, continue integration
             SS_dD = next_SS_dD
+
+            # increase iteration count
+            iter += 1
 
         print('Pries and Secomb integration completed! R = ' + str(self.root.R_eq))
 

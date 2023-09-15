@@ -344,7 +344,7 @@ def assign_outlet_pa_bcs(config, rpa_info, lpa_info, R_rpa, R_lpa, wedge_p=13332
             bc_idx += 1
 
 
-def construct_cwss_trees(config: dict, result, log_file=None, vis_trees=False, fig_dir=None):
+def construct_cwss_trees(config: dict, result, log_file=None, d_min=0.0049, vis_trees=False, fig_dir=None):
     '''
     construct structured trees at every outlet of the 0d model optimized against the outflow BC resistance,
     for the constant wall shear stress assumption.
@@ -378,7 +378,7 @@ def construct_cwss_trees(config: dict, result, log_file=None, vis_trees=False, f
                 # write to log file for debugging
                 write_to_log(log_file, "** building tree for resistance: " + str(R) + " **")
 
-                outlet_tree.optimize_tree_diameter(R, log_file)
+                outlet_tree.optimize_tree_diameter(R, log_file, d_min=d_min)
                 # write to log file for debugging
                 write_to_log(log_file, "     the number of vessels is " + str(outlet_tree.count_vessels()))
                 vessel_config["tree"] = outlet_tree.block_dict
@@ -391,7 +391,7 @@ def construct_cwss_trees(config: dict, result, log_file=None, vis_trees=False, f
     return trees
 
 
-def construct_pries_trees(config: dict, result, log_file=None, vis_trees=False, fig_dir=None):
+def construct_pries_trees(config: dict, result, log_file=None, d_min=0.0049, tol=0.01, vis_trees=False, fig_dir=None):
     '''
     construct trees for pries and secomb adaptation and perform initial integration
     :param config: 0D solver preop config
@@ -404,6 +404,8 @@ def construct_pries_trees(config: dict, result, log_file=None, vis_trees=False, 
             tau_ref [=] dyn/cm2
             Q_ref [=] cm3/s
     :param log_file: optional path to a log file
+    :param d_min: minimum vessel diameter for tree optimization
+    :param tol: tolerance for the pries and secomb integration
     :param vis_trees: boolean for visualizing trees
     :param fig_dir: [optional path to directory to save figures. Required if vis_trees = True.
     '''
@@ -428,10 +430,10 @@ def construct_pries_trees(config: dict, result, log_file=None, vis_trees=False, 
 
                 write_to_log(log_file, "** building tree for resistance: " + str(R) + " **")
 
-                outlet_stree.optimize_tree_diameter(R, log_file)
+                outlet_stree.optimize_tree_diameter(R, log_file, d_min=d_min)
 
                 write_to_log(log_file, "    integrating pries and secomb...")
-                outlet_stree.integrate_pries_secomb()
+                outlet_stree.integrate_pries_secomb(tol=tol)
                 write_to_log(log_file, "    pries and secomb integration completed, R_tree = " + str(outlet_stree.root.R_eq))
 
                 write_to_log(log_file, "     the number of vessels is " + str(outlet_stree.count_vessels()))
