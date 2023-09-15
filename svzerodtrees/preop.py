@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import json
 from svzerodtrees.utils import *
+from svzerodtrees.threedutils import *
 from svzerodtrees.post_processing.plotting import *
 from svzerodtrees.post_processing.stree_visualization import *
 from scipy.optimize import minimize, Bounds
@@ -166,6 +167,7 @@ def optimize_outlet_bcs(input_file,
 
 
 def optimize_pa_bcs(input_file,
+                    mesh_surfaces_path,
                     clinical_targets: csv,
                     log_file=None,
                     make_steady=False,
@@ -238,22 +240,28 @@ def optimize_pa_bcs(input_file,
     write_pa_config_resistances(pa_config, R)
 
     # get outlet areas
-
+    rpa_info, lpa_info, inflow_info = vtp_info(mesh_surfaces_path)
     # calculate proportional outlet resistances
+    print('total number of outlets: ' + str(len(rpa_info) + len(lpa_info)))
+    print('RPA total area: ' + str(sum(rpa_info.values())) + '\n')
+    print('LPA total area: ' + str(sum(lpa_info.values())) + '\n')
 
-    
+    # distribute amongst all resistance conditions in the config
+    assign_outlet_pa_bcs(preop_config, rpa_info, lpa_info, R[2], R[3])
 
 
-
-    return pa_config
-
-
-
+    return preop_config
 
 
 def pa_opt_loss_fcn(R, pa_config, targets):
     '''
     loss function for the PA optimization
+
+    :param R: list of resistances from optimizer
+    :param pa_config: pa config dict
+    :param targets: optimization targets [Q_RPA, P_MPA, P_RPA, P_LPA]
+
+    :return loss: sum of squares of differences between targets and model evaluation
     '''
 
     # write the optimization iteration resistances to the config

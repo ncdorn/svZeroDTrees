@@ -763,3 +763,52 @@ def get_pa_optimization_values(result):
     return np.array([Q_rpa, P_mpa, P_rpa, P_lpa])
 
 
+def assign_outlet_pa_bcs(config, rpa_info, lpa_info, R_rpa, R_lpa):
+    '''
+    assign resistances proportional to outlet area to the RPA and LPA outlet bcs.
+    this assumes that the rpa and lpa cap info has not changed info since export from simvascular.
+    In the case of AS1, this is LPA outlets first, and then RPA. This will also convert all outlet BCs to resistance BCs.
+
+    :param config: svzerodplus config dict
+    :param rpa_info: dict with rpa outlet info from vtk
+    :param lpa_info: dict with lpa outlet info from vtk
+    :param R_rpa: RPA outlet resistance value
+    :param R_lpa: LPA outlet resistance value
+    '''
+
+    def Ri(Ai, A, R):
+        return R * (A / Ai)
+    
+    # get RPA and LPA total area
+    a_RPA = sum(rpa_info.values())
+    a_LPA = sum(lpa_info.values())
+
+    # initialize list of resistances
+    all_R = {}
+
+    for name, val in lpa_info:
+        all_R[name] = Ri(val, a_LPA, R_lpa)
+    
+    for name, val in rpa_info:
+        all_R[name] = Ri(val, a_RPA, R_rpa)
+    
+    # write the resistances to the config
+    bc_idx = 0
+    for bc_config in config["boundary_conditions"]:
+
+        # add resistance to resistance boundary conditions
+        if bc_config["bc_type"] == 'RESISTANCE':
+            bc_config['bc_values']['R'] = all_R.values()[bc_idx]
+            bc_idx += 1
+
+        # change RCR boundary conditions to resistance
+        if bc_config["bc_type"] == 'RCR':
+            # change type to resistance
+            bc_config["bc_type"] = 'RESISTANCE'
+            bc_config['bc_values']['R'] = all_R.values()[bc_idx]
+            bc_idx += 1
+    
+
+
+    
+    
