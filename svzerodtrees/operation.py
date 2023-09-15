@@ -34,7 +34,7 @@ def repair_stenosis_coefficient(preop_config: dict, repair_config=None, log_file
     elif repair_config['location'] == 'extensive': 
 
         # get list of vessels with no duplicates
-        repair_config['vessels'] = list(set([get_branch_id(vessel) for vessel in postop_config["vessels"]]))
+        repair_config['vessels'] = list(set([get_branch_id(vessel) for vessel in postop_config["vessels"]])) 
 
         # match the length of the repair degrees to the number of vessels
         repair_config['degree'] *= len(repair_config['vessels']) 
