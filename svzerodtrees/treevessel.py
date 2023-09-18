@@ -12,7 +12,7 @@ class TreeVessel:
         '''
         self.name = name # name of the, tree only has a str in the root node
         self.info = info # vessel info dict
-        self._d = self.info["vessel_D"] # diameter
+        self._d = self.info["vessel_D"] # diameter in CM
         self.l = self.info["vessel_length"]
         self.id = self.info["vessel_id"]
         self.gen = self.info["generation"]
@@ -47,7 +47,7 @@ class TreeVessel:
 
         :return: TreeVessel instance
         '''
-        if diameter > .3 or id == 0:
+        if diameter > .03 or id == 0:
             # if we allow the first vessel to experience FL effects, the optimization does not work as the resistance is
             # decreased by an order of magnitude. Therefore the first vessel automatically does not experience FL.
             viscosity = eta
@@ -164,7 +164,7 @@ class TreeVessel:
         update vessel info dict based on changes to vessel diameter
         '''
 
-        if self._d < .3 and self.id > 0: 
+        if self._d < .03 and self.id > 0: 
         # if we allow the first vessel to experience FL effects, the optimization does not work as the resistance is decreased
         # by an order of magnitude
             self.eta = self.fl_visc(self.d)
@@ -236,6 +236,7 @@ class TreeVessel:
             self.d += self.dD
         else:
             pass
+            # potentially add collapsed 
 
         return self.dD
 

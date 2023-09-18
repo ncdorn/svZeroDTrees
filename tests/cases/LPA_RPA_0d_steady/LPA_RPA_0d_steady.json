@@ -88,7 +88,7 @@
         "density": 1.06,
         "model_name": "LPA_RPA",
         "number_of_cardiac_cycles": 1,
-        "number_of_time_pts_per_cardiac_cycle": 100,
+        "number_of_time_pts_per_cardiac_cycle": 10,
         "viscosity": 0.04
     },
     "vessels": [

@@ -1,37 +1,13 @@
 testing tree construction
-** building tree for resistance: 572.5744121727547 **
-     the optimized radius is [0.12246235]     the number of vessels is 279
-** building tree for resistance: 171.89218542899346 **
-     the optimized radius is [0.19442747]     the number of vessels is 975
-** repairing stenoses in vessels [] **
-     vessel 1 has been repaired
-     vessel 2 has been repaired
-     vessel 3 has been repaired
-     vessel 4 has been repaired
-     vessel 5 has been repaired
-     vessel 6 has been repaired
-all stenosis repairs completed
-** adaptation results for OutletTree3 **
-    R_new = 765.2234748457838, R_old = 572.5897215662584
-    The change in resistance is 192.63375327952542
-** adaptation results for OutletTree6 **
-    R_new = 144.5604796685252, R_old = 171.9042682741146
-    The change in resistance is -27.343788605589396
-Getting clinical target values...
-Optimizing preop outlet resistance...
-Getting clinical target values...
-Optimizing preop outlet resistance...
-0D optimizationoptimization completed! 
-     Optimization solution: [572.57441217 171.89218543]
-     Objective function value: 3.592080702280684e-08
-     Number of iterations: 128
-Outlet resistances optimized! [572.57441217 171.89218543]
-Getting clinical target values...
-Optimizing preop outlet resistance...
-Getting clinical target values...
-Optimizing preop outlet resistance...
-0D optimizationoptimization completed! 
-     Optimization solution: [572.57441217 171.89218543]
-     Objective function value: 3.592080702280684e-08
-     Number of iterations: 128
-Outlet resistances optimized! [572.57441217 171.89218543]
+** building tree for resistance: 572.5605569134406 **
+     Resistance after optimization is 572.8725342794132
+
+     the optimized diameter is 0.3590173760107835
+
+     the number of vessels is 859
+** building tree for resistance: 171.85134395526833 **
+     Resistance after optimization is 171.7845902349422
+
+     the optimized diameter is 0.5436672114928409
+
+     the number of vessels is 2611

@@ -9,7 +9,7 @@ import svzerodplus
 # utilities for working with structured trees
 
 
-def get_pressure(result_array, branch):
+def get_pressure(result_array, branch, convert_to_mmHg=False):
     '''
     get the time series, systolic, diastolic and mean pressure for a given branch
 
@@ -22,14 +22,40 @@ def get_pressure(result_array, branch):
     :return mean_p: time average pressure
     '''
     pressures = get_branch_result(result_array, 'pressure_in', branch, steady=False)
+
+    if convert_to_mmHg:
+        pressures = np.array(pressures) / 1333.22
+
     systolic_p = np.min(pressures)
     diastolic_p = np.max(pressures)
     mean_p = np.mean(pressures)
 
     return pressures, systolic_p, diastolic_p, mean_p
 
+def plot_pressure(result_array, branch, save=False, fig_dir=None):
+    '''
+    plot the pressure time series for a given branch
 
-def get_outlet_data(config: dict, result_array, data_name: str, steady=False):
+    :param result_array: result array from svzerodplus
+    :param branch: branch number
+    :param save: save the plot after optimization is complete
+    :param fig_dir: path to figures directory to save the optimization plot
+    '''
+    pressures, systolic_p, diastolic_p, mean_p = get_pressure(result_array, branch)
+
+    plt.clf()
+    plt.plot(range(len(pressures)), pressures, marker='o')
+    plt.xlabel('Time')
+    plt.ylabel('Pressure')
+    plt.title('Pressure Time Series')
+    plt.pause(0.001)
+    if save:
+        plt.savefig(str(fig_dir) + '/pressure_branch_' + str(branch) + '.png')
+    else:
+        plt.show()
+
+
+def get_outlet_data(config: dict, result_array, data_name: str, steady=True):
     '''
     get a result at the outlets of a model
 
@@ -93,7 +119,7 @@ def get_branch_d(config, branch):
     l = 0
     for vessel_config in config["vessels"]:
         if get_branch_id(vessel_config) == branch:
-            # get total resistance of branch
+            # get total resistance of branch if it is split into multiple segments
             R += vessel_config["zero_d_element_values"].get("R_poiseuille")
             l += vessel_config["vessel_length"]
             break
@@ -134,13 +160,13 @@ def get_branch_result(result_array, data_name: str, branch: int, steady: bool=Fa
     :param result_array: svzerodplus result array
     :param data_name: q, p or wss
     :param branch: branch id to get result for
-    :param steady: True if the model inflow is steady
+    :param steady: True if the model inflow is steady or youw want to get the average value
 
     :return: result array for branch and QoI
     '''
 
     if steady:
-        return result_array[data_name][branch][-1]
+        return np.mean(result_array[data_name][branch])
     else:
         return result_array[data_name][branch]
 
@@ -159,8 +185,30 @@ def get_resistances(config):
             resistance.append(bc_config['bc_values'].get('R'))
         if bc_config["bc_type"] == 'RCR':
             resistance.append(bc_config['bc_values'].get('Rp') + bc_config['bc_values'].get('Rd'))
+
     np.array(resistance)
+
     return resistance
+
+
+def get_rcrs(config, one_to_nine=False):
+    '''
+    get the outlet rcr bc values from a svzerodplus config
+
+    :param config: svzerodplus config dict
+
+    :return rcrs: list of outflow bc rcr values as a flattened array [Rp, C, Rd]
+    '''
+    rcrs = []
+    for bc_config in config["boundary_conditions"]:
+        if bc_config["bc_type"] == 'RCR':
+            rcrs.append([bc_config['bc_values'].get('Rp'), bc_config['bc_values'].get('C'), bc_config['bc_values'].get('Rd')])
+    if one_to_nine:
+        for rcr in rcrs:
+            rcr[2] = rcr[0] * 9
+    rcr = np.array(rcrs).flatten()
+
+    return rcr
 
 
 def write_resistances(config, resistances):
@@ -174,6 +222,24 @@ def write_resistances(config, resistances):
     for bc_config in config["boundary_conditions"]:
         if bc_config["bc_type"] == 'RESISTANCE':
             bc_config['bc_values']['R'] = resistances[idx]
+            idx += 1
+
+def write_rcrs(config, rcrs):
+    '''
+    write a list of rcrs to the outlet bcs of a config dict
+    
+    :param config: svzerodplus config dict
+    :param rcrs: list of rcrs, ordered by outlet in the config
+    '''
+    idx = 0
+    for bc_config in config["boundary_conditions"]:
+        if bc_config["bc_type"] == 'RCR':
+            # proximal resistance
+            bc_config['bc_values']['Rp'] = rcrs[3 * idx]
+            # capacitance
+            bc_config['bc_values']['C'] = rcrs[3 * idx + 1]
+            # distal resistance
+            bc_config['bc_values']['Rd'] = rcrs[3 * idx + 2]
             idx += 1
 
 
@@ -190,7 +256,7 @@ def get_value_from_csv(csv_file, name):
     with open(csv_file, 'r') as file:
         reader = csv.reader(file)
         for row in reader:
-            if name.lower() in row[0].lower():
+            if name.lower() in row[0].lower() and name.lower()[0] == row[0].lower()[0]:
                 return row[1]  # Return the value in the same row
 
     return None  # Return None if the name is not found
@@ -311,7 +377,7 @@ def assign_flow_to_root(result_array, root, steady=False):
     assign_flow(root)
 
 
-def run_svzerodplus(config):
+def run_svzerodplus(config: dict):
     """Run the svzerodplus solver and return a dict of results.
 
     :param config: svzerodplus config dict
@@ -397,24 +463,58 @@ def get_clinical_targets(clinical_targets: csv, log_file: str):
 
     :param clinical_targets: path to csv file with clinical targets
     :param log_file: path to log file
+
+    :return q: cardiac output [cm3/s]
+    :return mpa_ps: mpa systolic, diastolic, mean pressures [mmHg]
+    :return rpa_ps: rpa systolic, diastolic, mean pressures [mmHg]
+    :return lpa_ps: lpa systolic, diastolic, mean pressures [mmHg]
+    :return wedge_p: wedge pressure [mmHg]
     '''
     write_to_log(log_file, "Getting clinical target values...")
 
     bsa = float(get_value_from_csv(clinical_targets, 'bsa'))
     cardiac_index = float(get_value_from_csv(clinical_targets, 'cardiac index'))
     q = bsa * cardiac_index * 16.667 # cardiac output in L/min. convert to cm3/s
+    # get important mpa pressures
     mpa_pressures = get_value_from_csv(clinical_targets, 'mpa pressures') # mmHg
-    mpa_sys_p_target = int(mpa_pressures[0:2])
-    mpa_dia_p_target = int(mpa_pressures[3:5])
-    mpa_mean_p_target = int(get_value_from_csv(clinical_targets, 'mpa mean pressure'))
-    target_ps = np.array([
-        mpa_sys_p_target,
-        mpa_dia_p_target,
-        mpa_mean_p_target
+    mpa_sys_p = int(mpa_pressures[0:2])
+    mpa_dia_p = int(mpa_pressures[3:5])
+    mpa_mean_p = int(get_value_from_csv(clinical_targets, 'mpa mean pressure'))
+    mpa_ps = np.array([
+        mpa_sys_p,
+        mpa_dia_p,
+        mpa_mean_p
     ])
-    target_ps = target_ps * 1333.22 # convert to barye
 
-    return q, cardiac_index, mpa_pressures, target_ps
+    # get important rpa pressures
+    rpa_pressures = get_value_from_csv(clinical_targets, 'rpa pressures') # mmHg
+    rpa_sys_p = int(rpa_pressures[0:2])
+    rpa_dia_p = int(rpa_pressures[3:5])
+    rpa_mean_p = int(get_value_from_csv(clinical_targets, 'rpa mean pressure'))
+    rpa_ps = np.array([
+        rpa_sys_p,
+        rpa_dia_p,
+        rpa_mean_p
+    ])
+
+    # get important lpa pressures
+    lpa_pressures = get_value_from_csv(clinical_targets, 'lpa pressures') # mmHg
+    lpa_sys_p = int(lpa_pressures[0:2])
+    lpa_dia_p = int(lpa_pressures[3:5])
+    lpa_mean_p = int(get_value_from_csv(clinical_targets, 'lpa mean pressure'))
+    lpa_ps = np.array([
+        lpa_sys_p,
+        lpa_dia_p,
+        lpa_mean_p
+    ])
+
+    # get wedge pressure
+    wedge_p = int(get_value_from_csv(clinical_targets, 'wedge pressure'))
+
+    # get RPA flow split
+    rpa_split = float(get_value_from_csv(clinical_targets, 'pa flow split')[0:2]) / 100
+
+    return q, mpa_ps, rpa_ps, lpa_ps, wedge_p, rpa_split
 
 
 def config_flow(preop_config, q):
@@ -424,18 +524,276 @@ def config_flow(preop_config, q):
             bc_config["bc_values"]["t"] = [0.0, 1.0]
 
 
-def create_pa_optimizer_config(preop_config, log_file, clinical_targets):
+def create_pa_optimizer_config(preop_config, q, wedge_p, log_file=None):
     '''
     create a config dict for the pa optimizer
     
     :param preop_config: preoperative config dict
+    :param q: cardiac output
+    :param wedge_p: wedge pressure for the distal pressure bc
     :param log_file: path to log file
-    :param clinical_targets: path to csv file with clinical targets
     
     :return pa_config: config dict for the pa optimizer
     '''
-    pa_config = copy.deepcopy(preop_config)
+
+    write_to_log(log_file, "Creating PA optimizer config...")
+
+    pa_config = {'boundary_conditions': [],
+                 'simulation_parameters': [], 
+                 'vessels': [],
+                 'junctions': []}
+
+    # copy the inflow boundary condition
+    pa_config['boundary_conditions'].append(
+        {
+            "bc_name": "INFLOW",
+            "bc_type": "FLOW",
+            "bc_values": {
+                "Q": [q, q],
+                "t": [0.0, 1.0]
+            }
+        }
+    )
+
+    # set the outflow boundary conditions
+    pa_config['boundary_conditions'].append(
+        {
+            "bc_name": "RPA_BC",
+            "bc_type": "RESISTANCE",
+            "bc_values": {
+                "R": 300.0,
+                "Pd": wedge_p * 1333.22
+            }
+        }
+    )
+    pa_config['boundary_conditions'].append(
+        {
+            "bc_name": "LPA_BC",
+            "bc_type": "RESISTANCE",
+            "bc_values": {
+                "R": 300.0,
+                "Pd": wedge_p * 1333.22
+            }
+        }
+    )
+
+    # copy the simulation parameters
+    pa_config['simulation_parameters'] = preop_config['simulation_parameters']
+
+    # create the MPA, RPA and LPA vessels
+    pa_config['vessels'] = [
+        # MPA
+        preop_config['vessels'][0],
+
+        { # RPA proximal
+            "vessel_id": 1,
+            "vessel_length": 10.0,
+            "vessel_name": "branch1_seg0",
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "C": 0.0,
+                "L": 0.0,
+                "R_poiseuille": 100.0, # R_RPA_proximal
+                "stenosis_coefficient": 0.0
+            }
+        },
+        {   # LPA proximal
+            "vessel_id": 2,
+            "vessel_length": 10.0,
+            "vessel_name": "branch2_seg0",
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "C": 0.0,
+                "L": 0.0,
+                "R_poiseuille": 10.0, # R_LPA_proximal
+                "stenosis_coefficient": 0.0
+            }
+        },
+        {      # RPA distal
+            "boundary_conditions":{
+                "outlet": "RPA_BC"
+            },
+            "vessel_id": 3,
+            "vessel_length": 100.0,
+            "vessel_name": "branch3_seg0",
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "C": 0.0,
+                "L": 0.0,
+                "R_poiseuille": 0.0, # R_RPA_distal
+                "stenosis_coefficient": 0.0
+            }
+        },
+        {   # LPA distal
+            "boundary_conditions":{
+                "outlet": "LPA_BC"
+            },
+            "vessel_id": 4,
+            "vessel_length": 100.0,
+            "vessel_name": "branch4_seg0",
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "C": 0.0,
+                "L": 0.0,
+                "R_poiseuille": 0.0, # R_LPA_distal
+                "stenosis_coefficient": 0.0
+            }
+        }
+    ]
+    
+    
+    # create the junctions
+    pa_config['junctions'] = [
+        {
+            "inlet_vessels": [
+                0
+            ],
+            "junction_name": "J0",
+            "junction_type": "internal_junction",
+            "outlet_vessels": [
+                1,
+                2
+            ]
+        },
+        {
+            "inlet_vessels": [
+                1
+            ],
+            "junction_name": "J1",
+            "junction_type": "internal_junction",
+            "outlet_vessels": [
+                3
+            ]
+        },
+        {
+            "inlet_vessels": [
+                2
+            ],
+            "junction_name": "J2",
+            "junction_type": "internal_junction",
+            "outlet_vessels": [
+                4
+            ]
+        }]
+    
+    return pa_config
+
+
+def loss_function_bound_penalty(value, target, lb=None, ub=None):
+    '''
+    loss function penalty for optimization with bounds
+    
+    :param value: observed value
+    :param target: target value
+    :param lb: optional lower bound
+    :param ub: optional upper bound
+    
+    :return penalty: penalty value
+    '''
+
+    if lb is None:
+        lb = target - 10 # default lower bound is 10 less than target
+    if ub is None:
+        ub = target + 10 # default upper bound is 10 more than target
+
+    # Normalized by the tuning bounds
+    g1 = (lb - value) / (ub - lb)
+    g2 = (value - ub) / (ub - lb)
+
+    if np.any(g1 >= 0) or np.any(g2 >= 0):
+        return -np.inf
+    else:
+        return 0.1 * np.sum(np.log(-g1) + np.log(-g2))
+
+
+def get_pa_config_resistances(pa_config):
+    '''
+    get the important resistance values from a reduced pa config dict
+
+    :param pa_config: reduced pa config dict
+
+    :return: list of resistances [R_RPA_proximal, R_LPA_proximal, R_RPA_distal, R_LPA_distal, R_RPA_BC, R_LPA_BC]
+    '''
+
+    R_RPA_proximal = pa_config['vessels'][1]['zero_d_element_values']['R_poiseuille']
+    R_LPA_proximal = pa_config['vessels'][2]['zero_d_element_values']['R_poiseuille']
+    R_RPA_distal = pa_config['vessels'][3]['zero_d_element_values']['R_poiseuille']
+    R_LPA_distal = pa_config['vessels'][4]['zero_d_element_values']['R_poiseuille']
+    R_RPA_BC = pa_config['boundary_conditions'][1]['bc_values']['R']
+    R_LPA_BC = pa_config['boundary_conditions'][2]['bc_values']['R']
+
+    return [R_RPA_proximal, R_LPA_proximal, R_RPA_BC, R_LPA_BC] # R_RPA_distal, R_LPA_distal,
+
+def write_pa_config_resistances(pa_config, resistances):
+    '''
+    write the important resistance values to a reduced pa config dict
+
+    :param pa_config: reduced pa config dict
+    :param resistances: list of resistances [R_RPA_proximal, R_LPA_proximal, R_RPA_distal, R_LPA_distal, R_RPA_BC, R_LPA_BC]
+    '''
+
+    pa_config['vessels'][1]['zero_d_element_values']['R_poiseuille'] = resistances[0]
+    pa_config['vessels'][2]['zero_d_element_values']['R_poiseuille'] = resistances[1]
+    # pa_config['vessels'][3]['zero_d_element_values']['R_poiseuille'] = resistances[2]
+    # pa_config['vessels'][4]['zero_d_element_values']['R_poiseuille'] = resistances[3]
+    pa_config['boundary_conditions'][1]['bc_values']['R'] = resistances[2]
+    pa_config['boundary_conditions'][2]['bc_values']['R'] = resistances[3]
+
+def get_pa_optimization_values(result):
+    '''
+    get the fucntion values for the pa optimization from a result array
+
+    :param result: result array from svzerodplus
+
+    :return: list of targets [Q_rpa, P_mpa, P_rpa, P_lpa], pressures in mmHg
+    '''
+
+    # rpa flow, for flow split optimization
+    Q_rpa = get_branch_result(result, 'flow_in', 1, steady=True)
+
+    # mpa pressure
+    P_mpa = get_branch_result(result, 'pressure_in', 0, steady=True) /  1333.2 
+
+    # rpa pressure
+    P_rpa = get_branch_result(result, 'pressure_out', 1, steady=True) / 1333.2
+
+    # lpa pressure
+    P_lpa = get_branch_result(result, 'pressure_out', 2, steady=True) / 1333.2
+
+    return np.array([Q_rpa, P_mpa, P_rpa, P_lpa])
+
+
+
+def find_rpa_lpa_branches(config):
+    '''
+    find the LPA and RPA branches in a config dict. 
+    We assume that this is the first junction in the config with 2 distinct outlet vessels.
+    
+    :param config: svzerodplus config dict
+    
+    :return rpa_lpa_branch: list of ints of RPA, LPA branch id
+    '''
+    
+    junction_id = 0
+    junction_found = False
+    # search for the junction with 2 outlet vessels (LPA and RPA)
+    while not junction_found:
+        if len(config["junctions"][junction_id]["outlet_vessels"]) == 2:
+            rpa_lpa_id = config["junctions"][junction_id]["outlet_vessels"]
+            junction_found = True
+        
+        elif len(config["junctions"][junction_id]["outlet_vessels"]) != 2:
+            junction_id += 1
+
+    rpa_lpa_branch = [1, 2]
+    for i, id in enumerate(rpa_lpa_id):
+        for vessel_config in config["vessels"]:
+            if vessel_config["vessel_id"] == id:
+                rpa_lpa_branch[i] = get_branch_id(vessel_config)
+                
+
+    return rpa_lpa_branch
+
 
     
-
-    pass
+    

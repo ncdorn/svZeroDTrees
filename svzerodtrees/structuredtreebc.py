@@ -27,8 +27,9 @@ class StructuredTreeOutlet():
         # parameter attributes
         self.params = params
         self.simparams = simparams
-        # initial diameter of the vessel from which the tree starts
+        # initial diameter (in cm) of the vessel from which the tree starts
         self.initialD = ((128 * self.params["eta"] * self.params["l"]) / (np.pi * self.params["R"])) ** (1 / 4)
+
         # set up empty block dict if not generated from pre-existing tree
         if config is None:
             self.name = name
@@ -112,7 +113,7 @@ class StructuredTreeOutlet():
 
     def reset_tree(self, keep_root=False):
         """
-        reset the block dict if you are generating many iterations of the structured tree to optimize the radius
+        reset the block dict if you are generating many iterations of the structured tree to optimize the diameter
 
         :param keep_root: bool to decide whether to keep the root TreeVessel instance
         """
@@ -146,12 +147,12 @@ class StructuredTreeOutlet():
                 self.block_dict["vessels"].append(current_vessel.right.info)
 
 
-    def build_tree(self, initial_r=None, d_min=0.049, optimizing=False, alpha=0.9, beta=0.6):
+    def build_tree(self, initial_d=None, d_min=0.0049, optimizing=False, alpha=0.9, beta=0.6):
         '''
         recursively build the structured tree
 
-        :param initial_r: root vessel radius
-        :param d_min: diameter at which the vessel is considered "collapsed" and the tree terminates
+        :param initial_d: root vessel diameter
+        :param d_min: diameter at which the vessel is considered "collapsed" and the tree terminates [cm]. default is 100 um
         :param optimizing: True if the tree is being built as part of an optimization scheme, so the block_dict will be
             reset for each optimization iteration
         :param alpha: left vessel scaling factor (see Olufsen et al. 2012)
@@ -161,19 +162,18 @@ class StructuredTreeOutlet():
         if optimizing:
             self.reset_tree() # reset block dict if making the tree many times
 
-        if initial_r is None: # set default value of initial_r
-            initial_r = self.initialD / 2
+        if initial_d is None: # set default value of initial_r
+            initial_d = self.initialD
 
         if d_min <= 0:
             raise ValueError("The min diameter must be greater than 0.")
 
-        if initial_r <= 0:
-            raise Exception("initial_r is invalid, " + str(initial_r))
+        if initial_d <= 0:
+            raise Exception("initial_d is invalid, " + str(initial_d))
         if beta ==0:
             raise Exception("beta is zero")
         # add r_min into the block dict
         self.block_dict["D_min"] = d_min
-        initial_d = initial_r * 2
         # initialize counting values
         vessel_id = 0
         junc_id = 0
@@ -238,16 +238,6 @@ class StructuredTreeOutlet():
                 junc_id += 1
 
 
-    # def update_zero_d_params(self):
-    #     # update the zero_d parameters of the block based on a change in vessel diameter
-    #     for vessel in self.block_dict["vessels"]:
-    #         R, C, L, l = self.calc_zero_d_values(vessel.get("vessel_D"))
-    #         vessel["zero_d_element_values"]["R_poiseulle"] = R
-    #         vessel["zero_d_element_values"]["C"] = C
-    #         vessel["zero_d_element_values"]["L"] = L
-    #         vessel["vessel_length"] = l
-
-
     def adapt_constant_wss(self, Q, Q_new):
         R_old = self.root.R_eq  # calculate pre-adaptation resistance
 
@@ -261,7 +251,7 @@ class StructuredTreeOutlet():
             
             :return: length of the updated diameter
             '''
-            # adapt the radius of the vessel based on the constant shear stress assumption
+            # adapt the diameter of the vessel based on the constant shear stress assumption
             return (Q_new / Q) ** (1 / 3) * d
 
         def update_diameter(vessel, update_func):
@@ -288,43 +278,44 @@ class StructuredTreeOutlet():
         return R_old, R_new
 
 
-    def optimize_tree_radius(self, Resistance=5.0, log_file=None):
+    def optimize_tree_diameter(self, Resistance=5.0,  log_file=None, d_min=0.0049):
         """ 
-        Use Nelder-Mead to optimize the radius and number of vessels with respect to the desired resistance
+        Use Nelder-Mead to optimize the diameter and number of vessels with respect to the desired resistance
         
         :param Resistance: resistance value to optimize against
         :param log_file: optional path to log file
         """
 
         # initial guess is oulet r
-        r_guess = self.initialD / 2
+        d_guess = self.initialD / 2
 
         # define the objective function to be minimized
-        def r_min_objective(radius):
+        def r_min_objective(diameter, d_min):
             '''
             objective function for optimization
 
-            :param radius: inlet radius of the structured tree
+            :param diameter: inlet diameter of the structured tree
 
             :return: squared difference between target resistance and built tree resistance
             '''
             # build tree
-            self.build_tree(radius[0], optimizing=True)
+            self.build_tree(diameter[0], d_min=d_min, optimizing=True)
 
             # get equivalent resistance
             R = self.root.R_eq
 
-            # calculate squared difference
-            R_diff = (Resistance - R)**2
+            # calculate squared relative difference
+            loss = ((Resistance - R) / R) ** 2
 
-            return R_diff
+            return loss
 
         # define optimization bound (lower bound = r_min, which is the termination diameter)
         bounds = Bounds(lb=0.005)
 
         # perform Nelder-Mead optimization
-        r_final = minimize(r_min_objective,
-                           r_guess,
+        d_final = minimize(r_min_objective,
+                           d_guess,
+                           args=(d_min),
                            options={"disp": True},
                            method='Nelder-Mead',
                            bounds=bounds)
@@ -332,9 +323,9 @@ class StructuredTreeOutlet():
         R_final = self.root.R_eq
 
         write_to_log(log_file, "     Resistance after optimization is " + str(R_final) + "\n")
-        write_to_log(log_file, "     the optimized radius is " + str(r_final.x[0]) + "\n")
+        write_to_log(log_file, "     the optimized diameter is " + str(d_final.x[0]) + "\n")
 
-        return r_final.x, R_final
+        return d_final.x, R_final
     
 
     def optimize_alpha_beta(self, Resistance=5.0, log_file=None):
@@ -438,7 +429,7 @@ class StructuredTreeOutlet():
         '''
         return self.root.R_eq
     
-    def integrate_pries_secomb(self, ps_params=[0.68, .70, 2.45, 1.72, 1.73, 27.9, .103, 3.3 * 10 ** -8], dt=0.01, tol = 10 ** -5, time_avg_q=True):
+    def integrate_pries_secomb(self, ps_params=[0.68, .70, 2.45, 1.72, 1.73, 27.9, .103, 3.3 * 10 ** -8], dt=0.01, tol = .01, time_avg_q=True):
         '''
         integrate pries and secomb diff eq by Euler integration for the tree until dD reaches some tolerance (default 10^-5)
 
@@ -450,7 +441,7 @@ class StructuredTreeOutlet():
                 tau_ref [=] dyn/cm2
                 Q_ref [=] cm3/s
         :param dt: time step for explicit euler integration
-        :param tol: tolerance for euler integration convergence
+        :param tol: tolerance (relative difference in function value) for euler integration convergence
         :param time_avg_q: True if the flow in the vessels is assumed to be steady
 
         :return: equivalent resistance of the tree
@@ -461,6 +452,9 @@ class StructuredTreeOutlet():
 
         # initialize converged stop condition
         converged = False
+
+        # intialize iteration count
+        iter = 0
 
         # begin euler integration
         while not converged:
@@ -498,12 +492,18 @@ class StructuredTreeOutlet():
 
             # check if dD is below the tolerance. if so, end integration
             dD_diff = abs(next_SS_dD ** 2 - SS_dD ** 2)
-            print(dD_diff)
-            if dD_diff < tol:
+            if iter == 0:
+                first_dD = dD_diff
+            
+            print(dD_diff / first_dD)
+            if dD_diff / first_dD < tol:
                 converged = True
             
             # if not converged, continue integration
             SS_dD = next_SS_dD
+
+            # increase iteration count
+            iter += 1
 
         print('Pries and Secomb integration completed! R = ' + str(self.root.R_eq))
 
