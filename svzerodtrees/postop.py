@@ -13,17 +13,21 @@ def summarize_results(config, preop_result, postop_result, final_result, conditi
     :return: summ_results dict with summarized results
     '''
 
+    # find the lpa and rpa branch
+    rpa_lpa_branch = find_rpa_lpa_branches(config)
+
     # initialize summary results dict
     summ_results = {condition: {}}
 
     # get summary results for the MPA
     summ_results[condition]['mpa'] = branch_summary_result(config, preop_result, postop_result, final_result, 0)
 
-    # get summary results for the LPA
-    summ_results[condition]['lpa'] = branch_summary_result(config, preop_result, postop_result, final_result, 1)
-
     # get summary results for the RPA
-    summ_results[condition]['rpa'] = branch_summary_result(config, preop_result, postop_result, final_result, 2)
+    summ_results[condition]['rpa'] = branch_summary_result(config, preop_result, postop_result, final_result, rpa_lpa_branch[0])
+
+    # get summary results for the LPA
+    summ_results[condition]['lpa'] = branch_summary_result(config, preop_result, postop_result, final_result, rpa_lpa_branch[1])
+
 
 
     return summ_results

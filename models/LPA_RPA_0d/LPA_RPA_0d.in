@@ -415,16 +415,16 @@
             }
         },
         {
-            "bc_name": "RESISTANCE_0",
-            "bc_type": "RESISTANCE",
+            "bc_name": "RCR_0",
+            "bc_type": "RCR",
             "bc_values": {
                 "Pd": 0.0,
                 "R": 10000.0
             }
         },
         {
-            "bc_name": "RESISTANCE_1",
-            "bc_type": "RESISTANCE",
+            "bc_name": "RCR_1",
+            "bc_type": "RCR",
             "bc_values": {
                 "Pd": 0.0,
                 "R": 10000.0

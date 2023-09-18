@@ -14,6 +14,7 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
     :param vis_trees: if true, make tree visualization figures
     '''
     
+    # start off somewhere in the models directory, same level as the experiment config file
     with open(exp_config_file) as ff:
         exp_config = json.load(ff)
 
@@ -22,11 +23,18 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
     modelname = exp_config["model"]
     adapt = exp_config["adapt"] # either ps (pries and secomb) or cwss (constant wall shear stress)
     optimized = exp_config["optimized"] # true if the experiment has been optimized before, to skip the preop optimization
+    is_full_pa = exp_config["is_full_pa_tree"]
+    mesh_surfaces_path = exp_config["mesh_surfaces_path"]
     repair_config = exp_config["repair"]
 
     # check if we are in an experiments directory, if not assume we are in it
     if os.path.exists('../experiments'): # we are in the experiments directory already
 
+        os.system('mkdir ' + expname)
+
+    elif os.path.exists('experiments'): # we are ond directory above the experiments directory
+
+        os.chdir('experiments')
         os.system('mkdir ' + expname)
 
     else: # we are not in the experiments directory and need to create one
@@ -64,17 +72,25 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
     log_file = expdir_path + expname + '.log'
 
     # initialize log file
-    write_to_log(log_file, 'beginning experiment ' + expname,  write=True)
+    write_to_log(log_file, 'beginning experiment ' + expname + '!',  write=True)
 
     # optimize preoperative outlet boundary conditions
     if not optimized:
-
-        preop_config, preop_result = preop.optimize_outlet_bcs(
-            input_file,
-            clinical_targets,
-            log_file,
-            show_optimization=False
-        )
+        if is_full_pa:
+            preop_config, preop_result = preop.optimize_pa_bcs(
+                input_file,
+                mesh_surfaces_path,
+                clinical_targets,
+                log_file,
+                show_optimization=False
+            )
+        else:
+            preop_config, preop_result = preop.optimize_outlet_bcs(
+                input_file,
+                clinical_targets,
+                log_file,
+                show_optimization=False
+            )
 
         # save optimized config and result
         with open('preop_config.in', 'w') as ff:
