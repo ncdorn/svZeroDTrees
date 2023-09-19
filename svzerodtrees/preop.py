@@ -367,7 +367,7 @@ def construct_cwss_trees(config: dict, result, log_file=None, d_min=0.0049, vis_
     for vessel_config in config["vessels"]:
         if "boundary_conditions" in vessel_config:
             if "outlet" in vessel_config["boundary_conditions"]:
-                print("** building tree for outlet " + str(outlet_idx) + " of " + str(len(q_outs)) + " **")
+                print("** building tree for outlet " + str(outlet_idx) + " of " + str(len(q_outs) - 1) + " **")
                 for bc_config in config["boundary_conditions"]:
                     if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
                         outlet_tree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, 

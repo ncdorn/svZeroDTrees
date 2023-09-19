@@ -35,7 +35,7 @@ def adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_fi
         if "boundary_conditions" in vessel_config:
             if "outlet" in vessel_config["boundary_conditions"]:
                 for bc_config in adapted_config["boundary_conditions"]:
-                    if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
+                    if vessel_config["boundary_conditions"]["outlet"] == bc_config["bc_name"]:
                         # generate the postoperative tree with the postop outlet flowrate and pressure
                         outlet_stree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, 
                                                                                adapted_config["simulation_parameters"],
@@ -97,7 +97,7 @@ def adapt_constant_wss(postop_config, trees, preop_result, postop_result, log_fi
         if "boundary_conditions" in vessel_config:
             if "outlet" in vessel_config["boundary_conditions"]:
                 for bc_config in adapted_config["boundary_conditions"]:
-                    if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
+                    if vessel_config["boundary_conditions"]["outlet"] == bc_config["bc_name"]:
                         # adapt the cwss tree
                         R_old, R_new = trees[outlet_idx].adapt_constant_wss(Q=preop_q[outlet_idx], Q_new=postop_q[outlet_idx])
 
