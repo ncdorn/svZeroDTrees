@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from svzerodtrees.utils import *
 from scipy.optimize import minimize
 from svzerodtrees.adaptation import *
-from svzerodtrees import operation, preop, interface
+from svzerodtrees import operation, preop, interface, postop
 import pickle
 
 
@@ -144,6 +144,10 @@ def test_cwss_adaptation():
 
     adapted_config, adapted_result, trees = adapt_constant_wss(postop_config, trees, preop_result, postop_result, log_file)
 
+    result = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result, condition='repair')
+
+    print(result)
+
 
 def test_pries_adaptation():
     '''
@@ -168,7 +172,7 @@ def test_pries_adaptation():
 
     postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, repair_config, log_file)
 
-    adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_file)
+    adapted_config, adapted_result, trees = adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_file)
 
 
 def test_run_from_file():
