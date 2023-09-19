@@ -28,12 +28,6 @@ def summarize_results(config, preop_result, postop_result, final_result, conditi
     # get summary results for the LPA
     summ_results[condition]['lpa'] = branch_summary_result(config, preop_result, postop_result, final_result, rpa_lpa_branch[1])
 
-    # get summar results for all other vessels
-    for vessel_config in config['vessels']:
-        id = get_branch_id[vessel_config]
-        if id not in [0, rpa_lpa_branch[0], rpa_lpa_branch[1]]:
-            summ_results[condition][id] = branch_summary_result(config, preop_result, postop_result, final_result, id)
-
 
 
     return summ_results
