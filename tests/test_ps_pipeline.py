@@ -96,7 +96,7 @@ def test_pries_tree_construction():
     with open('tests/cases/LPA_RPA_0d_steady/preop_result.out', 'rb') as ff:
         preop_result = pickle.load(ff)
 
-    trees = preop.construct_pries_trees(preop_config, preop_result, d_min=0.049, tol=0.1)
+    trees = preop.construct_pries_trees(preop_config, preop_result, d_min=0.5, tol=0.1)
 
 
 def test_repair_stenosis():
@@ -138,7 +138,7 @@ def test_cwss_adaptation():
 
     write_to_log(log_file, 'testing tree construction', write=True)
 
-    trees = preop.construct_cwss_trees(preop_config, preop_result, log_file)
+    trees = preop.construct_cwss_trees(preop_config, preop_result, log_file, d_min=0.049)
 
     postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, repair_config, log_file)
 
@@ -164,7 +164,7 @@ def test_pries_adaptation():
 
     write_to_log(log_file, 'testing tree construction', write=True)
 
-    trees = preop.construct_pries_trees(preop_config, preop_result, log_file)
+    trees = preop.construct_pries_trees(preop_config, preop_result, log_file, d_min=0.5)
 
     postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, repair_config, log_file)
 
@@ -207,4 +207,4 @@ def test_pa_optimizer():
 
 if __name__ == '__main__':
 
-    test_preop()
+    test_pries_adaptation()

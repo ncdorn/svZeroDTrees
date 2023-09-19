@@ -111,15 +111,20 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
 
     if adapt == 'ps': # use pries and secomb adaptation scheme
         
-        result = run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir)
+        result, adapted_config = run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir)
 
     elif adapt == 'cwss': # use constant wall shear stress adaptation scheme
         
-        result = run_cwss_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir)
+        result, adapted_config = run_cwss_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir)
 
     else:
         raise Exception('invalid adaptation scheme chosen')
     
+    # save the adapted config
+    with open(expdir_path + 'adapted_config.json', 'w') as ff:
+        json.dump(adapted_config, ff)
+    
+    # save the result
     with open(expdir_path + 'summary_results.out', 'w') as ff:
         json.dump(result, ff)
     
@@ -161,9 +166,9 @@ def run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_f
                                                                             log_file)
     
     # summarize results
-    results = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result)
+    result_summary = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result)
 
-    return results
+    return result_summary, adapted_config
 
 
 def run_cwss_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir):
@@ -201,7 +206,7 @@ def run_cwss_adaptation(preop_config, preop_result, repair_config, log_file, vis
     # summarize results
     results = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result)
 
-    return results
+    return results, adapted_config
 
 
 
