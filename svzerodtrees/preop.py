@@ -353,6 +353,7 @@ def construct_cwss_trees(config: dict, result, log_file=None, d_min=0.0049, vis_
     :param config: 0D solver config
     :param result: 0D solver result corresponding to config
     :param log_file: optional path to a log file
+    :param d_min: minimum vessel diameter for tree optimization
     :param vis_trees: boolean for visualizing trees
     :param fig_dir: [optional path to directory to save figures. Required if vis_trees = True.
 

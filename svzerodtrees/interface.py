@@ -146,8 +146,7 @@ def run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_f
     trees = preop.construct_pries_trees(preop_config, 
                                         preop_result, 
                                         log_file, 
-                                        vis_trees, 
-                                        fig_dir)
+                                        d_min=.0049)
 
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
     postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, 
@@ -185,8 +184,7 @@ def run_cwss_adaptation(preop_config, preop_result, repair_config, log_file, vis
     trees = preop.construct_cwss_trees(preop_config,
                                        preop_result,
                                        log_file,
-                                       vis_trees,
-                                       fig_dir)
+                                       d_min=.0049)
     
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
     postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, 
