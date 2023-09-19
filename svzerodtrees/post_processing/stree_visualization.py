@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from svzerodtrees.utils import *
 import json
 from math import trunc
-import seaborn as sns
+# import seaborn as sns
 import random
 
 def visualize_binary_tree(root,
