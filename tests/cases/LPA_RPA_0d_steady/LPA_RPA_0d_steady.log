@@ -11,3 +11,25 @@ testing tree construction
      the optimized diameter is 0.5436672114928409
 
      the number of vessels is 2611
+Getting clinical target values...
+Optimizing preop outlet resistance...
+0D optimization optimization completed! 
+
+     Optimization solution: [572.55332396 171.85945692]
+
+     Objective function value: 2.295839011055233e-08
+
+     Number of iterations: 10
+
+Outlet resistances optimized! [572.55332396 171.85945692]
+Getting clinical target values...
+Optimizing preop outlet resistance...
+0D optimization optimization completed! 
+
+     Optimization solution: [572.55332396 171.85945692]
+
+     Objective function value: 2.295839011055233e-08
+
+     Number of iterations: 10
+
+Outlet resistances optimized! [572.55332396 171.85945692]
