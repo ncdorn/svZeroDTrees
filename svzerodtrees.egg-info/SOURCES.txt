@@ -6,7 +6,9 @@ svzerodtrees/interface.py
 svzerodtrees/operation.py
 svzerodtrees/postop.py
 svzerodtrees/preop.py
+svzerodtrees/run_experiment.py
 svzerodtrees/structuredtreebc.py
+svzerodtrees/threedutils.py
 svzerodtrees/treevessel.py
 svzerodtrees/utils.py
 svzerodtrees.egg-info/PKG-INFO
@@ -14,6 +16,7 @@ svzerodtrees.egg-info/SOURCES.txt
 svzerodtrees.egg-info/dependency_links.txt
 svzerodtrees.egg-info/top_level.txt
 svzerodtrees/post_processing/__init__.py
+svzerodtrees/post_processing/pa_tree_analysis.py
 svzerodtrees/post_processing/plotting.py
 svzerodtrees/post_processing/stree_visualization.py
 svzerodtrees/post_processing/stree_visualization_OLD.py
