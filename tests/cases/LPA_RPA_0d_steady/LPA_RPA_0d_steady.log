@@ -32,3 +32,39 @@ pries and secomb integration completed for OutletTree2
     R_new = 1203.7364659943544, R_old = 431.412196973549
     The change in resistance is 772.3242690208053
 pries and secomb adaptation completed for all trees. R_old = [1284.142265083244, 431.412196973549] R_new = [3718.7970792560704, 1203.7364659943544]
+     Resistance after optimization is 171.7845902349422
+
+     the optimized diameter is 0.5436672114928409
+
+     the number of vessels is 1288125
+making repair according to repair config: {'location': 'proximal', 'degree': [1.0, 0.9]}
+** repairing stenoses in vessels [] **
+     vessel 1 has been repaired
+     vessel 2 has been repaired
+     vessel 3 has been repaired
+     vessel 4 has been repaired
+     vessel 5 has been repaired
+     vessel 6 has been repaired
+all stenosis repairs completed
+** adapting trees based on constant wall shear stress assumption **
+** adaptation results for OutletTree1 **
+    R_new = 905.6940838058272, R_old = 572.8725342794132
+    The change in resistance is 332.82154952641395
+** adaptation results for OutletTree2 **
+    R_new = 209.30676612348825, R_old = 171.7845902349422
+    The change in resistance is 37.52217588854606
+    pries and secomb integration completed, R_tree = 3617.4716315073274
+     the number of vessels is 2611
+making repair according to repair config: {'location': 'proximal', 'degree': [1.0, 0.9]}
+** repairing stenoses in vessels [] **
+     vessel 1 has been repaired
+     vessel 2 has been repaired
+     vessel 3 has been repaired
+     vessel 4 has been repaired
+     vessel 5 has been repaired
+     vessel 6 has been repaired
+all stenosis repairs completed
+** adapting trees based on Pries and Secomb model **
+pries and secomb integration completed for OutletTree1
+    R_new = 15077.943782873537, R_old = 8134.038441147157
+    The change in resistance is 6943.90534172638
