@@ -207,4 +207,4 @@ def test_pa_optimizer():
 
 if __name__ == '__main__':
 
-    test_pries_tree_construction()
+    test_preop()
