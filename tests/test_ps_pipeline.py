@@ -124,21 +124,22 @@ def test_cwss_adaptation():
     test the constant wss tree adaptation algorithm
     '''
     
-    with open('tests/cases/LPA_RPA_0d_steady/preop_config.in') as ff:
+    with open('tests/cases/full_pa_test/preop_config.in') as ff:
         preop_config = json.load(ff)
 
-    with open('tests/cases/LPA_RPA_0d_steady/preop_result.out', 'rb') as ff:
+    with open('tests/cases/full_pa_test/preop_result.out', 'rb') as ff:
         preop_result = pickle.load(ff)
     
     with open('tests/cases/repair.json') as ff:
         repair_dict = json.load(ff)
     repair_config = repair_dict['proximal']
 
-    log_file = 'tests/cases/LPA_RPA_0d_steady/LPA_RPA_0d_steady.log'
+    log_file = 'tests/cases/full_pa_test/test.log'
 
     write_to_log(log_file, 'testing tree construction', write=True)
 
-    trees = preop.construct_cwss_trees(preop_config, preop_result, log_file, d_min=0.049)
+    trees = preop.construct_cwss_trees(preop_config, preop_result, log_file, d_min=0.49)
+
 
     postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, repair_config, log_file)
 
@@ -146,7 +147,6 @@ def test_cwss_adaptation():
 
     result = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result, condition='repair')
 
-    print(result)
 
 
 def test_pries_adaptation():
@@ -211,4 +211,4 @@ def test_pa_optimizer():
 
 if __name__ == '__main__':
 
-    test_pries_adaptation()
+    test_cwss_adaptation()
