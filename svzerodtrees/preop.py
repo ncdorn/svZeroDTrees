@@ -3,6 +3,7 @@ import csv
 from pathlib import Path
 import numpy as np
 import json
+import math
 from svzerodtrees.utils import *
 from svzerodtrees.threedutils import *
 from svzerodtrees.post_processing.plotting import *
@@ -147,7 +148,7 @@ def optimize_outlet_bcs(input_file,
                         options={"disp": False},
                         )
     else:
-        bounds = Bounds(lb=0)
+        bounds = Bounds(lb=0, ub=math.inf)
         result = minimize(zerod_optimization_objective,
                           rcr,
                           args=(preop_config, target_ps, steady, rpa_lpa_branch, rpa_split),
@@ -229,7 +230,7 @@ def optimize_pa_bcs(input_file,
     R_0 = get_pa_config_resistances(pa_config)
 
     # define optimization bounds [0, inf)
-    bounds = Bounds(lb=0)
+    bounds = Bounds(lb=0, ub=math.inf)
 
     result = minimize(pa_opt_loss_fcn, R_0, args=(pa_config, optimization_targets), method="Nelder-Mead", bounds=bounds)
 
