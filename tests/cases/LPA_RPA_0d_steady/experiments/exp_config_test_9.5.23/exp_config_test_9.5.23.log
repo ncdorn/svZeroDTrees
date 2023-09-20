@@ -1,16 +1,17 @@
 beginning experiment exp_config_test_9.5.23!
 ** building tree for resistance: 572.5605569134406 **
-     Resistance after optimization is 572.8725342794132
+     Resistance after optimization is 572.3064809047935
 
-     the optimized diameter is 0.3590173760107835
+     the optimized diameter is 0.31014274162948324
 
-     the number of vessels is 418653
+     the number of vessels is 3
 ** building tree for resistance: 171.85134395526833 **
-     Resistance after optimization is 171.7845902349422
+     Resistance after optimization is 171.8653740875563
 
-     the optimized diameter is 0.5436672114928409
+     the optimized diameter is 0.469698360875773
 
-     the number of vessels is 1288125
+     the number of vessels is 3
+trees constructed for all outlets, creating json file...
 making repair according to repair config: {'location': 'proximal', 'degree': [1.0, 0.9]}
 ** repairing stenoses in vessels [] **
      vessel 1 has been repaired
@@ -22,8 +23,8 @@ making repair according to repair config: {'location': 'proximal', 'degree': [1.
 all stenosis repairs completed
 ** adapting trees based on constant wall shear stress assumption **
 ** adaptation results for OutletTree1 **
-    R_new = 905.6940838058272, R_old = 572.8725342794132
-    The change in resistance is 332.82154952641395
+    R_new = 667.8064691601651, R_old = 572.3064809047935
+    The change in resistance is 95.49998825537159
 ** adaptation results for OutletTree2 **
-    R_new = 209.30676612348825, R_old = 171.7845902349422
-    The change in resistance is 37.52217588854606
+    R_new = 153.80753182335133, R_old = 171.8653740875563
+    The change in resistance is -18.057842264204965
