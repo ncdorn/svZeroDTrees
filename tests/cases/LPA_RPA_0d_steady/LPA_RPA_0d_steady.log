@@ -24,9 +24,9 @@ making repair according to repair config: {'location': 'proximal', 'degree': [1.
 all stenosis repairs completed
 ** adapting trees based on Pries and Secomb model **
 pries and secomb integration completed for OutletTree1
-    R_new = 2406.3465223638145, R_old = 572.7996499860483
-    The change in resistance is 1833.5468723777662
+    R_new = 1849.7382086893074, R_old = 572.7996499860483
+    The change in resistance is 1276.938558703259
 pries and secomb integration completed for OutletTree2
-    R_new = 927.1985568319748, R_old = 171.87474060330112
-    The change in resistance is 755.3238162286736
-pries and secomb adaptation completed for all trees. R_old = [572.7996499860483, 171.87474060330112] R_new = [2406.3465223638145, 927.1985568319748]
+    R_new = 691.5745236714329, R_old = 171.87474060330112
+    The change in resistance is 519.6997830681318
+pries and secomb adaptation completed for all trees. R_old = [572.7996499860483, 171.87474060330112] R_new = [1849.7382086893074, 691.5745236714329]
