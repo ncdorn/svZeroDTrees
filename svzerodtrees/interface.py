@@ -150,7 +150,8 @@ def run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_f
     # construct trees
     trees = preop.construct_pries_trees(preop_config, 
                                         preop_result, 
-                                        log_file, 
+                                        log_file,
+					fig_dir=fig_dir, 
                                         d_min=.0049)
 
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
