@@ -138,7 +138,7 @@ def test_cwss_adaptation():
 
     write_to_log(log_file, 'testing tree construction', write=True)
 
-    trees = preop.construct_cwss_trees(preop_config, preop_result, log_file, d_min=0.49)
+    trees = preop.construct_cwss_trees(preop_config, preop_result, log_file, fig_dir='tests/cases/LPA_RPA_0d_steady/', d_min=0.49)
 
 
     postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, repair_config, log_file)
@@ -215,4 +215,4 @@ def test_pa_optimizer():
 
 if __name__ == '__main__':
 
-    test_pries_adaptation()
+    test_cwss_adaptation()
