@@ -183,7 +183,7 @@ def test_run_from_file():
     expfile = 'exp_config_test.json'
     os.chdir('tests/cases/LPA_RPA_0d_steady/experiments')
 
-    interface.run_from_file(expfile)
+    interface.run_from_file(expfile, vis_trees=True)
 
 
 def test_pa_optimizer():
@@ -215,4 +215,4 @@ def test_pa_optimizer():
 
 if __name__ == '__main__':
 
-    test_cwss_adaptation()
+    test_run_from_file()
