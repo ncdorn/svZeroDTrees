@@ -389,6 +389,9 @@ def construct_cwss_trees(config: dict, result, log_file=None, d_min=0.0049, vis_
 
     # if vis_trees:
     #     visualize_trees(config, roots, fig_dir=fig_dir, fig_name='_preop')
+    
+    with open('fig_dir/config_w_trees.json', 'w') as ff:
+        json.dump(config, ff)
 
     return trees
 
