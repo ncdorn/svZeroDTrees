@@ -278,12 +278,15 @@ class StructuredTreeOutlet():
         return R_old, R_new
 
 
-    def optimize_tree_diameter(self, Resistance=5.0,  log_file=None, d_min=0.0049):
+    def optimize_tree_diameter(self, Resistance=5.0,  log_file=None, d_min=0.0049, pries_secomb=False):
         """ 
         Use Nelder-Mead to optimize the diameter and number of vessels with respect to the desired resistance
         
         :param Resistance: resistance value to optimize against
         :param log_file: optional path to log file
+        :param d_min: minimum diameter of the vessels
+        :param pries_secomb: True if the pries and secomb model is used to adapt the vessels, so pries and secomb integration
+            is performed at every optimization iteration
         """
 
         # initial guess is oulet r
@@ -300,6 +303,10 @@ class StructuredTreeOutlet():
             '''
             # build tree
             self.build_tree(diameter[0], d_min=d_min, optimizing=True)
+
+            # integrate pries and secomb if necessary
+            if pries_secomb:
+                self.integrate_pries_secomb()
 
             # get equivalent resistance
             R = self.root.R_eq
@@ -456,6 +463,7 @@ class StructuredTreeOutlet():
         # intialize iteration count
         iter = 0
 
+        og_d = self.root.d
         # begin euler integration
         while not converged:
             
@@ -505,6 +513,6 @@ class StructuredTreeOutlet():
             # increase iteration count
             iter += 1
 
-        print('Pries and Secomb integration completed! R = ' + str(self.root.R_eq))
+        print('Pries and Secomb integration completed! R = ' + str(self.root.R_eq) + ', dD = ' + str(og_d - self.root.d))
 
         return self.root.R_eq

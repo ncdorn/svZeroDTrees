@@ -1,16 +1,18 @@
 testing tree construction
 ** building tree for resistance: 572.5605569134406 **
-     Resistance after optimization is 572.8725342794132
+     Resistance after optimization is 572.7996499860483
 
-     the optimized diameter is 0.3590173760107835
+     the optimized diameter is 0.4222225359051189
 
-     the number of vessels is 859
+    integrating pries and secomb...
+     the number of vessels is 3
 ** building tree for resistance: 171.85134395526833 **
-     Resistance after optimization is 171.7845902349422
+     Resistance after optimization is 171.87474060330112
 
-     the optimized diameter is 0.5436672114928409
+     the optimized diameter is 1.0541521348583984
 
-     the number of vessels is 2611
+    integrating pries and secomb...
+     the number of vessels is 29
 making repair according to repair config: {'location': 'proximal', 'degree': [1.0, 0.9]}
 ** repairing stenoses in vessels [] **
      vessel 1 has been repaired
@@ -20,10 +22,11 @@ making repair according to repair config: {'location': 'proximal', 'degree': [1.
      vessel 5 has been repaired
      vessel 6 has been repaired
 all stenosis repairs completed
-** adapting trees based on constant wall shear stress assumption **
-** adaptation results for OutletTree1 **
-    R_new = 905.6940838058272, R_old = 572.8725342794132
-    The change in resistance is 332.82154952641395
-** adaptation results for OutletTree2 **
-    R_new = 209.30676612348825, R_old = 171.7845902349422
-    The change in resistance is 37.52217588854606
+** adapting trees based on Pries and Secomb model **
+pries and secomb integration completed for OutletTree1
+    R_new = 2406.3465223638145, R_old = 572.7996499860483
+    The change in resistance is 1833.5468723777662
+pries and secomb integration completed for OutletTree2
+    R_new = 927.1985568319748, R_old = 171.87474060330112
+    The change in resistance is 755.3238162286736
+pries and secomb adaptation completed for all trees. R_old = [572.7996499860483, 171.87474060330112] R_new = [2406.3465223638145, 927.1985568319748]
