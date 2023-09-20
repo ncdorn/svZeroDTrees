@@ -124,15 +124,15 @@ def test_cwss_adaptation():
     test the constant wss tree adaptation algorithm
     '''
     
-    with open('tests/cases/full_pa_test/preop_config.in') as ff:
+    with open('models/AS1_SU0308_prestent/preop_config.in') as ff:
         preop_config = json.load(ff)
 
-    with open('tests/cases/full_pa_test/preop_result.out', 'rb') as ff:
+    with open('models/AS1_SU0308_prestent/preop_result.out', 'rb') as ff:
         preop_result = pickle.load(ff)
     
-    with open('tests/cases/repair.json') as ff:
+    with open('models/AS1_SU0308_prestent/experiments/AS1_cwss_adaptation.json') as ff:
         repair_dict = json.load(ff)
-    repair_config = repair_dict['proximal']
+    repair_config = repair_dict['repair'][0]
 
     log_file = 'tests/cases/full_pa_test/test.log'
 
@@ -146,6 +146,8 @@ def test_cwss_adaptation():
     adapted_config, adapted_result, trees = adapt_constant_wss(postop_config, trees, preop_result, postop_result, log_file)
 
     result = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result, condition='repair')
+
+    print(result)
 
 
 
@@ -173,6 +175,8 @@ def test_pries_adaptation():
     postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, repair_config, log_file)
 
     adapted_config, adapted_result, trees = adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_file)
+
+    result = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result, condition='repair')
 
 
 def test_run_from_file():
@@ -211,4 +215,4 @@ def test_pa_optimizer():
 
 if __name__ == '__main__':
 
-    test_cwss_adaptation()
+    test_pries_adaptation()

@@ -3,7 +3,7 @@ import copy
 from svzerodtrees.structuredtreebc import StructuredTreeOutlet
 
 
-def adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_file=None):
+def adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_file=None, tol=.01):
     '''
     adapt structured tree microvasculature model based on Pries et al. 1998
 
@@ -45,7 +45,7 @@ def adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_fi
                                                                                Q_outlet=[np.mean(postop_q[outlet_idx])],
                                                                                P_outlet=[np.mean(postop_p[outlet_idx])])
                         # integrate pries and secomb until dD tolerance is reached
-                        outlet_stree.integrate_pries_secomb()
+                        outlet_stree.integrate_pries_secomb(tol=tol)
 
                         write_to_log(log_file, 'pries and secomb integration completed for ' + outlet_stree.name)
                         write_to_log(log_file, "    R_new = " + str(outlet_stree.root.R_eq) + ", R_old = " + str(R_old[outlet_idx]))
