@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from svzerodtrees.utils import *
 from scipy.optimize import minimize
 from svzerodtrees.adaptation import *
-from svzerodtrees import operation, preop, interface
+from svzerodtrees import operation, preop, interface, postop
 import pickle
 
 
@@ -124,25 +124,31 @@ def test_cwss_adaptation():
     test the constant wss tree adaptation algorithm
     '''
     
-    with open('tests/cases/LPA_RPA_0d_steady/preop_config.in') as ff:
+    with open('models/AS1_SU0308_prestent/preop_config.in') as ff:
         preop_config = json.load(ff)
 
-    with open('tests/cases/LPA_RPA_0d_steady/preop_result.out', 'rb') as ff:
+    with open('models/AS1_SU0308_prestent/preop_result.out', 'rb') as ff:
         preop_result = pickle.load(ff)
     
-    with open('tests/cases/repair.json') as ff:
+    with open('models/AS1_SU0308_prestent/experiments/AS1_cwss_adaptation.json') as ff:
         repair_dict = json.load(ff)
-    repair_config = repair_dict['proximal']
+    repair_config = repair_dict['repair'][0]
 
-    log_file = 'tests/cases/LPA_RPA_0d_steady/LPA_RPA_0d_steady.log'
+    log_file = 'tests/cases/full_pa_test/test.log'
 
     write_to_log(log_file, 'testing tree construction', write=True)
 
-    trees = preop.construct_cwss_trees(preop_config, preop_result, log_file, d_min=0.049)
+    trees = preop.construct_cwss_trees(preop_config, preop_result, log_file, fig_dir='tests/cases/LPA_RPA_0d_steady/', d_min=0.49)
+
 
     postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, repair_config, log_file)
 
     adapted_config, adapted_result, trees = adapt_constant_wss(postop_config, trees, preop_result, postop_result, log_file)
+
+    result = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result, condition='repair')
+
+    print(result)
+
 
 
 def test_pries_adaptation():
@@ -168,14 +174,16 @@ def test_pries_adaptation():
 
     postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, repair_config, log_file)
 
-    adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_file)
+    adapted_config, adapted_result, trees = adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_file)
+
+    result = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result, condition='repair')
 
 
 def test_run_from_file():
     expfile = 'exp_config_test.json'
     os.chdir('tests/cases/LPA_RPA_0d_steady/experiments')
 
-    interface.run_from_file(expfile)
+    interface.run_from_file(expfile, vis_trees=True)
 
 
 def test_pa_optimizer():
@@ -207,4 +215,4 @@ def test_pa_optimizer():
 
 if __name__ == '__main__':
 
-    test_pries_adaptation()
+    test_run_from_file()
