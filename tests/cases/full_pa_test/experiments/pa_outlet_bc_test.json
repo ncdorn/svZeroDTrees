@@ -3,7 +3,7 @@
     "adapt": "cwss",
     "optimized": false,
     "is_full_pa_tree": true,
-    "mesh_surfaces_path": "/scratch/users/ndorn/models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces",
+    "mesh_surfaces_path": "/home/ndorn/Documents/Stanford/PhD/PPAS/svPPAS/models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces",
     "repair": [
         {
         "location": "proximal",
