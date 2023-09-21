@@ -1,13 +1,4 @@
-beginning experiment pa_outlet_bc_test!
-Getting clinical target values...
-*** clinical targets ****
-Q: 97.30194600000002
-MPA pressure: 42
-RPA pressure: 32
-LPA pressure: 32
-wedge pressure: 20
-RPA flow split: 0.52
-optimized resistances: [263.09158453 285.01587112 316.18470184 342.53338978]
+testing tree construction
 ** building tree for resistance: 6887.545406335209 **
      Resistance after optimization is 6895.649046853989
 
@@ -554,7 +545,6 @@ optimized resistances: [263.09158453 285.01587112 316.18470184 342.53338978]
      the optimized diameter is 0.12947101147084983
 
      the number of vessels is 3
-trees constructed for all outlets, creating json file...
 making repair according to repair config: {'location': 'proximal', 'degree': [1.0, 0.9]}
 ** repairing stenoses in vessels [] **
      vessel 1 has been repaired
