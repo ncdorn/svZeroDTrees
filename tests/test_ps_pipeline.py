@@ -215,4 +215,4 @@ def test_pa_optimizer():
 
 if __name__ == '__main__':
 
-    test_run_from_file()
+    test_cwss_adaptation()
