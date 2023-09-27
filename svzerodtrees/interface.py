@@ -4,6 +4,7 @@ import pickle
 from svzerodtrees import preop, operation, adaptation, postop
 from svzerodtrees.post_processing import plotting
 from svzerodtrees.utils import *
+from svzerodtrees.results_handler import ResultHandler
 
 def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=False):
     '''
@@ -77,7 +78,7 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
     # optimize preoperative outlet boundary conditions
     if not optimized:
         if is_full_pa:
-            preop_config, preop_result = preop.optimize_pa_bcs(
+            preop_config, result_handler = preop.optimize_pa_bcs(
                 input_file,
                 mesh_surfaces_path,
                 clinical_targets,
@@ -85,7 +86,7 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
                 show_optimization=False
             )
         else:
-            preop_config, preop_result = preop.optimize_outlet_bcs(
+            preop_config, result_handler = preop.optimize_outlet_bcs(
                 input_file,
                 clinical_targets,
                 log_file,
@@ -161,11 +162,17 @@ def run_from_config_trees(exp_config_file: str, vis_trees: bool=False):
     # define fig dir path
     fig_dir = expdir_path + '/figures'
 
+    # delineate important file names
+    log_file = expdir_path + expname + '.log'
+
     # load config w trees
     with open(expdir_path + 'config_w_trees') as ff:
         config = json.load(ff)
     
-    for vessel_config in config['vessels']:
+    # perform the repair
+    postop_config, postop_result = operation.repair_stenosis_coefficient(config, repair_config[0], log_file)
+
+    for vessel_config in postop_config['vessels']:
         if 'tree' in vessel_config:
             print(len(vessel_config['tree']['vessels']))
 
