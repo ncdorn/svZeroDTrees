@@ -11,6 +11,7 @@ from svzerodtrees.post_processing.stree_visualization import *
 from scipy.optimize import minimize, Bounds
 from svzerodtrees.structuredtreebc import StructuredTreeOutlet
 from svzerodtrees.adaptation import *
+from svzerodtrees.results_handler import ResultHandler
 
 
 def optimize_outlet_bcs(input_file,
@@ -63,7 +64,10 @@ def optimize_outlet_bcs(input_file,
     else:
         rcr = get_rcrs(preop_config)
         
-    # get the LPA and RPA branch numbers
+    # initialize the result handler
+    result_handler = ResultHandler()
+    result_handler.get_branches(preop_config)
+
 
     # scale the inflow
     # objective function value as global variable
@@ -74,7 +78,7 @@ def optimize_outlet_bcs(input_file,
                                      input_config=preop_config,
                                      target_ps=None,
                                      steady=steady,
-                                     rpa_lpa_branch= [1, 2], # in general, this should be [1, 2]
+                                     rpa_lpa_branch= result.rpa_lpa_branch, # in general, this should be [1, 2]
                                      rpa_split=rpa_split
                                      ):
         '''
@@ -137,7 +141,7 @@ def optimize_outlet_bcs(input_file,
     write_to_log(log_file, "Optimizing preop outlet resistance...")
 
     # find rpa and lpa branches
-    rpa_lpa_branch = find_rpa_lpa_branches(preop_config)
+    rpa_lpa_branch = result_handler.rpa_lpa_branch
 
     # run the optimization algorithm
     if steady:
@@ -164,11 +168,15 @@ def optimize_outlet_bcs(input_file,
     R_final = result.x # get the array of optimized resistances
     write_resistances(preop_config, R_final)
 
+    # get the simulation result and add it to the result handler
     preop_flow = run_svzerodplus(preop_config)
-    print(R_final)
+
+    # add result to the handler
+    result_handler.add_result(preop_flow, 'preop')
+    
     plot_pressure(preop_flow,branch=0)
 
-    return preop_config, preop_flow
+    return preop_config, result_handler
 
 
 def optimize_pa_bcs(input_file,
@@ -213,6 +221,10 @@ def optimize_pa_bcs(input_file,
     with open(input_file) as ff:
         preop_config = json.load(ff)
 
+    # initialize the result handler
+    result_handler = ResultHandler()
+    result_handler.get_branches(preop_config)
+
     # make inflow steady
     if make_steady:
         make_inflow_steady(preop_config)
@@ -246,6 +258,7 @@ def optimize_pa_bcs(input_file,
 
     # get outlet areas
     rpa_info, lpa_info, inflow_info = vtp_info(mesh_surfaces_path)
+    
     # calculate proportional outlet resistances
     print('total number of outlets: ' + str(len(rpa_info) + len(lpa_info)))
     print('RPA total area: ' + str(sum(rpa_info.values())) + '\n')
@@ -256,7 +269,9 @@ def optimize_pa_bcs(input_file,
 
     preop_result = run_svzerodplus(preop_config)
 
-    return preop_config, preop_result
+    result_handler.add_result(preop_result, 'preop')
+
+    return preop_config, result_handler
 
 
 def pa_opt_loss_fcn(R, pa_config, targets):
