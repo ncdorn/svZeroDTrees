@@ -1,5 +1,0 @@
-{"name": "FL_visc_test_8.8.23",
- "repair type": "extensive",
- "repair degrees": [1.0]
-}
-
