@@ -1,7 +1,10 @@
 beginning experiment exp_config_test_9.5.23!
 <<<<<<< HEAD
+<<<<<<< HEAD
 ** building tree for resistance: 572.5605569134406 **
 =======
+=======
+>>>>>>> 920dd853b09b4d4297893abb5eb1ab81de0e7389
 Getting clinical target values...
 Optimizing preop outlet resistance...
 0D optimization optimization completed! 
@@ -41,4 +44,7 @@ all stenosis repairs completed
 ** adaptation results for OutletTree2 **
     R_new = 153.80825214756362, R_old = 171.8653740875563
     The change in resistance is -18.05712193999267
+<<<<<<< HEAD
+>>>>>>> 920dd853b09b4d4297893abb5eb1ab81de0e7389
+=======
 >>>>>>> 920dd853b09b4d4297893abb5eb1ab81de0e7389

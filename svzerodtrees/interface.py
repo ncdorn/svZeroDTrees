@@ -178,7 +178,11 @@ def run_from_config_trees(exp_config_file: str, vis_trees: bool=False):
     log_file = expdir_path + expname + '.log'
 
     # load config w trees
+<<<<<<< HEAD
     with open(expdir_path + 'config_w_trees.json') as ff:
+=======
+    with open(expdir_path + 'config_w_trees') as ff:
+>>>>>>> 920dd853b09b4d4297893abb5eb1ab81de0e7389
         config = json.load(ff)
     
     # perform the repair
@@ -208,14 +212,23 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
             preop_config = pickle.load(ff)
     else:
         # construct trees
+<<<<<<< HEAD
         trees = preop.construct_pries_trees(config_handler, 
+=======
+        trees = preop.construct_pries_trees(preop_config, 
+>>>>>>> 920dd853b09b4d4297893abb5eb1ab81de0e7389
                                             result_handler, 
                                             log_file,
                                             fig_dir=fig_dir, 
                                             d_min=.0049)
         
         # save preop config to json
+<<<<<<< HEAD
         config_handler.to_file('config_w_pries_trees.in')
+=======
+        with open('config_w_pries_trees.json', 'w') as ff:
+            json.dump(preop_config, ff)
+>>>>>>> 920dd853b09b4d4297893abb5eb1ab81de0e7389
     
 
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
@@ -228,8 +241,13 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
     adapted_config, adapted_result, trees = adaptation.adapt_pries_secomb(config_handler,
                                                                           result_handler,
                                                                           log_file)
+<<<<<<< HEAD
 
 
+=======
+
+
+>>>>>>> 920dd853b09b4d4297893abb5eb1ab81de0e7389
 def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHandler, repair_config, log_file, vis_trees, fig_dir, trees_exist=False):
     '''
     run the constant wall shear stress adaptation scheme from preop config to result
@@ -253,7 +271,11 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
                                         result_handler,
                                         log_file,
                                         fig_dir=fig_dir,
+<<<<<<< HEAD
                                         d_min=.0049)
+=======
+                                        d_min=.49)
+>>>>>>> 920dd853b09b4d4297893abb5eb1ab81de0e7389
 
         # save preop config to as pickle, with StructuredTreeOutlet objects
         config_handler.to_file_w_trees('config_w_cwss_trees.in')
