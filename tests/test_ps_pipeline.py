@@ -201,7 +201,7 @@ def test_pa_optimizer():
     clinical_targets = 'clinical_targets.csv'
     mesh_surfaces_path = '/home/ndorn/Documents/Stanford/PhD/PPAS/svPPAS/models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces'
 
-    optimized_pa_config, preop_result = preop.optimize_pa_bcs(
+    config_handler, result_handler = preop.optimize_pa_bcs(
         input_file,
         mesh_surfaces_path,
         clinical_targets,
@@ -210,13 +210,10 @@ def test_pa_optimizer():
     )
 
     # save the optimized pa config
-    with open('optimized_pa_config.json', 'w') as ff:
-        json.dump(optimized_pa_config, ff)
+    config_handler.to_json('pa_optimized_config.json')
 
     # save the preop_Result
-    with open('preop_result.out', 'wb') as ff:
-        pickle.dump(preop_result, ff)
-
+    result_handler.to_file('pa_preop_result.out')
 
 
 if __name__ == '__main__':
