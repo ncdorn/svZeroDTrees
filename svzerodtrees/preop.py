@@ -11,7 +11,7 @@ from svzerodtrees.post_processing.stree_visualization import *
 from scipy.optimize import minimize, Bounds
 from svzerodtrees.structuredtreebc import StructuredTreeOutlet
 from svzerodtrees.adaptation import *
-from svzerodtrees.results_handler import ResultHandler
+from svzerodtrees._result_handler import ResultHandler
 from svzerodtrees._config_handler import ConfigHandler
 
 
