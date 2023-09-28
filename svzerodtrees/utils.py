@@ -83,30 +83,30 @@ def get_outlet_data(config: dict, result_array, data_name: str, steady=True):
     return data_out
 
 
-def get_wss(config: dict, result_array, branch, steady=False):
+def get_wss(vessels, viscosity, result_array, branch, steady=False):
     '''
     get the wss of a branch
 
-    :param config: svzerodplus config dict
-    :param result_array: svzerodplus result array
+    :param vessels: dict with key "vessels" and value [list of vessel config dicts]
+    :param result_array: svzerodplus result array from result handler
     :param branch: branch id
     :param steady: True if the model has steady inflow
 
     :return wss: wss array for the branch
     '''
     
-    d = get_branch_d(config, branch)
+    d = get_branch_d(vessels, viscosity, branch)
 
     q_out = get_branch_result(result_array, 'flow_out', branch, steady)
     if steady:
-        wss = q_out * 4 * config["simulation_parameters"]["viscosity"] / (np.pi * d)
+        wss = q_out * 4 * viscosity / (np.pi * d)
     else:
-        wss = [q * 4 * config["simulation_parameters"]["viscosity"] / (np.pi * d) for q in q_out]
+        wss = [q * 4 * viscosity / (np.pi * d) for q in q_out]
 
     return wss
 
 
-def get_branch_d(config, branch):
+def get_branch_d(config, viscosity, branch):
     '''
     get the diameter of a branch
 
@@ -124,7 +124,7 @@ def get_branch_d(config, branch):
             l += vessel_config["vessel_length"]
             break
 
-    d = ((128 * config["simulation_parameters"]["viscosity"] * l) / (np.pi * R)) ** (1 / 4)
+    d = ((128 * viscosity * l) / (np.pi * R)) ** (1 / 4)
 
     return d
 
@@ -453,6 +453,7 @@ def get_branch_id(vessel_config):
 
     :return: integer branch id
     '''
+    
     branch_id, seg_id = vessel_config["vessel_name"].split("_")
 
     return int(branch_id[6:])
@@ -794,6 +795,17 @@ def find_rpa_lpa_branches(config):
 
     return rpa_lpa_branch
 
+def rebuild_trees(config: dict):
+        '''
+        build a list of StructuredTreeOutlet instances from a config_w_trees
 
-    
-    
+        :param config_w_trees: config dict with trees
+        
+        :return trees: list of StructuredTreeOutlet instances
+        '''
+
+        trees = []
+        for vessel_config in config['vessels']:
+            if 'tree' in vessel_config:
+                
+                pass

@@ -12,6 +12,7 @@ from scipy.optimize import minimize, Bounds
 from svzerodtrees.structuredtreebc import StructuredTreeOutlet
 from svzerodtrees.adaptation import *
 from svzerodtrees.results_handler import ResultHandler
+from svzerodtrees._config_handler import ConfigHandler
 
 
 def optimize_outlet_bcs(input_file,
@@ -64,10 +65,9 @@ def optimize_outlet_bcs(input_file,
     else:
         rcr = get_rcrs(preop_config)
         
-    # initialize the result handler
-    result_handler = ResultHandler()
-    result_handler.get_branches(preop_config)
-
+    # initialize the data handlers
+    result_handler = ResultHandler.from_config(preop_config)
+    config_handler = ConfigHandler(preop_config)
 
     # scale the inflow
     # objective function value as global variable
@@ -75,10 +75,10 @@ def optimize_outlet_bcs(input_file,
     obj_fun = [] # for plotting the objective function, maybe there is a better way to do this
     # run zerod simulation to reach clinical targets
     def zerod_optimization_objective(resistances,
-                                     input_config=preop_config,
+                                     input_config=config_handler.config,
                                      target_ps=None,
                                      steady=steady,
-                                     rpa_lpa_branch= result.rpa_lpa_branch, # in general, this should be [1, 2]
+                                     rpa_lpa_branch= result_handler.rpa_lpa_branch, # in general, this should be [1, 2]
                                      rpa_split=rpa_split
                                      ):
         '''
@@ -147,7 +147,7 @@ def optimize_outlet_bcs(input_file,
     if steady:
         result = minimize(zerod_optimization_objective,
                         resistance,
-                        args=(preop_config, target_ps, steady, rpa_lpa_branch, rpa_split),
+                        args=(config_handler.config, target_ps, steady, rpa_lpa_branch, rpa_split),
                         method="CG",
                         options={"disp": False},
                         )
@@ -155,7 +155,7 @@ def optimize_outlet_bcs(input_file,
         bounds = Bounds(lb=0, ub=math.inf)
         result = minimize(zerod_optimization_objective,
                           rcr,
-                          args=(preop_config, target_ps, steady, rpa_lpa_branch, rpa_split),
+                          args=(config_handler.config, target_ps, steady, rpa_lpa_branch, rpa_split),
                           method="CG",
                           options={"disp": False},
                           bounds=bounds
@@ -166,17 +166,17 @@ def optimize_outlet_bcs(input_file,
     write_to_log(log_file, "Outlet resistances optimized! " + str(result.x))
 
     R_final = result.x # get the array of optimized resistances
-    write_resistances(preop_config, R_final)
+    write_resistances(config_handler.config, R_final)
 
     # get the simulation result and add it to the result handler
-    preop_flow = run_svzerodplus(preop_config)
+    preop_flow = run_svzerodplus(config_handler.config)
 
     # add result to the handler
-    result_handler.add_result(preop_flow, 'preop')
+    result_handler.add_unformatted_result(preop_flow, 'preop')
     
     plot_pressure(preop_flow,branch=0)
 
-    return preop_config, result_handler
+    return config_handler, result_handler
 
 
 def optimize_pa_bcs(input_file,
@@ -221,10 +221,6 @@ def optimize_pa_bcs(input_file,
     with open(input_file) as ff:
         preop_config = json.load(ff)
 
-    # initialize the result handler
-    result_handler = ResultHandler()
-    result_handler.get_branches(preop_config)
-
     # make inflow steady
     if make_steady:
         make_inflow_steady(preop_config)
@@ -235,8 +231,12 @@ def optimize_pa_bcs(input_file,
         Pd = convert_RCR_to_R(preop_config)
         write_to_log(log_file, "RCR BCs converted to R, Pd = " + str(Pd))
 
+    # initialize the data handlers
+    result_handler = ResultHandler.from_config(preop_config)
+    config_handler = ConfigHandler(preop_config)
+
     # create the PA optimizer config
-    pa_config = create_pa_optimizer_config(preop_config, q, wedge_p)
+    pa_config = create_pa_optimizer_config(config_handler.config, q, wedge_p)
 
     # resitance initial guess
     R_0 = get_pa_config_resistances(pa_config)
@@ -265,13 +265,13 @@ def optimize_pa_bcs(input_file,
     print('LPA total area: ' + str(sum(lpa_info.values())) + '\n')
 
     # distribute amongst all resistance conditions in the config
-    assign_outlet_pa_bcs(preop_config, rpa_info, lpa_info, R[2], R[3], wedge_p)
+    assign_outlet_pa_bcs(config_handler.config, rpa_info, lpa_info, R[2], R[3], wedge_p)
 
-    preop_result = run_svzerodplus(preop_config)
+    preop_result = run_svzerodplus(config_handler.config)
 
-    result_handler.add_result(preop_result, 'preop')
+    result_handler.add_unformatted_result(preop_result, 'preop')
 
-    return preop_config, result_handler
+    return config_handler, result_handler
 
 
 def pa_opt_loss_fcn(R, pa_config, targets):
@@ -360,7 +360,7 @@ def assign_outlet_pa_bcs(config, rpa_info, lpa_info, R_rpa, R_lpa, wedge_p=13332
             bc_idx += 1
 
 
-def construct_cwss_trees(config: dict, result, log_file=None, d_min=0.0049, vis_trees=False, fig_dir=None):
+def construct_cwss_trees(config_handler, result_handler: ResultHandler, log_file=None, d_min=0.0049, vis_trees=False, fig_dir=None):
     '''
     construct structured trees at every outlet of the 0d model optimized against the outflow BC resistance,
     for the constant wall shear stress assumption.
@@ -375,18 +375,17 @@ def construct_cwss_trees(config: dict, result, log_file=None, d_min=0.0049, vis_
     :return roots: return the root TreeVessel objects of the outlet trees
 
     '''
-    trees = []
-    q_outs = get_outlet_data(config, result, 'flow_out', steady=True)
-    p_outs = get_outlet_data(config, result, 'pressure_out', steady=True)
+    q_outs = get_outlet_data(config_handler.config, result_handler.results['preop'], 'flow_out', steady=True)
+    p_outs = get_outlet_data(config_handler.config, result_handler.results['preop'], 'pressure_out', steady=True)
     outlet_idx = 0
-    for vessel_config in config["vessels"]:
+    for vessel_config in config_handler.config["vessels"]:
         if "boundary_conditions" in vessel_config:
             if "outlet" in vessel_config["boundary_conditions"]:
-                print("** building tree for outlet " + str(outlet_idx) + " of " + str(len(q_outs) - 1) + " **")
-                for bc_config in config["boundary_conditions"]:
+                print("** building tree for outlet " + str(outlet_idx) + " of " + str(len(q_outs) - 1) + " **, d_min = " + str(d_min) + " **")
+                for bc_config in config_handler.config["boundary_conditions"]:
                     if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
                         outlet_tree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, 
-                                                                            config["simulation_parameters"],
+                                                                            config_handler.config["simulation_parameters"],
                                                                             bc_config, 
                                                                             P_outlet=[p_outs[outlet_idx]],
                                                                             Q_outlet=[q_outs[outlet_idx]])
@@ -398,22 +397,15 @@ def construct_cwss_trees(config: dict, result, log_file=None, d_min=0.0049, vis_
                 outlet_tree.optimize_tree_diameter(R, log_file, d_min=d_min)
                 # write to log file for debugging
                 write_to_log(log_file, "     the number of vessels is " + str(outlet_tree.count_vessels()))
-                vessel_config["tree"] = outlet_tree.block_dict
-                trees.append(outlet_tree)
+
+                config_handler.trees.append(outlet_tree)
                 outlet_idx += 1
 
     # if vis_trees:
     #     visualize_trees(config, roots, fig_dir=fig_dir, fig_name='_preop')
 
-    write_to_log(log_file, "trees constructed for all outlets, creating json file...")
-    print(fig_dir)
-    with open(fig_dir + '/config_w_trees.json', 'w') as ff:
-        json.dump(config, ff)
 
-    return trees
-
-
-def construct_pries_trees(config: dict, result, log_file=None, d_min=0.0049, tol=0.01, vis_trees=False, fig_dir=None):
+def construct_pries_trees(config_handler, result_handler, log_file=None, d_min=0.0049, tol=0.01, vis_trees=False, fig_dir=None):
     '''
     construct trees for pries and secomb adaptation and perform initial integration
     :param config: 0D solver preop config
@@ -431,17 +423,17 @@ def construct_pries_trees(config: dict, result, log_file=None, d_min=0.0049, tol
     :param vis_trees: boolean for visualizing trees
     :param fig_dir: [optional path to directory to save figures. Required if vis_trees = True.
     '''
-    simparams = config["simulation_parameters"]
+    simparams = config_handler.config["simulation_parameters"]
     # get the outlet flowrate
-    q_outs = get_outlet_data(config, result, "flow_out", steady=True)
-    p_outs = get_outlet_data(config, result, "pressure_out", steady=True)
+    q_outs = get_outlet_data(config_handler.config, result_handler.results['preop'], "flow_out", steady=True)
+    p_outs = get_outlet_data(config_handler.config, result_handler.results['preop'], "pressure_out", steady=True)
     trees = []
     outlet_idx = 0 # need this when iterating through outlets 
     # get the outlet vessel
-    for vessel_config in config["vessels"]:
+    for vessel_config in config_handler.config["vessels"]:
         if "boundary_conditions" in vessel_config:
             if "outlet" in vessel_config["boundary_conditions"]:
-                for bc_config in config["boundary_conditions"]:
+                for bc_config in config_handler.config["boundary_conditions"]:
                     if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
                         outlet_stree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, 
                                                                                simparams,
@@ -459,18 +451,13 @@ def construct_pries_trees(config: dict, result, log_file=None, d_min=0.0049, tol
                 # write_to_log(log_file, "    pries and secomb integration completed, R_tree = " + str(outlet_stree.root.R_eq))
 
                 write_to_log(log_file, "     the number of vessels is " + str(outlet_stree.count_vessels()))
-                vessel_config["tree"] = outlet_stree.block_dict
-                trees.append(outlet_stree)
+
+                config_handler.trees.append(outlet_stree)
                 outlet_idx += 1
-                
-                # the question is, do we write the adapted resistance to the config and recalculate the flow...
-
-
-    return trees
 
     
-    def optimize_ps_params():
-        '''
-        method to optimize the pries and secomb parameters to compare with Ingrid's. To be implemented
-        '''
-        pass
+def optimize_ps_params():
+    '''
+    method to optimize the pries and secomb parameters to compare with Ingrid's. To be implemented
+    '''
+    pass
