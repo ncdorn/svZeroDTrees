@@ -144,6 +144,7 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
     if vis_trees:
         plotting.plot_LPA_RPA_changes(fig_dir, result_handler.clean_results, modelname + ' LPA, RPA')
         plotting.plot_MPA_changes(fig_dir, result_handler.clean_results, modelname + ' MPA')
+<<<<<<< HEAD
         
 
 def run_from_config_trees(exp_config_file: str, vis_trees: bool=False):
@@ -191,6 +192,8 @@ def run_from_config_trees(exp_config_file: str, vis_trees: bool=False):
     for vessel_config in postop_config['vessels']:
         if 'tree' in vessel_config:
             print(len(vessel_config['tree']['vessels']))
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 
     
 def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, repair_config, log_file, vis_trees, fig_dir, trees_exist=False):
@@ -208,10 +211,10 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
     '''
 
     if trees_exist:
-        with open('config_w_cwss_trees.in', 'rb') as ff:
-            preop_config = pickle.load(ff)
+        config_handler.from_file_w_trees('config_w_pries_trees.in')
     else:
         # construct trees
+<<<<<<< HEAD
 <<<<<<< HEAD
         trees = preop.construct_pries_trees(config_handler, 
 =======
@@ -229,19 +232,35 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
         with open('config_w_pries_trees.json', 'w') as ff:
             json.dump(preop_config, ff)
 >>>>>>> 920dd853b09b4d4297893abb5eb1ab81de0e7389
+=======
+        preop.construct_pries_trees(config_handler, 
+                                    result_handler, 
+                                    log_file,
+                                    fig_dir=fig_dir, 
+                                    d_min=.0049)
+        
+        # save preop config to json
+        config_handler.to_file_w_trees('config_w_pries_trees.in')
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
     
 
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
-    postop_config, postop_result = operation.repair_stenosis_coefficient(config_handler,
-                                                                         result_handler, 
-                                                                         repair_config[0], 
-                                                                         log_file)
+    operation.repair_stenosis_coefficient(config_handler,
+                                          result_handler, 
+                                          repair_config[0], 
+                                          log_file)
 
     # adapt trees
+<<<<<<< HEAD
     adapted_config, adapted_result, trees = adaptation.adapt_pries_secomb(config_handler,
                                                                           result_handler,
                                                                           log_file)
 <<<<<<< HEAD
+=======
+    adaptation.adapt_pries_secomb(config_handler,
+                                  result_handler,
+                                  log_file)
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 
 
 =======
