@@ -146,6 +146,7 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
         plotting.plot_MPA_changes(fig_dir, result_handler.clean_results, modelname + ' MPA')
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         
 
 def run_from_config_trees(exp_config_file: str, vis_trees: bool=False):
@@ -197,6 +198,8 @@ def run_from_config_trees(exp_config_file: str, vis_trees: bool=False):
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 
     
 def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, repair_config, log_file, vis_trees, fig_dir, trees_exist=False):
@@ -220,6 +223,7 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         trees = preop.construct_pries_trees(config_handler, 
 =======
         trees = preop.construct_pries_trees(preop_config, 
@@ -239,6 +243,8 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
 =======
 =======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
         preop.construct_pries_trees(config_handler, 
                                     result_handler, 
                                     log_file,
@@ -248,6 +254,9 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
         # save preop config to json
         config_handler.to_file_w_trees('config_w_pries_trees.in')
 <<<<<<< HEAD
+<<<<<<< HEAD
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
@@ -260,6 +269,7 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
                                           log_file)
 
     # adapt trees
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
     adapted_config, adapted_result, trees = adaptation.adapt_pries_secomb(config_handler,
@@ -277,6 +287,13 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
 
 
 >>>>>>> 920dd853b09b4d4297893abb5eb1ab81de0e7389
+=======
+    adaptation.adapt_pries_secomb(config_handler,
+                                  result_handler,
+                                  log_file)
+
+
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
     adaptation.adapt_pries_secomb(config_handler,
                                   result_handler,
@@ -309,10 +326,14 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
                                         fig_dir=fig_dir,
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                                         d_min=.0049)
 =======
                                         d_min=.49)
 >>>>>>> 920dd853b09b4d4297893abb5eb1ab81de0e7389
+=======
+                                        d_min=.49)
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
                                         d_min=.49)
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f

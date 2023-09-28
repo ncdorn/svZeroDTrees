@@ -109,7 +109,11 @@ class StructuredTreeOutlet():
             return cls(params=params, config = config["tree"], simparams=simparams, root=root)
         else:
 <<<<<<< HEAD
+<<<<<<< HEAD
             return cls(params=params, name="OutletTree" + str(get_branch_id(config)), simparams=simparams)
+=======
+            return cls(params=params, name="OutletTree" + str(config["vessel_id"]), simparams=simparams)
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
             return cls(params=params, name="OutletTree" + str(config["vessel_id"]), simparams=simparams)
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
@@ -283,7 +287,11 @@ class StructuredTreeOutlet():
 
 
 <<<<<<< HEAD
+<<<<<<< HEAD
     def optimize_tree_diameter(self, Resistance=5.0,  log_file=None, d_min=0.0049, pries_secomb=False):
+=======
+    def optimize_tree_diameter(self, Resistance=5.0,  log_file=None, d_min=0.0049):
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
     def optimize_tree_diameter(self, Resistance=5.0,  log_file=None, d_min=0.0049):
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
@@ -293,9 +301,12 @@ class StructuredTreeOutlet():
         :param Resistance: resistance value to optimize against
         :param log_file: optional path to log file
 <<<<<<< HEAD
+<<<<<<< HEAD
         :param d_min: minimum diameter of the vessels
         :param pries_secomb: True if the pries and secomb model is used to adapt the vessels, so pries and secomb integration
             is performed at every optimization iteration
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
         """
@@ -316,10 +327,13 @@ class StructuredTreeOutlet():
             self.build_tree(diameter[0], d_min=d_min, optimizing=True)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
             # integrate pries and secomb if necessary
             if pries_secomb:
                 self.integrate_pries_secomb()
 
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
             # get equivalent resistance
@@ -478,7 +492,10 @@ class StructuredTreeOutlet():
         iter = 0
 
 <<<<<<< HEAD
+<<<<<<< HEAD
         og_d = self.root.d
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
         # begin euler integration
@@ -531,7 +548,11 @@ class StructuredTreeOutlet():
             iter += 1
 
 <<<<<<< HEAD
+<<<<<<< HEAD
         print('Pries and Secomb integration completed! R = ' + str(self.root.R_eq) + ', dD = ' + str(og_d - self.root.d))
+=======
+        print('Pries and Secomb integration completed! R = ' + str(self.root.R_eq))
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
         print('Pries and Secomb integration completed! R = ' + str(self.root.R_eq))
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f

@@ -8,7 +8,11 @@
 /dataSources.local.xml
 # Byte-compiled / optimized / DLL files
 <<<<<<< HEAD
+<<<<<<< HEAD
 **/__pycache__/
+=======
+__pycache__/
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
 __pycache__/
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
@@ -34,7 +38,11 @@ var/
 
 # models
 <<<<<<< HEAD
+<<<<<<< HEAD
 models/
+=======
+models/
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
 models/
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
