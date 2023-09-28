@@ -5,7 +5,11 @@ from svzerodtrees.structuredtreebc import StructuredTreeOutlet
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 def adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_file=None, tol=.01):
+=======
+def adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_file=None):
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
 def adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_file=None):
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
@@ -41,6 +45,7 @@ def adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_fi
     # loop through the vessels and create StructuredTreeOutlet instances at the outlets, from the pre-adaptation tree instances
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     for vessel_config in adapted_config["vessels"]:
         if "boundary_conditions" in vessel_config:
             if "outlet" in vessel_config["boundary_conditions"]:
@@ -52,6 +57,8 @@ def adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_fi
 =======
 =======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
     for vessel_config in postop_config["vessels"]:
         if "boundary_conditions" in vessel_config:
             if "outlet" in vessel_config["boundary_conditions"]:
@@ -61,6 +68,9 @@ def adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_fi
                         outlet_stree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, 
                                                                                postop_config["simulation_parameters"],
 <<<<<<< HEAD
+<<<<<<< HEAD
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
@@ -70,6 +80,7 @@ def adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_fi
                                                                                Q_outlet=[np.mean(postop_q[outlet_idx])],
                                                                                P_outlet=[np.mean(postop_p[outlet_idx])])
                         # integrate pries and secomb until dD tolerance is reached
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
                         outlet_stree.integrate_pries_secomb(tol=tol)
@@ -89,6 +100,8 @@ def adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_fi
 =======
 =======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
                         outlet_stree.integrate_pries_secomb()
 
                         write_to_log(log_file, 'pries and secomb integration completed for ' + outlet_stree.name)
@@ -96,6 +109,9 @@ def adapt_pries_secomb(postop_config, trees, preop_result, postop_result, log_fi
                         R_new.append(outlet_stree.root.R_eq)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
@@ -135,6 +151,7 @@ def adapt_constant_wss(postop_config, trees, preop_result, postop_result, log_fi
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     for vessel_config in adapted_config["vessels"]:
         if "boundary_conditions" in vessel_config:
             if "outlet" in vessel_config["boundary_conditions"]:
@@ -159,6 +176,8 @@ def adapt_constant_wss(postop_config, trees, preop_result, postop_result, log_fi
 =======
 =======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
     for tree in trees: # loop through a list of outlet trees
         # adapt the diameter of each vessel in the tree
         R_old, R_new = tree.adapt_constant_wss(Q=preop_q[outlet_idx], Q_new=postop_q[outlet_idx])
@@ -173,6 +192,9 @@ def adapt_constant_wss(postop_config, trees, preop_result, postop_result, log_fi
 
         outlet_idx += 1
 <<<<<<< HEAD
+<<<<<<< HEAD
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f

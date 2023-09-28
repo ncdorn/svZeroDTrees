@@ -355,7 +355,10 @@ def construct_cwss_trees(config: dict, result, log_file=None, d_min=0.0049, vis_
     :param log_file: optional path to a log file
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     :param d_min: minimum vessel diameter for tree optimization
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
@@ -375,7 +378,11 @@ def construct_cwss_trees(config: dict, result, log_file=None, d_min=0.0049, vis_
             if "outlet" in vessel_config["boundary_conditions"]:
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                 print("** building tree for outlet " + str(outlet_idx) + " of " + str(len(q_outs) - 1) + " **")
+=======
+                print("** building tree for outlet " + str(outlet_idx) + " of " + str(len(q_outs)) + " **")
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
                 print("** building tree for outlet " + str(outlet_idx) + " of " + str(len(q_outs)) + " **")
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
@@ -406,11 +413,14 @@ def construct_cwss_trees(config: dict, result, log_file=None, d_min=0.0049, vis_
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     write_to_log(log_file, "trees constructed for all outlets, creating json file...")
     print(fig_dir)
     with open(fig_dir + '/config_w_trees.json', 'w') as ff:
         json.dump(config, ff)
 
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
@@ -459,6 +469,7 @@ def construct_pries_trees(config: dict, result, log_file=None, d_min=0.0049, tol
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
                 outlet_stree.optimize_tree_diameter(R, log_file, d_min=d_min, pries_secomb=True)
 
                 write_to_log(log_file, "    integrating pries and secomb...")
@@ -467,12 +478,17 @@ def construct_pries_trees(config: dict, result, log_file=None, d_min=0.0049, tol
 =======
 =======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
                 outlet_stree.optimize_tree_diameter(R, log_file, d_min=d_min)
 
                 write_to_log(log_file, "    integrating pries and secomb...")
                 outlet_stree.integrate_pries_secomb(tol=tol)
                 write_to_log(log_file, "    pries and secomb integration completed, R_tree = " + str(outlet_stree.root.R_eq))
 <<<<<<< HEAD
+<<<<<<< HEAD
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
@@ -494,7 +510,11 @@ def construct_pries_trees(config: dict, result, log_file=None, d_min=0.0049, tol
         '''
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
         pass
+=======
+        pass
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 =======
         pass
 >>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
