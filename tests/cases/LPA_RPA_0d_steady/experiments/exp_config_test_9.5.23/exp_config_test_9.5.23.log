@@ -1,37 +1,22 @@
 beginning experiment exp_config_test_9.5.23!
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-** building tree for resistance: 572.5605569134406 **
-=======
-=======
->>>>>>> 920dd853b09b4d4297893abb5eb1ab81de0e7389
-=======
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 Getting clinical target values...
 Optimizing preop outlet resistance...
 0D optimization optimization completed! 
 
-     Optimization solution: [572.55332396 171.85945692]
+     Optimization solution: [572.55862021 171.85780798]
 
-     Objective function value: 2.295839011055233e-08
+     Objective function value: 2.5148533230831786e-09
 
      Number of iterations: 10
 
-Outlet resistances optimized! [572.55332396 171.85945692]
-** building tree for resistance: 572.5533239605311 **
+Outlet resistances optimized! [572.55862021 171.85780798]
+** building tree for resistance: 572.5586202085873 **
      Resistance after optimization is 572.3064809047935
 
      the optimized diameter is 0.31014274162948324
 
      the number of vessels is 3
-** building tree for resistance: 171.8594569206668 **
+** building tree for resistance: 171.85780797800493 **
      Resistance after optimization is 171.8653740875563
 
      the optimized diameter is 0.469698360875773
@@ -48,21 +33,8 @@ making repair according to repair config: {'location': 'proximal', 'degree': [1.
 all stenosis repairs completed
 ** adapting trees based on constant wall shear stress assumption **
 ** adaptation results for OutletTree1 **
-    R_new = 667.799913977317, R_old = 572.3064809047935
-    The change in resistance is 95.49343307252354
+    R_new = 667.8015086117013, R_old = 572.3064809047935
+    The change in resistance is 95.49502770690776
 ** adaptation results for OutletTree2 **
-    R_new = 153.80825214756362, R_old = 171.8653740875563
-    The change in resistance is -18.05712193999267
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> 920dd853b09b4d4297893abb5eb1ab81de0e7389
-=======
->>>>>>> 920dd853b09b4d4297893abb5eb1ab81de0e7389
-=======
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+    R_new = 153.8081559892826, R_old = 171.8653740875563
+    The change in resistance is -18.057218098273694
