@@ -8,6 +8,7 @@ LPA pressure: 32
 wedge pressure: 20
 RPA flow split: 0.52
 optimized resistances: [263.09158453 285.01587112 316.18470184 342.53338978]
+<<<<<<< HEAD
 ** building tree for resistance: 6887.545406335209 **
      Resistance after optimization is 6888.477209997294
 
@@ -560,3 +561,5 @@ making repair according to repair config: {'location': 'proximal', 'degree': [1.
      vessel 1 has been repaired
      vessel 76 has been repaired
 all stenosis repairs completed
+=======
+>>>>>>> 920dd853b09b4d4297893abb5eb1ab81de0e7389

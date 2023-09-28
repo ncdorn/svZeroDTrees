@@ -132,6 +132,43 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
         plotting.plot_LPA_RPA_changes(fig_dir, result, modelname + ' LPA, RPA', 'repair')
         plotting.plot_MPA_changes(fig_dir, result, modelname + ' MPA', 'repair')
         
+
+def run_from_config_trees(exp_config_file: str, vis_trees: bool=False):
+    '''
+    run the experiment from a previously generated preop config dict with optimized trees
+
+    :param exp_config_file: path to the experiment config file
+    :param config_w_trees: path to the config file with optimized trees
+    :param vis_trees: if true, make tree visualization figures
+    '''
+
+    # start off somewhere in the models directory, same level as the experiment config file
+    with open(exp_config_file) as ff:
+        exp_config = json.load(ff)
+
+    # unpack the experiment config parameters
+    expname = exp_config["name"]
+    modelname = exp_config["model"]
+    adapt = exp_config["adapt"] # either ps (pries and secomb) or cwss (constant wall shear stress)
+    optimized = exp_config["optimized"] # true if the experiment has been optimized before, to skip the preop optimization
+    is_full_pa = exp_config["is_full_pa_tree"]
+    mesh_surfaces_path = exp_config["mesh_surfaces_path"]
+    repair_config = exp_config["repair"]
+
+    # define the experiment directory path
+    expdir_path = expname + '/'
+
+    # define fig dir path
+    fig_dir = expdir_path + '/figures'
+
+    # load config w trees
+    with open(expdir_path + 'config_w_trees.json') as ff:
+        config = json.load(ff)
+    
+    for vessel_config in config['vessels']:
+        if 'tree' in vessel_config:
+            print(len(vessel_config['tree']['vessels']))
+
     
 def run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir):
     '''
@@ -152,7 +189,7 @@ def run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_f
                                         preop_result, 
                                         log_file,
 					                    fig_dir=fig_dir, 
-                                        d_min=.49)
+                                        d_min=.0049)
 
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
     postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, 

@@ -1,8 +1,9 @@
-{   "name": "AS1_cwss_adaptation_full_repair",
+{   "name": "AS1_cwss_adaptation",
     "model": "AS1_SU0308_prestent",
     "adapt": "cwss",
     "optimized": false,
     "is_full_pa_tree": true,
+    "trees_exist": false,
     "mesh_surfaces_path": "/scratch/users/ndorn/models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces",
     "repair": [
         {

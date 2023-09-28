@@ -1,6 +1,8 @@
 README.md
 setup.py
 svzerodtrees/__init__.py
+svzerodtrees/_config_handler.py
+svzerodtrees/_result_handler.py
 svzerodtrees/adaptation.py
 svzerodtrees/interface.py
 svzerodtrees/operation.py

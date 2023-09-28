@@ -1,15 +1,15 @@
 testing tree construction
-** building tree for resistance: 572.5605569134406 **
+** building tree for resistance: 572.5533239605311 **
      Resistance after optimization is 572.7996499860483
 
      the optimized diameter is 0.4222225359051189
 
     integrating pries and secomb...
      the number of vessels is 3
-** building tree for resistance: 171.85134395526833 **
-     Resistance after optimization is 171.87474060330112
+** building tree for resistance: 171.8594569206668 **
+     Resistance after optimization is 171.87474060330106
 
-     the optimized diameter is 1.0541521348583984
+     the optimized diameter is 1.054075324006252
 
     integrating pries and secomb...
      the number of vessels is 29
@@ -24,9 +24,9 @@ making repair according to repair config: {'location': 'proximal', 'degree': [1.
 all stenosis repairs completed
 ** adapting trees based on Pries and Secomb model **
 pries and secomb integration completed for OutletTree1
-    R_new = 1849.7382086893074, R_old = 572.7996499860483
-    The change in resistance is 1276.938558703259
+    R_new = 1655.726522978473, R_old = 572.7996499860483
+    The change in resistance is 1082.9268729924247
 pries and secomb integration completed for OutletTree2
-    R_new = 691.5745236714329, R_old = 171.87474060330112
-    The change in resistance is 519.6997830681318
-pries and secomb adaptation completed for all trees. R_old = [572.7996499860483, 171.87474060330112] R_new = [1849.7382086893074, 691.5745236714329]
+    R_new = 714.3598131657859, R_old = 171.87474060330106
+    The change in resistance is 542.4850725624849
+pries and secomb adaptation completed for all trees. R_old = [572.7996499860483, 171.87474060330106] R_new = [1655.726522978473, 714.3598131657859]
