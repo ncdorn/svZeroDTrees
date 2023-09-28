@@ -516,3 +516,4 @@ class StructuredTreeOutlet():
         print('Pries and Secomb integration completed! R = ' + str(self.root.R_eq) + ', dD = ' + str(og_d - self.root.d))
 
         return self.root.R_eq
+    
