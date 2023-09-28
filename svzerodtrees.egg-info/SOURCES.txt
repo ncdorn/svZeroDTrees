@@ -1,6 +1,8 @@
 README.md
 setup.py
 svzerodtrees/__init__.py
+svzerodtrees/_config_handler.py
+svzerodtrees/_result_handler.py
 svzerodtrees/adaptation.py
 svzerodtrees/interface.py
 svzerodtrees/operation.py
@@ -23,3 +25,4 @@ svzerodtrees/post_processing/stree_visualization_OLD.py
 tests/test_post_processing.py
 tests/test_ps_pipeline.py
 tests/test_svzerodplus.py
+tests/test_unsteady.py
