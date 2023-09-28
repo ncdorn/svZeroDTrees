@@ -106,7 +106,7 @@ class StructuredTreeOutlet():
             bc_values = bc_config["bc_values"]
         )
         if tree_exists:
-            return cls(params=params, config = config["tree"], simparams=simparams, root=root)
+            return cls(params=params, config = config, simparams=simparams, root=root)
         else:
             return cls(params=params, name="OutletTree" + str(get_branch_id(config)), simparams=simparams)
 
