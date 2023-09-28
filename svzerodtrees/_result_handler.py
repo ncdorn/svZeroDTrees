@@ -1,4 +1,6 @@
 from svzerodtrees.utils import *
+import pickle
+import json
 
 class ResultHandler:
     '''
@@ -126,3 +128,24 @@ class ResultHandler:
 
         self.results[name] = result
 
+    def to_file(self, file_name: str):
+        '''
+        write the result handler to a pickle file
+
+        :param file_name: name of the file to write to
+        '''
+
+        with open(file_name, 'wb') as ff:
+            pickle.dump(self, ff)
+    
+    def to_json(self, file_name: str):
+        '''
+        write the result handler to a json file
+
+        :param file_name: name of the file to write to
+        '''
+
+        self.format_results()
+
+        with open(file_name, 'w') as ff:
+            json.dump(self.clean_results, ff)

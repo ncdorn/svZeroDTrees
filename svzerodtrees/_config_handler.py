@@ -12,6 +12,30 @@ class ConfigHandler():
         self.config = config
         self.trees = []
 
+    @classmethod
+    def from_json(cls, file_name: str):
+        '''
+        load in a config dict from json file
+
+        :param file_name: name of the file to load from
+        '''
+
+        with open(file_name) as ff:
+            config = json.load(ff)
+
+        return ConfigHandler(config)
+    
+    @classmethod
+    def from_file(cls, file_name: str):
+        '''
+        load in a config dict from binary file via pickle
+        '''
+
+        with open(file_name, 'rb') as ff:
+            config = pickle.load(ff)
+
+        return ConfigHandler(config)
+
 
     def to_json(self, file_name: str):
         '''
