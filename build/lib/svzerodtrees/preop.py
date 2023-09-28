@@ -353,7 +353,10 @@ def construct_cwss_trees(config: dict, result, log_file=None, d_min=0.0049, vis_
     :param config: 0D solver config
     :param result: 0D solver result corresponding to config
     :param log_file: optional path to a log file
+<<<<<<< HEAD
     :param d_min: minimum vessel diameter for tree optimization
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
     :param vis_trees: boolean for visualizing trees
     :param fig_dir: [optional path to directory to save figures. Required if vis_trees = True.
 
@@ -367,7 +370,11 @@ def construct_cwss_trees(config: dict, result, log_file=None, d_min=0.0049, vis_
     for vessel_config in config["vessels"]:
         if "boundary_conditions" in vessel_config:
             if "outlet" in vessel_config["boundary_conditions"]:
+<<<<<<< HEAD
                 print("** building tree for outlet " + str(outlet_idx) + " of " + str(len(q_outs) - 1) + " **")
+=======
+                print("** building tree for outlet " + str(outlet_idx) + " of " + str(len(q_outs)) + " **")
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
                 for bc_config in config["boundary_conditions"]:
                     if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
                         outlet_tree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, 
@@ -390,11 +397,14 @@ def construct_cwss_trees(config: dict, result, log_file=None, d_min=0.0049, vis_
     # if vis_trees:
     #     visualize_trees(config, roots, fig_dir=fig_dir, fig_name='_preop')
 
+<<<<<<< HEAD
     write_to_log(log_file, "trees constructed for all outlets, creating json file...")
     print(fig_dir)
     with open(fig_dir + '/config_w_trees.json', 'w') as ff:
         json.dump(config, ff)
 
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
     return trees
 
 
@@ -437,11 +447,19 @@ def construct_pries_trees(config: dict, result, log_file=None, d_min=0.0049, tol
 
                 write_to_log(log_file, "** building tree for resistance: " + str(R) + " **")
 
+<<<<<<< HEAD
                 outlet_stree.optimize_tree_diameter(R, log_file, d_min=d_min, pries_secomb=True)
 
                 write_to_log(log_file, "    integrating pries and secomb...")
                 # outlet_stree.integrate_pries_secomb(tol=tol)
                 # write_to_log(log_file, "    pries and secomb integration completed, R_tree = " + str(outlet_stree.root.R_eq))
+=======
+                outlet_stree.optimize_tree_diameter(R, log_file, d_min=d_min)
+
+                write_to_log(log_file, "    integrating pries and secomb...")
+                outlet_stree.integrate_pries_secomb(tol=tol)
+                write_to_log(log_file, "    pries and secomb integration completed, R_tree = " + str(outlet_stree.root.R_eq))
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 
                 write_to_log(log_file, "     the number of vessels is " + str(outlet_stree.count_vessels()))
                 vessel_config["tree"] = outlet_stree.block_dict
@@ -458,4 +476,8 @@ def construct_pries_trees(config: dict, result, log_file=None, d_min=0.0049, tol
         '''
         method to optimize the pries and secomb parameters to compare with Ingrid's. To be implemented
         '''
+<<<<<<< HEAD
         pass
+=======
+        pass
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
