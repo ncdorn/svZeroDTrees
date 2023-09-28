@@ -111,15 +111,49 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
 
     if adapt == 'ps': # use pries and secomb adaptation scheme
         
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+        result, adapted_config = run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir)
+
+    elif adapt == 'cwss': # use constant wall shear stress adaptation scheme
+        
+        result, adapted_config = run_cwss_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir)
+=======
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
         result = run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir)
 
     elif adapt == 'cwss': # use constant wall shear stress adaptation scheme
         
         result = run_cwss_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir)
+<<<<<<< HEAD
+<<<<<<< HEAD
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 
     else:
         raise Exception('invalid adaptation scheme chosen')
     
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+    # save the adapted config
+    with open(expdir_path + 'adapted_config.json', 'w') as ff:
+        json.dump(adapted_config, ff)
+    
+    # save the result
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
     with open(expdir_path + 'summary_results.out', 'w') as ff:
         json.dump(result, ff)
     
@@ -127,6 +161,52 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
         plotting.plot_LPA_RPA_changes(fig_dir, result, modelname + ' LPA, RPA', 'repair')
         plotting.plot_MPA_changes(fig_dir, result, modelname + ' MPA', 'repair')
         
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+
+def run_from_config_trees(exp_config_file: str, vis_trees: bool=False):
+    '''
+    run the experiment from a previously generated preop config dict with optimized trees
+
+    :param exp_config_file: path to the experiment config file
+    :param config_w_trees: path to the config file with optimized trees
+    :param vis_trees: if true, make tree visualization figures
+    '''
+
+    # start off somewhere in the models directory, same level as the experiment config file
+    with open(exp_config_file) as ff:
+        exp_config = json.load(ff)
+
+    # unpack the experiment config parameters
+    expname = exp_config["name"]
+    modelname = exp_config["model"]
+    adapt = exp_config["adapt"] # either ps (pries and secomb) or cwss (constant wall shear stress)
+    optimized = exp_config["optimized"] # true if the experiment has been optimized before, to skip the preop optimization
+    is_full_pa = exp_config["is_full_pa_tree"]
+    mesh_surfaces_path = exp_config["mesh_surfaces_path"]
+    repair_config = exp_config["repair"]
+
+    # define the experiment directory path
+    expdir_path = expname + '/'
+
+    # define fig dir path
+    fig_dir = expdir_path + '/figures'
+
+    # load config w trees
+    with open(expdir_path + 'config_w_trees.json') as ff:
+        config = json.load(ff)
+    
+    for vessel_config in config['vessels']:
+        if 'tree' in vessel_config:
+            print(len(vessel_config['tree']['vessels']))
+
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
     
 def run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir):
     '''
@@ -145,9 +225,27 @@ def run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_f
     # construct trees
     trees = preop.construct_pries_trees(preop_config, 
                                         preop_result, 
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+                                        log_file,
+					                    fig_dir=fig_dir, 
+                                        d_min=.0049)
+=======
                                         log_file, 
                                         vis_trees, 
                                         fig_dir)
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+                                        log_file, 
+                                        vis_trees, 
+                                        fig_dir)
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+                                        log_file, 
+                                        vis_trees, 
+                                        fig_dir)
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
     postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, 
@@ -162,9 +260,27 @@ def run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_f
                                                                             log_file)
     
     # summarize results
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+    result_summary = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result)
+
+    return result_summary, adapted_config
+=======
     results = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result)
 
     return results
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+    results = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result)
+
+    return results
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+    results = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result)
+
+    return results
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 
 
 def run_cwss_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir):
@@ -185,8 +301,23 @@ def run_cwss_adaptation(preop_config, preop_result, repair_config, log_file, vis
     trees = preop.construct_cwss_trees(preop_config,
                                        preop_result,
                                        log_file,
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+                                       fig_dir=fig_dir,
+                                       d_min=.0049)
+=======
                                        vis_trees,
                                        fig_dir)
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+                                       vis_trees,
+                                       fig_dir)
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+                                       vis_trees,
+                                       fig_dir)
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
     
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
     postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, 
@@ -203,7 +334,19 @@ def run_cwss_adaptation(preop_config, preop_result, repair_config, log_file, vis
     # summarize results
     results = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result)
 
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+    return results, adapted_config
+=======
     return results
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+    return results
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+    return results
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
 
 
 
