@@ -1,13 +1,13 @@
 testing tree construction
 ** building tree for resistance: 572.5605569134406 **
-     Resistance after optimization is 572.7996499860483
+     Resistance after optimization is 572.8002990878267
 
      the optimized diameter is 0.4222225359051189
 
     integrating pries and secomb...
      the number of vessels is 3
 ** building tree for resistance: 171.85134395526833 **
-     Resistance after optimization is 171.87474060330112
+     Resistance after optimization is 171.8745616346875
 
      the optimized diameter is 1.0541521348583984
 
@@ -24,9 +24,31 @@ making repair according to repair config: {'location': 'proximal', 'degree': [1.
 all stenosis repairs completed
 ** adapting trees based on Pries and Secomb model **
 pries and secomb integration completed for OutletTree1
-    R_new = 1849.7382086893074, R_old = 572.7996499860483
-    The change in resistance is 1276.938558703259
+    R_new = 1849.740209533845, R_old = 572.8002990878267
+    The change in resistance is 1276.9399104460183
 pries and secomb integration completed for OutletTree2
-    R_new = 691.5745236714329, R_old = 171.87474060330112
-    The change in resistance is 519.6997830681318
-pries and secomb adaptation completed for all trees. R_old = [572.7996499860483, 171.87474060330112] R_new = [1849.7382086893074, 691.5745236714329]
+    R_new = 691.5738566456404, R_old = 171.8745616346875
+    The change in resistance is 519.6992950109529
+pries and secomb adaptation completed for all trees. R_old = [572.8002990878267, 171.8745616346875] R_new = [1849.740209533845, 691.5738566456404]
+Getting clinical target values...
+Optimizing preop outlet resistance...
+0D optimization optimization completed! 
+
+     Optimization solution: [572.55862021 171.85780798]
+
+     Objective function value: 2.5148533230831786e-09
+
+     Number of iterations: 10
+
+Outlet resistances optimized! [572.55862021 171.85780798]
+Getting clinical target values...
+Optimizing preop outlet resistance...
+0D optimization optimization completed! 
+
+     Optimization solution: [572.55862021 171.85780798]
+
+     Objective function value: 2.5148533230831786e-09
+
+     Number of iterations: 10
+
+Outlet resistances optimized! [572.55862021 171.85780798]

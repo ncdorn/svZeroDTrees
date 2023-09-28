@@ -48,7 +48,7 @@ def plot_changes_subfig(result, branches, qoi, title, ylabel, xlabel=None, ax=No
     ax.legend()
 
 
-def plot_LPA_RPA_changes(fig_dir, results, title, condition='repair'):
+def plot_LPA_RPA_changes(fig_dir, results, title):
     '''
     plot LPA and RPA changes in q, p, wss as three subfigures
 
@@ -65,35 +65,32 @@ def plot_LPA_RPA_changes(fig_dir, results, title, condition='repair'):
     fig = plt.figure()
     ax = fig.subplots(1, 3)
 
-    # check if the experimental condition is valid
-    if condition not in results:
-        raise Exception('this is an invalid condition. The conditions for this experiment are ' + str([key for key in results]))
-    
+
     # plot the changes in q, p, wss in subfigures
-    plot_changes_subfig(results[condition],
+    plot_changes_subfig(results,
                         ['lpa', 'rpa'],
                         'q_out',
                         title='outlet flowrate',
                         ylabel='q (cm3/s)',
                         ax=ax[0])
     
-    plot_changes_subfig(results[condition],
+    plot_changes_subfig(results,
                         ['lpa', 'rpa'],
                         'p_out',
                         title='outlet pressure',
                         ylabel='p (mmHg)',
                         ax=ax[1])
     
-    plot_changes_subfig(results[condition],
+    plot_changes_subfig(results,
                         ['lpa', 'rpa'],
                         'wss',
                         title='wss',
                         ylabel='wss (dynes/cm2)',
                         ax=ax[2])
 
-    plt.suptitle(title + ' ' + condition)
+    plt.suptitle(title)
     plt.tight_layout()
-    plt.savefig(str(fig_dir + '/' + condition) + '_' + title + '.png')
+    plt.savefig(fig_dir + '/' + title + '.png')
 
 
 def plot_MPA_changes(fig_dir, result, title, condition='repair'):
@@ -112,33 +109,30 @@ def plot_MPA_changes(fig_dir, result, title, condition='repair'):
     fig = plt.figure()
     ax = fig.subplots(1, 3)
 
-    # check if the experimental condition is valid
-    if condition not in result:
-        raise Exception('this is an invalid condition. The conditions for this experiment are ' + str([key for key in result]))
     
     # plot the changes in q, p, wss in subfigures
-    plot_changes_subfig(result[condition],
+    plot_changes_subfig(result,
                         ['mpa'],
                         'q_out',
                         title='outlet flowrate',
                         ylabel='q (cm3/s)',
                         ax=ax[0])
     
-    plot_changes_subfig(result[condition],
+    plot_changes_subfig(result,
                         ['mpa'],
                         'p_out',
                         title='outlet pressure',
                         ylabel='p (mmHg)',
                         ax=ax[1])
     
-    plot_changes_subfig(result[condition],
+    plot_changes_subfig(result,
                         ['mpa'],
                         'wss',
                         title='wss',
                         ylabel='wss (dynes/cm2)',
                         ax=ax[2])
     
-    plt.suptitle(title + ' ' + condition)
+    plt.suptitle(title)
     plt.tight_layout()
-    plt.savefig(str(fig_dir + '/' + condition) + '_' + title + '.png')
+    plt.savefig(fig_dir + '/' + title + '.png')
     
