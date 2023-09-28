@@ -144,49 +144,6 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
     if vis_trees:
         plotting.plot_LPA_RPA_changes(fig_dir, result_handler.clean_results, modelname + ' LPA, RPA')
         plotting.plot_MPA_changes(fig_dir, result_handler.clean_results, modelname + ' MPA')
-        
-
-def run_from_config_trees(exp_config_file: str, vis_trees: bool=False):
-    '''
-    run the experiment from a previously generated preop config dict with optimized trees
-
-    :param exp_config_file: path to the experiment config file
-    :param config_w_trees: path to the config file with optimized trees
-    :param vis_trees: if true, make tree visualization figures
-    '''
-
-    # start off somewhere in the models directory, same level as the experiment config file
-    with open(exp_config_file) as ff:
-        exp_config = json.load(ff)
-
-    # unpack the experiment config parameters
-    expname = exp_config["name"]
-    modelname = exp_config["model"]
-    adapt = exp_config["adapt"] # either ps (pries and secomb) or cwss (constant wall shear stress)
-    optimized = exp_config["optimized"] # true if the experiment has been optimized before, to skip the preop optimization
-    is_full_pa = exp_config["is_full_pa_tree"]
-    mesh_surfaces_path = exp_config["mesh_surfaces_path"]
-    repair_config = exp_config["repair"]
-
-    # define the experiment directory path
-    expdir_path = expname + '/'
-
-    # define fig dir path
-    fig_dir = expdir_path + '/figures'
-
-    # delineate important file names
-    log_file = expdir_path + expname + '.log'
-
-    # load config w trees
-    with open(expdir_path + 'config_w_trees') as ff:
-        config = json.load(ff)
-    
-    # perform the repair
-    operation.repair_stenosis_coefficient(config_handler, repair_config[0], log_file)
-
-    for vessel_config in postop_config['vessels']:
-        if 'tree' in vessel_config:
-            print(len(vessel_config['tree']['vessels']))
 
     
 def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, repair_config, log_file, vis_trees, fig_dir, trees_exist=False):
@@ -204,31 +161,29 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
     '''
 
     if trees_exist:
-        with open('config_w_cwss_trees.in', 'rb') as ff:
-            preop_config = pickle.load(ff)
+        config_handler.from_file_w_trees('config_w_pries_trees.in')
     else:
         # construct trees
-        trees = preop.construct_pries_trees(preop_config, 
-                                            result_handler, 
-                                            log_file,
-                                            fig_dir=fig_dir, 
-                                            d_min=.0049)
+        preop.construct_pries_trees(config_handler, 
+                                    result_handler, 
+                                    log_file,
+                                    fig_dir=fig_dir, 
+                                    d_min=.0049)
         
         # save preop config to json
-        with open('config_w_pries_trees.json', 'w') as ff:
-            json.dump(preop_config, ff)
+        config_handler.to_file_w_trees('config_w_pries_trees.in')
     
 
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
-    postop_config, postop_result = operation.repair_stenosis_coefficient(config_handler,
-                                                                         result_handler, 
-                                                                         repair_config[0], 
-                                                                         log_file)
+    operation.repair_stenosis_coefficient(config_handler,
+                                          result_handler, 
+                                          repair_config[0], 
+                                          log_file)
 
     # adapt trees
-    adapted_config, adapted_result, trees = adaptation.adapt_pries_secomb(config_handler,
-                                                                          result_handler,
-                                                                          log_file)
+    adaptation.adapt_pries_secomb(config_handler,
+                                  result_handler,
+                                  log_file)
 
 
 def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHandler, repair_config, log_file, vis_trees, fig_dir, trees_exist=False):
