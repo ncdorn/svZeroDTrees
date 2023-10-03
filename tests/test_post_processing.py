@@ -1,5 +1,5 @@
 from svzerodtrees.post_processing import plotting
-from svzerodtrees.post_processing import pa_tree_analysis as pa
+from svzerodtrees.post_processing import pa_plotter as pa
 import json
 import pickle
 

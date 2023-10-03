@@ -139,5 +139,4 @@ class ConfigHandler():
                     for bc_config in self.config["boundary_conditions"]:
                         if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
                             vessel_config["tree"] = {}
-
     
