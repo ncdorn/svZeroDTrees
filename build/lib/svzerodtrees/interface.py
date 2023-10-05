@@ -4,6 +4,8 @@ import pickle
 from svzerodtrees import preop, operation, adaptation, postop
 from svzerodtrees.post_processing import plotting
 from svzerodtrees.utils import *
+from svzerodtrees._result_handler import ResultHandler
+from svzerodtrees._config_handler import ConfigHandler
 
 def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=False):
     '''
@@ -24,6 +26,7 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
     adapt = exp_config["adapt"] # either ps (pries and secomb) or cwss (constant wall shear stress)
     optimized = exp_config["optimized"] # true if the experiment has been optimized before, to skip the preop optimization
     is_full_pa = exp_config["is_full_pa_tree"]
+    trees_exist = exp_config["trees_exist"]
     mesh_surfaces_path = exp_config["mesh_surfaces_path"]
     repair_config = exp_config["repair"]
 
@@ -77,7 +80,7 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
     # optimize preoperative outlet boundary conditions
     if not optimized:
         if is_full_pa:
-            preop_config, preop_result = preop.optimize_pa_bcs(
+            config_handler, result_handler = preop.optimize_pa_bcs(
                 input_file,
                 mesh_surfaces_path,
                 clinical_targets,
@@ -85,7 +88,7 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
                 show_optimization=False
             )
         else:
-            preop_config, preop_result = preop.optimize_outlet_bcs(
+            config_handler, result_handler = preop.optimize_outlet_bcs(
                 input_file,
                 clinical_targets,
                 log_file,
@@ -93,122 +96,57 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
             )
 
         # save optimized config and result
-        with open('preop_config.in', 'w') as ff:
-            json.dump(preop_config, ff)
+        config_handler.to_json('preop_config.json')
         
         # json won't work for results dump
-        with open('preop_result.out', 'wb') as ff:
-            pickle.dump(preop_result, ff)
+        with open('preop_result_handler.out', 'wb') as ff:
+            pickle.dump(result_handler, ff)
 
     else: # use previous optimization results
 
-        with open('preop_config.in') as ff:
-            preop_config = json.load(ff)
+        config_handler = ConfigHandler.from_json('preop_config.json')
 
         # json won't work for results load
-        with open('preop_result.out', 'rb') as ff:
-            preop_result = pickle.load(ff)
+        with open('preop_result_handler.out', 'rb') as ff:
+            result_handler = pickle.load(ff)
 
     if adapt == 'ps': # use pries and secomb adaptation scheme
         
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-        result, adapted_config = run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir)
+        run_pries_secomb_adaptation(config_handler, 
+                                    result_handler, 
+                                    repair_config, 
+                                    log_file, vis_trees, 
+                                    fig_dir,
+                                    trees_exist)
 
     elif adapt == 'cwss': # use constant wall shear stress adaptation scheme
         
-        result, adapted_config = run_cwss_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir)
-=======
-=======
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-        result = run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir)
-
-    elif adapt == 'cwss': # use constant wall shear stress adaptation scheme
-        
-        result = run_cwss_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir)
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+        run_cwss_adaptation(config_handler, 
+                            result_handler, 
+                            repair_config, 
+                            log_file, 
+                            vis_trees, 
+                            fig_dir,
+                            trees_exist)
 
     else:
         raise Exception('invalid adaptation scheme chosen')
     
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+    # format the results
+    result_handler.format_results()
+
     # save the adapted config
-    with open(expdir_path + 'adapted_config.json', 'w') as ff:
-        json.dump(adapted_config, ff)
+    config_handler.to_json_w_trees(expdir_path + 'adapted_config.json')
     
     # save the result
-=======
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-    with open(expdir_path + 'summary_results.out', 'w') as ff:
-        json.dump(result, ff)
+    result_handler.to_json(expdir_path + 'full_results.json')
     
     if vis_trees:
-        plotting.plot_LPA_RPA_changes(fig_dir, result, modelname + ' LPA, RPA', 'repair')
-        plotting.plot_MPA_changes(fig_dir, result, modelname + ' MPA', 'repair')
-        
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
+        plotting.plot_LPA_RPA_changes(fig_dir, result_handler.clean_results, modelname + ' LPA, RPA')
+        plotting.plot_MPA_changes(fig_dir, result_handler.clean_results, modelname + ' MPA')
 
-def run_from_config_trees(exp_config_file: str, vis_trees: bool=False):
-    '''
-    run the experiment from a previously generated preop config dict with optimized trees
 
-    :param exp_config_file: path to the experiment config file
-    :param config_w_trees: path to the config file with optimized trees
-    :param vis_trees: if true, make tree visualization figures
-    '''
-
-    # start off somewhere in the models directory, same level as the experiment config file
-    with open(exp_config_file) as ff:
-        exp_config = json.load(ff)
-
-    # unpack the experiment config parameters
-    expname = exp_config["name"]
-    modelname = exp_config["model"]
-    adapt = exp_config["adapt"] # either ps (pries and secomb) or cwss (constant wall shear stress)
-    optimized = exp_config["optimized"] # true if the experiment has been optimized before, to skip the preop optimization
-    is_full_pa = exp_config["is_full_pa_tree"]
-    mesh_surfaces_path = exp_config["mesh_surfaces_path"]
-    repair_config = exp_config["repair"]
-
-    # define the experiment directory path
-    expdir_path = expname + '/'
-
-    # define fig dir path
-    fig_dir = expdir_path + '/figures'
-
-    # load config w trees
-    with open(expdir_path + 'config_w_trees.json') as ff:
-        config = json.load(ff)
-    
-    for vessel_config in config['vessels']:
-        if 'tree' in vessel_config:
-            print(len(vessel_config['tree']['vessels']))
-
-=======
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-    
-def run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir):
+def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, repair_config, log_file, vis_trees, fig_dir, trees_exist=False):
     '''
     run the pries and secomb adaptation scheme from preop config to result
 
@@ -222,68 +160,31 @@ def run_pries_secomb_adaptation(preop_config, preop_result, repair_config, log_f
     :return result: summarized results
     '''
 
-    # construct trees
-    trees = preop.construct_pries_trees(preop_config, 
-                                        preop_result, 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-                                        log_file,
-					                    fig_dir=fig_dir, 
-                                        d_min=.0049)
-=======
-                                        log_file, 
-                                        vis_trees, 
-                                        fig_dir)
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
-                                        log_file, 
-                                        vis_trees, 
-                                        fig_dir)
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
-                                        log_file, 
-                                        vis_trees, 
-                                        fig_dir)
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+    if trees_exist:
+        config_handler.from_file_w_trees('config_w_pries_trees.in')
+    else:
+        # construct trees
+        preop.construct_pries_trees(config_handler, 
+                                    result_handler, 
+                                    log_file,
+                                    fig_dir=fig_dir, 
+                                    d_min=.0049)
+        
+        # save preop config to json
+        config_handler.to_file_w_trees('config_w_pries_trees.in')
 
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
-    postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, 
-                                                                            repair_config[0], 
-                                                                            log_file)
+    operation.repair_stenosis_coefficient(config_handler,
+                                          result_handler, 
+                                          repair_config[0], 
+                                          log_file)
 
     # adapt trees
-    adapted_config, adapted_result, trees = adaptation.adapt_pries_secomb(postop_config, 
-                                                                            trees, 
-                                                                            preop_result, 
-                                                                            postop_result, 
-                                                                            log_file)
-    
-    # summarize results
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-    result_summary = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result)
+    adaptation.adapt_pries_secomb(config_handler,
+                                  result_handler,
+                                  log_file)
 
-    return result_summary, adapted_config
-=======
-    results = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result)
-
-    return results
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
-    results = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result)
-
-    return results
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
-    results = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result)
-
-    return results
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-
-
-def run_cwss_adaptation(preop_config, preop_result, repair_config, log_file, vis_trees, fig_dir):
+def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHandler, repair_config, log_file, vis_trees, fig_dir, trees_exist=False):
     '''
     run the constant wall shear stress adaptation scheme from preop config to result
 
@@ -297,56 +198,30 @@ def run_cwss_adaptation(preop_config, preop_result, repair_config, log_file, vis
     :return result: summarized results
     '''
 
-    # construct trees
-    trees = preop.construct_cwss_trees(preop_config,
-                                       preop_result,
-                                       log_file,
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-                                       fig_dir=fig_dir,
-                                       d_min=.0049)
-=======
-                                       vis_trees,
-                                       fig_dir)
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
-                                       vis_trees,
-                                       fig_dir)
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
-                                       vis_trees,
-                                       fig_dir)
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+    if trees_exist:
+        config_handler.from_file_w_trees('config_w_cwss_trees.in')
+
+    else:
+        # construct trees
+        preop.construct_cwss_trees(config_handler,
+                                           result_handler,
+                                           log_file,
+                                           fig_dir=fig_dir,
+                                           d_min=.0049)
+
+        # save preop config to as pickle, with StructuredTreeOutlet objects
+        config_handler.to_file_w_trees('config_w_cwss_trees.in')
     
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
-    postop_config, postop_result = operation.repair_stenosis_coefficient(preop_config, 
-                                                                            repair_config[0], 
-                                                                            log_file)
+    operation.repair_stenosis_coefficient(config_handler, 
+                                          result_handler,
+                                          repair_config[0], 
+                                          log_file)
 
     # adapt trees
-    adapted_config, adapted_result, trees = adaptation.adapt_constant_wss(postop_config, 
-                                                                            trees, 
-                                                                            preop_result, 
-                                                                            postop_result, 
-                                                                            log_file)
-    
-    # summarize results
-    results = postop.summarize_results(adapted_config, preop_result, postop_result, adapted_result)
-
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-    return results, adapted_config
-=======
-    return results
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
-    return results
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
-=======
-    return results
->>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+    adaptation.adapt_constant_wss(config_handler,
+                                  result_handler,
+                                  log_file)
 
 
 
