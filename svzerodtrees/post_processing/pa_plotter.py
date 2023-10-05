@@ -1,10 +1,11 @@
 import matplotlib.pyplot as plt
+import numpy as np
 from svzerodtrees.utils import *
 import pickle
 import json
 
 
-class PAPlotter:
+class PAanalyzer:
     '''
     plotter class for pulmonary tree analysis
     '''
@@ -18,8 +19,24 @@ class PAPlotter:
         # root of the vessel map for tree structure
         self.root = None
 
+        # maps of vessels and branches
+        self.vessel_map = {}
+        self.branch_map = {}
+        self.vessel_branch_map = {}
+
+        # initialize indices of mpa, rpa, lpa
+        self.mpa = None
+        self.rpa = None
+        self.lpa = None
+
+        # build tree map, organize by branches, and map vessels to branches
+        self.map_vessels_to_branches()
+        self.build_tree_map()
+        self.map_branches_to_vessels()
+        
+
     @classmethod
-    def from_file(cls, config_file: str, result_file: str, fig_dir: str):
+    def from_files(cls, config_file: str, result_file: str, fig_dir: str):
         '''
         class method to generate the results handler with vessel and config information
 
@@ -58,11 +75,11 @@ class PAPlotter:
         with open('config_no_trees.json', 'w') as ff:
             json.dump(config, ff)
 
-    def make_figure(self, result: dict, fig_title: str, filename: str, sharex=False, sharey=False):
+    def make_figure(self, plot_config: dict, fig_title: str, filename: str, sharex=False, sharey=False):
         '''
         make a figure with the given list of subfigures
 
-        :param result: dict of lists of result arrays, with one for each subplot
+        :param plot_config: dict of lists of result arrays, with one for each subplot
         :param fig_title: title of figure
         :param filename: filename to save figure
         :param sharex: bool to share xlabel
@@ -72,20 +89,20 @@ class PAPlotter:
         # initialize the figure
         # fig = plt.figure()
 
-        fig, axs = plt.subplots(1, len(result), sharex=sharex, sharey=sharey)
+        fig, axs = plt.subplots(1, len(plot_config), sharex=sharex, sharey=sharey)
 
         # make an array so indexing still works
-        if len(result) == 1:
+        if len(plot_config) == 1:
             axs = [axs]
 
         # intialize the subplot axes depending on the length of result dict
         # axs = fig.subplots(1, len(result), sharex=sharex, sharey=sharey)
 
         # loop through reult dict and make subplots
-        for i, (title, info) in enumerate(result.items()):
+        for i, (title, info) in enumerate(plot_config.items()):
             
             # if only one result, no subplot title
-            if len(result) == 1:
+            if len(plot_config) == 1:
                 title=None
             
             # type of plot (scatter, histogram, bar)
@@ -242,7 +259,7 @@ class PAPlotter:
         for vessel in outlet_vessels:
             outlet_flows.append(self.result[str(vessel)]["q_out"]["final"])
 
-        result_dict = {
+        plot_config = {
             'flow_adaptation':
             {
                 'type': 'hist',
@@ -254,36 +271,45 @@ class PAPlotter:
             }
         }
 
-        self.make_figure(result_dict, 'Histogram of outlet flowrate', 'outlet_flowrate.png')
+        self.make_figure(plot_config, 'Histogram of outlet flowrate', 'outlet_flowrate.png')
 
-    def plot_flow_adaptation(self, vessels, filename='flow_adaptation.png'):
+
+    def get_qoi_adaptation(self, vessels, qoi: str,  threshold=0):
+        '''
+        get a list of the percent flow adapatation for a given list of vessels
+
+        :param vessels: list of vessels
+        :param qoi: quantity of interest, either 'p_in', 'p_out', 'q_in', 'q_out', or 'wss'
+        :param threshold: threshold for flow adaptation
+        '''
+
+        postop = self.get_result(vessels, qoi, 'postop', type='np')
+        adapted = self.get_result(vessels, qoi, 'final', type='np')
+
+        percent_adapt = np.subtract(adapted, postop) / postop * 100
+
+        percent_adapt = percent_adapt[abs(percent_adapt) > threshold]
+        
+        return percent_adapt
+
+
+    def plot_flow_adaptation(self, vessels, filename='flow_adaptation.png', threshold=100.0):
         '''
         plot a bar chart of the flow adaptation in the large vessels
 
         :param vessels: list of vessels
-
-
+        :param filename: filename to save figure
+        :param threshold: threshold for flow adaptation
         '''
         if vessels == 'all':
-            vessels = self.result.keys()
+            vessels = list(self.result.keys())
         if vessels == 'outlets':
             outlet_vessels, outlet_d = find_outlets(self.config)
             vessels = [str(vessel) for vessel in outlet_vessels]
 
-        percents_adapt = []
-        for vessel in vessels:
-            postop_q = self.result[vessel]["q_out"]["postop"]
-            adapted_q = self.result[vessel]["q_out"]["final"]
-
-            percent_adapt = (adapted_q - postop_q) / postop_q * 100
-            if vessels == 'all':
-                # set some threshold to reduce the numebr of bars
-                if abs(percent_adapt) > 100:
-                    percents_adapt.append(percent_adapt)
-            else:
-                percents_adapt.append(percent_adapt)
+        percents_adapt = self.get_qoi_adaptation(vessels, 'q_out', threshold=threshold)
         
-        result_dict = {
+        plot_config = {
             'flow_adaptation':
             {
                 'type': 'bar',
@@ -295,7 +321,43 @@ class PAPlotter:
             }
         }
         
-        self.make_figure(result_dict, '% flow adaptation in vessels', filename, sharex=False, sharey=False)
+        self.make_figure(plot_config, '% flow adaptation in vessels', filename, sharex=False, sharey=False)
+
+    def scatter_qoi_adaptation_distance(self, branches, qoi: str, filename= 'adaptation_scatter.png', threshold=0.0):
+        '''
+        create a scatterplot of flow adaptation vs distance from MPA where the points are colored red and blue for
+        LPA vs RPA
+
+        '''
+
+        if branches == 'all':
+            branches = list(self.result.keys())
+            vessels = list(self.vessel_map.values())
+
+        elif branches == 'outlets':
+            outlet_branches, outlet_d = find_outlets(self.config)
+            branches = [str(branch) for branch in outlet_branches]
+            vessels = [self.vessel_map[branch] for branch in outlet_branches]
+        else:
+            branches = str(branches)
+            vessels = [self.vessel_map[branch] for branch in branches]
+        percents_adapt = self.get_qoi_adaptation(branches, qoi, threshold=threshold)
+        distances = self.get_distance_from_mpa(vessels)
+
+        # color the vessels red or blue depending on if they are LPA or RPA
+        rpa_distances, lpa_distances = self.sort_into_rpa_lpa(vessels, distances)
+        rpa_percents_adapt, lpa_percents_adapt = self.sort_into_rpa_lpa(vessels, percents_adapt)
+        
+        fig, ax = plt.subplots()
+        ax.scatter(rpa_distances, rpa_percents_adapt, s=100, c='red')
+        ax.scatter(lpa_distances, lpa_percents_adapt, s=100, c='blue')
+
+        ax.set_xlabel('distance from MPA (cm)')
+        ax.set_ylabel('% ' + qoi + ' adaptation')
+        ax.legend(['RPA', 'LPA'])
+        ax.set_title(qoi + ' adaptation vs distance from MPA')
+
+        plt.savefig(str(self.fig_dir + '/') + qoi + '_' + filename)
 
 
     def label_lpa_or_rpa(self):
@@ -305,59 +367,85 @@ class PAPlotter:
         '''
 
         pass
+    
+
+    def map_vessels_to_branches(self):
+        '''
+        map each vessel to a branch id
+        '''
+
+        for vessel in self.vessels:
+            self.vessel_branch_map[vessel['vessel_id']] = get_branch_id(vessel)
+
 
     def build_tree_map(self):
         '''
-        build a map of the tree structure
+        Build a recursive map of the tree structure using self.Vessel objects.
+        Useful for dfs and vessel distance analysis
 
+        :return self.vessel_map: a dict where the keys are branch ids and the values are Vessel objects
         '''
 
-        class Vessel:
-            def __init__(self, id: int):
-                self.id = id
-                # optional name, such as mpa, lpa, rpa
-                self.label= None
-                # list of child vessels
-                self.children = []
-                # path to root
-                self.path = []
-        
-        vessel_map = {}
-
-        # initialize the vessel map (dict of vessels)
-        for vessel in self.vessels:
-            vessel_map[vessel['vessel_id']] = Vessel(vessel['vessel_id'])
+        # initialize the vessel map (dict of branches)
+        for vessel_config in self.vessels:
+            if get_branch_id(vessel_config) not in self.vessel_map.keys():
+                self.vessel_map[get_branch_id(vessel_config)] = self.Vessel(vessel_config)
+            else: 
+                self.vessel_map[get_branch_id(vessel_config)] = self.combine_vessels(self.vessel_map[get_branch_id(vessel_config)], self.Vessel(vessel_config))
+            # map vessel id to branch
         
         # loop through junctions and add children to parent vessels
         for junction in self.config['junctions']:
-            inlets = junction['inlet_vessels']
+            # map inlet vessel id to branches
+            inlets = [self.vessel_branch_map[inlet] for inlet in junction['inlet_vessels']]
             
             if len(inlets) > 1:
                 raise Exception("there is more than one inlet to this junction")
             
-            outlets = junction['outlet_vessels']
+            # map outlet vessel id to branches
+            outlets = [self.vessel_branch_map[outlet] for outlet in junction['outlet_vessels']]
 
-            parent_vessel = vessel_map[inlets[0]]
+            # if the inlet and outlet branches are the same, skip
+            if inlets == outlets:
+                continue
 
+            parent_vessel = self.vessel_map[inlets[0]]
+
+            # connect all the vessel instances
             for outlet in outlets:
-                child_vessel = vessel_map[outlet]
+                child_vessel = self.vessel_map[outlet]
+                child_vessel.parent = parent_vessel
                 parent_vessel.children.append(child_vessel)
-            
+
         # find the root vessel
         self.root = None
-        for vessel in vessel_map.values():
-            if not any(vessel in child_vessel.children for child_vessel in vessel_map.values()):
+        for vessel in self.vessel_map.values():
+            if not any(vessel in child_vessel.children for child_vessel in self.vessel_map.values()):
                 self.root = vessel
-        
+
         # label the mpa, rpa and lpa
         self.root.label = 'mpa'
         self.root.children[0].label = 'rpa'
         self.root.children[1].label = 'lpa'
+        
+        # add these in incase we index using the mpa, lpa, rpa strings
+        self.mpa = self.root
+        self.rpa = self.root.children[0]
+        self.lpa = self.root.children[1]
+
+        # modify the self.result array to include the mpa, rpa, lpa with numerical ids
+        self.result[str(self.root.branch)] = self.result.pop('mpa')
+        self.result[str(self.root.children[0].branch)] = self.result.pop('rpa')
+        self.result[str(self.root.children[1].branch)] = self.result.pop('lpa')
+
+        keys = list(self.result.keys())
+        keys.sort(key=int)
+
+        self.result = {key: self.result[key] for key in keys}
 
         self.find_vessel_paths()
 
 
-    
     def find_vessel_paths(self):
         '''
         find the path from the root to each vessel
@@ -365,18 +453,136 @@ class PAPlotter:
 
         # helper function for depth-first search
         def dfs(vessel, path):
+
             if vessel is None:
                 return
             
             # add current vessel to the path
-            path.append(vessel.id)
+            path.append(vessel.branch)
 
             vessel.path = path.copy()
+            
+            vessel.gen = len(path) - 1
 
             for child in vessel.children:
                 dfs(child, path.copy())
 
         dfs(self.root, [])
+
+
+    def get_distance_from_mpa(self, vessels):
+        '''
+        get the distance from the mpa for a given list of vessel ids
+
+        :param vessels: vessels to get distance for
+        '''
+        distances = []
+        for vessel in vessels:
+            if vessel.label == 'mpa':
+                distances.append(0)
+            else:
+                distances.append(vessel.length + self.get_distance_from_mpa([vessel.parent])[0])
+            
+        return distances
+    
+    def sort_into_rpa_lpa(self, vessels, data):
+        rpa_data = []
+        lpa_data = []
+        for vessel, datum in zip(vessels, data):
+            if self.rpa.branch in vessel.path:
+                rpa_data.append(datum)
+            elif self.lpa.branch in vessel.path:
+                lpa_data.append(datum)
+        
+        return rpa_data, lpa_data
+
+    def map_branches_to_vessels(self):
+        '''
+        organize the vessel map by branch
+        '''
+
+        branches = list(self.result.keys())
+
+        for branch_id in branches:
+            # create a branch map where each branch id keeps a list of vessels in that branch if multiple segments have been made
+            self.branch_map[branch_id] = [vessel for vessel in self.vessel_map.values() if vessel.branch == branch_id]
+            # sort the list from least to most distal vessels
+            self.branch_map[branch_id].sort(key=lambda x: x.gen)
+
+    def get_result(self, branches, qoi: str, time: str, type='np'):
+        '''
+        get a result for a given qoi for a list of branches
+        
+        :param branches: list of branch ids
+        :param qoi: quantity of interest
+        :param type: datatype of result array (np or list)
+        '''
+
+        if qoi not in ['p_in', 'p_out', 'q_in', 'q_out', 'wss']:
+            raise ValueError('qoi not recognized')
+
+        if type not in ['np', 'list']:
+            raise ValueError('type not recognized')
+        
+        if time not in ['preop', 'postop', 'final']:
+            raise ValueError('time not recognized')
+        
+        values = []
+        for branch in branches:
+            values.append(self.result[str(branch)][qoi][time])
+        
+        if type == 'np':
+            return np.array(values)
+        else:
+            return values
+        
+    def combine_vessels(self, vessel1, vessel2):
+        '''
+        combine two vessels of the same branch into one vessel
+        :param vessel1: first vessel
+        :param vessel2: second vessel
+        '''
+        vessel_config = dict(
+            label = vessel1.label,
+            vessel_id = vessel1.branch,
+            vessel_length = vessel1.length + vessel2.length,
+            vessel_name = 'branch' + str(vessel1.branch) + '_seg0',
+            zero_d_element_values = {
+                'R_poiseuille': vessel1.zero_d_element_values['R_poiseuille'] + vessel2.zero_d_element_values['R_poiseuille'],
+                # need to update this to be actual math
+                'C': vessel1.zero_d_element_values['C'] + vessel2.zero_d_element_values['C'],
+                # need to update this to be actual math
+                'L': vessel1.zero_d_element_values['L'] + vessel2.zero_d_element_values['L'],
+                # take the max, there is definitely some math to be done here
+                'stenosis_coefficient': max(vessel1.zero_d_element_values['stenosis_coefficient'], vessel2.zero_d_element_values['stenosis_coefficient'])
+            }
+        )
+
+        return self.Vessel(vessel_config)
+
+    
+
+    class Vessel:
+        '''
+        class to handle tree structure creation and dfs on the tree
+
+        '''
+        def __init__(self, config: dict):
+            # optional name, such as mpa, lpa, rpa to classify the vessel
+            self.label= None
+            # list of child vessels
+            self.children = []
+            self.parent = None
+            # path to root
+            self.path = []
+            # generation from root
+            self.gen = None
+            # get info from vessel config
+            self.length = config['vessel_length']
+            self.id = config['vessel_id']
+            self.branch = get_branch_id(config)
+            self.zero_d_element_values = config['zero_d_element_values']
+
 
 
 

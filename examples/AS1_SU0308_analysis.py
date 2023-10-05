@@ -1,23 +1,26 @@
-from svzerodtrees.post_processing.pa_plotter import PAPlotter
+from svzerodtrees.post_processing.pa_plotter import PAanalyzer
 import numpy as np
 import os
 
 if __name__ == '__main__':
 
     os.chdir('../zerod_models/AS1_SU0308_prestent/')
-    plotter = PAPlotter.from_file('preop_config.json', 'experiments/AS1_cwss_adaptation/full_results.json', 'experiments/AS1_cwss_adaptation/figures/')
+    plotter = PAanalyzer.from_files('preop_config.json', 'experiments/AS1_cwss_adaptation/full_results.json', 'experiments/AS1_cwss_adaptation/figures/')
 
-    # plotter.plot_flow_adaptation(['lpa', 'rpa'])
 
-    # plotter.plot_flow_adaptation(vessels='all', filename='flow_adaptation_all.png')
+    # plot outflow vs. distance
+    plotter.scatter_qoi_adaptation_distance('all', 'q_out')
+    plotter.scatter_qoi_adaptation_distance('outlets', 'q_out', filename='adaptation_scatter_outlets.png')
 
-    # plotter.plot_flow_adaptation(vessels='outlets', filename='flow_adaptation_outlets.png')
+    # plot pressure vs. distance
+    plotter.scatter_qoi_adaptation_distance('all', 'p_out')
+    plotter.scatter_qoi_adaptation_distance('outlets', 'p_out', filename='adaptation_scatter_outlets.png')
 
-    # plotter.plot_outlet_flow_histogram()
+    # plot wss vs. distance
+    plotter.scatter_qoi_adaptation_distance('all', 'wss')
+    plotter.scatter_qoi_adaptation_distance('outlets', 'wss', filename='adaptation_scatter_outlets.png')
 
-    plotter.build_tree_map()
 
-    print(len(plotter.vessels))
-    print([child.path for child in plotter.root.children])
+
 
 
