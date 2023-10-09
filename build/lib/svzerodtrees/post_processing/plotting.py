@@ -62,7 +62,7 @@ def plot_LPA_RPA_changes(fig_dir, results, title):
         with open(results) as ff:
             results = json.load(ff)
 
-    fig = plt.figure()
+    fig = plt.figure(figsize=(10, 4))
     ax = fig.subplots(1, 3)
 
 
