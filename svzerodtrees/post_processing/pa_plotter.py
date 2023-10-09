@@ -282,13 +282,14 @@ class PAanalyzer:
         fig = plt.figure()
         ax = fig.subplots(1, 3)
 
-        print([self.lpa.branch, self.rpa.branch])
         # plot the changes in q, p, wss in subfigures
-        self.plot_changes_subfig([self.lpa.branch, self.rpa.branch],
-                                 'q_out',
-                                 title='outlet flowrate',
-                                 ylabel='q (cm3/s)',
-                                 ax=ax[0])
+        # self.plot_changes_subfig([self.lpa.branch, self.rpa.branch],
+        #                          'q_out',
+        #                          title='outlet flowrate',
+        #                          ylabel='q (cm3/s)',
+        #                          ax=ax[0])
+        
+        self.plot_flow_split(ax[0])
         
         self.plot_changes_subfig([self.lpa.branch, self.rpa.branch],
                                  'p_out',
@@ -298,19 +299,50 @@ class PAanalyzer:
         
         self.plot_changes_subfig([self.lpa.branch, self.rpa.branch],
                                  'wss',
-                                 title='wss',
+                                 title='wall shear stress',
                                  ylabel='wss (dynes/cm2)',
                                  ax=ax[2])
 
         plt.suptitle('Hemodynamic changes in LPA and RPA')
         plt.tight_layout()
-        plt.savefig(self.fig_dir + '/lpa_rpa_diff.png')
+        plt.savefig(self.fig_dir + '/lpa_rpa_diff_w_bar.png')
 
 
-    def plot_flow_split(self):
+    def plot_flow_split(self, ax):
         '''
         plot the flow split between the LPA and RPA as a stacked bar graph
+
+        :param ax: pyplot axis
         '''
+        
+        timesteps = ['preop', 'postop', 'final']
+
+        # get flow splits
+        preop_q = self.get_result([self.lpa.branch, self.rpa.branch], 'q_out', 'preop', type='np')
+        postop_q = self.get_result([self.lpa.branch, self.rpa.branch], 'q_out', 'postop', type='np')
+        final_q = self.get_result([self.lpa.branch, self.rpa.branch], 'q_out', 'final', type='np')
+
+        preop_split = preop_q / sum(preop_q)
+        postop_split = postop_q / sum(postop_q)
+        final_split = final_q / sum(final_q)
+
+        percent = {'lpa': [preop_split[0] * 100, postop_split[0] * 100, final_split[0] * 100],
+                     'rpa': [preop_split[1] * 100, postop_split[1] * 100, final_split[1] * 100]}
+        
+        q = {'lpa': [preop_q[0], postop_q[0], final_q[0]],
+             'rpa': [preop_q[1], postop_q[1], final_q[1]]}
+
+        # plot the stacked bar graph
+        bottom = np.zeros(len(timesteps))
+        for vessel, values in q.items():
+            ax.bar(timesteps, values, label=vessel, bottom=bottom)
+            for value in values:
+                ax.text(timesteps[values.index(value)], value / 2 + bottom[values.index(value)], str(int(percent[vessel][values.index(value)])) + '%', ha='center', va='center')
+            bottom += values
+
+        ax.set_title('flow split')
+        ax.set_ylabel('flowrate (cm3/s)')
+        ax.legend()
 
     def plot_changes_subfig(self, branches, qoi, title, ylabel, xlabel=None, ax=None):
         '''
@@ -327,7 +359,6 @@ class PAanalyzer:
 
         '''
 
-        # intialize plot dict
         timesteps = ['preop', 'postop', 'final']
 
         bar_width = 1 / (len(branches) + 1)
@@ -433,8 +464,18 @@ class PAanalyzer:
         ax.scatter(rpa_distances, rpa_percents_adapt, s=100, c='red')
         ax.scatter(lpa_distances, lpa_percents_adapt, s=100, c='blue')
 
+        # add horizontal line at zero
+        # ax.axhline(0, color='red', linestyle='--', label='0% adaptation')
+
+        # add grid
+        ax.grid(True)
+
         ax.set_xlabel('distance from MPA (cm)')
         ax.set_ylabel('% ' + qoi + ' adaptation')
+
+        # symmetric log y axis
+        ax.set_yscale('symlog')
+
         ax.legend(['RPA', 'LPA'])
         ax.set_title(qoi + ' adaptation vs distance from MPA')
 
@@ -503,21 +544,27 @@ class PAanalyzer:
         for vessel in self.vessel_map.values():
             if not any(vessel in child_vessel.children for child_vessel in self.vessel_map.values()):
                 self.root = vessel
+        
+        # organize the children in numerical order
+        # we assume that the branches are sorted alphabetically, and therefore the lpa comes first.
+        self.root.children.sort(key=lambda x: x.branch)
+
+        print([child.branch for child in self.root.children])
 
         # label the mpa, rpa and lpa
         self.root.label = 'mpa'
-        self.root.children[0].label = 'rpa'
-        self.root.children[1].label = 'lpa'
+        self.root.children[0].label = 'lpa'
+        self.root.children[1].label = 'rpa'
         
         # add these in incase we index using the mpa, lpa, rpa strings
         self.mpa = self.root
-        self.rpa = self.root.children[0]
-        self.lpa = self.root.children[1]
+        self.lpa = self.root.children[0]
+        self.rpa = self.root.children[1]
 
         # modify the self.result array to include the mpa, rpa, lpa with numerical ids
-        self.result[str(self.root.branch)] = self.result.pop('mpa')
-        self.result[str(self.root.children[0].branch)] = self.result.pop('rpa')
-        self.result[str(self.root.children[1].branch)] = self.result.pop('lpa')
+        self.result[str(self.mpa.branch)] = self.result.pop('mpa')
+        self.result[str(self.rpa.branch)] = self.result.pop('rpa')
+        self.result[str(self.lpa.branch)] = self.result.pop('lpa')
 
         keys = list(self.result.keys())
         keys.sort(key=int)
