@@ -274,6 +274,87 @@ class PAanalyzer:
         self.make_figure(plot_config, 'Histogram of outlet flowrate', 'outlet_flowrate.png')
 
 
+    def plot_lpa_rpa_diff(self):
+        '''
+        plot the difference in flowrate, pressure and wss between the LPA and RPA
+        '''
+
+        fig = plt.figure()
+        ax = fig.subplots(1, 3)
+
+        print([self.lpa.branch, self.rpa.branch])
+        # plot the changes in q, p, wss in subfigures
+        self.plot_changes_subfig([self.lpa.branch, self.rpa.branch],
+                                 'q_out',
+                                 title='outlet flowrate',
+                                 ylabel='q (cm3/s)',
+                                 ax=ax[0])
+        
+        self.plot_changes_subfig([self.lpa.branch, self.rpa.branch],
+                                 'p_out',
+                                 title='outlet pressure',
+                                 ylabel='p (mmHg)',
+                                 ax=ax[1])
+        
+        self.plot_changes_subfig([self.lpa.branch, self.rpa.branch],
+                                 'wss',
+                                 title='wss',
+                                 ylabel='wss (dynes/cm2)',
+                                 ax=ax[2])
+
+        plt.suptitle('Hemodynamic changes in LPA and RPA')
+        plt.tight_layout()
+        plt.savefig(self.fig_dir + '/lpa_rpa_diff.png')
+
+
+    def plot_flow_split(self):
+        '''
+        plot the flow split between the LPA and RPA as a stacked bar graph
+        '''
+
+    def plot_changes_subfig(self, branches, qoi, title, ylabel, xlabel=None, ax=None):
+        '''
+        plot the changes in the LPA and RPA flow, pressure and wss as a grouped bar graph
+
+        :param summary_values: summarized results dict for a given QOI, from postop.summarize_results
+        :param branches: list of str containing the branches to plot
+        :param qoi: str containing the data name to plot
+        :param title: figure title
+        :param ylabel: figure ylabel
+        :param xlabel: figure xlabel
+        :param ax: figure ax object
+        :param condition: experimental condition name
+
+        '''
+
+        # intialize plot dict
+        timesteps = ['preop', 'postop', 'final']
+
+        bar_width = 1 / (len(branches) + 1)
+
+        x = np.arange(len(timesteps))
+
+        bar_width = 0.25
+        shift = 0
+
+        # Plotting the grouped bar chart
+        for branch, qois in self.result.items():
+            if int(branch) in branches:
+                values = [qois[qoi][timestep] for timestep in timesteps]
+                offset = bar_width * shift
+                ax.bar(x + offset, values, bar_width, label=branch)
+                shift += 1
+        
+        # set x and y axis ranges
+        ax.set_ylim((0, 1.3 * max([self.result[str(branch)][qoi]['final'] for branch in branches])))
+
+        # Set labels, title, and legend
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.set_xticks([0, 1, 2], timesteps)
+        ax.legend(['lpa', 'rpa'])
+
     def get_qoi_adaptation(self, vessels, qoi: str,  threshold=0):
         '''
         get a list of the percent flow adapatation for a given list of vessels
