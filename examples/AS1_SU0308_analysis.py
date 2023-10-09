@@ -20,6 +20,9 @@ if __name__ == '__main__':
     plotter.scatter_qoi_adaptation_distance('all', 'wss')
     plotter.scatter_qoi_adaptation_distance('outlets', 'wss', filename='adaptation_scatter_outlets.png')
 
+    # plot lpa and rpa changes
+    plotter.plot_lpa_rpa_diff()
+
 
 
 

@@ -442,7 +442,7 @@ def construct_pries_trees(config_handler, result_handler, log_file=None, d_min=0
                                                                                P_outlet=[np.mean(p_outs[outlet_idx])])
                         R = bc_config["bc_values"]["R"]
 
-                write_to_log(log_file, "** building tree for resistance: " + str(R) + " **")
+                write_to_log(log_file, "** building tree " + str(outlet_idx) + " for R = " + str(R) + " **")
 
                 outlet_stree.optimize_tree_diameter(R, log_file, d_min=d_min, pries_secomb=True)
 
