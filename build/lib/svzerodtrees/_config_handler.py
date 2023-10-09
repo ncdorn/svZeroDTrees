@@ -115,7 +115,7 @@ class ConfigHandler():
             if "boundary_conditions" in vessel_config:
                 if "outlet" in vessel_config["boundary_conditions"]:
                     for bc_config in self.config["boundary_conditions"]:
-                        if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
+                        if vessel_config["boundary_conditions"]["outlet"] == bc_config["bc_name"]:
                             self.trees.append(vessel_config["tree"])
 
         self.clear_config_trees()
@@ -137,7 +137,6 @@ class ConfigHandler():
             if "boundary_conditions" in vessel_config:
                 if "outlet" in vessel_config["boundary_conditions"]:
                     for bc_config in self.config["boundary_conditions"]:
-                        if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
+                        if vessel_config["boundary_conditions"]["outlet"] == bc_config["bc_name"]:
                             vessel_config["tree"] = {}
-
     
