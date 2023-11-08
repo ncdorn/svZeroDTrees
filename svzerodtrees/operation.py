@@ -23,13 +23,13 @@ def repair_stenosis_coefficient(config_handler: ConfigHandler, result_handler: R
     # proximal stenosis repair case
     if repair_config['location'] == 'proximal': 
         # repair only the LPA and RPA (should be the outlets of the first junction in the config file)
-        repair_config['vessels'] = result_handler.rpa_lpa_branch
+        repair_config['vessels'] = [result_handler.lpa_branch, result_handler.rpa_branch]
 
         # if an improper number of repair degrees are specified
         if len(repair_config['degree']) != 2: 
             raise Exception("repair config must specify 2 degrees for LPA and RPA")
         
-        write_to_log(log_file, "** repairing stenoses in vessels " + str(repair_vessels) + " **")
+        write_to_log(log_file, "** repairing stenoses in vessels " + str(repair_config['vessels']) + " **")
 
     # extensive repair case (all vessels)
     elif repair_config['location'] == 'extensive': 
@@ -45,16 +45,26 @@ def repair_stenosis_coefficient(config_handler: ConfigHandler, result_handler: R
     # custom repair case
     elif type(repair_config['location']) is list: 
 
-        # repair vessels specified in the repair config
-        repair_config['vessels'] = repair_config['location']
+        repair_config['vessels'] = []
+        # add lpa and rpa branch if rpa and lpa are specified
+        for location in repair_config['location']:
+            if location == 'rpa':
+                repair_config['vessels'].append(result_handler.rpa_branch)
+
+            elif location == 'lpa':
+                repair_config['vessels'].append(result_handler.lpa_branch)
+
+            else:
+                repair_config['vessels'].append(location)
         
         # repair degree specified in the repair config
-        repair_config['degree'] = repair_config['degree']
+        # repair_config['degree'] = repair_config['degree']
 
-        write_to_log(log_file, "** repairing stenoses in vessels " + str(repair_vessels) + " **")
+        write_to_log(log_file, "** repairing stenoses in vessels " + str(repair_config['vessels']) + " **")
 
     # perform the virtual stenosis repair
     for vessel_config in config_handler.config["vessels"]:
+
 
         if get_branch_id(vessel_config) in repair_config['vessels']:
 
@@ -66,7 +76,8 @@ def repair_stenosis_coefficient(config_handler: ConfigHandler, result_handler: R
             
             # if we write to the log file for every vessel in the extensive case we could clog the log file
             if repair_config['location'] != 'extensive': 
-                write_to_log(log_file, "     vessel " + str(vessel_config["vessel_id"]) + " has been repaired")
+                write_to_log(log_file, "     vessel " + str(vessel_config["vessel_id"]) + " has been repaired by degree " + str(repair_config['degree'][repair_idx]))
+                write_to_log(log_file, "     the new stenosis coefficient is " + str(vessel_config["zero_d_element_values"]["stenosis_coefficient"]))
                 
     write_to_log(log_file, 'all stenosis repairs completed')
 

@@ -7,8 +7,10 @@ class ResultHandler:
     class to handle preop, postop and post adaptation results from the structured tree simulation
     '''
 
-    def __init__(self, vessels, rpa_lpa_branch, viscosity):
-        self.rpa_lpa_branch = rpa_lpa_branch
+    def __init__(self, vessels, lpa_branch, rpa_branch, viscosity):
+
+        self.lpa_branch = lpa_branch
+        self.rpa_branch = rpa_branch
         # vessel list in a dict to be compatible with utils
         self.vessels = {'vessels': vessels}
         self.viscosity = viscosity # for wss calculations
@@ -26,7 +28,7 @@ class ResultHandler:
         '''
 
         # get rpa_lpa_branch ids
-        rpa_lpa_branch = find_rpa_lpa_branches(config)
+        lpa_branch, rpa_branch = find_lpa_rpa_branches(config)
 
         # get vessel info and vessel ids (vessel info necessary for wss calculations)
         vessels = []
@@ -37,16 +39,16 @@ class ResultHandler:
         # get the viscosity
         viscosity = config['simulation_parameters']['viscosity']
 
-        return ResultHandler(vessels, rpa_lpa_branch, viscosity)
+        return ResultHandler(vessels, lpa_branch, rpa_branch, viscosity)
 
     def get_branches(self, config):
 
-        if self.rpa_lpa_branch is None:
-            self.rpa_lpa_branch = find_rpa_lpa_branches(config)
+        if self.rpa_branch is None and self.lpa_branch is None:
+            self.lpa_branch, self.rpa_branch = find_lpa_rpa_branches(config)
 
         for vessel_config in config['vessels']:
             id = get_branch_id(vessel_config)
-            if id not in [0, self.rpa_lpa_branch[0], self.rpa_lpa_branch[1]]:
+            if id not in [0, self.lpa_branch, self.rpa_branch]:
                 if id not in self.vessels:
                     self.vessels.append(id)
     
@@ -60,15 +62,15 @@ class ResultHandler:
         self.clean_results['mpa'] = self.format_branch_result(0)
 
         # get summary results for the RPA
-        self.clean_results['rpa'] = self.format_branch_result(self.rpa_lpa_branch[0])
+        self.clean_results['rpa'] = self.format_branch_result(self.rpa_branch)
 
         # get summary results for the LPA
-        self.clean_results['lpa'] = self.format_branch_result(self.rpa_lpa_branch[1])
+        self.clean_results['lpa'] = self.format_branch_result(self.lpa_branch)
 
         # get summary results for all other vessels
         for vessel_config in self.vessels['vessels']:
             id = get_branch_id(vessel_config)
-            if id not in [0, self.rpa_lpa_branch[0], self.rpa_lpa_branch[1]]:
+            if id not in [0, self.lpa_branch, self.rpa_branch]:
                 self.clean_results[id] = self.format_branch_result(id)
 
     

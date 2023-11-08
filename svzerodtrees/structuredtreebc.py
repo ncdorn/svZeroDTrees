@@ -262,6 +262,7 @@ class StructuredTreeOutlet():
             :param update_func: function to update vessel diameter based on constant wall shear stress asssumption
             '''
             if vessel:
+                print(vessel.d - update_func(vessel.d))
                 vessel.d = update_func(vessel.d)
                 vessel.update_vessel_info()
                 # recursive step
@@ -273,7 +274,7 @@ class StructuredTreeOutlet():
 
         self.create_block_dict()
 
-        R_new = self.root.R_eq
+        R_new = self.root.R_eq  # calculate post-adaptation resistance
 
         return R_old, R_new
 

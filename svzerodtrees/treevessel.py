@@ -47,13 +47,9 @@ class TreeVessel:
 
         :return: TreeVessel instance
         '''
-        if diameter > .03 or id == 0:
-            # if we allow the first vessel to experience FL effects, the optimization does not work as the resistance is
-            # decreased by an order of magnitude. Therefore the first vessel automatically does not experience FL.
-            viscosity = eta
-        else: 
-            # Implemented Fahraeus-Lindqvist effect according to empirical relationship in Lan et al. and Pries and Secomb
-            viscosity = cls.fl_visc(cls, diameter)
+
+        # Viscosity is always governed by fahraeus lindqvist effect
+        viscosity = cls.fl_visc(cls, diameter)
         
         # initialize the 0D parameters of the treee
         R, C, L, l = cls.calc_zero_d_values(cls, diameter, viscosity)
@@ -164,11 +160,10 @@ class TreeVessel:
         update vessel info dict based on changes to vessel diameter
         '''
 
-        if self._d < .03 and self.id > 0: 
-        # if we allow the first vessel to experience FL effects, the optimization does not work as the resistance is decreased
-        # by an order of magnitude
-            self.eta = self.fl_visc(self.d)
-            self.info["viscosity"] = self.eta
+        # update viscosity
+        self.eta = self.fl_visc(self.d)
+        self.info["viscosity"] = self.eta
+        
         R, C, L, l = self.calc_zero_d_values(self._d, self.eta)
         self.info["vessel_length"] = l
         self.info["vessel_D"] = self.d

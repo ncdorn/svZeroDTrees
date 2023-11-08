@@ -78,7 +78,8 @@ def optimize_outlet_bcs(input_file,
                                      input_config=config_handler.config,
                                      target_ps=None,
                                      steady=steady,
-                                     rpa_lpa_branch= result_handler.rpa_lpa_branch, # in general, this should be [1, 2]
+                                     lpa_branch= result_handler.lpa_branch, # in general, this should be [1, 2]
+                                     rpa_branch = result_handler.rpa_branch,
                                      rpa_split=rpa_split
                                      ):
         '''
@@ -106,8 +107,8 @@ def optimize_outlet_bcs(input_file,
 
         # get the MPA, RPA, LPA flow rates
         q_MPA = get_branch_result(zerod_result, branch=0, data_name='flow_in', steady=steady)
-        q_RPA = get_branch_result(zerod_result, branch=rpa_lpa_branch[0], data_name='flow_in', steady=steady)
-        q_LPA = get_branch_result(zerod_result, branch=rpa_lpa_branch[1], data_name='flow_in', steady=steady)
+        q_RPA = get_branch_result(zerod_result, branch=rpa_branch, data_name='flow_in', steady=steady)
+        q_LPA = get_branch_result(zerod_result, branch=lpa_branch, data_name='flow_in', steady=steady)
 
         if steady: # take the mean pressure only
             p_diff = abs(target_ps[2] - mpa_mean_p) ** 2
@@ -140,14 +141,11 @@ def optimize_outlet_bcs(input_file,
     # write to log file for debugging
     write_to_log(log_file, "Optimizing preop outlet resistance...")
 
-    # find rpa and lpa branches
-    rpa_lpa_branch = result_handler.rpa_lpa_branch
-
     # run the optimization algorithm
     if steady:
         result = minimize(zerod_optimization_objective,
                         resistance,
-                        args=(config_handler.config, target_ps, steady, rpa_lpa_branch, rpa_split),
+                        args=(config_handler.config, target_ps, steady, result_handler.lpa_branch, result_handler.rpa_branch, rpa_split),
                         method="CG",
                         options={"disp": False},
                         )
@@ -155,7 +153,7 @@ def optimize_outlet_bcs(input_file,
         bounds = Bounds(lb=0, ub=math.inf)
         result = minimize(zerod_optimization_objective,
                           rcr,
-                          args=(config_handler.config, target_ps, steady, rpa_lpa_branch, rpa_split),
+                          args=(config_handler.config, target_ps, steady, result_handler.lpa_branch, result_handler.rpa_branch, rpa_split),
                           method="CG",
                           options={"disp": False},
                           bounds=bounds

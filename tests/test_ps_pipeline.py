@@ -108,8 +108,7 @@ def test_repair_stenosis():
     '''
     test the virtual 0d stenosis repair algorithm for the proximal, extensive and custom cases
     '''
-    with open('tests/cases/LPA_RPA_0d_steady/preop_config.in') as ff:
-        preop_config = json.load(ff)
+    preop_config_handler = ConfigHandler.from_json('tests/cases/LPA_RPA_0d_steady/preop_config.json')
     
     with open('tests/cases/repair.json') as ff:
         repair_dict = json.load(ff)
@@ -118,13 +117,13 @@ def test_repair_stenosis():
         result_handler = pickle.load(ff)
 
     # proximal repair case
-    postop_config_prox, result_handler_prox = operation.repair_stenosis_coefficient(preop_config, result_handler, repair_dict['proximal'])
+    operation.repair_stenosis_coefficient(preop_config_handler, result_handler, repair_dict['proximal'])
 
     # extensive repair case
-    postop_config_ext, result_handler_ext = operation.repair_stenosis_coefficient(preop_config, result_handler, repair_dict['extensive'])
+    operation.repair_stenosis_coefficient(preop_config_handler, result_handler, repair_dict['extensive'])
 
     # custom repair case
-    postop_config_cust, result_handler_cust = operation.repair_stenosis_coefficient(preop_config, result_handler, repair_dict['custom'])
+    operation.repair_stenosis_coefficient(preop_config_handler, result_handler, repair_dict['custom'])
 
 
 def test_cwss_adaptation():
@@ -219,4 +218,4 @@ def test_pa_optimizer():
 if __name__ == '__main__':
 
     # test_preop()
-    test_run_from_file()
+    test_repair_stenosis()

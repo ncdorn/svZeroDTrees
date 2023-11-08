@@ -6,8 +6,9 @@ from svzerodtrees.post_processing import plotting
 from svzerodtrees.utils import *
 from svzerodtrees._result_handler import ResultHandler
 from svzerodtrees._config_handler import ConfigHandler
+from svzerodtrees.post_processing.pa_plotter import PAanalyzer
 
-def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=False):
+def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=True):
     '''
     run the structured tree optimization pipeline from an experiment config file
 
@@ -76,6 +77,8 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
 
     # initialize log file
     write_to_log(log_file, 'beginning experiment ' + expname + '!',  write=True)
+    write_to_log(log_file, 'with the following configuration: ')
+    write_to_log(log_file, str(exp_config))
 
     # optimize preoperative outlet boundary conditions
     if not optimized:
@@ -110,6 +113,15 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
         with open('preop_result_handler.out', 'rb') as ff:
             result_handler = pickle.load(ff)
 
+        # get preop result
+        preop_flow = run_svzerodplus(config_handler.config)
+
+        # load a new result handler
+        result_handler = ResultHandler.from_config(config_handler.config)
+
+        # add result to the handler
+        result_handler.add_unformatted_result(preop_flow, 'preop')
+
     if adapt == 'ps': # use pries and secomb adaptation scheme
         
         run_pries_secomb_adaptation(config_handler, 
@@ -142,8 +154,26 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
     result_handler.to_json(expdir_path + 'full_results.json')
     
     if vis_trees:
-        plotting.plot_LPA_RPA_changes(fig_dir, result_handler.clean_results, modelname + ' LPA, RPA')
-        plotting.plot_MPA_changes(fig_dir, result_handler.clean_results, modelname + ' MPA')
+        # initialize the data plotter
+        plotter = PAanalyzer.from_files('preop_config.json', expdir_path + 'full_results.json', expdir_path + 'figures/')
+
+        # scatter outflow vs. distance
+        plotter.scatter_qoi_adaptation_distance('all', 'q_out')
+        plotter.scatter_qoi_adaptation_distance('outlets', 'q_out', filename='adaptation_scatter_outlets.png')
+
+        # scatter pressure vs. distance
+        plotter.scatter_qoi_adaptation_distance('all', 'p_out')
+        plotter.scatter_qoi_adaptation_distance('outlets', 'p_out', filename='adaptation_scatter_outlets.png')
+
+        # scatter wss vs. distance
+        plotter.scatter_qoi_adaptation_distance('all', 'wss')
+        plotter.scatter_qoi_adaptation_distance('outlets', 'wss', filename='adaptation_scatter_outlets.png')
+
+        # plot lpa and rpa flow adaptation
+        plotter.plot_lpa_rpa_adaptation()
+
+        # plot lpa and rpa changes
+        plotter.plot_lpa_rpa_diff()
 
 
 def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, repair_config, log_file, vis_trees, fig_dir, trees_exist=False):

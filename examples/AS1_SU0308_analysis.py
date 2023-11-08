@@ -5,7 +5,8 @@ import os
 if __name__ == '__main__':
 
     os.chdir('../zerod_models/AS1_SU0308_prestent/')
-    plotter = PAanalyzer.from_files('preop_config.json', 'experiments/AS1_cwss_adaptation_extensive/full_results.json', 'experiments/AS1_cwss_adaptation_extensive/figures/')
+    experiment = 'AS1_LPA_only'
+    plotter = PAanalyzer.from_files('preop_config.json', 'experiments/' + experiment + '/full_results.json', 'experiments/' + experiment + '/figures/')
 
 
     # plot outflow vs. distance
@@ -20,8 +21,9 @@ if __name__ == '__main__':
     plotter.scatter_qoi_adaptation_distance('all', 'wss')
     plotter.scatter_qoi_adaptation_distance('outlets', 'wss', filename='adaptation_scatter_outlets.png')
 
-    # plot flow adaptation in the lpa and rpa
-    plotter.plot_flow_adaptation([plotter.lpa.branch, plotter.rpa.branch], filename='lpa_rpa_flow_adaptation.png', threshold=0.0)
+
+    # plot lpa and rpa flow adaptation
+    plotter.plot_lpa_rpa_adaptation()
 
     # plot lpa and rpa changes
     plotter.plot_lpa_rpa_diff()

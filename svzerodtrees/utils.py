@@ -6,8 +6,7 @@ import pandas as pd
 import copy
 import svzerodplus
 
-# utilities for working with structured trees
-
+# utilities for working with zero D trees
 
 def get_pressure(result_array, branch, convert_to_mmHg=False):
     '''
@@ -104,7 +103,6 @@ def get_wss(vessels, viscosity, result_array, branch, steady=False):
         wss = [q * 4 * viscosity / (np.pi * d) for q in q_out]
 
     return wss
-
 
 def get_branch_d(config, viscosity, branch):
     '''
@@ -765,7 +763,7 @@ def get_pa_optimization_values(result):
 
 
 
-def find_rpa_lpa_branches(config):
+def find_lpa_rpa_branches(config):
     '''
     find the LPA and RPA branches in a config dict. 
     We assume that this is the first junction in the config with 2 distinct outlet vessels.
@@ -777,23 +775,27 @@ def find_rpa_lpa_branches(config):
     
     junction_id = 0
     junction_found = False
-    # search for the junction with 2 outlet vessels (LPA and RPA)
+    # search for the first junction with 2 outlet vessels (LPA and RPA)
     while not junction_found:
         if len(config["junctions"][junction_id]["outlet_vessels"]) == 2:
-            rpa_lpa_id = config["junctions"][junction_id]["outlet_vessels"]
+            lpa_rpa_id = config["junctions"][junction_id]["outlet_vessels"]
             junction_found = True
         
         elif len(config["junctions"][junction_id]["outlet_vessels"]) != 2:
             junction_id += 1
 
-    rpa_lpa_branch = [1, 2]
-    for i, id in enumerate(rpa_lpa_id):
+    # initialize the list of branch ids
+    branches = []
+
+    for i, id in enumerate(lpa_rpa_id):
         for vessel_config in config["vessels"]:
             if vessel_config["vessel_id"] == id:
-                rpa_lpa_branch[i] = get_branch_id(vessel_config)
-                
+                branches.append(get_branch_id(vessel_config))
+    
+    lpa_branch = branches[0]
+    rpa_branch = branches[1]
 
-    return rpa_lpa_branch
+    return lpa_branch, rpa_branch
 
 def rebuild_trees(config: dict):
         '''
