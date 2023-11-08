@@ -1,40 +1,49 @@
 beginning experiment exp_config_test_9.5.23!
+with the following configuration: 
+{'name': 'exp_config_test_9.5.23', 'model': 'LPA_RPA_0d_steady', 'adapt': 'cwss', 'optimized': False, 'is_full_pa_tree': False, 'trees_exist': False, 'mesh_surfaces_path': '/home/ndorn/Documents/Stanford/PhD/PPAS/svPPAS/models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces', 'repair': [{'location': 'proximal', 'degree': [0.0, 0.0]}]}
 Getting clinical target values...
 Optimizing preop outlet resistance...
 0D optimization optimization completed! 
 
-     Optimization solution: [572.55862021 171.85780798]
+     Optimization solution: [657.99576658  52.80157556]
 
-     Objective function value: 2.5148533230831786e-09
+     Objective function value: 3.780413374484652e-10
 
-     Number of iterations: 10
+     Number of iterations: 6
 
-Outlet resistances optimized! [572.55862021 171.85780798]
-** building tree for resistance: 572.5586202085873 **
-     Resistance after optimization is 572.3064809047935
+Outlet resistances optimized! [657.99576658  52.80157556]
+** building tree for resistance: 657.995766575132 **
+     Resistance after optimization is 659.4221264314997
 
-     the optimized diameter is 0.31014274162948324
+     the optimized diameter is 0.09805096403655758
 
-     the number of vessels is 3
-** building tree for resistance: 171.85780797800493 **
-     Resistance after optimization is 171.8653740875563
+     the number of vessels is 21
+** building tree for resistance: 52.801575556689 **
+     Resistance after optimization is 52.744303042776224
 
-     the optimized diameter is 0.469698360875773
+     the optimized diameter is 0.1892619396889452
 
-     the number of vessels is 3
-making repair according to repair config: {'location': 'proximal', 'degree': [1.0, 0.9]}
-** repairing stenoses in vessels [] **
-     vessel 1 has been repaired
-     vessel 2 has been repaired
-     vessel 3 has been repaired
-     vessel 4 has been repaired
-     vessel 5 has been repaired
-     vessel 6 has been repaired
+     the number of vessels is 139
+saving preop config with cwss trees...
+making repair according to repair config: {'location': 'proximal', 'degree': [0.0, 0.0]}
+** repairing stenoses in vessels [1, 2] **
+     vessel 1 has been repaired by degree 0.0
+     the new stenosis coefficient is 3.278070397561343e-07
+     vessel 2 has been repaired by degree 0.0
+     the new stenosis coefficient is 3.0993613148226786
+     vessel 3 has been repaired by degree 0.0
+     the new stenosis coefficient is 0.8034345943457993
+     vessel 4 has been repaired by degree 0.0
+     the new stenosis coefficient is 0.04304918134756488
+     vessel 5 has been repaired by degree 0.0
+     the new stenosis coefficient is 11.847370548918812
+     vessel 6 has been repaired by degree 0.0
+     the new stenosis coefficient is 0.6492760093973661
 all stenosis repairs completed
 ** adapting trees based on constant wall shear stress assumption **
 ** adaptation results for OutletTree1 **
-    R_new = 667.8015086117013, R_old = 572.3064809047935
-    The change in resistance is 95.49502770690776
+    R_new = 997.2434258252467, R_old = 659.4221264314997
+    The change in resistance is 337.82129939374704
 ** adaptation results for OutletTree2 **
-    R_new = 153.8081559892826, R_old = 171.8653740875563
-    The change in resistance is -18.057218098273694
+    R_new = 78.89883105955586, R_old = 52.744303042776224
+    The change in resistance is 26.154528016779636

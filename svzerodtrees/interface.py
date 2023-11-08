@@ -237,9 +237,11 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
                                            result_handler,
                                            log_file,
                                            fig_dir=fig_dir,
-                                           d_min=.0049)
+                                           d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
 
         # save preop config to as pickle, with StructuredTreeOutlet objects
+        write_to_log(log_file, 'saving preop config with cwss trees...')
+
         config_handler.to_file_w_trees('config_w_cwss_trees.in')
     
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1

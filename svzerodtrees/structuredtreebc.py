@@ -262,7 +262,6 @@ class StructuredTreeOutlet():
             :param update_func: function to update vessel diameter based on constant wall shear stress asssumption
             '''
             if vessel:
-                print(vessel.d - update_func(vessel.d))
                 vessel.d = update_func(vessel.d)
                 vessel.update_vessel_info()
                 # recursive step
@@ -313,8 +312,7 @@ class StructuredTreeOutlet():
             R = self.root.R_eq
 
             # calculate squared relative difference
-            loss = ((Resistance - R) / R) ** 2
-
+            loss = ((Resistance - R) / Resistance) ** 2
             return loss
 
         # define optimization bound (lower bound = r_min, which is the termination diameter)

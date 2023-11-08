@@ -84,8 +84,6 @@ def adapt_constant_wss(config_handler: ConfigHandler, result_handler: ResultHand
     preop_q = get_outlet_data(config_handler.config, result_handler.results['preop'], 'flow_out', steady=True)
     postop_q = get_outlet_data(config_handler.config, result_handler.results['postop'], 'flow_out', steady=True)
 
-    print([q1 - q2 for q1, q2 in zip(preop_q, postop_q)])
-
     R_adapt = []
     outlet_idx = 0 # index through outlets
 
