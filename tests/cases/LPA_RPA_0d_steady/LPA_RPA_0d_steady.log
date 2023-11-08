@@ -1,13 +1,13 @@
 testing tree construction
 ** building tree for resistance: 657.995766575132 **
-     Resistance after optimization is 657.7732568688333
+     Resistance after optimization is 657.6576901467564
 
-     the optimized diameter is 0.7288203580655894
+     the optimized diameter is 0.3204003809440771
+
+     the number of vessels is 619
+** building tree for resistance: 52.801575556689 **
+     Resistance after optimization is 52.78778906464425
+
+     the optimized diameter is 0.7235582272199153
 
      the number of vessels is 5815
-** building tree for resistance: 52.801575556689 **
-     Resistance after optimization is 52.80553591269649
-
-     the optimized diameter is 0.3919657785035272
-
-     the number of vessels is 1107

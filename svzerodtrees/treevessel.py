@@ -235,14 +235,17 @@ class TreeVessel:
 
         return self.dD
 
-    def fl_visc(self, diameter):
+    def fl_visc(self, diameter, H_d=0.45):
         '''
         calculate the viscosity within a vessel of diameter < 300 um based on empirical relationship describing 
         fahraeus-lindqvist effect
 
-        :param diameter: vessel diameter
+        :param diameter: vessel diameter in cm
+        :param H_d: hematocrit
         '''
-        H_d = 0.45 # hematocrit
+
+        diameter = diameter * 100 # convert to um
+
         u_45 = 6 * math.exp(-0.085 * diameter) + 3.2 - 2.44 * math.exp(-0.06 * diameter ** 0.645)
         C = (0.8 + math.exp(-0.075 * diameter)) * (-1 + (1 + 10 ** -11 * diameter ** 12) ** -1) + (1 + 10 ** -11 * diameter ** 12) ** -1
         viscosity = .012 * (1 + (u_45 - 1) * (((1 - H_d) ** C - 1) / ((1 - 0.45) ** C - 1)) * (diameter / (diameter - 1.1)) ** 2) * (diameter / (diameter - 1.1)) ** 2

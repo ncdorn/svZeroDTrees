@@ -90,9 +90,6 @@ def test_cwss_tree_construction():
 
     SSE = sum((R_bc - R_opt) ** 2)
 
-    print(SSE)
-    print(config_handler.trees)
-
 
 def test_pries_tree_construction():
     # test pries and secomb tree building
@@ -218,4 +215,4 @@ def test_pa_optimizer():
 if __name__ == '__main__':
 
     # test_preop()
-    test_repair_stenosis()
+    test_pries_tree_construction()
