@@ -140,3 +140,29 @@ class ConfigHandler():
                         if vessel_config["boundary_conditions"]["outlet"] == bc_config["bc_name"]:
                             vessel_config["tree"] = {}
     
+
+    def update_stree_hemodynamics(self, current_result):
+        '''
+        update the hemodynamics of the StructuredTreeOutlet instances
+        '''
+
+        # get the outlet flowrate
+        q_outs = get_outlet_data(self.config, current_result, "flow_out", steady=True)
+        p_outs = get_outlet_data(self.config, current_result, "pressure_out", steady=True)
+        outlet_idx = 0 # need this when iterating through outlets 
+        # get the outlet vessel
+        for vessel_config in self.config["vessels"]:
+            if "boundary_conditions" in vessel_config:
+                if "outlet" in vessel_config["boundary_conditions"]:
+                    for bc_config in self.config["boundary_conditions"]:
+                        if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
+                            # update the outlet flowrate and pressure for the tree at that outlet
+                            self.trees[outlet_idx].add_hemodynamics_from_outlet([q_outs[outlet_idx]], [p_outs[outlet_idx]])
+
+                            # re-integrate pries and secomb --- this is not necesary at the moment because I think it will send us into an
+                            # endless loop of re-integration
+
+                            # self.trees[outlet_idx].integrate_pries_secomb()
+
+                            # count up
+                            outlet_idx += 1

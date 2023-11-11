@@ -1,13 +1,36 @@
 testing tree construction
-** building tree for resistance: 657.995766575132 **
-     Resistance after optimization is 657.6576901467564
+** building tree 0 for R = 657.995766575132 **
+     Resistance after optimization is 656.9795015168728
 
-     the optimized diameter is 0.3204003809440771
+     the optimized diameter is 0.14330525513035397
 
-     the number of vessels is 619
-** building tree for resistance: 52.801575556689 **
-     Resistance after optimization is 52.78778906464425
+     the number of vessels is 3
+** building tree 1 for R = 52.801575556689 **
+     Resistance after optimization is 52.779461625193605
 
-     the optimized diameter is 0.7235582272199153
+     the optimized diameter is 0.3116984380104473
 
-     the number of vessels is 5815
+     the number of vessels is 3
+making repair according to repair config: {'location': 'proximal', 'degree': [1.0, 0.9]}
+** repairing stenoses in vessels [1, 2] **
+     vessel 1 has been repaired by degree 1.0
+     the new stenosis coefficient is 0.0
+     vessel 2 has been repaired by degree 1.0
+     the new stenosis coefficient is 0.0
+     vessel 3 has been repaired by degree 1.0
+     the new stenosis coefficient is 0.0
+     vessel 4 has been repaired by degree 0.9
+     the new stenosis coefficient is 0.004304918134756487
+     vessel 5 has been repaired by degree 0.9
+     the new stenosis coefficient is 1.184737054891881
+     vessel 6 has been repaired by degree 0.9
+     the new stenosis coefficient is 0.0649276009397366
+all stenosis repairs completed
+** adapting trees based on Pries and Secomb model **
+pries and secomb integration completed for OutletTree1
+    R_new = 6708.7260995030665, R_old = 656.9795015168728
+    The change in resistance is 6051.746597986194
+pries and secomb integration completed for OutletTree2
+    R_new = 705.5888326408818, R_old = 52.779461625193605
+    The change in resistance is 652.8093710156883
+pries and secomb adaptation completed for all trees. R_old = [656.9795015168728, 52.779461625193605] R_new = [6708.7260995030665, 705.5888326408818]

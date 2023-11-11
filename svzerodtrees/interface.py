@@ -193,7 +193,6 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
     if trees_exist:
         config_handler.from_file_w_trees('config_w_pries_trees.in')
     else:
-        # construct trees
         preop.construct_pries_trees(config_handler, 
                                     result_handler, 
                                     log_file,
@@ -231,13 +230,17 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
     if trees_exist:
         config_handler.from_file_w_trees('config_w_cwss_trees.in')
 
+        preop_result = run_svzerodplus(config_handler.config)
+
+        result_handler.add_unformatted_result(preop_result, 'preop')
+
     else:
         # construct trees
         preop.construct_cwss_trees(config_handler,
                                            result_handler,
                                            log_file,
                                            fig_dir=fig_dir,
-                                           d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
+                                           d_min=.01) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
 
         # save preop config to as pickle, with StructuredTreeOutlet objects
         write_to_log(log_file, 'saving preop config with cwss trees...')

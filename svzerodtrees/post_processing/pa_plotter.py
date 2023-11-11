@@ -428,7 +428,7 @@ class PAanalyzer:
 
         percent_adapt = np.subtract(adapted, postop) / postop * 100
 
-        percent_adapt = percent_adapt[abs(percent_adapt) > threshold]
+        percent_adapt = percent_adapt[abs(percent_adapt) >= threshold]
         
         return percent_adapt
 

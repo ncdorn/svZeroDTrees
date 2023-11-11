@@ -110,10 +110,12 @@ class TreeVessel:
 
     @property
     def R_eq(self):
-        return self._R + (1 / (self._left._R_eq ** -1 + self._right._R_eq ** -1))
+        if self.left is not None and self.right is not None:
+            self._update_R_eq()
+        return self._R_eq
 
     def _update_R_eq(self):
-        self._R_eq = self._R + (1 / (self._left._R_eq ** -1 + self._right._R_eq ** -1))
+        self._R_eq = self._R + (1 / (self._left.R_eq ** -1 + self._right.R_eq ** -1))
 
     @property
     def collapsed(self):
@@ -167,7 +169,7 @@ class TreeVessel:
         R, C, L, l = self.calc_zero_d_values(self._d, self.eta)
         self.info["vessel_length"] = l
         self.info["vessel_D"] = self.d
-        self.info["zero_d_element_values"]["R_poiseulle"] = R
+        self.info["zero_d_element_values"]["R_poiseuille"] = R
         self.info["zero_d_element_values"]["C"] = C
         self.info["zero_d_element_values"]["L"] = L
         self.R = R

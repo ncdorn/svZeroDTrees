@@ -74,7 +74,6 @@ class ResultHandler:
                 self.clean_results[id] = self.format_branch_result(id)
 
     
-
     def format_branch_result(self, branch: int):
         '''
         get a dict containing the preop, postop and final q, p, wss for a specified branch

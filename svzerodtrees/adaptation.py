@@ -80,10 +80,12 @@ def adapt_constant_wss(config_handler: ConfigHandler, result_handler: ResultHand
 
     :return: config dict post-adaptation, flow result post-adaptation, list of StructuredTreeOutlet instances
     '''
-    # adapt the tree vessels based on the constant wall shear stress assumption
+    print('adapting the vessels...')
+    # get the preop and postop outlet flowrates
     preop_q = get_outlet_data(config_handler.config, result_handler.results['preop'], 'flow_out', steady=True)
     postop_q = get_outlet_data(config_handler.config, result_handler.results['postop'], 'flow_out', steady=True)
 
+    # intialize the adpated resistance list
     R_adapt = []
     outlet_idx = 0 # index through outlets
 
@@ -96,7 +98,10 @@ def adapt_constant_wss(config_handler: ConfigHandler, result_handler: ResultHand
                     if vessel_config["boundary_conditions"]["outlet"] == bc_config["bc_name"]:
                         # adapt the cwss tree
                         outlet_stree = config_handler.trees[outlet_idx]
+
                         R_old, R_new = outlet_stree.adapt_constant_wss(Q=preop_q[outlet_idx], Q_new=postop_q[outlet_idx])
+
+
 
                         # append the adapted equivalent resistance to the list of adapted resistances
                         R_adapt.append(R_new)
@@ -108,9 +113,10 @@ def adapt_constant_wss(config_handler: ConfigHandler, result_handler: ResultHand
 
                         outlet_idx += 1
 
-    
     # write the adapted resistances to the config resistance boundary conditions
+    # config_handler.to_json('experiments/AS1_no_repair/postop_config.json')
     write_resistances(config_handler.config, R_adapt)
+    # config_handler.to_json('experiments/AS1_no_repair/adapted_config_no_trees.json')
 
     adapted_result = run_svzerodplus(config_handler.config)
 

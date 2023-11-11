@@ -219,7 +219,9 @@ def write_resistances(config, resistances):
     idx = 0
     for bc_config in config["boundary_conditions"]:
         if bc_config["bc_type"] == 'RESISTANCE':
+
             bc_config['bc_values']['R'] = resistances[idx]
+
             idx += 1
 
 def write_rcrs(config, rcrs):

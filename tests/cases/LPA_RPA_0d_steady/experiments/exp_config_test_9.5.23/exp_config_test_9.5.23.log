@@ -13,17 +13,17 @@ Optimizing preop outlet resistance...
 
 Outlet resistances optimized! [657.99576658  52.80157556]
 ** building tree for resistance: 657.995766575132 **
-     Resistance after optimization is 659.4221264314997
+     Resistance after optimization is 658.0662556276811
 
-     the optimized diameter is 0.09805096403655758
+     the optimized diameter is 0.10129418823161299
 
-     the number of vessels is 21
+     the number of vessels is 9
 ** building tree for resistance: 52.801575556689 **
-     Resistance after optimization is 52.744303042776224
+     Resistance after optimization is 52.82123960318062
 
-     the optimized diameter is 0.1892619396889452
+     the optimized diameter is 0.30470865046511686
 
-     the number of vessels is 139
+     the number of vessels is 209
 saving preop config with cwss trees...
 making repair according to repair config: {'location': 'proximal', 'degree': [0.0, 0.0]}
 ** repairing stenoses in vessels [1, 2] **
@@ -42,8 +42,8 @@ making repair according to repair config: {'location': 'proximal', 'degree': [0.
 all stenosis repairs completed
 ** adapting trees based on constant wall shear stress assumption **
 ** adaptation results for OutletTree1 **
-    R_new = 997.2434258252467, R_old = 659.4221264314997
-    The change in resistance is 337.82129939374704
+    R_new = 658.0662556276811, R_old = 658.0662556276811
+    The change in resistance is 0.0
 ** adaptation results for OutletTree2 **
-    R_new = 78.89883105955586, R_old = 52.744303042776224
-    The change in resistance is 26.154528016779636
+    R_new = 52.82123960318062, R_old = 52.82123960318062
+    The change in resistance is 0.0

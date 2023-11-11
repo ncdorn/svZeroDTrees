@@ -166,13 +166,7 @@ def optimize_outlet_bcs(input_file,
     R_final = result.x # get the array of optimized resistances
     write_resistances(config_handler.config, R_final)
 
-    # get the simulation result and add it to the result handler
-    preop_flow = run_svzerodplus(config_handler.config)
-
-    # add result to the handler
-    result_handler.add_unformatted_result(preop_flow, 'preop')
     
-    plot_pressure(preop_flow,branch=0)
 
     return config_handler, result_handler
 
@@ -264,10 +258,6 @@ def optimize_pa_bcs(input_file,
 
     # distribute amongst all resistance conditions in the config
     assign_outlet_pa_bcs(config_handler.config, rpa_info, lpa_info, R[2], R[3], wedge_p)
-
-    preop_result = run_svzerodplus(config_handler.config)
-
-    result_handler.add_unformatted_result(preop_result, 'preop')
 
     return config_handler, result_handler
 
@@ -373,34 +363,43 @@ def construct_cwss_trees(config_handler, result_handler: ResultHandler, log_file
     :return roots: return the root TreeVessel objects of the outlet trees
 
     '''
-    q_outs = get_outlet_data(config_handler.config, result_handler.results['preop'], 'flow_out', steady=True)
-    p_outs = get_outlet_data(config_handler.config, result_handler.results['preop'], 'pressure_out', steady=True)
+    num_outlets = len(config_handler.config["boundary_conditions"]) - 2
     outlet_idx = 0
+
     for vessel_config in config_handler.config["vessels"]:
         if "boundary_conditions" in vessel_config:
             if "outlet" in vessel_config["boundary_conditions"]:
-                print("** building tree for outlet " + str(outlet_idx) + " of " + str(len(q_outs) - 1) + " **, d_min = " + str(d_min) + " **")
+                print("** building tree for outlet " + str(outlet_idx) + " of " + str(num_outlets) + " **, d_min = " + str(d_min) + " **")
                 for bc_config in config_handler.config["boundary_conditions"]:
-                    if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
+                    if vessel_config["boundary_conditions"]["outlet"] == bc_config["bc_name"]:
+                        print(bc_config["bc_name"])
                         outlet_tree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, 
                                                                             config_handler.config["simulation_parameters"],
-                                                                            bc_config, 
-                                                                            P_outlet=[p_outs[outlet_idx]],
-                                                                            Q_outlet=[q_outs[outlet_idx]])
+                                                                            bc_config)
 
                         R = bc_config["bc_values"]["R"]
-                # write to log file for debugging
-                write_to_log(log_file, "** building tree for resistance: " + str(R) + " **")
 
-                outlet_tree.optimize_tree_diameter(R, log_file, d_min=d_min)
+                        # write to log file for debugging
+                        write_to_log(log_file, "** building tree for resistance: " + str(R) + " **")
+
+                        outlet_tree.optimize_tree_diameter(R, log_file, d_min=d_min)
+
+                        # replace the bc resistance with the optimized value as it may be different than the initial value
+                        bc_config["bc_values"]["R"] = outlet_tree.root.R_eq
+                        print(' the equivalent resistance being added as the outlet boundary condition is ' + str(outlet_tree.root.R_eq))
+
                 # write to log file for debugging
                 write_to_log(log_file, "     the number of vessels is " + str(outlet_tree.count_vessels()))
 
                 config_handler.trees.append(outlet_tree)
                 outlet_idx += 1
 
-    # if vis_trees:
-    #     visualize_trees(config, roots, fig_dir=fig_dir, fig_name='_preop')
+    preop_result = run_svzerodplus(config_handler.config)
+
+    # leaving vessel radius fixed, update the hemodynamics of the StructuredTreeOutlet instances based on the preop result
+    # config_handler.update_stree_hemodynamics(preop_result)
+
+    result_handler.add_unformatted_result(preop_result, 'preop')
 
 
 def construct_pries_trees(config_handler, result_handler, log_file=None, d_min=0.0049, tol=0.01, vis_trees=False, fig_dir=None):
@@ -422,17 +421,21 @@ def construct_pries_trees(config_handler, result_handler, log_file=None, d_min=0
     :param fig_dir: [optional path to directory to save figures. Required if vis_trees = True.
     '''
     simparams = config_handler.config["simulation_parameters"]
+    num_outlets = len(config_handler.config["boundary_conditions"])
+
+    # compute a pretree result to use to optimize the trees
+    pretree_result = run_svzerodplus(config_handler.config)
+
     # get the outlet flowrate
     q_outs = get_outlet_data(config_handler.config, result_handler.results['preop'], "flow_out", steady=True)
     p_outs = get_outlet_data(config_handler.config, result_handler.results['preop'], "pressure_out", steady=True)
-    trees = []
     outlet_idx = 0 # need this when iterating through outlets 
     # get the outlet vessel
     for vessel_config in config_handler.config["vessels"]:
         if "boundary_conditions" in vessel_config:
             if "outlet" in vessel_config["boundary_conditions"]:
                 for bc_config in config_handler.config["boundary_conditions"]:
-                    if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
+                    if vessel_config["boundary_conditions"]["outlet"] == bc_config["bc_name"]:
                         outlet_stree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, 
                                                                                simparams,
                                                                                bc_config, 
@@ -440,18 +443,25 @@ def construct_pries_trees(config_handler, result_handler, log_file=None, d_min=0
                                                                                P_outlet=[np.mean(p_outs[outlet_idx])])
                         R = bc_config["bc_values"]["R"]
 
-                write_to_log(log_file, "** building tree " + str(outlet_idx) + " for R = " + str(R) + " **")
+                        write_to_log(log_file, "** building tree " + str(outlet_idx) + " for R = " + str(R) + " **")
 
-                outlet_stree.optimize_tree_diameter(R, log_file, d_min=d_min, pries_secomb=True)
+                        outlet_stree.optimize_tree_diameter(R, log_file, d_min=d_min, pries_secomb=True)
 
-                write_to_log(log_file, "    integrating pries and secomb...")
-                # outlet_stree.integrate_pries_secomb(tol=tol)
-                # write_to_log(log_file, "    pries and secomb integration completed, R_tree = " + str(outlet_stree.root.R_eq))
+                        bc_config["bc_values"]["R"] = outlet_stree.root.R_eq
 
-                write_to_log(log_file, "     the number of vessels is " + str(outlet_stree.count_vessels()))
+                        write_to_log(log_file, "     the number of vessels is " + str(outlet_stree.count_vessels()))
 
                 config_handler.trees.append(outlet_stree)
                 outlet_idx += 1
+
+    # compute the preop result
+    preop_result = run_svzerodplus(config_handler.config)
+
+    # leaving vessel radius fixed, update the hemodynamics of the StructuredTreeOutlet instances based on the preop result
+    config_handler.update_stree_hemodynamics(preop_result)
+
+    # add the preop result to the result handler
+    result_handler.add_unformatted_result(preop_result, 'preop')
 
     
 def optimize_ps_params():

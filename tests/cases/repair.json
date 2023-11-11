@@ -12,5 +12,9 @@
     "custom": {
         "location": [1, 2, 3],
         "degree": [0.7, 0.8, 0.9]
+    },
+    "no repair": {
+        "location": "proximal",
+        "degree": [0.0, 0.0]
     }
 }

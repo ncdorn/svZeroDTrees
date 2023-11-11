@@ -123,6 +123,36 @@ def test_repair_stenosis():
     operation.repair_stenosis_coefficient(preop_config_handler, result_handler, repair_dict['custom'])
 
 
+def test_no_repair():
+    '''
+    test the case in which no repair, and hence no adaptation, occurs
+    '''
+
+    config_handler = ConfigHandler.from_json('tests/cases/LPA_RPA_0d_steady/preop_config.json')
+    
+    with open('tests/cases/repair.json') as ff:
+        repair_dict = json.load(ff)
+    
+    with open('tests/cases/LPA_RPA_0d_steady/result_handler.out', 'rb') as ff:
+        result_handler = pickle.load(ff)
+
+    repair_config = repair_dict['no repair']
+
+    preop.construct_cwss_trees(config_handler, result_handler, fig_dir='tests/cases/LPA_RPA_0d_steady/', d_min=0.49)
+
+
+    operation.repair_stenosis_coefficient(config_handler, result_handler, repair_config)
+
+    adapt_constant_wss(config_handler, result_handler)
+
+    result_handler.format_results()
+
+    print(result_handler.clean_results)
+
+    # assert result
+
+
+
 def test_cwss_adaptation():
     '''
     test the constant wss tree adaptation algorithm
@@ -213,6 +243,7 @@ def test_pa_optimizer():
 
 
 if __name__ == '__main__':
+
 
     # test_preop()
     test_run_from_file()

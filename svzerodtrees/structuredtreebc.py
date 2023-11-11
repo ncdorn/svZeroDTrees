@@ -66,7 +66,7 @@ class StructuredTreeOutlet():
                            tree_exists=False, 
                            root: TreeVessel = None, 
                            P_outlet: list=[0.0], 
-                           Q_outlet: list=[97.3]) -> "StructuredTreeOutlet":
+                           Q_outlet: list=[0.0]) -> "StructuredTreeOutlet":
         """
         Class method to creat an instance from the config dictionary of an outlet vessel
 
@@ -252,6 +252,7 @@ class StructuredTreeOutlet():
             :return: length of the updated diameter
             '''
             # adapt the diameter of the vessel based on the constant shear stress assumption
+
             return (Q_new / Q) ** (1 / 3) * d
 
         def update_diameter(vessel, update_func):
@@ -261,12 +262,14 @@ class StructuredTreeOutlet():
             :param vessel: TreeVessel instance
             :param update_func: function to update vessel diameter based on constant wall shear stress asssumption
             '''
+
             if vessel:
-                vessel.d = update_func(vessel.d)
-                vessel.update_vessel_info()
                 # recursive step
                 update_diameter(vessel.left, update_func)
                 update_diameter(vessel.right, update_func)
+
+                vessel.d = update_func(vessel.d)
+
         
         # recursive step
         update_diameter(self.root, constant_wss)
@@ -274,6 +277,8 @@ class StructuredTreeOutlet():
         self.create_block_dict()
 
         R_new = self.root.R_eq  # calculate post-adaptation resistance
+
+        print('difference in resistance is ' + str(R_new - R_old))
 
         return R_old, R_new
 
@@ -332,6 +337,30 @@ class StructuredTreeOutlet():
         write_to_log(log_file, "     the optimized diameter is " + str(d_final.x[0]) + "\n")
 
         return d_final.x, R_final
+    
+
+    def add_hemodynamics_from_outlet(self, Q_outlet, P_outlet):
+        '''
+        add hemodynamics from the outlet of the 0D model to the structured tree
+        
+        :param Q_outlet: flow at the outlet of the 0D model
+        :param P_outlet: pressure at the outlet of the 0D model
+        '''
+
+        # make the array length 2 for steady state bc
+        if len(Q_outlet) == 1:
+            Q_outlet = [Q_outlet[0],] * 2
+        
+        if len(P_outlet) == 1:
+            P_outlet = [P_outlet[0],] * 2
+
+        # add the flow and pressure values to the structured tree
+        self.params["Q_in"] = Q_outlet
+        self.params["P_in"] = P_outlet
+
+        # this is redundant but whatever
+        self.block_dict["Q_in"] = Q_outlet
+        self.block_dict["P_in"] = P_outlet
     
 
     def optimize_alpha_beta(self, Resistance=5.0, log_file=None):
