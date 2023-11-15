@@ -101,17 +101,13 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
         # save optimized config and result
         config_handler.to_json('preop_config.json')
         
-        # json won't work for results dump
-        with open('preop_result_handler.out', 'wb') as ff:
-            pickle.dump(result_handler, ff)
 
     else: # use previous optimization results
 
         config_handler = ConfigHandler.from_json('preop_config.json')
 
         # json won't work for results load
-        with open('preop_result_handler.out', 'rb') as ff:
-            result_handler = pickle.load(ff)
+        
 
         # get preop result
         preop_flow = run_svzerodplus(config_handler.config)
@@ -152,6 +148,9 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
     
     # save the result
     result_handler.to_json(expdir_path + 'full_results.json')
+
+    # save the result handler to use later
+    result_handler.to_file(expdir_path + 'result_handler.out')
     
     if vis_trees:
         # initialize the data plotter
@@ -175,6 +174,9 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
         # plot lpa and rpa changes
         plotter.plot_lpa_rpa_diff()
 
+        # plot the mpa pressure changes
+        plotter.plot_mpa_pressure()
+
 
 def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, repair_config, log_file, vis_trees, fig_dir, trees_exist=False):
     '''
@@ -192,15 +194,24 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
 
     if trees_exist:
         config_handler.from_file_w_trees('config_w_pries_trees.in')
+
+        with open('preop_result_handler.out', 'rb') as ff:
+            result_handler = pickle.load(ff)
+
     else:
         preop.construct_pries_trees(config_handler, 
                                     result_handler, 
                                     log_file,
                                     fig_dir=fig_dir, 
-                                    d_min=.0049)
+                                    d_min=.3)
         
         # save preop config to json
         config_handler.to_file_w_trees('config_w_pries_trees.in')
+
+        # json won't work for results dump
+        with open('preop_result_handler.out', 'wb') as ff:
+            pickle.dump(result_handler, ff)
+
 
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
     operation.repair_stenosis_coefficient(config_handler,
@@ -240,12 +251,16 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
                                            result_handler,
                                            log_file,
                                            fig_dir=fig_dir,
-                                           d_min=.01) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
+                                           d_min=.49) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
 
         # save preop config to as pickle, with StructuredTreeOutlet objects
         write_to_log(log_file, 'saving preop config with cwss trees...')
 
         config_handler.to_file_w_trees('config_w_cwss_trees.in')
+
+        # json won't work for results dump
+        with open('preop_result_handler.out', 'wb') as ff:
+            pickle.dump(result_handler, ff)
     
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
     operation.repair_stenosis_coefficient(config_handler, 

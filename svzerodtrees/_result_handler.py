@@ -150,3 +150,38 @@ class ResultHandler:
 
         with open(file_name, 'w') as ff:
             json.dump(self.clean_results, ff)
+
+
+    def format_result_for_cl_projection(self, timestep):
+        '''format a pressure or flow result for the centerline projection
+
+        Args:
+            timestep (str): timestep to format, ['preop', 'postop', 'adapted']
+        
+        
+        '''
+
+        cl_mappable_result = {"q": {}, "p": {}, "distance": {}}
+
+        branches = list(self.clean_results.keys())
+
+        fields = list(self.results[timestep].keys())
+
+        fields.sort() # should be ['flow_in', 'flow_out', 'pressure_in', 'pressure_out']
+
+        for field in ['q', 'p']:
+                cl_mappable_result[field] = {
+                    branch: [self.clean_results[branch][field + "_in"][timestep], 
+                             self.clean_results[branch][field + "_out"][timestep]]
+                    for branch in branches}
+                # now, change the branch id for mpa, lpa, rpa
+                for branch in cl_mappable_result[field].keys():
+                    if branch == 'mpa':
+                        cl_mappable_result[field][0] = cl_mappable_result[field].pop(branch)
+                    elif branch == 'lpa':
+                        cl_mappable_result[field][self.lpa_branch] = cl_mappable_result[field].pop(branch)
+                    elif branch == 'rpa':
+                        cl_mappable_result[field][self.rpa_branch] = cl_mappable_result[field].pop(branch)
+        return cl_mappable_result
+
+

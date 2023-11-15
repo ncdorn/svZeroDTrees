@@ -278,8 +278,6 @@ class StructuredTreeOutlet():
 
         R_new = self.root.R_eq  # calculate post-adaptation resistance
 
-        print('difference in resistance is ' + str(R_new - R_old))
-
         return R_old, R_new
 
 

@@ -155,8 +155,9 @@ class ConfigHandler():
             if "boundary_conditions" in vessel_config:
                 if "outlet" in vessel_config["boundary_conditions"]:
                     for bc_config in self.config["boundary_conditions"]:
-                        if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
+                        if vessel_config["boundary_conditions"]["outlet"] == bc_config["bc_name"]:
                             # update the outlet flowrate and pressure for the tree at that outlet
+                            print(outlet_idx, len(self.trees))
                             self.trees[outlet_idx].add_hemodynamics_from_outlet([q_outs[outlet_idx]], [p_outs[outlet_idx]])
 
                             # re-integrate pries and secomb --- this is not necesary at the moment because I think it will send us into an

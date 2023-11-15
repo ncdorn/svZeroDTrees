@@ -138,12 +138,12 @@ def test_no_repair():
 
     repair_config = repair_dict['no repair']
 
-    preop.construct_cwss_trees(config_handler, result_handler, fig_dir='tests/cases/LPA_RPA_0d_steady/', d_min=0.49)
+    preop.construct_pries_trees(config_handler, result_handler, fig_dir='tests/cases/LPA_RPA_0d_steady/', d_min=0.49)
 
 
     operation.repair_stenosis_coefficient(config_handler, result_handler, repair_config)
 
-    adapt_constant_wss(config_handler, result_handler)
+    adapt_pries_secomb(config_handler, result_handler)
 
     result_handler.format_results()
 
@@ -208,7 +208,7 @@ def test_pries_adaptation():
 
     result_handler.format_results()
 
-    print(result_handler.clean_results)
+    print(result_handler.results)
 
 
 def test_run_from_file():

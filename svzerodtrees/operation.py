@@ -72,13 +72,21 @@ def repair_stenosis_coefficient(config_handler: ConfigHandler, result_handler: R
             repair_idx = repair_config['vessels'].index(get_branch_id(vessel_config))
 
             # adjust the stenosis coefficient
-            vessel_config["zero_d_element_values"]["stenosis_coefficient"] = vessel_config["zero_d_element_values"].get("stenosis_coefficient") * (1-repair_config['degree'][repair_idx])
+            if repair_config['type'] == 'stenosis_coefficient':
+                vessel_config["zero_d_element_values"]["stenosis_coefficient"] = vessel_config["zero_d_element_values"].get("stenosis_coefficient") * (1-repair_config['degree'][repair_idx])
+                # if we write to the log file for every vessel in the extensive case we could clog the log file
+                if repair_config['location'] != 'extensive': 
+                    write_to_log(log_file, "     vessel " + str(vessel_config["vessel_id"]) + " has been repaired by degree " + str(repair_config['degree'][repair_idx]))
+                    write_to_log(log_file, "     the new stenosis coefficient is " + str(vessel_config["zero_d_element_values"]["stenosis_coefficient"]))
             
-            # if we write to the log file for every vessel in the extensive case we could clog the log file
-            if repair_config['location'] != 'extensive': 
-                write_to_log(log_file, "     vessel " + str(vessel_config["vessel_id"]) + " has been repaired by degree " + str(repair_config['degree'][repair_idx]))
-                write_to_log(log_file, "     the new stenosis coefficient is " + str(vessel_config["zero_d_element_values"]["stenosis_coefficient"]))
-                
+            # adjust the vessel resistance by some scaLing factor
+            if repair_config['type'] == 'resistance':
+                vessel_config["zero_d_element_values"]["R_poiseuille"] = vessel_config["zero_d_element_values"].get("R_poiseuille") * (repair_config['degree'][repair_idx])
+                if repair_config['location'] != 'extensive': 
+                    write_to_log(log_file, "     vessel " + str(vessel_config["vessel_id"]) + " resistance has been scaled by " + str(repair_config['degree'][repair_idx]))
+                    write_to_log(log_file, "     the new resistance is " + str(vessel_config["zero_d_element_values"]["R_poiseuille"]))
+            
+
     write_to_log(log_file, 'all stenosis repairs completed')
 
     postop_result = run_svzerodplus(config_handler.config)
@@ -87,6 +95,14 @@ def repair_stenosis_coefficient(config_handler: ConfigHandler, result_handler: R
 
 
 def repair_stenosis_resistance(preop_config: dict, repair_config=None, log_file=None):
-    # adjust the resistance of the stenosed vessel, as opposed to the stenosis coefficient
-    # to be implemented
+    '''
+    repair the stenosis by manually reducing the resistance by some value
+
+    :param preop_config: preop config dict
+    :param repair_config: repair config dict, with keys 'location' and 'resistance'. If location is a list, adjust those vessels
+    '''
     pass
+    
+
+    
+    

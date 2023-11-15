@@ -427,8 +427,8 @@ def construct_pries_trees(config_handler, result_handler, log_file=None, d_min=0
     pretree_result = run_svzerodplus(config_handler.config)
 
     # get the outlet flowrate
-    q_outs = get_outlet_data(config_handler.config, result_handler.results['preop'], "flow_out", steady=True)
-    p_outs = get_outlet_data(config_handler.config, result_handler.results['preop'], "pressure_out", steady=True)
+    q_outs = get_outlet_data(config_handler.config, pretree_result, "flow_out", steady=True)
+    p_outs = get_outlet_data(config_handler.config, pretree_result, "pressure_out", steady=True)
     outlet_idx = 0 # need this when iterating through outlets 
     # get the outlet vessel
     for vessel_config in config_handler.config["vessels"]:

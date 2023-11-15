@@ -61,6 +61,7 @@ class PAanalyzer:
 
         return cls(config, result, fig_dir)
     
+
     def remove_trees(self):
         '''
         remove the structured tree objects from the config and dump to a json file
@@ -74,6 +75,7 @@ class PAanalyzer:
 
         with open('config_no_trees.json', 'w') as ff:
             json.dump(config, ff)
+
 
     def make_figure(self, plot_config: dict, fig_title: str, filename: str, sharex=False, sharey=False):
         '''
@@ -390,6 +392,36 @@ class PAanalyzer:
         ax.legend(['lpa', 'rpa'])
 
 
+    def plot_mpa_pressure(self):
+        '''
+        plot the inlet and outlet pressure in the mpa for the preop, postop and final cases
+        '''
+
+        # initialize timesteps
+        timesteps = ['preop', 'postop', 'final']
+
+        # get the inlet pressure
+        p_in = [self.result[str(self.mpa.branch)]['p_in'][timestep] for timestep in timesteps]
+
+        # get the outlet pressure
+        p_out = [self.result[str(self.mpa.branch)]['p_out'][timestep] for timestep in timesteps]
+
+        # make a barplot of the inlet and outlet pressure
+        fig, ax = plt.subplots(1, 2, sharey=True)
+
+        ax[0].bar(timesteps, p_in)
+        ax[0].set_title('inlet pressure')
+
+        ax[1].bar(timesteps, p_out)
+        ax[1].set_title('outlet pressure')
+
+        ax[0].set_ylabel('pressure (mmHg)')
+
+        plt.tight_layout()
+
+        plt.savefig(self.fig_dir + '/mpa_pressure.png')
+
+
     def plot_lpa_rpa_adaptation(self):
         '''
         make a barplot of the flow adaptation in the lpa and rpa
@@ -550,10 +582,6 @@ class PAanalyzer:
         plt.savefig(str(self.fig_dir + '/') + filename)
 
 
-
-
-
-
     def plot_flow_adaptation(self, vessels, filename='flow_adaptation.png', threshold=100.0):
         '''
         plot a bar chart of the flow adaptation in the large vessels
@@ -587,6 +615,7 @@ class PAanalyzer:
         
         self.make_figure(plot_config, '% flow adaptation in vessels', filename, sharex=False, sharey=False)
 
+
     def scatter_qoi_adaptation_distance(self, branches, qoi: str, filename= 'adaptation_scatter.png', threshold=0.0):
         '''
         create a scatterplot of flow adaptation vs distance from MPA where the points are colored red and blue for
@@ -616,7 +645,7 @@ class PAanalyzer:
         ax.set_ylabel('% ' + qoi + ' adaptation')
 
         # symmetric log y axis
-        ax.set_yscale('symlog')
+        # ax.set_yscale('symlog')
 
         ax.legend(['RPA', 'LPA'])
         ax.set_title(qoi + ' adaptation vs distance from MPA')
@@ -757,6 +786,7 @@ class PAanalyzer:
             
         return distances
     
+
     def sort_into_rpa_lpa(self, vessels, data):
         rpa_data = []
         lpa_data = []
@@ -767,6 +797,7 @@ class PAanalyzer:
                 lpa_data.append(datum)
         
         return rpa_data, lpa_data
+
 
     def map_branches_to_vessels(self):
         '''
@@ -781,6 +812,7 @@ class PAanalyzer:
             
             # sort the list from least to most distal vessels
             self.branch_map[branch_id].sort(key=lambda x: x.gen)
+
 
     def get_result(self, branches, qoi: str, time: str, type='np'):
         '''
@@ -808,7 +840,8 @@ class PAanalyzer:
             return np.array(values)
         else:
             return values
-        
+
+
     def get_qoi(self, qoi: str, vessels, branches=None, timestep='final'):
         ''' get a list of qois depending on a string input name
         
@@ -902,6 +935,7 @@ class PAanalyzer:
         
         return branches, vessels
         
+
     def combine_vessels(self, vessel1, vessel2):
         '''
         combine two vessels of the same branch into one vessel
@@ -927,7 +961,6 @@ class PAanalyzer:
         return self.Vessel(vessel_config)
 
     
-
     class Vessel:
         '''
         class to handle tree structure creation and dfs on the tree

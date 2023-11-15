@@ -54,7 +54,21 @@ def test_distal_wss_plot():
 
     pa.plot_distal_wss(config, result)
 
+
+def test_cl_projection():
+    '''
+    test the centerline projection plotting method
+    '''
+
+    with open('tests/cases/LPA_RPA_0d_steady/preop_config_handler.in', 'rb') as ff:
+        config_handler = pickle.load(ff)
+
+    with open('tests/cases/LPA_RPA_0d_steady/experiments/exp_config_test_9.5.23/result_handler.out', 'rb') as ff:
+        result_handler = pickle.load(ff)
+
+
+    print(result_handler.format_result_for_cl_projection('preop'))
+
 if __name__ =='__main__':
 
-    test_distal_wss_plot()
-    
+    test_cl_projection()
