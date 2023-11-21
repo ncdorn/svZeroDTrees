@@ -167,3 +167,15 @@ class ConfigHandler():
 
                             # count up
                             outlet_idx += 1
+
+    def get_time_series(self):
+        '''
+        get the time series from the config
+        '''
+
+        t_min = min(self.config["boundary_conditions"][0]["bc_values"]["t"])
+        t_max = max(self.config["boundary_conditions"][0]["bc_values"]["t"])
+
+        return np.linspace(min(self.config["boundary_conditions"][0]["bc_values"]["t"]), 
+                           max(self.config["boundary_conditions"][0]["bc_values"]["t"]), 
+                           self.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"])

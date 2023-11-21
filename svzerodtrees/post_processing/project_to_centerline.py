@@ -1,8 +1,11 @@
 import vtk
+import os
 import numpy as np
-import utils
+from scipy.interpolate import interp1d
+from collections import defaultdict
+from vtk.util.numpy_support import numpy_to_vtk
 import svzerodplus
-from svsuperestimator import reader, tasks
+from svsuperestimator.reader._centerline_handler import CenterlineHandler
 
 
 def get_branch_result(qoi, result_handler, config_handler):
@@ -34,13 +37,15 @@ def get_branch_result(qoi, result_handler, config_handler):
     else:
         raise Exception('qoi not recognized')
     
+    results = result_handler.format_result_for_cl_projection(timestep)
+
     pass
 
 
 
 
 
-def _map_0d_on_centerline(qoi, centerline, config_handler, result_handler, output_folder):
+def _map_0d_on_centerline(centerline, config_handler, result_handler, timestep, output_folder):
         """Map 0D result on centerline.
 
         TODO: This functions has been mainly copied from SimVascular, and has now been adopted from svsuperestimator. A cleanup
@@ -51,6 +56,7 @@ def _map_0d_on_centerline(qoi, centerline, config_handler, result_handler, outpu
             centerline (str): Path to centerline file.
             config_handler (ConfigHandler): Config handler.
             result_handler (ResultHandler): Result handler.
+            timestep (str): Timestep to map. Can be "preop" "postop" "final" or "adaptation"
             output_folder (str): Path to output folder.
         
         Returns:
@@ -60,7 +66,8 @@ def _map_0d_on_centerline(qoi, centerline, config_handler, result_handler, outpu
         print("Mapping 0D solution on centerline")
 
         # create centerline handler
-        cl_handler = reader.CenterlineHandler.from_file(centerline)
+        # cl_handler = reader.CenterlineHandler.from_file(centerline)
+        cl_handler = CenterlineHandler.from_file(centerline)
 
         # unformatted result in the result_handler should already be in branch result form
         # this is where we need to figure out exactly what we will be projecting onto the centerline
@@ -77,7 +84,27 @@ def _map_0d_on_centerline(qoi, centerline, config_handler, result_handler, outpu
         ids_cent = np.unique(branch_ids).tolist()
         ids_cent.remove(-1)
 
-        results = convert_csv_to_branch_result(result0d, zerod_handler)
+        # get zero d result
+        results = result_handler.format_result_for_cl_projection(timestep)
+        results["time"] = config_handler.get_time_series()
+
+        # add path distance
+        for vessel in config_handler.config["vessels"]:
+            br, seg = vessel["vessel_name"].split("_")
+            br = int(br[6:])
+            seg = int(seg[3:])
+            if seg == 0:
+                results["distance"][br] = [0, 0]
+            l_new = (
+                results["distance"][br][-1] + vessel["vessel_length"]
+            )
+            results["distance"][br][1] += l_new
+
+        # assemble output dict
+        def rec_dd() -> defaultdict:
+            return defaultdict(rec_dd)
+
+        arrays = rec_dd()
 
         # loop all result fields
         for f in ["flow", "pressure"]:
@@ -110,9 +137,9 @@ def _map_0d_on_centerline(qoi, centerline, config_handler, result_handler, outpu
                 # interpolate ROM onto centerline
                 # limit to interval [0,1] to avoid extrapolation error interp1d
                 # due to slightly incompatible lenghts
-                f_cent = interp1d(path_1d_res / path_1d_res[-1], f_res.T)(
+                f_cent = np.asarray(interp1d(np.asarray(path_1d_res) / path_1d_res[-1], np.asarray(f_res).T)(
                     path_cent / path_cent[-1]
-                ).T
+                )).T
 
                 # store results of this path
                 array_f[branch_ids == br] = f_cent
@@ -173,8 +200,5 @@ def _map_0d_on_centerline(qoi, centerline, config_handler, result_handler, outpu
             out_array.SetName(f)
             cl_handler.data.GetPointData().AddArray(out_array)
 
-        target = os.path.join(self.output_folder, "initial_centerline.vtp")
+        target = os.path.join(output_folder, "initial_centerline.vtp")
         cl_handler.to_file(target)
-        self.log(f"Saved centerline result {target}")
-
-        pass

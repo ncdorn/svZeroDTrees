@@ -161,27 +161,48 @@ class ResultHandler:
         
         '''
 
-        cl_mappable_result = {"q": {}, "p": {}, "distance": {}}
+        cl_mappable_result = {"flow": {}, "pressure": {}, "distance": {},"time": {}}
 
         branches = list(self.clean_results.keys())
+        for branch in branches:
+            if branch == 'mpa':
+                branches[branches.index(branch)] = 0
+            elif branch == 'lpa':
+                branches[branches.index(branch)] = self.lpa_branch
+            elif branch == 'rpa':
+                branches[branches.index(branch)] = self.rpa_branch
 
-        fields = list(self.results[timestep].keys())
+        fields = list(self.results['preop'].keys())
 
         fields.sort() # should be ['flow_in', 'flow_out', 'pressure_in', 'pressure_out']
 
-        for field in ['q', 'p']:
-                cl_mappable_result[field] = {
-                    branch: [self.clean_results[branch][field + "_in"][timestep], 
-                             self.clean_results[branch][field + "_out"][timestep]]
-                    for branch in branches}
-                # now, change the branch id for mpa, lpa, rpa
-                for branch in cl_mappable_result[field].keys():
-                    if branch == 'mpa':
-                        cl_mappable_result[field][0] = cl_mappable_result[field].pop(branch)
-                    elif branch == 'lpa':
-                        cl_mappable_result[field][self.lpa_branch] = cl_mappable_result[field].pop(branch)
-                    elif branch == 'rpa':
-                        cl_mappable_result[field][self.rpa_branch] = cl_mappable_result[field].pop(branch)
+        if timestep == 'adaptation':
+            for field in ['q', 'p']:
+                    cl_mappable_result[field] = {
+                        branch: [(self.clean_results[branch][field + "_in"]['postop'] - 
+                                 self.clean_results[branch][field + "_in"]['final']) / 
+                                 self.clean_results[branch][field + "_in"]['postop'], 
+                                (self.clean_results[branch][field + "_out"]['postop'] - 
+                                 self.clean_results[branch][field + "_out"]['final']) / 
+                                 self.clean_results[branch][field + "_out"]['postop'], ]
+                        for branch in branches}
+        else:
+            for field in ['flow', 'pressure']:
+                    cl_mappable_result[field] = {
+                        branch: [self.results[timestep][field + "_in"][branch], 
+                                self.results[timestep][field + "_out"][branch]]
+                        for branch in branches}
+                    # now, change the branch id for mpa, lpa, rpa
+                    for branch in cl_mappable_result[field].keys():
+                        if branch == 'mpa':
+                            cl_mappable_result[field][0] = cl_mappable_result[field].pop(branch)
+                        elif branch == 'lpa':
+                            cl_mappable_result[field][self.lpa_branch] = cl_mappable_result[field].pop(branch)
+                        elif branch == 'rpa':
+                            cl_mappable_result[field][self.rpa_branch] = cl_mappable_result[field].pop(branch)
+        
+        # construct the distance dict
+
         return cl_mappable_result
 
 
