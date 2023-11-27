@@ -161,7 +161,7 @@ class ResultHandler:
         
         '''
 
-        cl_mappable_result = {"flow": {}, "pressure": {}, "distance": {},"time": {}}
+        cl_mappable_result = {"flow": {}, "pressure": {}, "distance": {},"time": {}, "resistance": {}}
 
         branches = list(self.clean_results.keys())
         for branch in branches:
@@ -177,14 +177,14 @@ class ResultHandler:
         fields.sort() # should be ['flow_in', 'flow_out', 'pressure_in', 'pressure_out']
 
         if timestep == 'adaptation':
-            for field in ['q', 'p']:
+            for field in ['flow', 'pressure']:
                     cl_mappable_result[field] = {
-                        branch: [(self.clean_results[branch][field + "_in"]['postop'] - 
-                                 self.clean_results[branch][field + "_in"]['final']) / 
-                                 self.clean_results[branch][field + "_in"]['postop'], 
-                                (self.clean_results[branch][field + "_out"]['postop'] - 
-                                 self.clean_results[branch][field + "_out"]['final']) / 
-                                 self.clean_results[branch][field + "_out"]['postop'], ]
+                        branch: [(self.results['postop'][field + "_in"][branch] - 
+                                 self.results['adapted'][field + "_in"][branch]) / 
+                                 self.results['postop'][field + "_in"][branch], 
+                                (self.results['postop'][field + "_out"][branch] - 
+                                 self.results['adapted'][field + "_out"][branch]) / 
+                                 self.results['postop'][field + "_out"][branch], ]
                         for branch in branches}
         else:
             for field in ['flow', 'pressure']:

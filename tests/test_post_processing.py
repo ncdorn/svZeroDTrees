@@ -1,7 +1,7 @@
 from svzerodtrees.post_processing import plotting
 from svzerodtrees.post_processing import pa_plotter as pa
 from svzerodtrees._config_handler import ConfigHandler
-from svzerodtrees.post_processing.project_to_centerline import _map_0d_on_centerline
+from svzerodtrees.post_processing.project_to_centerline import map_0d_on_centerline
 import json
 import pickle
 
@@ -68,9 +68,10 @@ def test_cl_projection():
         result_handler = pickle.load(ff)
 
     # print(result_handler.format_result_for_cl_projection('preop'))
-    _map_0d_on_centerline('tests/cases/LPA_RPA_0d_steady/centerlines.vtp', 
-                          config_handler, result_handler, 
-                          'preop', 'tests/cases/LPA_RPA_0d_steady/cl_projection/')
+    
+    map_0d_on_centerline('tests/cases/LPA_RPA_0d_steady/centerlines.vtp', 
+                        config_handler, result_handler, 
+                        'adaptation', 'tests/cases/LPA_RPA_0d_steady/cl_projection/')
 
 if __name__ =='__main__':
 

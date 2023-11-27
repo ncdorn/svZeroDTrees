@@ -179,3 +179,13 @@ class ConfigHandler():
         return np.linspace(min(self.config["boundary_conditions"][0]["bc_values"]["t"]), 
                            max(self.config["boundary_conditions"][0]["bc_values"]["t"]), 
                            self.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"])
+    
+    def get_branch_resistances(self):
+        '''
+        get the branch resistances from the config for centerline projection
+        '''
+        
+        for vessel in self.config["vessels"]:
+            br, seg = vessel["vessel_name"].split("_")
+            R = vessel["zero_d_element_values"]["R_poiseuille"]
+            

@@ -45,7 +45,7 @@ def get_branch_result(qoi, result_handler, config_handler):
 
 
 
-def _map_0d_on_centerline(centerline, config_handler, result_handler, timestep, output_folder):
+def map_0d_on_centerline(centerline, config_handler, result_handler, timestep, output_folder):
         """Map 0D result on centerline.
 
         TODO: This functions has been mainly copied from SimVascular, and has now been adopted from svsuperestimator. A cleanup
@@ -71,8 +71,7 @@ def _map_0d_on_centerline(centerline, config_handler, result_handler, timestep, 
 
         # unformatted result in the result_handler should already be in branch result form
         # this is where we need to figure out exactly what we will be projecting onto the centerline
-         
-
+        
         # centerline points
         points = cl_handler.points
         branch_ids = cl_handler.get_point_data_array("BranchId")
@@ -88,17 +87,20 @@ def _map_0d_on_centerline(centerline, config_handler, result_handler, timestep, 
         results = result_handler.format_result_for_cl_projection(timestep)
         results["time"] = config_handler.get_time_series()
 
-        # add path distance
+        # add vessel properties to results (path distance and vessel resistance)
         for vessel in config_handler.config["vessels"]:
             br, seg = vessel["vessel_name"].split("_")
             br = int(br[6:])
             seg = int(seg[3:])
             if seg == 0:
                 results["distance"][br] = [0, 0]
-            l_new = (
-                results["distance"][br][-1] + vessel["vessel_length"]
-            )
-            results["distance"][br][1] += l_new
+                results["resistance"][br] = [0, 0]
+            # l_new = (
+            #     results["distance"][br][-1] + vessel["vessel_length"]
+            # )
+            results["resistance"][br][0] = [vessel["zero_d_element_values"]["R_poiseuille"]] * config_handler.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"]
+            results["resistance"][br][1] = results["resistance"][br][0]
+            results["distance"][br][1] += vessel["vessel_length"]
 
         # assemble output dict
         def rec_dd() -> defaultdict:
@@ -107,7 +109,7 @@ def _map_0d_on_centerline(centerline, config_handler, result_handler, timestep, 
         arrays = rec_dd()
 
         # loop all result fields
-        for f in ["flow", "pressure"]:
+        for f in ["flow", "pressure", "resistance"]:
             if f not in results:
                 continue
 
@@ -200,5 +202,8 @@ def _map_0d_on_centerline(centerline, config_handler, result_handler, timestep, 
             out_array.SetName(f)
             cl_handler.data.GetPointData().AddArray(out_array)
 
-        target = os.path.join(output_folder, "initial_centerline.vtp")
+        target = os.path.join(output_folder, "initial_centerline_" + timestep + ".vtp")
         cl_handler.to_file(target)
+
+    
+    
