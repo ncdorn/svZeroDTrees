@@ -161,7 +161,7 @@ class ResultHandler:
         
         '''
 
-        cl_mappable_result = {"flow": {}, "pressure": {}, "distance": {},"time": {}, "resistance": {}}
+        cl_mappable_result = {"flow": {}, "pressure": {}, "distance": {},"time": {}, "resistance": {}, "WU m2": {}}
 
         branches = list(self.clean_results.keys())
         for branch in branches:
