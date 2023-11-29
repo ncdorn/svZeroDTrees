@@ -763,6 +763,12 @@ def get_pa_optimization_values(result):
 
     return np.array([Q_rpa, P_mpa, P_rpa, P_lpa])
 
+def calc_WU_m2(vessel, viscosity):
+    '''
+    calculate woods units by m2 for a given vessel config
+    '''
+
+    return np.sqrt(8 * viscosity * vessel["vessel_length"] * np.pi * vessel["zero_d_element_values"].get("R_poiseuille"))
 
 
 def find_lpa_rpa_branches(config):

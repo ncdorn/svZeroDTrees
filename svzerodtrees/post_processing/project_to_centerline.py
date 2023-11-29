@@ -4,6 +4,7 @@ import numpy as np
 from scipy.interpolate import interp1d
 from collections import defaultdict
 from vtk.util.numpy_support import numpy_to_vtk
+from svzerodtrees.utils import *
 import svzerodplus
 from svsuperestimator.reader._centerline_handler import CenterlineHandler
 
@@ -95,11 +96,16 @@ def map_0d_on_centerline(centerline, config_handler, result_handler, timestep, o
             if seg == 0:
                 results["distance"][br] = [0, 0]
                 results["resistance"][br] = [0, 0]
+                results["WU m2"][br] = [0, 0]
             # l_new = (
             #     results["distance"][br][-1] + vessel["vessel_length"]
             # )
-            results["resistance"][br][0] = [vessel["zero_d_element_values"]["R_poiseuille"]] * config_handler.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"]
-            results["resistance"][br][1] = results["resistance"][br][0]
+            results["resistance"][br] = [[vessel["zero_d_element_values"]["R_poiseuille"]] * config_handler.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"]] * 2
+            # results["resistance"][br][1] = results["resistance"][br][0]
+
+            results["WU m2"][br] = [[calc_WU_m2(vessel, config_handler.config["simulation_parameters"]["viscosity"])] * config_handler.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"]] * 2
+
+
             results["distance"][br][1] += vessel["vessel_length"]
 
         # assemble output dict
