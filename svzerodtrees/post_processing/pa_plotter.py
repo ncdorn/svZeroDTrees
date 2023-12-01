@@ -664,7 +664,7 @@ class PAanalyzer:
 
     def map_vessels_to_branches(self):
         '''
-        map each vessel to a branch id
+        map each vessel id to a branch id
         '''
 
         for vessel in self.vessels:
@@ -973,7 +973,7 @@ class PAanalyzer:
             if len(vessel.children) != 0:
                 calc_R_eq(vessel.children[0])
                 calc_R_eq(vessel.children[1])
-                vessel.R_eq = vessel.zero_d_element_values['R_poiseuille'] + vessel.children[0].R_eq + vessel.children[1].R_eq
+                vessel.R_eq = vessel.zero_d_element_values['R_poiseuille'] + (1 / sum([1 / child.R_eq for child in vessel.children]))
             else:
                 vessel.R_eq = vessel.zero_d_element_values['R_poiseuille']
         

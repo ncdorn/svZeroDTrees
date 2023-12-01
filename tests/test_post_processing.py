@@ -87,7 +87,7 @@ def test_pa_plotter_functions():
     # test R_eq calculation
     plotter.get_R_eq()
 
-    print('R_poiseuille: ' + str(plotter.root.zero_d_element_values["R_poiseuille"]) + 'R_eq: ' + str(plotter.root.R_eq))
+    print('R_poiseuille: ' + str(plotter.root.zero_d_element_values["R_poiseuille"]) + '  R_eq: ' + str(plotter.root.R_eq))
 
 
 
