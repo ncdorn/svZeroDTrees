@@ -960,6 +960,24 @@ class PAanalyzer:
 
         return self.Vessel(vessel_config)
 
+
+    def get_R_eq(self):
+        '''
+        calculate the equivalent resistance for a vessel
+
+        :param vessel: vessel to calculate resistance for
+        '''
+
+        # get the resistance of the children
+        def calc_R_eq(vessel):
+            if len(vessel.children) != 0:
+                calc_R_eq(vessel.children[0])
+                calc_R_eq(vessel.children[1])
+                vessel.R_eq = vessel.zero_d_element_values['R_poiseuille'] + vessel.children[0].R_eq + vessel.children[1].R_eq
+            else:
+                vessel.R_eq = vessel.zero_d_element_values['R_poiseuille']
+        
+        calc_R_eq(self.root)
     
     class Vessel:
         '''

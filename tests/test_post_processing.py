@@ -1,8 +1,9 @@
 from svzerodtrees.post_processing import plotting
-from svzerodtrees.post_processing import pa_plotter as pa
+from svzerodtrees.post_processing.pa_plotter import PAanalyzer
 from svzerodtrees._config_handler import ConfigHandler
 from svzerodtrees.post_processing.project_to_centerline import map_0d_on_centerline
 from svzerodtrees.utils import *
+import os
 import json
 import pickle
 
@@ -75,6 +76,21 @@ def test_cl_projection():
                         'adaptation', 'tests/cases/LPA_RPA_0d_steady/cl_projection/')
 
 
+def test_pa_plotter_functions():
+    '''
+    test various functions of the pa plotter'''
+
+    os.chdir('tests/cases/LPA_RPA_0d_steady/')
+    experiment = 'exp_config_test_9.5.23'
+    plotter = PAanalyzer.from_files('preop_config.json', 'experiments/' + experiment + '/full_results.json', 'experiments/' + experiment + '/figures/')
+
+    # test R_eq calculation
+    plotter.get_R_eq()
+
+    print('R_poiseuille: ' + str(plotter.root.zero_d_element_values["R_poiseuille"]) + 'R_eq: ' + str(plotter.root.R_eq))
+
+
+
 if __name__ =='__main__':
 
-    test_cl_projection()
+    test_pa_plotter_functions()
