@@ -115,7 +115,7 @@ def map_0d_on_centerline(centerline, config_handler, result_handler, timestep, o
         arrays = rec_dd()
 
         # loop all result fields
-        for f in ["flow", "pressure", "resistance"]:
+        for f in ["flow", "pressure", "resistance", "WU m2"]:
             if f not in results:
                 continue
 
