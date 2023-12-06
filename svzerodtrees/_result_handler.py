@@ -47,7 +47,7 @@ class ResultHandler:
             self.lpa_branch, self.rpa_branch = find_lpa_rpa_branches(config)
 
         for vessel_config in config['vessels']:
-            id = get_branch_id(vessel_config)
+            id = get_branch_id(vessel_config)[0]
             if id not in [0, self.lpa_branch, self.rpa_branch]:
                 if id not in self.vessels:
                     self.vessels.append(id)
@@ -69,7 +69,7 @@ class ResultHandler:
 
         # get summary results for all other vessels
         for vessel_config in self.vessels['vessels']:
-            id = get_branch_id(vessel_config)
+            id = get_branch_id(vessel_config)[0]
             if id not in [0, self.lpa_branch, self.rpa_branch]:
                 self.clean_results[id] = self.format_branch_result(id)
 

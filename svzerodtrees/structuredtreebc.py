@@ -108,7 +108,7 @@ class StructuredTreeOutlet():
         if tree_exists:
             return cls(params=params, config = config, simparams=simparams, root=root)
         else:
-            return cls(params=params, name="OutletTree" + str(get_branch_id(config)), simparams=simparams)
+            return cls(params=params, name="OutletTree" + str(get_branch_id(config)[0]), simparams=simparams)
 
 
     def reset_tree(self, keep_root=False):

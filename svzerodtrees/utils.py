@@ -116,7 +116,7 @@ def get_branch_d(config, viscosity, branch):
     R = 0
     l = 0
     for vessel_config in config["vessels"]:
-        if get_branch_id(vessel_config) == branch:
+        if get_branch_id(vessel_config)[0] == branch:
             # get total resistance of branch if it is split into multiple segments
             R += vessel_config["zero_d_element_values"].get("R_poiseuille")
             l += vessel_config["vessel_length"]
@@ -141,7 +141,7 @@ def find_outlets(config):
     for vessel_config in config["vessels"]:
         if "boundary_conditions" in vessel_config:
             if "outlet" in vessel_config["boundary_conditions"]:
-                branch_id = get_branch_id(vessel_config)
+                branch_id = get_branch_id(vessel_config)[0]
                 outlet_vessels.append(branch_id)
                 # calculate the diameter
                 d = ((128 * config["simulation_parameters"]["viscosity"] * vessel_config["vessel_length"]) /
@@ -454,9 +454,11 @@ def get_branch_id(vessel_config):
     :return: integer branch id
     '''
     
-    branch_id, seg_id = vessel_config["vessel_name"].split("_")
+    br, seg = vessel_config["vessel_name"].split("_")
+    br = int(br[6:])
+    seg = int(seg[3:])
 
-    return int(branch_id[6:])
+    return br, seg
 
 def get_clinical_targets(clinical_targets: csv, log_file: str):
     '''
@@ -478,8 +480,9 @@ def get_clinical_targets(clinical_targets: csv, log_file: str):
     q = bsa * cardiac_index * 16.667 # cardiac output in L/min. convert to cm3/s
     # get important mpa pressures
     mpa_pressures = get_value_from_csv(clinical_targets, 'mpa pressures') # mmHg
-    mpa_sys_p = int(mpa_pressures[0:2])
-    mpa_dia_p = int(mpa_pressures[3:5])
+    mpa_sys_p, mpa_dia_p = mpa_pressures.split("/")
+    mpa_sys_p = int(mpa_sys_p)
+    mpa_dia_p = int(mpa_dia_p)
     mpa_mean_p = int(get_value_from_csv(clinical_targets, 'mpa mean pressure'))
     mpa_ps = np.array([
         mpa_sys_p,
@@ -489,8 +492,9 @@ def get_clinical_targets(clinical_targets: csv, log_file: str):
 
     # get important rpa pressures
     rpa_pressures = get_value_from_csv(clinical_targets, 'rpa pressures') # mmHg
-    rpa_sys_p = int(rpa_pressures[0:2])
-    rpa_dia_p = int(rpa_pressures[3:5])
+    rpa_sys_p, rpa_dia_p = rpa_pressures.split("/")
+    rpa_sys_p = int(rpa_sys_p)
+    rpa_dia_p = int(rpa_dia_p)
     rpa_mean_p = int(get_value_from_csv(clinical_targets, 'rpa mean pressure'))
     rpa_ps = np.array([
         rpa_sys_p,
@@ -500,8 +504,9 @@ def get_clinical_targets(clinical_targets: csv, log_file: str):
 
     # get important lpa pressures
     lpa_pressures = get_value_from_csv(clinical_targets, 'lpa pressures') # mmHg
-    lpa_sys_p = int(lpa_pressures[0:2])
-    lpa_dia_p = int(lpa_pressures[3:5])
+    lpa_sys_p, lpa_dia_p = lpa_pressures.split("/")
+    lpa_sys_p = int(lpa_sys_p)
+    lpa_dia_p = int(lpa_dia_p)
     lpa_mean_p = int(get_value_from_csv(clinical_targets, 'lpa mean pressure'))
     lpa_ps = np.array([
         lpa_sys_p,
@@ -525,11 +530,11 @@ def config_flow(preop_config, q):
             bc_config["bc_values"]["t"] = [0.0, 1.0]
 
 
-def create_pa_optimizer_config(preop_config, q, wedge_p, log_file=None):
+def create_pa_optimizer_config(config_handler, q, wedge_p, log_file=None):
     '''
     create a config dict for the pa optimizer
     
-    :param preop_config: preoperative config dict
+    :param config_handler: config_handler
     :param q: cardiac output
     :param wedge_p: wedge pressure for the distal pressure bc
     :param log_file: path to log file
@@ -567,6 +572,7 @@ def create_pa_optimizer_config(preop_config, q, wedge_p, log_file=None):
             }
         }
     )
+
     pa_config['boundary_conditions'].append(
         {
             "bc_name": "LPA_BC",
@@ -579,12 +585,12 @@ def create_pa_optimizer_config(preop_config, q, wedge_p, log_file=None):
     )
 
     # copy the simulation parameters
-    pa_config['simulation_parameters'] = preop_config['simulation_parameters']
+    pa_config['simulation_parameters'] = config_handler.config['simulation_parameters']
 
     # create the MPA, RPA and LPA vessels
     pa_config['vessels'] = [
         # MPA
-        preop_config['vessels'][0],
+        config_handler.config['vessels'][0],
 
         { # RPA proximal
             "vessel_id": 1,
@@ -594,7 +600,7 @@ def create_pa_optimizer_config(preop_config, q, wedge_p, log_file=None):
             "zero_d_element_values": {
                 "C": 0.0,
                 "L": 0.0,
-                "R_poiseuille": 100.0, # R_RPA_proximal
+                "R_poiseuille": config_handler.rpa.zero_d_element_values.get("R_poiseuille"), # R_RPA_proximal
                 "stenosis_coefficient": 0.0
             }
         },
@@ -606,7 +612,7 @@ def create_pa_optimizer_config(preop_config, q, wedge_p, log_file=None):
             "zero_d_element_values": {
                 "C": 0.0,
                 "L": 0.0,
-                "R_poiseuille": 10.0, # R_LPA_proximal
+                "R_poiseuille": config_handler.lpa.zero_d_element_values.get("R_poiseuille"), # R_LPA_proximal
                 "stenosis_coefficient": 0.0
             }
         },
@@ -615,7 +621,7 @@ def create_pa_optimizer_config(preop_config, q, wedge_p, log_file=None):
                 "outlet": "RPA_BC"
             },
             "vessel_id": 3,
-            "vessel_length": 100.0,
+            "vessel_length": config_handler.rpa.R_eq - config_handler.rpa.zero_d_element_values.get("R_poiseuille"),
             "vessel_name": "branch3_seg0",
             "zero_d_element_type": "BloodVessel",
             "zero_d_element_values": {
@@ -630,7 +636,7 @@ def create_pa_optimizer_config(preop_config, q, wedge_p, log_file=None):
                 "outlet": "LPA_BC"
             },
             "vessel_id": 4,
-            "vessel_length": 100.0,
+            "vessel_length": config_handler.lpa.R_eq - config_handler.lpa.zero_d_element_values.get("R_poiseuille"),
             "vessel_name": "branch4_seg0",
             "zero_d_element_type": "BloodVessel",
             "zero_d_element_values": {
@@ -716,14 +722,14 @@ def get_pa_config_resistances(pa_config):
     :return: list of resistances [R_RPA_proximal, R_LPA_proximal, R_RPA_distal, R_LPA_distal, R_RPA_BC, R_LPA_BC]
     '''
 
-    R_RPA_proximal = pa_config['vessels'][1]['zero_d_element_values']['R_poiseuille']
-    R_LPA_proximal = pa_config['vessels'][2]['zero_d_element_values']['R_poiseuille']
-    R_RPA_distal = pa_config['vessels'][3]['zero_d_element_values']['R_poiseuille']
-    R_LPA_distal = pa_config['vessels'][4]['zero_d_element_values']['R_poiseuille']
+    # R_RPA_proximal = pa_config['vessels'][1]['zero_d_element_values']['R_poiseuille']
+    # R_LPA_proximal = pa_config['vessels'][2]['zero_d_element_values']['R_poiseuille']
+    # R_RPA_distal = pa_config['vessels'][3]['zero_d_element_values']['R_poiseuille']
+    # R_LPA_distal = pa_config['vessels'][4]['zero_d_element_values']['R_poiseuille']
     R_RPA_BC = pa_config['boundary_conditions'][1]['bc_values']['R']
     R_LPA_BC = pa_config['boundary_conditions'][2]['bc_values']['R']
 
-    return [R_RPA_proximal, R_LPA_proximal, R_RPA_BC, R_LPA_BC] # R_RPA_distal, R_LPA_distal,
+    return [R_RPA_BC, R_LPA_BC] # R_RPA_distal, R_LPA_distal,
 
 def write_pa_config_resistances(pa_config, resistances):
     '''
@@ -733,12 +739,12 @@ def write_pa_config_resistances(pa_config, resistances):
     :param resistances: list of resistances [R_RPA_proximal, R_LPA_proximal, R_RPA_distal, R_LPA_distal, R_RPA_BC, R_LPA_BC]
     '''
 
-    pa_config['vessels'][1]['zero_d_element_values']['R_poiseuille'] = resistances[0]
-    pa_config['vessels'][2]['zero_d_element_values']['R_poiseuille'] = resistances[1]
+    # pa_config['vessels'][1]['zero_d_element_values']['R_poiseuille'] = resistances[0]
+    # pa_config['vessels'][2]['zero_d_element_values']['R_poiseuille'] = resistances[1]
     # pa_config['vessels'][3]['zero_d_element_values']['R_poiseuille'] = resistances[2]
     # pa_config['vessels'][4]['zero_d_element_values']['R_poiseuille'] = resistances[3]
-    pa_config['boundary_conditions'][1]['bc_values']['R'] = resistances[2]
-    pa_config['boundary_conditions'][2]['bc_values']['R'] = resistances[3]
+    pa_config['boundary_conditions'][1]['bc_values']['R'] = resistances[0]
+    pa_config['boundary_conditions'][2]['bc_values']['R'] = resistances[1]
 
 def get_pa_optimization_values(result):
     '''
@@ -798,7 +804,7 @@ def find_lpa_rpa_branches(config):
     for i, id in enumerate(lpa_rpa_id):
         for vessel_config in config["vessels"]:
             if vessel_config["vessel_id"] == id:
-                branches.append(get_branch_id(vessel_config))
+                branches.append(get_branch_id(vessel_config)[0])
     
     lpa_branch = branches[0]
     rpa_branch = branches[1]

@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import pickle
 from svzerodtrees import preop, operation, adaptation, postop
@@ -32,14 +33,35 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
     repair_config = exp_config["repair"]
 
     # check if we are in an experiments directory, if not assume we are in it
+
     if os.path.exists('../experiments'): # we are in the experiments directory already
 
-        os.system('mkdir ' + expname)
+        if os.path.exists(expname):
+            ovwrite_dir = input('experiment ' + expname + ' already exists, do you want to overwrite? (y/n) ')
 
-    elif os.path.exists('experiments'): # we are ond directory above the experiments directory
+            if ovwrite_dir == 'y':
+                pass
 
-        os.chdir('experiments')
-        os.system('mkdir ' + expname)
+            else:
+                sys.exit()
+        
+        else:
+            os.system('mkdir ' + expname)
+
+    elif os.path.exists('experiments'): # we are in the directory above the experiments directory
+        
+        if os.path.exists(expname):
+            ovwrite_dir = input('experiment ' + expname + ' already exists, do you want to overwrite? (y/n) ')
+            
+            if ovwrite_dir == 'y':
+                pass
+
+            else:
+                sys.exit()
+        
+        else:
+            os.chdir('experiments')
+            os.system('mkdir ' + expname)
 
     else: # we are not in the experiments directory and need to create one
 
@@ -105,10 +127,7 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
     else: # use previous optimization results
 
         config_handler = ConfigHandler.from_json('preop_config.json')
-
-        # json won't work for results load
         
-
         # get preop result
         preop_flow = run_svzerodplus(config_handler.config)
 
@@ -251,7 +270,7 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
                                            result_handler,
                                            log_file,
                                            fig_dir=fig_dir,
-                                           d_min=.49) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
+                                           d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
 
         # save preop config to as pickle, with StructuredTreeOutlet objects
         write_to_log(log_file, 'saving preop config with cwss trees...')

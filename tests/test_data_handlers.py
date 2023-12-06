@@ -11,5 +11,15 @@ def test_pa_handling():
     '''
 
     # load the config file
-    config_handler = ConfigHandler.from_file('tests/cases/full_pa_test/preop_config.in')
+    config_handler = ConfigHandler.from_json('tests/cases/full_pa_test/preop_config.in')
+
+    config_handler.load_pa_model()
+
+    print(config_handler.lpa.R_eq, config_handler.rpa.R_eq)
+
+
+if __name__ == '__main__':
+    test_pa_handling()
+
+
 

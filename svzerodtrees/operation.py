@@ -35,7 +35,7 @@ def repair_stenosis_coefficient(config_handler: ConfigHandler, result_handler: R
     elif repair_config['location'] == 'extensive': 
 
         # get list of vessels with no duplicates
-        repair_config['vessels'] = list(set([get_branch_id(vessel) for vessel in config_handler.config["vessels"]])) 
+        repair_config['vessels'] = list(set([get_branch_id(vessel)[0] for vessel in config_handler.config["vessels"]])) 
 
         # match the length of the repair degrees to the number of vessels
         repair_config['degree'] *= len(repair_config['vessels']) 
@@ -66,10 +66,10 @@ def repair_stenosis_coefficient(config_handler: ConfigHandler, result_handler: R
     for vessel_config in config_handler.config["vessels"]:
 
 
-        if get_branch_id(vessel_config) in repair_config['vessels']:
+        if get_branch_id(vessel_config)[0] in repair_config['vessels']:
 
             # get the repair index to match with the appropriate repair degree
-            repair_idx = repair_config['vessels'].index(get_branch_id(vessel_config))
+            repair_idx = repair_config['vessels'].index(get_branch_id(vessel_config)[0])
 
             # adjust the stenosis coefficient
             if repair_config['type'] == 'stenosis_coefficient':
@@ -86,7 +86,15 @@ def repair_stenosis_coefficient(config_handler: ConfigHandler, result_handler: R
                     write_to_log(log_file, "     vessel " + str(vessel_config["vessel_id"]) + " resistance has been scaled by " + str(repair_config['degree'][repair_idx]))
                     write_to_log(log_file, "     the new resistance is " + str(vessel_config["zero_d_element_values"]["R_poiseuille"]))
             
+            # adjust the vessel resistance by stent diameter (in cm)
+            if repair_config['type'] == 'stent':
+                R_old = vessel_config["zero_d_element_values"].get("R_poiseuille") + vessel_config["zero_d_element_values"].get("stenosis_coefficient")
+                vessel_config["zero_d_element_values"]["R_poiseuille"] = (8 * config_handler.config["simulation_parameters"]["viscosity"] * vessel_config["vessel_length"]) / (np.pi * (repair_config["diameter"][repair_idx] / 2) ** 4)
+                vessel_config["zero_d_element_values"]["stenosis_coefficient"] = 0.0
 
+                write_to_log(log_file, "     vessel " + str(vessel_config["vessel_id"]) + " has been repaired by " + str(repair_config["diameter"][repair_idx] * 10) + " mm stent")
+                write_to_log(log_file, "     the change in resistance is " + str(R_old - vessel_config["zero_d_element_values"]["R_poiseuille"]))
+        
     write_to_log(log_file, 'all stenosis repairs completed')
 
     postop_result = run_svzerodplus(config_handler.config)

@@ -12,6 +12,10 @@ class ConfigHandler():
         self.config = config
         self.trees = []
 
+        self.map_vessels_to_branches()
+        self.build_tree_map()
+        self.compute_R_eq()
+
 
     @classmethod
     def from_json(cls, file_name: str):
@@ -194,46 +198,61 @@ class ConfigHandler():
         for vessel in self.config["vessels"]:
             br, seg = vessel["vessel_name"].split("_")
             R = vessel["zero_d_element_values"]["R_poiseuille"]
-            
+    
 
-### below is a set of routines for loading in a pulmonary artery model and creating a tree structure from it
+    def set_inflow(self, Q_in):
+        '''
+        set the inflow for the config
+        '''
 
-    def load_pa_model(self):
-        pass
+        for bc in self.config["boundary_conditions"]:
+            if bc["bc_name"] == "INFLOW":
+                bc["bc_values"]["Q"] = [Q_in] * len(bc["bc_values"]["t"])
 
 
     def map_vessels_to_branches(self):
         '''
-        map each vessel id to a branch id
+        map each vessel id to a branch id to deal with the case of multiple vessel ids in the same branch
         '''
 
-        for vessel in self.vessels:
-            self.vessel_branch_map[vessel['vessel_id']] = get_branch_id(vessel)
+        self.vessel_branch_map = {}
+        for vessel in self.config["vessels"]:
+            self.vessel_branch_map[vessel['vessel_id']] = get_branch_id(vessel)[0]
 
 
-    def combine_vessels(self, vessel1, vessel2):
-        '''
-        combine two vessels of the same branch into one vessel
-        :param vessel1: first vessel
-        :param vessel2: second vessel
-        '''
-        vessel_config = dict(
-            label = vessel1.label,
-            vessel_id = vessel1.branch,
-            vessel_length = vessel1.length + vessel2.length,
-            vessel_name = 'branch' + str(vessel1.branch) + '_seg0',
-            zero_d_element_values = {
-                'R_poiseuille': vessel1.zero_d_element_values['R_poiseuille'] + vessel2.zero_d_element_values['R_poiseuille'],
-                # need to update this to be actual math
-                'C': vessel1.zero_d_element_values['C'] + vessel2.zero_d_element_values['C'],
-                # need to update this to be actual math
-                'L': vessel1.zero_d_element_values['L'] + vessel2.zero_d_element_values['L'],
-                # take the max, there is definitely some math to be done here
-                'stenosis_coefficient': max(vessel1.zero_d_element_values['stenosis_coefficient'], vessel2.zero_d_element_values['stenosis_coefficient'])
-            }
-        )
+    def find_vessel_paths(self):
+            '''
+            find the path from the root to each vessel
+            '''
 
-        return self.Vessel(vessel_config)
+            # helper function for depth-first search
+            def dfs(vessel, path):
+
+                if vessel is None:
+                    return
+                
+                # add current vessel to the path
+                path.append(vessel.branch)
+
+                vessel.path = path.copy()
+                
+                vessel.gen = len(path) - 1
+
+                for child in vessel.children:
+                    dfs(child, path.copy())
+
+            dfs(self.root, [])
+
+
+    def build_vessel(self, branch):
+        '''build a vessel object given a branch id'''
+
+        for vessel_config in self.config['vessels']:
+            br, seg = get_branch_id(vessel_config)
+            if br == branch and seg == 0:
+                self.vessel_map[br] = self.Vessel(vessel_config)
+            elif br == branch and seg != 0:
+                self.vessel_map[br].add_segment(vessel_config)
 
 
     def build_tree_map(self):
@@ -243,17 +262,14 @@ class ConfigHandler():
 
         :return self.vessel_map: a dict where the keys are branch ids and the values are Vessel objects
         '''
-
+        self.vessel_map = {}
         # initialize the vessel map (dict of branches)
         for vessel_config in self.config['vessels']:
-            branch = get_branch_id(vessel_config)
-            if branch not in self.vessel_map.keys():
-                self.vessel_map[branch] = self.Vessel(vessel_config)
+            br, seg = get_branch_id(vessel_config)
+            if seg == 0:
+                self.vessel_map[br] = self.Vessel(vessel_config)
             else: 
-                self.vessel_map[branch] = self.combine_vessels(self.vessel_map[branch], self.Vessel(vessel_config))
-            
-            self.vessel_map[branch].d = get_branch_d(self.config, self.config["simulation_parameters"]["viscosity"], branch)
-            # map vessel id to branch
+                self.vessel_map[br].add_segment(vessel_config)
         
         # loop through junctions and add children to parent vessels
         for junction in self.config['junctions']:
@@ -299,19 +315,11 @@ class ConfigHandler():
         self.lpa = self.root.children[0]
         self.rpa = self.root.children[1]
 
-        # modify the self.result array to include the mpa, rpa, lpa with numerical ids
-        self.result[str(self.mpa.branch)] = self.result.pop('mpa')
-        self.result[str(self.rpa.branch)] = self.result.pop('rpa')
-        self.result[str(self.lpa.branch)] = self.result.pop('lpa')
-
-        keys = list(self.result.keys())
-        keys.sort(key=int)
-
-        self.result = {key: self.result[key] for key in keys}
 
         self.find_vessel_paths()
 
-    def get_R_eq(self):
+
+    def compute_R_eq(self):
         '''
         calculate the equivalent resistance for a vessel
 
@@ -321,19 +329,20 @@ class ConfigHandler():
         # get the resistance of the children
         def calc_R_eq(vessel):
             if len(vessel.children) != 0:
-                calc_R_eq(vessel.children[0])
-                calc_R_eq(vessel.children[1])
+                for child in vessel.children:
+                    calc_R_eq(child)
                 vessel.R_eq = vessel.zero_d_element_values['R_poiseuille'] + (1 / sum([1 / child.R_eq for child in vessel.children]))
             else:
                 vessel.R_eq = vessel.zero_d_element_values['R_poiseuille']
         
         calc_R_eq(self.root)
 
+
     class Vessel:
         '''
         class to handle tree structure creation and dfs on the tree
-
         '''
+
         def __init__(self, config: dict):
             # optional name, such as mpa, lpa, rpa to classify the vessel
             self.label= None
@@ -344,11 +353,28 @@ class ConfigHandler():
             self.path = []
             # generation from root
             self.gen = None
+            # segments in the branch
+            segs = [0]
             # get info from vessel config
             self.length = config['vessel_length']
-            self.id = config['vessel_id']
-            self.branch = get_branch_id(config)
+            self.ids = [config['vessel_id']]
+            self.branch = get_branch_id(config)[0]
             self.zero_d_element_values = config['zero_d_element_values']
             self.R_eq = 0.0
-            # get the branch diameter
-            self.d = 0.0
+        
+
+        def add_segment(self, config: dict):
+            '''
+            add a segment to the vessel
+            '''
+            # add the length
+            self.length += config['vessel_length']
+            # add the vessel id of the segment
+            self.ids.append(config['vessel_id'])
+            # add zero d element values
+            self.zero_d_element_values['R_poiseuille'] += config['zero_d_element_values']['R_poiseuille']
+            self.zero_d_element_values['C'] = 1 / ((1 / self.zero_d_element_values['C']) + (1 / config['zero_d_element_values']['C']))
+            self.zero_d_element_values['L'] += config['zero_d_element_values']['L']
+            self.zero_d_element_values['stenosis_coefficient'] += config['zero_d_element_values']['stenosis_coefficient']
+            # add the segment number
+            self.segs.append(get_branch_id(config)[1])

@@ -668,7 +668,7 @@ class PAanalyzer:
         '''
 
         for vessel in self.vessels:
-            self.vessel_branch_map[vessel['vessel_id']] = get_branch_id(vessel)
+            self.vessel_branch_map[vessel['vessel_id']] = get_branch_id(vessel)[0]
 
 
     def build_tree_map(self):
@@ -681,7 +681,7 @@ class PAanalyzer:
 
         # initialize the vessel map (dict of branches)
         for vessel_config in self.vessels:
-            branch = get_branch_id(vessel_config)
+            branch = get_branch_id(vessel_config)[0]
             if branch not in self.vessel_map.keys():
                 self.vessel_map[branch] = self.Vessel(vessel_config)
             else: 
@@ -874,7 +874,7 @@ class PAanalyzer:
         elif qoi == 'tree_resistance':
             qois = []
             for vessel in self.config['vessels']:
-                if str(get_branch_id(vessel)) in branches:
+                if str(get_branch_id(vessel)[0]) in branches:
                     if 'tree' in vessel.keys():
                         qois.append(vessel["tree"].root.R_eq)
         elif qoi in ['p_in', 'p_out', 'q_in', 'q_out', 'wss']:
@@ -997,7 +997,7 @@ class PAanalyzer:
             # get info from vessel config
             self.length = config['vessel_length']
             self.id = config['vessel_id']
-            self.branch = get_branch_id(config)
+            self.branch = get_branch_id(config)[0]
             self.zero_d_element_values = config['zero_d_element_values']
             self.R_eq = 0.0
             # get the branch diameter

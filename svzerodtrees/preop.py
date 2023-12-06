@@ -215,7 +215,7 @@ def optimize_pa_bcs(input_file,
 
     # make inflow steady
     if make_steady:
-        make_inflow_steady(preop_config)
+        make_inflow_steady(preop_config, q)
         write_to_log(log_file, "inlet BCs converted to steady")
 
     # change boundary conditions to R
@@ -226,9 +226,11 @@ def optimize_pa_bcs(input_file,
     # initialize the data handlers
     result_handler = ResultHandler.from_config(preop_config)
     config_handler = ConfigHandler(preop_config)
+    config_handler.load_pa_model()
 
     # create the PA optimizer config
-    pa_config = create_pa_optimizer_config(config_handler.config, q, wedge_p)
+    pa_config = create_pa_optimizer_config(config_handler, q, wedge_p)
+    print(pa_config)
 
     # resitance initial guess
     R_0 = get_pa_config_resistances(pa_config)
@@ -248,6 +250,16 @@ def optimize_pa_bcs(input_file,
     # write optimized resistances to config
     write_pa_config_resistances(pa_config, R)
 
+    # get and log the optimized pressure values
+    opt_result = run_svzerodplus(pa_config)
+    vals = get_pa_optimization_values(opt_result)
+
+    write_to_log(log_file, "*** optimized values ****")
+    write_to_log(log_file, "MPA pressure: " + str(vals[1]))
+    write_to_log(log_file, "RPA pressure: " + str(vals[2]))
+    write_to_log(log_file, "LPA pressure: " + str(vals[3]))
+    write_to_log(log_file, "RPA flow split: " + str(vals[0] / q))
+
     # get outlet areas
     rpa_info, lpa_info, inflow_info = vtp_info(mesh_surfaces_path)
     
@@ -257,7 +269,7 @@ def optimize_pa_bcs(input_file,
     print('LPA total area: ' + str(sum(lpa_info.values())) + '\n')
 
     # distribute amongst all resistance conditions in the config
-    assign_outlet_pa_bcs(config_handler.config, rpa_info, lpa_info, R[2], R[3], wedge_p)
+    assign_pa_bcs(config_handler, q, rpa_info, lpa_info, R[0], R[1], wedge_p)
 
     return config_handler, result_handler
 
@@ -288,7 +300,8 @@ def pa_opt_loss_fcn(R, pa_config, targets):
     # print(loss, pa_eval, targets)
     return loss
 
-def assign_outlet_pa_bcs(config, rpa_info, lpa_info, R_rpa, R_lpa, wedge_p=13332.2):
+
+def assign_pa_bcs(config_handler, q_in, rpa_info, lpa_info, R_rpa, R_lpa, wedge_p=13332.2):
     '''
     assign resistances proportional to outlet area to the RPA and LPA outlet bcs.
     this assumes that the rpa and lpa cap info has not changed info since export from simvascular.
@@ -323,9 +336,11 @@ def assign_outlet_pa_bcs(config, rpa_info, lpa_info, R_rpa, R_lpa, wedge_p=13332
     # get all resistance values
     R_list = list(all_R.values())
 
-    # loop through boundary conditions to assign resistance values
-    for bc_config in config["boundary_conditions"]:
+    # set the inflow
+    config_handler.set_inflow(q_in)
 
+    # loop through boundary conditions to assign resistance values
+    for bc_config in config_handler.config["boundary_conditions"]:
         # add resistance to resistance boundary conditions
         if bc_config["bc_type"] == 'RESISTANCE':
             bc_config["bc_values"] = {

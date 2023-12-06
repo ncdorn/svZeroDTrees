@@ -23,6 +23,7 @@ svzerodtrees/post_processing/plotting.py
 svzerodtrees/post_processing/project_to_centerline.py
 svzerodtrees/post_processing/stree_visualization.py
 svzerodtrees/post_processing/stree_visualization_OLD.py
+tests/test_data_handlers.py
 tests/test_fl_visc.py
 tests/test_post_processing.py
 tests/test_ps_pipeline.py

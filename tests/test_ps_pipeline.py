@@ -225,7 +225,7 @@ def test_pa_optimizer():
     input_file = 'AS1_SU0308_prestent.json'
     log_file = 'full_pa_test.log'
     clinical_targets = 'clinical_targets.csv'
-    mesh_surfaces_path = '/home/ndorn/Documents/Stanford/PhD/PPAS/svPPAS/models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces'
+    mesh_surfaces_path = '/home/ndorn/Documents/Stanford/PhD/Simvascular/threed_models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces'
 
     config_handler, result_handler = preop.optimize_pa_bcs(
         input_file,
@@ -246,4 +246,4 @@ if __name__ == '__main__':
 
 
     # test_preop()
-    test_run_from_file()
+    test_pa_optimizer()
