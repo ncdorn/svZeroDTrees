@@ -4,6 +4,10 @@ import os
 import numpy as np
 from svzerodtrees._config_handler import ConfigHandler
 from svzerodtrees._result_handler import ResultHandler
+from svzerodtrees.utils import run_svzerodplus
+import svzerodplus
+import pandas as pd
+from io import StringIO
 
 def test_pa_handling():
     '''
@@ -11,14 +15,22 @@ def test_pa_handling():
     '''
 
     # load the config file
-    config_handler = ConfigHandler.from_json('tests/cases/full_pa_test/preop_config.in')
+    config_handler = ConfigHandler.from_json('tests/cases/full_pa_test/preop_config.json')
 
-    config_handler.load_pa_model()
+    config_handler.assemble_config()
 
-    print(config_handler.lpa.R_eq, config_handler.rpa.R_eq)
+    output = svzerodplus.simulate(config_handler.assembled_config)
+    result = pd.read_csv(StringIO(output))
+
+
+
+    with open('tests/cases/full_pa_test/assembled_result.json', 'w') as ff:
+        json.dump(result, ff)
+
 
 
 if __name__ == '__main__':
+
     test_pa_handling()
 
 

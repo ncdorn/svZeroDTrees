@@ -3,6 +3,7 @@ import json
 import pickle
 
 
+
 class ConfigHandler():
     '''
     class to handle configs with and without trees
@@ -12,8 +13,17 @@ class ConfigHandler():
         self.config = config
         self.trees = []
 
+        # initialize config maps
+        self.branch_map = {}
+        self.junctions = {}
+        self.bcs = {}
+        self.simparams = None
+
+        # build the config maps
         self.map_vessels_to_branches()
-        self.build_tree_map()
+        self.build_config_map()
+
+        # compute equivalent resistance
         self.compute_R_eq()
 
 
@@ -128,6 +138,26 @@ class ConfigHandler():
         self.clear_config_trees()
 
 
+    def assemble_config(self):
+        '''
+        assemble the config dict from the config maps
+        '''
+
+        # this is a separate config for debugging purposes
+        self.assembled_config = {}
+        # add the boundary conditions
+        self.assembled_config['boundary_conditions'] = [bc.to_dict() for bc in self.bcs.values()]
+
+        # add the junctions
+        self.assembled_config['junctions'] = [junction.to_dict() for junction in self.junctions.values()]
+
+        # add the simulation parameters
+        self.assembled_config['simulation_parameters'] = self.simparams.to_dict()
+
+        # add the vessels
+        self.assembled_config['vessels'] = [vessel.to_dict() for vessel in self.branch_map.values()]
+
+
     def convert_struct_trees_to_dict(self):
         '''
         convert the StructuredTreeOutlet instances into dict instances
@@ -138,7 +168,7 @@ class ConfigHandler():
 
     def clear_config_trees(self):
         '''
-        clear the trees from the config
+        clear the trees from the config dict
         '''
 
         for vessel_config in self.config["vessels"]:
@@ -190,24 +220,13 @@ class ConfigHandler():
                            self.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"])
     
 
-    def get_branch_resistances(self):
-        '''
-        get the branch resistances from the config for centerline projection
-        '''
-        
-        for vessel in self.config["vessels"]:
-            br, seg = vessel["vessel_name"].split("_")
-            R = vessel["zero_d_element_values"]["R_poiseuille"]
-    
-
     def set_inflow(self, Q_in):
         '''
         set the inflow for the config
         '''
 
-        for bc in self.config["boundary_conditions"]:
-            if bc["bc_name"] == "INFLOW":
-                bc["bc_values"]["Q"] = [Q_in] * len(bc["bc_values"]["t"])
+
+        self.bcs["INFLOW"].bc_values["Q"] = [Q_in] * len(self.bcs["INFLOW"].bc_values["t"])
 
 
     def map_vessels_to_branches(self):
@@ -250,54 +269,60 @@ class ConfigHandler():
         for vessel_config in self.config['vessels']:
             br, seg = get_branch_id(vessel_config)
             if br == branch and seg == 0:
-                self.vessel_map[br] = self.Vessel(vessel_config)
+                self.branch_map[br] = self.Vessel(vessel_config)
             elif br == branch and seg != 0:
-                self.vessel_map[br].add_segment(vessel_config)
+                self.branch_map[br].add_segment(vessel_config)
 
 
-    def build_tree_map(self):
+    def build_config_map(self):
         '''
         Build a recursive map of the tree structure using self.Vessel objects.
         Useful for dfs and vessel distance analysis
 
-        :return self.vessel_map: a dict where the keys are branch ids and the values are Vessel objects
+        :return self.branch_map: a dict where the keys are branch ids and the values are Vessel objects
+        return self.junction_mapL a dict where the keys are junction ids and the values are Junction objects
         '''
-        self.vessel_map = {}
+        self.branch_map = {}
         # initialize the vessel map (dict of branches)
         for vessel_config in self.config['vessels']:
             br, seg = get_branch_id(vessel_config)
             if seg == 0:
-                self.vessel_map[br] = self.Vessel(vessel_config)
+                self.branch_map[br] = Vessel.from_config(vessel_config)
             else: 
-                self.vessel_map[br].add_segment(vessel_config)
+                self.branch_map[br].add_segment(vessel_config)
         
+        # initialize the junction map (dict of junctions)
+        self.junctions = {}
+        for junction_config in self.config['junctions']:
+            if junction_config['junction_type'] == 'NORMAL_JUNCTION':
+                self.junctions[junction_config['junction_name']] = Junction.from_config(junction_config, self.vessel_branch_map)
+        
+        # initialize the boundary condition map (dict of boundary conditions)
+        self.bcs = {}
+        for bc_config in self.config['boundary_conditions']:
+            self.bcs[bc_config['bc_name']] = BoundaryCondition.from_config(bc_config)
+
+        # initialize the simulation parameters
+        self.simparams = SimParams(self.config['simulation_parameters'])
+
         # loop through junctions and add children to parent vessels
-        for junction in self.config['junctions']:
-            # map inlet vessel id to branches
-            inlets = [self.vessel_branch_map[inlet] for inlet in junction['inlet_vessels']]
-            
-            if len(inlets) > 1:
+        for junction in self.junctions.values():
+
+            if len(junction.inlet_branches) > 1:
                 raise Exception("there is more than one inlet to this junction")
-            
-            # map outlet vessel id to branches
-            outlets = [self.vessel_branch_map[outlet] for outlet in junction['outlet_vessels']]
 
-            # if the inlet and outlet branches are the same, skip
-            if inlets == outlets:
-                continue
-
-            parent_vessel = self.vessel_map[inlets[0]]
+            parent_vessel = self.branch_map[junction.inlet_branches[0]]
 
             # connect all the vessel instances
-            for outlet in outlets:
-                child_vessel = self.vessel_map[outlet]
+            for outlet in junction.outlet_branches:
+                child_vessel = self.branch_map[outlet]
                 child_vessel.parent = parent_vessel
                 parent_vessel.children.append(child_vessel)
 
         # find the root vessel
         self.root = None
-        for vessel in self.vessel_map.values():
-            if not any(vessel in child_vessel.children for child_vessel in self.vessel_map.values()):
+        for vessel in self.branch_map.values():
+            if not any(vessel in child_vessel.children for child_vessel in self.branch_map.values()):
                 self.root = vessel
         
         # organize the children in numerical order
@@ -338,43 +363,211 @@ class ConfigHandler():
         calc_R_eq(self.root)
 
 
-    class Vessel:
+    def change_zerod_element_value(self, branch: id, param: dict):
         '''
-        class to handle tree structure creation and dfs on the tree
+        change the value of a zero d element in a branch
+
+        :param branch: id of the branch to change
+        :param param: dict of the parameter to change and the new value
         '''
 
-        def __init__(self, config: dict):
-            # optional name, such as mpa, lpa, rpa to classify the vessel
-            self.label= None
-            # list of child vessels
-            self.children = []
-            self.parent = None
-            # path to root
-            self.path = []
-            # generation from root
-            self.gen = None
-            # segments in the branch
-            segs = [0]
-            # get info from vessel config
-            self.length = config['vessel_length']
-            self.ids = [config['vessel_id']]
-            self.branch = get_branch_id(config)[0]
-            self.zero_d_element_values = config['zero_d_element_values']
-            self.R_eq = 0.0
+        vessel = self.branch_map[branch]
+
+        seg_ids = vessel.ids
+
+
+
+        for name, value in param.items():
+            vessel.zero_d_element_values[name] = value
         
 
-        def add_segment(self, config: dict):
-            '''
-            add a segment to the vessel
-            '''
-            # add the length
-            self.length += config['vessel_length']
-            # add the vessel id of the segment
-            self.ids.append(config['vessel_id'])
-            # add zero d element values
-            self.zero_d_element_values['R_poiseuille'] += config['zero_d_element_values']['R_poiseuille']
-            self.zero_d_element_values['C'] = 1 / ((1 / self.zero_d_element_values['C']) + (1 / config['zero_d_element_values']['C']))
-            self.zero_d_element_values['L'] += config['zero_d_element_values']['L']
-            self.zero_d_element_values['stenosis_coefficient'] += config['zero_d_element_values']['stenosis_coefficient']
-            # add the segment number
-            self.segs.append(get_branch_id(config)[1])
+
+
+
+
+class Vessel:
+    '''
+    class to handle BloodVessel LPN tree structure creation and dfs on the tree
+    '''
+
+    def __init__(self, config: dict):
+        # optional name, such as mpa, lpa, rpa to classify the vessel
+        self.label= None
+        # list of child vessels
+        self.children = []
+        self.parent = None
+        # path to root
+        self.path = []
+        # generation from root
+        self.gen = None
+        # segments in the branch
+        self.segs = [0]
+        # boundary condition
+        if 'boundary_conditions' in config:
+            self.bc = config['boundary_conditions']
+        else:
+            self.bc = None
+        # get info from vessel config
+        self.length = config['vessel_length']
+        self.ids = [config['vessel_id']]
+        self.branch = get_branch_id(config)[0]
+        self.zero_d_element_values = config['zero_d_element_values']
+        self.R_eq = 0.0
+    
+    @classmethod
+    def from_config(cls, config):
+        '''
+        create a vessel from a config dict
+
+        :param config: config dict
+        '''
+
+        return cls(config)
+    
+    def to_dict(self):
+        '''
+        convert the vessel to a dict for zerod solver use
+        '''
+
+        if self.bc is None:
+            return {
+                'vessel_id': self.branch,
+                'vessel_length': self.length,
+                'vessel_name': 'branch' + str(self.branch) + '_seg0',
+                'zero_d_element_type': "BloodVessel",
+                'zero_d_element_values': self.zero_d_element_values,
+            }
+        
+        else:
+            return {
+                'boundary_conditions': self.bc,
+                'vessel_id': self.branch,
+                'vessel_length': self.length,
+                'vessel_name': 'branch' + str(self.branch) + '_seg0',
+                'zero_d_element_type': "BloodVessel",
+                'zero_d_element_values': self.zero_d_element_values,
+            }
+
+        return 
+
+    def add_segment(self, config: dict):
+        '''
+        add a segment to the vessel
+        '''
+        # add the length
+        self.length += config['vessel_length']
+        # add the vessel id of the segment
+        self.ids.append(config['vessel_id'])
+        # add zero d element values
+        self.zero_d_element_values['R_poiseuille'] += config['zero_d_element_values']['R_poiseuille']
+        self.zero_d_element_values['C'] = 1 / ((1 / self.zero_d_element_values['C']) + (1 / config['zero_d_element_values']['C']))
+        self.zero_d_element_values['L'] += config['zero_d_element_values']['L']
+        self.zero_d_element_values['stenosis_coefficient'] += config['zero_d_element_values']['stenosis_coefficient']
+        # add the segment number
+        self.segs.append(get_branch_id(config)[1])
+
+
+class Junction:
+    '''
+    class to handle junction LPN blocks
+    '''
+
+    def __init__(self, config, in_branches, out_branches):
+        self.inlet_branches = in_branches
+        self.outlet_branches = out_branches
+        self.name = config['junction_name']
+        self.areas = config['areas']
+        self.type = config['junction_type']
+    
+    @classmethod
+    def from_config(cls, config, vessel_branch_map):
+        '''
+        create a junction from a config dict
+
+        :param config: config dict
+        :param vessel_branch_map: dict mapping vessel ids to branch ids
+        '''
+
+        in_branches = [vessel_branch_map[inlet] for inlet in config['inlet_vessels']]
+        out_branches = [vessel_branch_map[outlet] for outlet in config['outlet_vessels']]
+
+        return cls(config, in_branches, out_branches)
+    
+    def to_dict(self):
+        '''
+        convert the junction to a dict for zerod solver use
+        '''
+
+        return {
+            'junction_name': self.name,
+            'junction_type': self.type,
+            'inlet_vessels': self.inlet_branches,
+            'outlet_vessels': self.outlet_branches,
+            'areas': self.areas
+        }
+    
+
+class BoundaryCondition:
+    '''
+    class to handle boundary conditions
+    '''
+
+    def __init__(self, config: dict):
+        self.name = config['bc_name']
+        self.type = config['bc_type']
+        self.values = config['bc_values']
+    
+    @classmethod
+    def from_config(cls, config):
+        '''
+        create a boundary condition from a config dict
+
+        :param config: config dict
+        '''
+
+        return cls(config)
+    
+    def to_dict(self):
+        '''
+        convert the boundary condition to a dict for zerod solver use
+        '''
+
+        return {
+            'bc_name': self.name,
+            'bc_type': self.type,
+            'bc_values': self.values
+        }
+    
+
+class SimParams:
+    '''class to handle simulation parameters'''
+
+    def __init__(self, config: dict):
+        self.density = config['density']
+        self.model_name = config['model_name']
+        self.number_of_cardiac_cycles = config['number_of_cardiac_cycles']
+        self.number_of_time_pts_per_cardiac_cycle = config['number_of_time_pts_per_cardiac_cycle']
+        self.viscosity = config['viscosity']
+
+    @classmethod
+    def from_config(cls, config):
+        '''
+        create a simulation parameters object from a config dict
+
+        :param config: config dict
+        '''
+
+        return cls(config)
+    
+    def to_dict(self):
+        '''
+        convert the simulation parameters to a dict for zerod solver use
+        '''
+
+        return {
+            'density': self.density,
+            'model_name': self.model_name,
+            'number_of_cardiac_cycles': self.number_of_cardiac_cycles,
+            'number_of_time_pts_per_cardiac_cycle': self.number_of_time_pts_per_cardiac_cycle,
+            'viscosity': self.viscosity
+        }
