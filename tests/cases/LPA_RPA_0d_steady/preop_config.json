@@ -37,7 +37,7 @@
                 0
             ],
             "junction_name": "J0",
-            "junction_type": "internal_junction",
+            "junction_type": "NORMAL_JUNCTION",
             "outlet_vessels": [
                 1,
                 4

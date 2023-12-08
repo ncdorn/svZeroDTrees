@@ -112,5 +112,26 @@ def repair_stenosis_resistance(preop_config: dict, repair_config=None, log_file=
     pass
     
 
+class Stenosis:
+    '''
+    a class to handle stenoses in 0D
+    '''
+
+    def __init__(self, config_handler: list, branch: int, repair_config: dict=None, log_file=None):
+        '''
+        :param vessel_config: the vessel config dict or a list if multiple segments
+        :param repair_config: the repair config dict
+        :param log_file: the log file to write to'''
+        self.config_handler = config_handler
+        self.branch = branch
+        self.ids = config_handler.branch_map[branch].ids
+        self.repair_type = repair_config['type']
+        self.log_file = log_file
+        self.vessels = [config_handler.vessel_map[id] for id in self.ids]
     
-    
+    def repair(self):
+        '''repair the stenosis according to the specs'''
+        for vessel in self.vessels:
+            pass
+
+        pass

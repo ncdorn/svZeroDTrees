@@ -8,6 +8,7 @@ from svzerodtrees.utils import run_svzerodplus
 import svzerodplus
 import pandas as pd
 from io import StringIO
+from deepdiff import DeepDiff
 
 def test_pa_handling():
     '''
@@ -28,10 +29,29 @@ def test_pa_handling():
         json.dump(result, ff)
 
 
+def test_config_handler():
+    '''
+    test config handler on a small model
+    '''
+    config_handler = ConfigHandler.from_json('tests/cases/LPA_RPA_0d_steady/preop_config.json')
+
+    config_handler.assemble_config()
+
+    with open('tests/cases/LPA_RPA_0d_steady/assembled_config.json', 'w') as ff:
+        json.dump(config_handler.assembled_config, ff)
+
+    assembled_result = run_svzerodplus(config_handler.assembled_config)
+
+    result = run_svzerodplus(config_handler.config)
+
+    result_comparison = DeepDiff(assembled_result, result)
+
+    assert result_comparison == {}
+
 
 if __name__ == '__main__':
 
-    test_pa_handling()
+    test_config_handler()
 
 
 
