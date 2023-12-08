@@ -15,6 +15,7 @@ class ConfigHandler():
 
         # initialize config maps
         self.branch_map = {}
+        self.vessel_map = {}
         self.junctions = {}
         self.bcs = {}
         self.simparams = None
@@ -155,7 +156,7 @@ class ConfigHandler():
         self.assembled_config['simulation_parameters'] = self.simparams.to_dict()
 
         # add the vessels
-        self.assembled_config['vessels'] = [vessel.to_dict() for vessel in self.branch_map.values()]
+        self.assembled_config['vessels'] = [vessel.to_dict() for vessel in self.vessel_map.values()]
 
 
     def convert_struct_trees_to_dict(self):
@@ -263,17 +264,6 @@ class ConfigHandler():
             dfs(self.root, [])
 
 
-    def build_vessel(self, branch):
-        '''build a vessel object given a branch id'''
-
-        for vessel_config in self.config['vessels']:
-            br, seg = get_branch_id(vessel_config)
-            if br == branch and seg == 0:
-                self.branch_map[br] = self.Vessel(vessel_config)
-            elif br == branch and seg != 0:
-                self.branch_map[br].add_segment(vessel_config)
-
-
     def build_config_map(self):
         '''
         Build a recursive map of the tree structure using self.Vessel objects.
@@ -282,9 +272,10 @@ class ConfigHandler():
         :return self.branch_map: a dict where the keys are branch ids and the values are Vessel objects
         return self.junction_mapL a dict where the keys are junction ids and the values are Junction objects
         '''
-        self.branch_map = {}
+
         # initialize the vessel map (dict of branches)
         for vessel_config in self.config['vessels']:
+            self.vessel_map[vessel_config['vessel_id']] = Vessel.from_config(vessel_config)
             br, seg = get_branch_id(vessel_config)
             if seg == 0:
                 self.branch_map[br] = Vessel.from_config(vessel_config)
@@ -292,32 +283,31 @@ class ConfigHandler():
                 self.branch_map[br].add_segment(vessel_config)
         
         # initialize the junction map (dict of junctions)
-        self.junctions = {}
         for junction_config in self.config['junctions']:
-            if junction_config['junction_type'] == 'NORMAL_JUNCTION':
-                self.junctions[junction_config['junction_name']] = Junction.from_config(junction_config, self.vessel_branch_map)
+            self.junctions[junction_config['junction_name']] = Junction.from_config(junction_config)
         
         # initialize the boundary condition map (dict of boundary conditions)
-        self.bcs = {}
         for bc_config in self.config['boundary_conditions']:
             self.bcs[bc_config['bc_name']] = BoundaryCondition.from_config(bc_config)
 
         # initialize the simulation parameters
         self.simparams = SimParams(self.config['simulation_parameters'])
 
-        # loop through junctions and add children to parent vessels
+        # loop through junctions and add children to parent BRANCHES
         for junction in self.junctions.values():
+            # make sure we ignore internal junctions since we are just dealing with branches
+            if junction.type == 'NORMAL_JUNCTION':
 
-            if len(junction.inlet_branches) > 1:
-                raise Exception("there is more than one inlet to this junction")
+                if len(junction.inlet_branches) > 1:
+                    raise Exception("there is more than one inlet to this junction")
 
-            parent_vessel = self.branch_map[junction.inlet_branches[0]]
+                parent_vessel = self.branch_map[self.vessel_branch_map[junction.inlet_branches[0]]]
 
-            # connect all the vessel instances
-            for outlet in junction.outlet_branches:
-                child_vessel = self.branch_map[outlet]
-                child_vessel.parent = parent_vessel
-                parent_vessel.children.append(child_vessel)
+                # connect all the vessel instances
+                for outlet in [self.vessel_branch_map[outlet] for outlet in junction.outlet_branches]:
+                    child_vessel = self.branch_map[outlet]
+                    child_vessel.parent = parent_vessel
+                    parent_vessel.children.append(child_vessel)
 
         # find the root vessel
         self.root = None
@@ -363,7 +353,7 @@ class ConfigHandler():
         calc_R_eq(self.root)
 
 
-    def change_zerod_element_value(self, branch: id, param: dict):
+    def change_zerod_element_value(self, branch: int, param: dict):
         '''
         change the value of a zero d element in a branch
 
@@ -381,6 +371,14 @@ class ConfigHandler():
             vessel.zero_d_element_values[name] = value
         
 
+    def get_segments(self, branch: int):
+        '''
+        get the vessels in a branch
+
+        :param branch: id of the branch to get the vessels of
+        '''
+
+        return [self.vessel_map[id] for id in self.branch_map[branch].ids]
 
 
 
@@ -388,11 +386,13 @@ class ConfigHandler():
 class Vessel:
     '''
     class to handle BloodVessel LPN tree structure creation and dfs on the tree
+    used for both vessels (vessel map) and branches (branch map)
     '''
 
     def __init__(self, config: dict):
         # optional name, such as mpa, lpa, rpa to classify the vessel
         self.label= None
+        self.name = config['vessel_name']
         # list of child vessels
         self.children = []
         self.parent = None
@@ -409,6 +409,8 @@ class Vessel:
             self.bc = None
         # get info from vessel config
         self.length = config['vessel_length']
+        self.id = config['vessel_id']
+        # list of ids if multiple segments
         self.ids = [config['vessel_id']]
         self.branch = get_branch_id(config)[0]
         self.zero_d_element_values = config['zero_d_element_values']
@@ -431,9 +433,9 @@ class Vessel:
 
         if self.bc is None:
             return {
-                'vessel_id': self.branch,
+                'vessel_id': self.id,
                 'vessel_length': self.length,
-                'vessel_name': 'branch' + str(self.branch) + '_seg0',
+                'vessel_name': self.name,
                 'zero_d_element_type': "BloodVessel",
                 'zero_d_element_values': self.zero_d_element_values,
             }
@@ -441,9 +443,9 @@ class Vessel:
         else:
             return {
                 'boundary_conditions': self.bc,
-                'vessel_id': self.branch,
+                'vessel_id': self.id,
                 'vessel_length': self.length,
-                'vessel_name': 'branch' + str(self.branch) + '_seg0',
+                'vessel_name': self.name,
                 'zero_d_element_type': "BloodVessel",
                 'zero_d_element_values': self.zero_d_element_values,
             }
@@ -466,21 +468,28 @@ class Vessel:
         # add the segment number
         self.segs.append(get_branch_id(config)[1])
 
+        # add bc
+        if 'boundary_conditions' in config:
+            self.bc = config['boundary_conditions']
+
 
 class Junction:
     '''
     class to handle junction LPN blocks
     '''
 
-    def __init__(self, config, in_branches, out_branches):
-        self.inlet_branches = in_branches
-        self.outlet_branches = out_branches
+    def __init__(self, config):
+        self.inlet_branches = config['inlet_vessels']
+        self.outlet_branches = config['outlet_vessels']
         self.name = config['junction_name']
-        self.areas = config['areas']
+        if 'areas' in config:
+            self.areas = config['areas']
+        else:
+            self.areas = None
         self.type = config['junction_type']
-    
+
     @classmethod
-    def from_config(cls, config, vessel_branch_map):
+    def from_config(cls, config):
         '''
         create a junction from a config dict
 
@@ -488,11 +497,8 @@ class Junction:
         :param vessel_branch_map: dict mapping vessel ids to branch ids
         '''
 
-        in_branches = [vessel_branch_map[inlet] for inlet in config['inlet_vessels']]
-        out_branches = [vessel_branch_map[outlet] for outlet in config['outlet_vessels']]
+        return cls(config)
 
-        return cls(config, in_branches, out_branches)
-    
     def to_dict(self):
         '''
         convert the junction to a dict for zerod solver use

@@ -399,8 +399,7 @@ def run_svzerodplus(config: dict):
 
     for vessel in config["vessels"]:
         name = vessel["vessel_name"]
-        branch_id, seg_id = name.split("_")
-        branch_id, seg_id = int(branch_id[6:]), int(seg_id[3:])
+        branch_id, seg_id = get_branch_id(vessel)
 
         if seg_id == 0:
             output["pressure_in"][branch_id] = np.array(
@@ -453,7 +452,7 @@ def get_branch_id(vessel_config):
 
     :return: integer branch id
     '''
-    
+
     br, seg = vessel_config["vessel_name"].split("_")
     br = int(br[6:])
     seg = int(seg[3:])
@@ -591,7 +590,7 @@ def create_pa_optimizer_config(config_handler, q, wedge_p, log_file=None):
     pa_config['vessels'] = [
         # MPA
         config_handler.config['vessels'][0],
-
+        
         { # RPA proximal
             "vessel_id": 1,
             "vessel_length": 10.0,
