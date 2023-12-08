@@ -233,10 +233,10 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
 
 
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
-    operation.repair_stenosis_coefficient(config_handler,
-                                          result_handler, 
-                                          repair_config[0], 
-                                          log_file)
+    operation.repair_stenosis(config_handler,
+                              result_handler, 
+                              repair_config[0], 
+                              log_file)
 
     # adapt trees
     adaptation.adapt_pries_secomb(config_handler,

@@ -1,4 +1,5 @@
 from svzerodtrees.utils import *
+from svzerodtrees._result_handler import ResultHandler
 import json
 import pickle
 
@@ -139,24 +140,42 @@ class ConfigHandler():
         self.clear_config_trees()
 
 
+    def simulate(self, result_handler: ResultHandler, label: str):
+        '''
+        run the simulation
+
+        :param result_handler: result handler instance to add the result to
+        :param label: label for the result e.g. preop, postop, final
+        '''
+
+        # assemble the config
+        self.assemble_config()
+
+        # run the simulation
+        result = run_svzerodplus(self.config)
+
+        # add the result to the result handler
+        result_handler.add_unformatted_result(result, label)
+
+
     def assemble_config(self):
         '''
         assemble the config dict from the config maps
         '''
 
         # this is a separate config for debugging purposes
-        self.assembled_config = {}
+        self.config = {}
         # add the boundary conditions
-        self.assembled_config['boundary_conditions'] = [bc.to_dict() for bc in self.bcs.values()]
+        self.config['boundary_conditions'] = [bc.to_dict() for bc in self.bcs.values()]
 
         # add the junctions
-        self.assembled_config['junctions'] = [junction.to_dict() for junction in self.junctions.values()]
+        self.config['junctions'] = [junction.to_dict() for junction in self.junctions.values()]
 
         # add the simulation parameters
-        self.assembled_config['simulation_parameters'] = self.simparams.to_dict()
+        self.config['simulation_parameters'] = self.simparams.to_dict()
 
         # add the vessels
-        self.assembled_config['vessels'] = [vessel.to_dict() for vessel in self.vessel_map.values()]
+        self.config['vessels'] = [vessel.to_dict() for vessel in self.vessel_map.values()]
 
 
     def convert_struct_trees_to_dict(self):
@@ -379,8 +398,7 @@ class ConfigHandler():
         '''
 
         return [self.vessel_map[id] for id in self.branch_map[branch].ids]
-
-
+    
 
 
 class Vessel:
@@ -415,6 +433,8 @@ class Vessel:
         self.branch = get_branch_id(config)[0]
         self.zero_d_element_values = config['zero_d_element_values']
         self.R_eq = 0.0
+        # get diameter with viscosity 0.04
+        self.diameter = ((128 * 0.04 * self.length) / (np.pi * self.zero_d_element_values['R_poiseuille'])) ** (1 / 4)
     
     @classmethod
     def from_config(cls, config):
