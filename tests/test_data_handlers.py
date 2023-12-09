@@ -6,6 +6,7 @@ from svzerodtrees._config_handler import ConfigHandler
 from svzerodtrees._result_handler import ResultHandler
 from svzerodtrees.operation import Stenosis, repair_stenosis
 from svzerodtrees.utils import run_svzerodplus
+from svzerodtrees.preop import PAConfig
 import svzerodplus
 import pandas as pd
 from io import StringIO
@@ -66,10 +67,32 @@ def test_stenosis_ops():
     print(result_handler.results['preop'], result_handler.results['postop'])
 
 
+def test_pa_config():
+    '''
+    test the creation of a pulmonary artery config file
+    '''
+
+    config_handler = ConfigHandler.from_json('tests/cases/full_pa_test/preop_config.json')
+
+    pa_config = PAConfig.from_config_handler(config_handler)
+
+    pa_config.assemble_config()
+
+    with open('tests/cases/full_pa_test/pa_config.json', 'w') as ff:
+        json.dump(pa_config.config, ff)
+
+    result = pa_config.simulate()
+
+
+
+    print(result)
+
+
+
 
 if __name__ == '__main__':
 
-    test_stenosis_ops()
+    test_pa_config()
 
 
 

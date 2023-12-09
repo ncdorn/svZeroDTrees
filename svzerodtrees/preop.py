@@ -12,7 +12,7 @@ from scipy.optimize import minimize, Bounds
 from svzerodtrees.structuredtreebc import StructuredTreeOutlet
 from svzerodtrees.adaptation import *
 from svzerodtrees._result_handler import ResultHandler
-from svzerodtrees._config_handler import ConfigHandler
+from svzerodtrees._config_handler import ConfigHandler, Vessel, BoundaryCondition, Junction, SimParams
 
 
 def optimize_outlet_bcs(input_file,
@@ -226,7 +226,6 @@ def optimize_pa_bcs(input_file,
     # initialize the data handlers
     result_handler = ResultHandler.from_config(preop_config)
     config_handler = ConfigHandler(preop_config)
-    config_handler.load_pa_model()
 
     # create the PA optimizer config
     pa_config = create_pa_optimizer_config(config_handler, q, wedge_p)
@@ -484,3 +483,182 @@ def optimize_ps_params():
     method to optimize the pries and secomb parameters to compare with Ingrid's. To be implemented
     '''
     pass
+
+
+class PAConfig():
+    '''
+    a class to handle the reduced pa config for boundary condition optimization
+    '''
+
+    def __init__(self, simparams: SimParams, mpa: list, lpa_prox: list, rpa_prox: list, lpa_dist: Vessel, rpa_dist: Vessel, inflow: BoundaryCondition, wedge_p: float):
+        '''
+        initialize the PAConfig object
+        
+        :param mpa: dict with MPA config
+        :param lpa_prox: list of Vessels with LPA proximal config
+        :param rpa_prox: list of Vessels with RPA proximal config
+        :param lpa_dist: dict with LPA distal config
+        :param rpa_dist: dict with RPA distal config
+        :param inflow: dict with inflow config
+        :param wedge_p: wedge pressure'''
+        self.mpa = mpa
+        self.rpa_prox = rpa_prox
+        self.lpa_prox = lpa_prox
+        self.rpa_dist = rpa_dist
+        self.lpa_dist = lpa_dist
+
+        self.simparams = simparams
+
+        self.junctions = {}
+        self.initialize_config_maps()
+
+
+        self.initalize_bcs(inflow, wedge_p)
+
+
+
+
+
+    @classmethod
+    def from_config_handler(cls, config_handler):
+        '''
+        initialize from a general config handler
+        '''
+        mpa = config_handler.get_segments('mpa')
+        rpa_prox = config_handler.get_segments('rpa')
+        lpa_prox = config_handler.get_segments('lpa')
+        rpa_dist = Vessel.from_config({
+            "boundary_conditions":{
+                "outlet": "RPA_BC"
+            },
+            "vessel_id": 3, # needs to be changed later
+            "vessel_length": 10.0,
+            "vessel_name": "branch3_seg0",
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "C": 1 / (config_handler.rpa.C_eq ** -1 - config_handler.rpa.C ** -1), # C_RPA_distal
+                "L": config_handler.rpa.L_eq - config_handler.rpa.L, # L_RPA_distal
+                "R_poiseuille": config_handler.rpa.R_eq - config_handler.rpa.zero_d_element_values.get("R_poiseuille"), # R_RPA_distal
+                "stenosis_coefficient": 0.0
+            }
+        })
+
+        lpa_dist = Vessel.from_config({
+            "boundary_conditions":{
+                "outlet": "LPA_BC"
+            },
+            "vessel_id": 4, # needs to be changed later
+            "vessel_length": 10.0,
+            "vessel_name": "branch4_seg0",
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "C": 1 / (config_handler.lpa.C_eq ** -1 - config_handler.lpa.C ** -1), # C_LPA_distal
+                "L": config_handler.lpa.L_eq - config_handler.lpa.L, # L_LPA_distal
+                "R_poiseuille": config_handler.lpa.R_eq - config_handler.lpa.zero_d_element_values.get("R_poiseuille"), # R_LPA_distal
+                "stenosis_coefficient": 0.0
+            }
+        })
+
+        return cls(config_handler.simparams, mpa, lpa_prox, rpa_prox, lpa_dist, rpa_dist, config_handler.bcs["INFLOW"], config_handler.bcs['RCR_0'].values["Pd"])
+    
+
+    def simulate(self):
+        '''
+        run the simulation with the current config
+        '''
+        self.assemble_config()
+
+        return run_svzerodplus(self.config)
+    
+
+    def initalize_bcs(self, inflow: BoundaryCondition, wedge_p: float):
+        '''initialize the boundary conditions for the pa config
+        '''
+
+        # initialize the inflow
+        self.bcs = {
+            "INFLOW": inflow,
+
+            "RPA_BC": BoundaryCondition.from_config({
+                "bc_name": "RPA_BC",
+                "bc_type": "RESISTANCE",
+                "bc_values": {
+                    "R": 100.0,
+                    "Pd": wedge_p * 1333.22
+                }
+            }),
+
+            "LPA_BC": BoundaryCondition.from_config({
+                "bc_name": "LPA_BC",
+                "bc_type": "RESISTANCE",
+                "bc_values": {
+                    "R": 100.0,
+                    "Pd": wedge_p * 1333.22
+                }
+            })
+        }
+
+
+    def initialize_config_maps(self):
+        '''
+        initialize the junctions for the pa config
+        '''
+        
+        # change the vessel ids of the proximal vessels
+        for vessel in self.lpa_prox:
+            vessel.id = len(self.mpa) + self.lpa_prox.index(vessel)
+            vessel.name = 'branch1' + '_seg' + str(self.lpa_prox.index(vessel))
+        
+        self.lpa_dist.id = self.lpa_prox[-1].id + 1
+        self.lpa_dist.name = 'branch2' + '_seg0'
+        
+        for vessel in self.rpa_prox:
+            vessel.id = self.lpa_dist.id + self.rpa_prox.index(vessel) + 1
+            vessel.name = 'branch3' + '_seg' + str(self.rpa_prox.index(vessel))
+        
+        self.rpa_dist.id = self.rpa_prox[-1].id + 1
+        self.rpa_dist.name = 'branch4' + '_seg0'
+
+        # connect the vessels together
+        self.mpa[-1].children = [self.lpa_prox[0], self.rpa_prox[0]]
+        self.lpa_prox[-1].children = [self.lpa_dist]
+        self.rpa_prox[-1].children = [self.rpa_dist]
+
+        self.vessel_map = {}
+        for vessel in self.mpa:
+            self.vessel_map[vessel.id] = vessel
+        
+        for vessel in self.lpa_prox:
+            self.vessel_map[vessel.id] = vessel
+        
+        for vessel in self.rpa_prox:
+            self.vessel_map[vessel.id] = vessel
+        
+        self.vessel_map[self.lpa_dist.id] = self.lpa_dist
+        self.vessel_map[self.rpa_dist.id] = self.rpa_dist
+
+        for vessel in self.vessel_map.values():
+            junction = Junction.from_vessel(vessel)
+            if junction is not None:
+                self.junctions[junction.name] = junction
+
+        
+    def assemble_config(self):
+        '''
+        assemble the config dict from the config maps
+        '''
+
+        # this is a separate config for debugging purposes
+        self.config = {}
+        # add the boundary conditions
+        self.config['boundary_conditions'] = [bc.to_dict() for bc in self.bcs.values()]
+
+        # add the junctions
+        self.config['junctions'] = [junction.to_dict() for junction in self.junctions.values()]
+
+        # add the simulation parameters
+        self.config['simulation_parameters'] = self.simparams.to_dict()
+
+        # add the vessels
+        self.config['vessels'] = [vessel.to_dict() for vessel in self.vessel_map.values()]
+        

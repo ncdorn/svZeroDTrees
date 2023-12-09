@@ -26,7 +26,7 @@ class ConfigHandler():
         self.build_config_map()
 
         # compute equivalent resistance
-        self.compute_R_eq()
+        # self.compute_R_eq()
 
 
     @classmethod
@@ -246,7 +246,7 @@ class ConfigHandler():
         '''
 
 
-        self.bcs["INFLOW"].bc_values["Q"] = [Q_in] * len(self.bcs["INFLOW"].bc_values["t"])
+        self.bcs["INFLOW"].values["Q"] = [Q_in] * len(self.bcs["INFLOW"].values["t"])
 
 
     def map_vessels_to_branches(self):
@@ -365,41 +365,47 @@ class ConfigHandler():
             if len(vessel.children) != 0:
                 for child in vessel.children:
                     calc_R_eq(child)
-                vessel.R_eq = vessel.zero_d_element_values['R_poiseuille'] + (1 / sum([1 / child.R_eq for child in vessel.children]))
+                    # we assume here that the stenosis coefficient is linear, which is not true but a reasonable approximation
+                vessel.R_eq = vessel.R + vessel.zero_d_element_values['stenosis_coefficient'] + (1 / sum([1 / child.R_eq for child in vessel.children]))
             else:
-                vessel.R_eq = vessel.zero_d_element_values['R_poiseuille']
+                vessel.R_eq = vessel.R + vessel.zero_d_element_values['stenosis_coefficient']
         
         calc_R_eq(self.root)
 
 
-    def change_zerod_element_value(self, branch: int, param: dict):
+    def change_zerod_element_value(self, branch_id: int, param: dict):
         '''
         change the value of a zero d element in a branch
 
         :param branch: id of the branch to change
         :param param: dict of the parameter to change and the new value
         '''
-
-        vessel = self.branch_map[branch]
-
-        seg_ids = vessel.ids
-
-
-
-        for name, value in param.items():
-            vessel.zero_d_element_values[name] = value
         
+        # get the branch object and the segments in that branch
+        branch = self.branch_map[branch_id]
+        vessels = self.get_segments(branch_id)
 
-    def get_segments(self, branch: int):
+
+    def get_segments(self, branch: int or str, dtype: str = 'vessel', junctions=False):
         '''
         get the vessels in a branch
 
         :param branch: id of the branch to get the vessels of
+        :param dtype: type of data to return, either 'Vessel' class or 'dict'
         '''
+        if branch == 'mpa':
+            branch = self.mpa.branch
+        elif branch == 'lpa':
+            branch = self.lpa.branch
+        elif branch == 'rpa':
+            branch = self.rpa.branch
 
-        return [self.vessel_map[id] for id in self.branch_map[branch].ids]
+        if dtype == 'vessel':
+            return [self.vessel_map[id] for id in self.branch_map[branch].ids]
+        if dtype == 'dict':
+            return [self.vessel_map[id].to_dict() for id in self.branch_map[branch].ids]
+
     
-
 
 class Vessel:
     '''
@@ -412,7 +418,7 @@ class Vessel:
         self.label= None
         self.name = config['vessel_name']
         # list of child vessels
-        self.children = []
+        self._children = []
         self.parent = None
         # path to root
         self.path = []
@@ -432,7 +438,13 @@ class Vessel:
         self.ids = [config['vessel_id']]
         self.branch = get_branch_id(config)[0]
         self.zero_d_element_values = config['zero_d_element_values']
-        self.R_eq = 0.0
+        self._R = config['zero_d_element_values']['R_poiseuille']
+        self._C = config['zero_d_element_values']['C']
+        self._L = config['zero_d_element_values']['L']
+        # get equivalent values, initilized with the values of the vessel
+        self._R_eq = self._R
+        self._C_eq = self._C
+        self._L_eq = self._L
         # get diameter with viscosity 0.04
         self.diameter = ((128 * 0.04 * self.length) / (np.pi * self.zero_d_element_values['R_poiseuille'])) ** (1 / 4)
     
@@ -492,6 +504,70 @@ class Vessel:
         if 'boundary_conditions' in config:
             self.bc = config['boundary_conditions']
 
+    #### property setters for dynamically updating the equivalent values ####
+    @property
+    def R(self):
+        return self._R
+
+    @R.setter
+    def R(self, new_R):
+        self._R = new_R
+
+    @property
+    def R_eq(self):
+        if len(self.children) != 0:
+            self._update_R_eq()
+        return self._R_eq
+
+    def _update_R_eq(self):
+        self._R_eq = self._R + (1 / sum([1 / child.R_eq for child in self.children]))
+    
+    @property
+    def C(self):
+        return self._C
+    
+    @C.setter
+    def C(self, new_C):
+        self._C = new_C
+
+    @property
+    def C_eq(self):
+        if len(self.children) != 0:
+            self._update_C_eq()
+        return self._C_eq
+    
+    def _update_C_eq(self):
+        self._C_eq = 1 / ((1 / self._C) + (1 / sum(child.R_eq for child in self.children)))
+
+    @property
+    def L(self):
+        return self._L
+
+    @L.setter
+    def L(self, new_L):
+        self._L = new_L
+
+    @property
+    def L_eq(self):
+        if len(self.children) != 0:
+            self._update_L_eq()
+        return self._L_eq
+
+    def _update_L_eq(self):
+        self._L_eq = self._L + (1 / sum([1 / child.R_eq for child in self.children]))
+        
+    @property
+    def children(self):
+        return self._children
+    
+    @children.setter
+    def children(self, new_children):
+        for child in new_children:
+            child.parent = self
+        self._children = new_children
+
+
+
 
 class Junction:
     '''
@@ -518,6 +594,29 @@ class Junction:
         '''
 
         return cls(config)
+    
+    @classmethod
+    def from_vessel(cls, inlet_vessel: Vessel):
+        '''
+        generate a junction from inlet vessel and a list of outlet vessels'''
+        # determine if tehere are outlet vessels
+        if len(inlet_vessel.children) == 0:
+            return None
+        # determine if it is a normal junction or internal junction
+        if len(inlet_vessel.children) == 1:
+            junction_type = 'internal_junction'
+        else:
+            junction_type = 'NORMAL_JUNCTION'
+        config = {
+            'junction_name': 'J' + str(inlet_vessel.id),
+            'junction_type': junction_type,
+            'inlet_vessels': [inlet_vessel.id],
+            'outlet_vessels': [outlet_vessel.id for outlet_vessel in inlet_vessel.children],
+            'areas': [outlet_vessel.diameter ** 2 * np.pi / 4 for outlet_vessel in inlet_vessel.children]
+        }
+
+        return cls(config)
+
 
     def to_dict(self):
         '''

@@ -40,7 +40,7 @@ def repair_stenosis(config_handler: ConfigHandler, result_handler: ResultHandler
         branch_stenosis.repair()
     
     config_handler.simulate(result_handler, 'postop')
-    
+
 
 class Stenosis:
     '''

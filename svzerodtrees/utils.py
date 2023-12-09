@@ -620,13 +620,13 @@ def create_pa_optimizer_config(config_handler, q, wedge_p, log_file=None):
                 "outlet": "RPA_BC"
             },
             "vessel_id": 3,
-            "vessel_length": config_handler.rpa.R_eq - config_handler.rpa.zero_d_element_values.get("R_poiseuille"),
+            "vessel_length": 10.0,
             "vessel_name": "branch3_seg0",
             "zero_d_element_type": "BloodVessel",
             "zero_d_element_values": {
                 "C": 0.0,
                 "L": 0.0,
-                "R_poiseuille": 0.0, # R_RPA_distal
+                "R_poiseuille": config_handler.rpa.R_eq - config_handler.rpa.zero_d_element_values.get("R_poiseuille"), # R_RPA_distal
                 "stenosis_coefficient": 0.0
             }
         },
@@ -635,13 +635,13 @@ def create_pa_optimizer_config(config_handler, q, wedge_p, log_file=None):
                 "outlet": "LPA_BC"
             },
             "vessel_id": 4,
-            "vessel_length": config_handler.lpa.R_eq - config_handler.lpa.zero_d_element_values.get("R_poiseuille"),
+            "vessel_length": 10.0,
             "vessel_name": "branch4_seg0",
             "zero_d_element_type": "BloodVessel",
             "zero_d_element_values": {
                 "C": 0.0,
                 "L": 0.0,
-                "R_poiseuille": 0.0, # R_LPA_distal
+                "R_poiseuille": config_handler.lpa.R_eq - config_handler.lpa.zero_d_element_values.get("R_poiseuille"), # R_LPA_distal
                 "stenosis_coefficient": 0.0
             }
         }
@@ -683,6 +683,67 @@ def create_pa_optimizer_config(config_handler, q, wedge_p, log_file=None):
         }]
     
     return pa_config
+
+
+def create_pa_optimizer_config_NEW(config_handler, q, wedge_p, log_file=None):
+    '''
+    create the reduced pa config for the bc optimizer\
+    '''
+
+    write_to_log(log_file, "Creating PA optimizer config...")
+
+    # initialize the config dict
+    pa_config = {'boundary_conditions': [],
+                 'simulation_parameters': [], 
+                 'vessels': [],
+                 'junctions': []}
+
+    # copy the inflow boundary condition
+    pa_config['boundary_conditions'].append(
+        {
+            "bc_name": "INFLOW",
+            "bc_type": "FLOW",
+            "bc_values": {
+                "Q": [q, q],
+                "t": [0.0, 1.0]
+            }
+        }
+    )
+
+    # set the outflow boundary conditions
+    pa_config['boundary_conditions'].append(
+        {
+            "bc_name": "RPA_BC",
+            "bc_type": "RESISTANCE",
+            "bc_values": {
+                "R": 300.0,
+                "Pd": wedge_p * 1333.22
+            }
+        }
+    )
+
+    pa_config['boundary_conditions'].append(
+        {
+            "bc_name": "LPA_BC",
+            "bc_type": "RESISTANCE",
+            "bc_values": {
+                "R": 300.0,
+                "Pd": wedge_p * 1333.22
+            }
+        }
+    )
+
+    # copy the simulation parameters
+    pa_config['simulation_parameters'] = config_handler.simparams.to_dict()
+
+    # add in the MPA
+    pa_config['vessels'].extend(config_handler.get_vessels('mpa', dtype='dict'))
+
+    # add in the RPA
+    pa_config['vessels'].extend(config_handler.get_vessels('rpa', dtype='dict'))
+
+
+
 
 
 def loss_function_bound_penalty(value, target, lb=None, ub=None):
