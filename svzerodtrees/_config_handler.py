@@ -469,7 +469,11 @@ class Vessel:
                 'vessel_length': self.length,
                 'vessel_name': self.name,
                 'zero_d_element_type': "BloodVessel",
-                'zero_d_element_values': self.zero_d_element_values,
+                'zero_d_element_values': {
+                    'R_poiseuille': self.R,
+                    'C': self.C,
+                    'L': self.L,
+                },
             }
         
         else:
@@ -479,7 +483,11 @@ class Vessel:
                 'vessel_length': self.length,
                 'vessel_name': self.name,
                 'zero_d_element_type': "BloodVessel",
-                'zero_d_element_values': self.zero_d_element_values,
+                'zero_d_element_values': {
+                    'R_poiseuille': self.R,
+                    'C': self.C,
+                    'L': self.L,
+                },
             }
 
         return 
@@ -567,8 +575,6 @@ class Vessel:
         self._children = new_children
 
 
-
-
 class Junction:
     '''
     class to handle junction LPN blocks
@@ -641,6 +647,8 @@ class BoundaryCondition:
         self.name = config['bc_name']
         self.type = config['bc_type']
         self.values = config['bc_values']
+        if self.type == 'RESISTANCE':
+            self._R = self.values['R']
     
     @classmethod
     def from_config(cls, config):
@@ -662,6 +670,16 @@ class BoundaryCondition:
             'bc_type': self.type,
             'bc_values': self.values
         }
+    
+    # a setter so we can change the resistances in the BC easier
+    @property
+    def R(self):
+        return self._R
+
+    @R.setter
+    def R(self, new_R):
+        self._R = new_R
+        self.values['R'] = new_R
     
 
 class SimParams:

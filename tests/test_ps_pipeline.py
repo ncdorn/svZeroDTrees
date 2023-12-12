@@ -57,7 +57,6 @@ def test_preop():
 
     result_handler.to_file('tests/cases/LPA_RPA_0d_steady/result_handler.out')
     config_handler.to_file('tests/cases/LPA_RPA_0d_steady/preop_config.in')
-        
 
 
 def test_cwss_tree_construction():
@@ -180,7 +179,6 @@ def test_cwss_adaptation():
     print(result_handler.clean_results)
 
 
-
 def test_pries_adaptation():
     '''
     test the constant wss tree adaptation algorithm
@@ -227,13 +225,15 @@ def test_pa_optimizer():
     clinical_targets = 'clinical_targets.csv'
     mesh_surfaces_path = '/home/ndorn/Documents/Stanford/PhD/Simvascular/threed_models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces'
 
-    config_handler, result_handler = preop.optimize_pa_bcs(
+    config_handler, result_handler, pa_config = preop.optimize_pa_bcs(
         input_file,
         mesh_surfaces_path,
         clinical_targets,
         log_file,
         show_optimization=False,
     )
+
+    pa_config.to_json('pa_reduced_config.json')
 
     # save the optimized pa config
     config_handler.to_json('pa_optimized_config.json')

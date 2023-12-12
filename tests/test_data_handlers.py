@@ -81,11 +81,13 @@ def test_pa_config():
     with open('tests/cases/full_pa_test/pa_config.json', 'w') as ff:
         json.dump(pa_config.config, ff)
 
+    simulation_run = False
+    
     result = pa_config.simulate()
 
+    simulation_run = True
 
-
-    print(result)
+    assert simulation_run == True
 
 
 

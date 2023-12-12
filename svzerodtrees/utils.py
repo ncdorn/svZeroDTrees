@@ -743,9 +743,6 @@ def create_pa_optimizer_config_NEW(config_handler, q, wedge_p, log_file=None):
     pa_config['vessels'].extend(config_handler.get_vessels('rpa', dtype='dict'))
 
 
-
-
-
 def loss_function_bound_penalty(value, target, lb=None, ub=None):
     '''
     loss function penalty for optimization with bounds
