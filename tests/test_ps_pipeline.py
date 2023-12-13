@@ -157,7 +157,7 @@ def test_cwss_adaptation():
     test the constant wss tree adaptation algorithm
     '''
     
-    config_handler = ConfigHandler.from_file('tests/cases/LPA_RPA_0d_steady/preop_config.in')
+    config_handler = ConfigHandler.from_json('tests/cases/LPA_RPA_0d_steady/preop_config.json')
 
     with open('tests/cases/LPA_RPA_0d_steady/result_handler.out', 'rb') as ff:
         result_handler = pickle.load(ff)
@@ -169,8 +169,7 @@ def test_cwss_adaptation():
 
     preop.construct_cwss_trees(config_handler, result_handler, fig_dir='tests/cases/LPA_RPA_0d_steady/', d_min=0.49)
 
-
-    operation.repair_stenosis_coefficient(config_handler, result_handler, repair_config)
+    operation.repair_stenosis(config_handler, result_handler, repair_config)
 
     adapt_constant_wss(config_handler, result_handler)
 
@@ -210,8 +209,8 @@ def test_pries_adaptation():
 
 
 def test_run_from_file():
-    expfile = 'exp_config_test.json'
-    os.chdir('tests/cases/LPA_RPA_0d_steady/experiments')
+    expfile = 'pa_outlet_bc_test.json'
+    os.chdir('tests/cases/full_pa_test/experiments')
 
     interface.run_from_file(expfile, vis_trees=True)
 
@@ -242,8 +241,26 @@ def test_pa_optimizer():
     result_handler.to_file('pa_preop_result.out')
 
 
+def test_simple_config():
+    '''
+    test the simplest config
+    '''
+
+    os.chdir('tests/cases/full_pa_test')
+    input_file = 'pa_config.json'
+    
+    config_handler = ConfigHandler.from_json(input_file)
+
+    result_handler = ResultHandler.from_config_handler(config_handler)
+
+    config_handler.simulate(result_handler, 'preop')
+
+    result_handler.results_to_dict()
+
+    with open('pa_config_result.json', 'w') as ff:
+        json.dump(result_handler.results['preop'], ff, indent=4)
+
 if __name__ == '__main__':
 
 
-    # test_preop()
-    test_pa_optimizer()
+    test_run_from_file()

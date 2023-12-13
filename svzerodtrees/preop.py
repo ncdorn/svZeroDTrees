@@ -175,8 +175,7 @@ def optimize_pa_bcs(input_file,
                     mesh_surfaces_path,
                     clinical_targets: csv,
                     log_file=None,
-                    steady=True,
-                    show_optimization=True):
+                    steady=True):
     '''
     optimize the outlet boundary conditions of a pulmonary arterial model by splitting the LPA and RPA
     into two RCR blocks. Using Nelder-Mead optimization method.
@@ -202,6 +201,12 @@ def optimize_pa_bcs(input_file,
     config_handler = ConfigHandler.from_json(input_file)
     result_handler = ResultHandler.from_config(config_handler.config)
 
+    # if steady, change boundary conditions to R
+    if steady:
+        for bc in config_handler.bcs.values():
+            if bc.type == 'RCR':
+                bc.change_to_R()
+
     pa_config = PAConfig.from_config_handler(config_handler, clinical_targets)
 
     pa_config.optimize()
@@ -221,39 +226,12 @@ def optimize_pa_bcs(input_file,
     print('LPA total area: ' + str(sum(lpa_info.values())) + '\n')
 
     # distribute amongst all resistance conditions in the config
-    assign_pa_bcs(config_handler, clinical_targets.q, rpa_info, lpa_info, pa_config.bcs["LPA_BC"].R, pa_config.bcs["RPA_BC"].R, clinical_targets.wedge_p)
+    assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info)
 
     return config_handler, result_handler, pa_config
 
 
-def pa_opt_loss_fcn(R, pa_config, targets):
-    '''
-    loss function for the PA optimization
-
-    :param R: list of resistances from optimizer
-    :param pa_config: pa config dict
-    :param targets: optimization targets [Q_RPA, P_MPA, P_RPA, P_LPA]
-
-    :return loss: sum of squares of differences between targets and model evaluation
-    '''
-
-    # write the optimization iteration resistances to the config
-    write_pa_config_resistances(pa_config, R)
-
-    # run the 0D solver
-    pa_result = run_svzerodplus(pa_config)
-
-    # get the result values to compare against targets [Q_rpa, P_mpa, P_rpa, P_lpa]
-    pa_eval = get_pa_optimization_values(pa_result)
-
-    loss = np.sum((pa_eval - targets) ** 2)
-
-    # print for debugging
-    # print(loss, pa_eval, targets)
-    return loss
-
-
-def assign_pa_bcs(config_handler, q_in, rpa_info, lpa_info, R_lpa, R_rpa, wedge_p=13332.2):
+def assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info):
     '''
     assign resistances proportional to outlet area to the RPA and LPA outlet bcs.
     this assumes that the rpa and lpa cap info has not changed info since export from simvascular.
@@ -277,10 +255,10 @@ def assign_pa_bcs(config_handler, q_in, rpa_info, lpa_info, R_lpa, R_rpa, wedge_
     all_R = {}
 
     for name, val in lpa_info.items():
-        all_R[name] = Ri(val, a_LPA, R_lpa)
+        all_R[name] = Ri(val, a_LPA, pa_config.bcs["LPA_BC"].R)
     
     for name, val in rpa_info.items():
-        all_R[name] = Ri(val, a_RPA, R_rpa)
+        all_R[name] = Ri(val, a_RPA, pa_config.bcs["RPA_BC"].R)
     
     # write the resistances to the config
     bc_idx = 0
@@ -289,13 +267,16 @@ def assign_pa_bcs(config_handler, q_in, rpa_info, lpa_info, R_lpa, R_rpa, wedge_
     R_list = list(all_R.values())
 
     # set the inflow
-    config_handler.set_inflow(q_in)
+    config_handler.set_inflow(pa_config.clinical_targets.q)
+    
+    # change the proximal LPA and RPA branch resistances
+    config_handler.change_branch_resistance(1, R_list[bc_idx])
 
     # loop through boundary conditions to assign resistance values
     for bc in config_handler.bcs.values():
         if bc.type == 'RESISTANCE':
             bc.values['R'] = R_list[bc_idx]
-            bc.values['Pd'] = wedge_p
+            bc.values['Pd'] = pa_config.clinical_targets.wedge_p * 1333.22 # convert wedge pressure from mmHg to dyn/cm2
 
             bc_idx += 1
 
@@ -328,7 +309,7 @@ def construct_cwss_trees(config_handler, result_handler: ResultHandler, log_file
                         outlet_tree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, 
                                                                             config_handler.config["simulation_parameters"],
                                                                             bc_config)
-
+                        print(bc_config)
                         R = bc_config["bc_values"]["R"]
 
                         # write to log file for debugging
@@ -557,11 +538,12 @@ class PAConfig():
                 "outlet": "RPA_BC"
             },
             "vessel_id": 3, # needs to be changed later
-            "vessel_length": 10.0,
+            "vessel_length": 300.0,
             "vessel_name": "branch3_seg0",
             "zero_d_element_type": "BloodVessel",
             "zero_d_element_values": {
-                "C": 1 / (config_handler.rpa.C_eq ** -1 - config_handler.rpa.C ** -1), # C_RPA_distal
+                # "C": 1 / (config_handler.rpa.C_eq ** -1 - config_handler.rpa.C ** -1), # calculates way too large of a capacitance
+                "C": 0.0,
                 "L": config_handler.rpa.L_eq - config_handler.rpa.L, # L_RPA_distal
                 "R_poiseuille": config_handler.rpa.R_eq - config_handler.rpa.zero_d_element_values.get("R_poiseuille"), # R_RPA_distal
                 "stenosis_coefficient": 0.0
@@ -573,11 +555,12 @@ class PAConfig():
                 "outlet": "LPA_BC"
             },
             "vessel_id": 4, # needs to be changed later
-            "vessel_length": 10.0,
+            "vessel_length": 300.0,
             "vessel_name": "branch4_seg0",
             "zero_d_element_type": "BloodVessel",
             "zero_d_element_values": {
-                "C": 1 / (config_handler.lpa.C_eq ** -1 - config_handler.lpa.C ** -1), # C_LPA_distal
+                # "C": 1 / (config_handler.lpa.C_eq ** -1 - config_handler.lpa.C ** -1), # calculates way too large of a capacitance
+                "C": 0.0,
                 "L": config_handler.lpa.L_eq - config_handler.lpa.L, # L_LPA_distal
                 "R_poiseuille": config_handler.lpa.R_eq - config_handler.lpa.zero_d_element_values.get("R_poiseuille"), # R_LPA_distal
                 "stenosis_coefficient": 0.0
@@ -593,7 +576,7 @@ class PAConfig():
                    config_handler.bcs["INFLOW"], 
                    config_handler.bcs['RCR_0'].values["Pd"],
                    clinical_targets)
-    
+
 
     def to_json(self, output_file):
         '''
@@ -624,7 +607,7 @@ class PAConfig():
                 "bc_name": "RPA_BC",
                 "bc_type": "RESISTANCE",
                 "bc_values": {
-                    "R": 100.0,
+                    "R": 1000.0,
                     "Pd": wedge_p
                 }
             }),
@@ -633,7 +616,7 @@ class PAConfig():
                 "bc_name": "LPA_BC",
                 "bc_type": "RESISTANCE",
                 "bc_values": {
-                    "R": 100.0,
+                    "R": 1000.0,
                     "Pd": wedge_p
                 }
             })
@@ -701,13 +684,14 @@ class PAConfig():
         self._config['vessels'] = [vessel.to_dict() for vessel in self.vessel_map.values()]
         
 
-    def compute_steady_loss(self, R_guess, fun='SSE'):
+    def compute_steady_loss(self, R_guess, fun='L2'):
         '''
         compute loss compared to the steady inflow optimization targets
         :param R_f: list of resistances to put into the config
         '''
-        for obj, R_g in zip(self.lpa_prox + self.rpa_prox + [self.bcs['LPA_BC']] + [self.bcs['RPA_BC']], R_guess):
-            obj.R = R_g
+        blocks_to_optimize = self.lpa_prox + self.rpa_prox + [self.bcs['LPA_BC']] + [self.bcs['RPA_BC']]
+        for block, R_g in zip(blocks_to_optimize, R_guess):
+            block.R = R_g
         # run the simulation
         self.result = self.simulate()
 
@@ -725,12 +709,19 @@ class PAConfig():
         self.P_lpa = get_branch_result(self.result, 'pressure_out', 3, steady=True) / 1333.2
 
 
-        if fun == 'SSE':
+        if fun == 'L2':
             loss = np.sum((self.P_mpa - self.clinical_targets.mpa_p) ** 2) + \
                 np.sum((self.P_rpa - self.clinical_targets.rpa_p) ** 2) + \
                 np.sum((self.P_lpa - self.clinical_targets.lpa_p) ** 2) + \
-                np.sum((self.Q_rpa - self.clinical_targets.q_rpa) ** 2)
+                np.sum((self.Q_rpa - self.clinical_targets.q_rpa) ** 2) + \
+                np.sum(np.array([1 / block.R for block in blocks_to_optimize]) ** 2) # penalize small resistances
 
+        if fun == 'L1':
+            loss = np.sum(np.abs(self.P_mpa - self.clinical_targets.mpa_p)) + \
+                np.sum(np.abs(self.P_rpa - self.clinical_targets.rpa_p)) + \
+                np.sum(np.abs(self.P_lpa - self.clinical_targets.lpa_p)) + \
+                np.sum(np.abs(self.Q_rpa - self.clinical_targets.q_rpa))
+        
         print('R_guess: ' + str(R_guess)) 
         print('loss: ' + str(loss))
 

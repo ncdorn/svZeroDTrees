@@ -11,7 +11,7 @@ class ConfigHandler():
     '''
 
     def __init__(self, config: dict):
-        self.config = config
+        self._config = config
         self.trees = []
 
         # initialize config maps
@@ -164,18 +164,18 @@ class ConfigHandler():
         '''
 
         # this is a separate config for debugging purposes
-        self.config = {}
+        self._config = {}
         # add the boundary conditions
-        self.config['boundary_conditions'] = [bc.to_dict() for bc in self.bcs.values()]
+        self._config['boundary_conditions'] = [bc.to_dict() for bc in self.bcs.values()]
 
         # add the junctions
-        self.config['junctions'] = [junction.to_dict() for junction in self.junctions.values()]
+        self._config['junctions'] = [junction.to_dict() for junction in self.junctions.values()]
 
         # add the simulation parameters
-        self.config['simulation_parameters'] = self.simparams.to_dict()
+        self._config['simulation_parameters'] = self.simparams.to_dict()
 
         # add the vessels
-        self.config['vessels'] = [vessel.to_dict() for vessel in self.vessel_map.values()]
+        self._config['vessels'] = [vessel.to_dict() for vessel in self.vessel_map.values()]
 
 
     def convert_struct_trees_to_dict(self):
@@ -255,32 +255,32 @@ class ConfigHandler():
         '''
 
         self.vessel_branch_map = {}
-        for vessel in self.config["vessels"]:
+        for vessel in self._config["vessels"]:
             self.vessel_branch_map[vessel['vessel_id']] = get_branch_id(vessel)[0]
 
 
     def find_vessel_paths(self):
-            '''
-            find the path from the root to each vessel
-            '''
+        '''
+        find the path from the root to each vessel
+        '''
 
-            # helper function for depth-first search
-            def dfs(vessel, path):
+        # helper function for depth-first search
+        def dfs(vessel, path):
 
-                if vessel is None:
-                    return
-                
-                # add current vessel to the path
-                path.append(vessel.branch)
+            if vessel is None:
+                return
+            
+            # add current vessel to the path
+            path.append(vessel.branch)
 
-                vessel.path = path.copy()
-                
-                vessel.gen = len(path) - 1
+            vessel.path = path.copy()
+            
+            vessel.gen = len(path) - 1
 
-                for child in vessel.children:
-                    dfs(child, path.copy())
+            for child in vessel.children:
+                dfs(child, path.copy())
 
-            dfs(self.root, [])
+        dfs(self.root, [])
 
 
     def build_config_map(self):
@@ -293,7 +293,7 @@ class ConfigHandler():
         '''
 
         # initialize the vessel map (dict of branches)
-        for vessel_config in self.config['vessels']:
+        for vessel_config in self._config['vessels']:
             self.vessel_map[vessel_config['vessel_id']] = Vessel.from_config(vessel_config)
             br, seg = get_branch_id(vessel_config)
             if seg == 0:
@@ -302,15 +302,15 @@ class ConfigHandler():
                 self.branch_map[br].add_segment(vessel_config)
         
         # initialize the junction map (dict of junctions)
-        for junction_config in self.config['junctions']:
+        for junction_config in self._config['junctions']:
             self.junctions[junction_config['junction_name']] = Junction.from_config(junction_config)
         
         # initialize the boundary condition map (dict of boundary conditions)
-        for bc_config in self.config['boundary_conditions']:
+        for bc_config in self._config['boundary_conditions']:
             self.bcs[bc_config['bc_name']] = BoundaryCondition.from_config(bc_config)
 
         # initialize the simulation parameters
-        self.simparams = SimParams(self.config['simulation_parameters'])
+        self.simparams = SimParams(self._config['simulation_parameters'])
 
         # loop through junctions and add children to parent BRANCHES
         for junction in self.junctions.values():
@@ -320,18 +320,34 @@ class ConfigHandler():
                 if len(junction.inlet_branches) > 1:
                     raise Exception("there is more than one inlet to this junction")
 
-                parent_vessel = self.branch_map[self.vessel_branch_map[junction.inlet_branches[0]]]
+                parent_branch = self.branch_map[self.vessel_branch_map[junction.inlet_branches[0]]]
+                # from the vessel map
+                parent_vessel = self.vessel_map[junction.inlet_branches[0]]
 
                 # connect all the vessel instances
+                for outlet in junction.outlet_branches:
+                    parent_vessel.children.append(self.vessel_map[outlet])
+                    self.vessel_map[outlet].parent = parent_vessel
+                
+                # connect branches
                 for outlet in [self.vessel_branch_map[outlet] for outlet in junction.outlet_branches]:
-                    child_vessel = self.branch_map[outlet]
-                    child_vessel.parent = parent_vessel
-                    parent_vessel.children.append(child_vessel)
+                    child_branch = self.branch_map[outlet]
+                    child_branch.parent = parent_branch
+                    parent_branch.children.append(child_branch)
+            
+            else:
+                # internal junctions are just a single vessel
+                parent_vessel = self.vessel_map[junction.inlet_branches[0]]
+                child_vessel = self.vessel_map[junction.outlet_branches[0]]
+                child_vessel.parent = parent_vessel
+                parent_vessel.children.append(child_vessel)
 
         # find the root vessel
         self.root = None
-        for vessel in self.branch_map.values():
-            if not any(vessel in child_vessel.children for child_vessel in self.branch_map.values()):
+        for vessel in self.vessel_map.values():
+            # this takes from the vessel map as opposed to the branch map. since the vessels are nonlinear we may have to use the vessel
+            # map in the future
+            if not any(vessel in child_vessel.children for child_vessel in self.vessel_map.values()):
                 self.root = vessel
         
         # organize the children in numerical order
@@ -351,6 +367,7 @@ class ConfigHandler():
 
 
         self.find_vessel_paths()
+        self.assemble_config()
 
 
     def compute_R_eq(self):
@@ -373,17 +390,24 @@ class ConfigHandler():
         calc_R_eq(self.root)
 
 
-    def change_zerod_element_value(self, branch_id: int, param: dict):
+    def change_branch_resistance(self, branch_id: int, value: list or float):
         '''
         change the value of a zero d element in a branch
 
         :param branch: id of the branch to change
-        :param param: dict of the parameter to change and the new value
+        :param value: a list of values to change the resistance for the zero d elements
         '''
         
         # get the branch object and the segments in that branch
-        branch = self.branch_map[branch_id]
-        vessels = self.get_segments(branch_id)
+        print(self.branch_map[branch_id].R)
+
+        if type(value) == float:
+            for idx, vessel in enumerate(self.get_segments(branch_id)):
+                vessel.R = value * (vessel.R / self.branch_map[branch_id].R)
+
+        elif type(value) == list:
+            for idx, vessel in enumerate(self.get_segments(branch_id)):
+                vessel.R = value[idx]
 
 
     def get_segments(self, branch: int or str, dtype: str = 'vessel', junctions=False):
@@ -405,7 +429,10 @@ class ConfigHandler():
         if dtype == 'dict':
             return [self.vessel_map[id].to_dict() for id in self.branch_map[branch].ids]
 
-    
+    @property
+    def config(self):
+        self.assemble_config()
+        return self._config
 
 class Vessel:
     '''
@@ -501,9 +528,9 @@ class Vessel:
         # add the vessel id of the segment
         self.ids.append(config['vessel_id'])
         # add zero d element values
-        self.zero_d_element_values['R_poiseuille'] += config['zero_d_element_values']['R_poiseuille']
-        self.zero_d_element_values['C'] = 1 / ((1 / self.zero_d_element_values['C']) + (1 / config['zero_d_element_values']['C']))
-        self.zero_d_element_values['L'] += config['zero_d_element_values']['L']
+        self.R += config['zero_d_element_values']['R_poiseuille']
+        self.C = 1 / ((1 / self.zero_d_element_values['C']) + (1 / config['zero_d_element_values']['C']))
+        self.L += config['zero_d_element_values']['L']
         self.zero_d_element_values['stenosis_coefficient'] += config['zero_d_element_values']['stenosis_coefficient']
         # add the segment number
         self.segs.append(get_branch_id(config)[1])
@@ -671,6 +698,17 @@ class BoundaryCondition:
             'bc_values': self.values
         }
     
+    def change_to_R(self):
+        '''
+        change the boundary condition to a resistance
+        '''
+        self.values = {'R': self.values['Rd'] + self.values['Rp'],
+                       'Pd': self.values['Pd']}
+
+        self.type = 'RESISTANCE'
+
+        self._R = self.values['R']
+    
     # a setter so we can change the resistances in the BC easier
     @property
     def R(self):
@@ -681,6 +719,8 @@ class BoundaryCondition:
         self._R = new_R
         self.values['R'] = new_R
     
+
+
 
 class SimParams:
     '''class to handle simulation parameters'''

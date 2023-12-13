@@ -2,7 +2,7 @@
     "proximal": {
         "type": "stenosis_coefficient",
         "location": "proximal",
-        "degree": [1.0, 0.9]
+        "value": [1.0, 1.0]
     },
     
     "extensive": {

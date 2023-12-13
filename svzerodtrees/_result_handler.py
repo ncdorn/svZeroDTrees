@@ -41,6 +41,29 @@ class ResultHandler:
 
         return ResultHandler(vessels, lpa_branch, rpa_branch, viscosity)
 
+    @classmethod
+    def from_config_handler(cls, config_handler):
+        '''
+        class method to generate the results handler from a config handler
+        
+        :param config_handler: ConfigHandler instance
+        
+        :return: ResultHandler instance
+        '''
+        # get rpa_lpa_branch ids
+        lpa_branch, rpa_branch = find_lpa_rpa_branches(config_handler.config)
+
+        # get vessel info and vessel ids (vessel info necessary for wss calculations)
+        vessels = []
+        for vessel_config in config_handler.config['vessels']:
+            # add to the vessel list
+            vessels.append(vessel_config)
+
+        # get the viscosity
+        viscosity = config_handler.config['simulation_parameters']['viscosity']
+
+        return ResultHandler(vessels, lpa_branch, rpa_branch, viscosity)
+
     def get_branches(self, config):
 
         if self.rpa_branch is None and self.lpa_branch is None:
@@ -206,3 +229,11 @@ class ResultHandler:
         return cl_mappable_result
 
 
+    def results_to_dict(self):
+        '''
+        convert the results to dict which are json serializeable
+        '''
+
+        for timestep in self.results.keys():
+            for field in self.results[timestep].keys():
+                self.results[timestep][field] = {key: value.tolist() for key, value in self.results[timestep][field].items()}
