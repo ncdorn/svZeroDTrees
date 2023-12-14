@@ -36,7 +36,7 @@ def test_config_handler():
     '''
     test config handler on a small model
     '''
-    config_handler = ConfigHandler.from_json('tests/cases/LPA_RPA_0d_steady/preop_config.json')
+    config_handler = ConfigHandler.from_json('tests/cases/full_pa_test/preop_config.json')
 
     result = run_svzerodplus(config_handler.config)
 
@@ -46,7 +46,8 @@ def test_config_handler():
 
     result_comparison = DeepDiff(assembled_result, result)
 
-
+    print('ran simulations')
+    
     assert result_comparison == {}
 
 
@@ -115,7 +116,7 @@ def test_pa_config():
 
 if __name__ == '__main__':
 
-    test_config_handler_methods()
+    test_config_handler()
 
 
 

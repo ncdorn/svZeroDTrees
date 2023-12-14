@@ -7,9 +7,9 @@
     "mesh_surfaces_path": "/home/ndorn/Documents/Stanford/PhD/Simvascular/threed_models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces",
     "repair": [
         {
-        "type": "stenosis_coefficient",
+        "type": "stent",
         "location": "proximal",
-        "value": [1.0, 1.0]
+        "value": [1.2, 1.2]
         }
     ]
 

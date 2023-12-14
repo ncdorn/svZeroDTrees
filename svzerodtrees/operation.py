@@ -99,8 +99,7 @@ class Stenosis:
 
         # change the stenosis coefficient
         for vessel in self.vessels:
-            vessel.zero_d_element_values['stenosis_coefficient'] = vessel.zero_d_element_values['stenosis_coefficient'] * (1 - self.repair_value)
-    
+            vessel.stenosis_coefficient *= (1 - self.repair_value)
 
     def stent_repair(self):
         '''
@@ -109,9 +108,9 @@ class Stenosis:
         for vessel in self.vessels:
             # set stenosis coefficient to zero
             R_old = vessel.zero_d_element_values['R_poiseuille']
-            vessel.zero_d_element_values['stenosis_coefficient'] = 0.0
-            vessel.zero_d_element_values["R_poiseuille"] = (8 * self.viscosity * vessel.length) / (np.pi * (self.repair_value / 2) ** 4)
-            R_change = R_old - vessel.zero_d_element_values['R_poiseuille']
+            vessel.stenosis_coefficient = 0.0
+            vessel.R = (8 * self.viscosity * vessel.length) / (np.pi * (self.repair_value / 2) ** 4)
+            R_change = R_old - vessel.R
     
 
     def resistance_repair(self):
@@ -120,4 +119,4 @@ class Stenosis:
         '''
 
         for vessel in self.vessels:
-            vessel.zero_d_element_values['R_poiseuille'] = vessel.zero_d_element_values['R_poiseuille'] * self.repair_value
+            vessel.R *= self.repair_value

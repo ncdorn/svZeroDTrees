@@ -211,6 +211,8 @@ def optimize_pa_bcs(input_file,
 
     pa_config.optimize()
 
+    print(pa_config.bcs["INFLOW"].to_dict())
+
     write_to_log(log_file, "*** optimized values ****")
     write_to_log(log_file, "MPA pressure: " + str(pa_config.P_mpa))
     write_to_log(log_file, "RPA pressure: " + str(pa_config.P_rpa))
@@ -270,63 +272,66 @@ def assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info):
     config_handler.set_inflow(pa_config.clinical_targets.q)
     
     # change the proximal LPA and RPA branch resistances
-    config_handler.change_branch_resistance(1, R_list[bc_idx])
+    config_handler.change_branch_resistance(config_handler.lpa.branch, pa_config.lpa_prox.R)
+    config_handler.change_branch_resistance(config_handler.rpa.branch, pa_config.rpa_prox.R)
+
+    print('LPA RESISTANCE: ' + str(config_handler.get_branch_resistance(config_handler.lpa.branch)))
+    print('RPA RESISTANCE: ' + str(config_handler.get_branch_resistance(config_handler.rpa.branch)))
 
     # loop through boundary conditions to assign resistance values
     for bc in config_handler.bcs.values():
         if bc.type == 'RESISTANCE':
-            bc.values['R'] = R_list[bc_idx]
+            bc.R = R_list[bc_idx]
             bc.values['Pd'] = pa_config.clinical_targets.wedge_p * 1333.22 # convert wedge pressure from mmHg to dyn/cm2
 
             bc_idx += 1
 
 
-def construct_cwss_trees(config_handler, result_handler: ResultHandler, log_file=None, d_min=0.0049, vis_trees=False, fig_dir=None):
+def construct_cwss_trees(config_handler, result_handler, log_file=None, d_min=0.0049):
+
     '''
     construct structured trees at every outlet of the 0d model optimized against the outflow BC resistance,
     for the constant wall shear stress assumption.
 
-    :param config: 0D solver config
-    :param result: 0D solver result corresponding to config
+    :param config_handler: 0D solver config_handler
+    :param result_handler: 0D solver result_handler
     :param log_file: optional path to a log file
     :param d_min: minimum vessel diameter for tree optimization
-    :param vis_trees: boolean for visualizing trees
-    :param fig_dir: [optional path to directory to save figures. Required if vis_trees = True.
 
     :return roots: return the root TreeVessel objects of the outlet trees
 
     '''
-    num_outlets = len(config_handler.config["boundary_conditions"]) - 2
-    outlet_idx = 0
+    num_outlets = len(config_handler.bcs) - 2
+    outlet_count = 0
+    for vessel in config_handler.vessel_map.values():
+        if vessel.bc is not None:
+            if "outlet" in vessel.bc:
+                print("** building tree for outlet " + str(outlet_count) + " of " + str(num_outlets) + " **, d_min = " + str(d_min) + " **")
+                # get the bc object
+                bc = config_handler.bcs[vessel.bc["outlet"]]
+                # create outlet tree
+                outlet_tree = StructuredTreeOutlet.from_outlet_vessel(vessel, 
+                                                                      config_handler.simparams,
+                                                                      bc)
+                
+                config_handler.trees.append(outlet_tree)
 
-    for vessel_config in config_handler.config["vessels"]:
-        if "boundary_conditions" in vessel_config:
-            if "outlet" in vessel_config["boundary_conditions"]:
-                print("** building tree for outlet " + str(outlet_idx) + " of " + str(num_outlets) + " **, d_min = " + str(d_min) + " **")
-                for bc_config in config_handler.config["boundary_conditions"]:
-                    if vessel_config["boundary_conditions"]["outlet"] == bc_config["bc_name"]:
-                        print(bc_config["bc_name"])
-                        outlet_tree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, 
-                                                                            config_handler.config["simulation_parameters"],
-                                                                            bc_config)
-                        print(bc_config)
-                        R = bc_config["bc_values"]["R"]
+                # write to log file for debugging
+                write_to_log(log_file, "** building tree for resistance: " + str(bc.R) + " **")
+                
+                outlet_tree.optimize_tree_diameter(bc.R, log_file, d_min=d_min)
 
-                        # write to log file for debugging
-                        write_to_log(log_file, "** building tree for resistance: " + str(R) + " **")
+                # replace the bc resistance with the optimized value as it may be different than the initial value
+                bc.R = outlet_tree.root.R_eq
 
-                        outlet_tree.optimize_tree_diameter(R, log_file, d_min=d_min)
-
-                        # replace the bc resistance with the optimized value as it may be different than the initial value
-                        bc_config["bc_values"]["R"] = outlet_tree.root.R_eq
-                        print(' the equivalent resistance being added as the outlet boundary condition is ' + str(outlet_tree.root.R_eq))
+                print(' the equivalent resistance being added as the outlet boundary condition is ' + str(outlet_tree.root.R_eq))
 
                 # write to log file for debugging
                 write_to_log(log_file, "     the number of vessels is " + str(outlet_tree.count_vessels()))
 
-                config_handler.trees.append(outlet_tree)
-                outlet_idx += 1
-
+                outlet_count += 1
+    
+    config_handler.to_json('post_tree_config.json')
     preop_result = run_svzerodplus(config_handler.config)
 
     # leaving vessel radius fixed, update the hemodynamics of the StructuredTreeOutlet instances based on the preop result
@@ -334,6 +339,31 @@ def construct_cwss_trees(config_handler, result_handler: ResultHandler, log_file
 
     result_handler.add_unformatted_result(preop_result, 'preop')
 
+
+def construct_cwss_trees_parallel(config_handler, result_handler, log_file=None, d_min=0.0049):
+    '''
+    construct cwss trees in parallel to increase computational speed
+    '''
+    num_outlets = len(config_handler.bcs) - 2
+    outlet_count = 0
+    for vessel in config_handler.vessel_map.values():
+        if vessel.bc is not None:
+            if "outlet" in vessel.bc:
+                print("** building tree for outlet " + str(outlet_count) + " of " + str(num_outlets) + " **, d_min = " + str(d_min) + " **")
+                # get the bc object
+                bc = config_handler.bcs[vessel.bc["outlet"]]
+                # create outlet tree
+                outlet_tree = StructuredTreeOutlet.from_outlet_vessel(vessel, 
+                                                                      config_handler.simparams,
+                                                                      bc)
+                
+                config_handler.trees.append(outlet_tree)
+
+    
+    # run the optimization in parallel
+    for tree in config_handler.trees:
+        # this is where we can parallelize
+        tree.optimize_tree_diameter(bc.R, log_file, d_min=d_min)
 
 def construct_pries_trees(config_handler, result_handler, log_file=None, d_min=0.0049, tol=0.01, vis_trees=False, fig_dir=None):
     '''
@@ -530,9 +560,9 @@ class PAConfig():
         '''
         initialize from a general config handler
         '''
-        mpa = config_handler.get_segments('mpa')
-        rpa_prox = config_handler.get_segments('rpa')
-        lpa_prox = config_handler.get_segments('lpa')
+        mpa = copy.deepcopy(config_handler.mpa)
+        rpa_prox = copy.deepcopy(config_handler.rpa)
+        lpa_prox = copy.deepcopy(config_handler.lpa)
         rpa_dist = Vessel.from_config({
             "boundary_conditions":{
                 "outlet": "RPA_BC"
@@ -574,7 +604,7 @@ class PAConfig():
                    lpa_dist, 
                    rpa_dist, 
                    config_handler.bcs["INFLOW"], 
-                   config_handler.bcs['RCR_0'].values["Pd"],
+                   config_handler.bcs[list(config_handler.bcs.keys())[1]].values["Pd"],
                    clinical_targets)
 
 
@@ -629,36 +659,28 @@ class PAConfig():
         '''
         
         # change the vessel ids of the proximal vessels
-        for vessel in self.lpa_prox:
-            vessel.id = len(self.mpa) + self.lpa_prox.index(vessel)
-            vessel.name = 'branch1' + '_seg' + str(self.lpa_prox.index(vessel))
+
+        self.lpa_prox.id = 1
+        self.lpa_prox.name = 'branch1_seg0'
         
-        self.lpa_dist.id = self.lpa_prox[-1].id + 1
-        self.lpa_dist.name = 'branch2' + '_seg0'
+        self.lpa_dist.id = 2
+        self.lpa_dist.name = 'branch2_seg0'
         
-        for vessel in self.rpa_prox:
-            vessel.id = self.lpa_dist.id + self.rpa_prox.index(vessel) + 1
-            vessel.name = 'branch3' + '_seg' + str(self.rpa_prox.index(vessel))
+
+        self.rpa_prox.id = 3
+        self.rpa_prox.name = 'branch3_seg0'
         
-        self.rpa_dist.id = self.rpa_prox[-1].id + 1
+        self.rpa_dist.id = 4
         self.rpa_dist.name = 'branch4' + '_seg0'
 
         # connect the vessels together
-        self.mpa[-1].children = [self.lpa_prox[0], self.rpa_prox[0]]
-        self.lpa_prox[-1].children = [self.lpa_dist]
-        self.rpa_prox[-1].children = [self.rpa_dist]
+        self.mpa.children = [self.lpa_prox, self.rpa_prox]
+        self.lpa_prox.children = [self.lpa_dist]
+        self.rpa_prox.children = [self.rpa_dist]
 
-        for vessel in self.mpa:
+        for vessel in [self.mpa, self.lpa_prox, self.rpa_prox, self.lpa_dist, self.rpa_dist]:
             self.vessel_map[vessel.id] = vessel
         
-        for vessel in self.lpa_prox:
-            self.vessel_map[vessel.id] = vessel
-        
-        for vessel in self.rpa_prox:
-            self.vessel_map[vessel.id] = vessel
-        
-        self.vessel_map[self.lpa_dist.id] = self.lpa_dist
-        self.vessel_map[self.rpa_dist.id] = self.rpa_dist
 
         for vessel in self.vessel_map.values():
             junction = Junction.from_vessel(vessel)
@@ -689,7 +711,7 @@ class PAConfig():
         compute loss compared to the steady inflow optimization targets
         :param R_f: list of resistances to put into the config
         '''
-        blocks_to_optimize = self.lpa_prox + self.rpa_prox + [self.bcs['LPA_BC']] + [self.bcs['RPA_BC']]
+        blocks_to_optimize = [self.lpa_prox, self.rpa_prox, self.bcs['LPA_BC'], self.bcs['RPA_BC']]
         for block, R_g in zip(blocks_to_optimize, R_guess):
             block.R = R_g
         # run the simulation
@@ -697,7 +719,7 @@ class PAConfig():
 
         # get the pressures
         # rpa flow, for flow split optimization
-        self.Q_rpa = get_branch_result(self.result, 'flow_in', 1, steady=True)
+        self.Q_rpa = get_branch_result(self.result, 'flow_in', 3, steady=True)
 
         # mpa pressure
         self.P_mpa = get_branch_result(self.result, 'pressure_in', 0, steady=True) /  1333.2 
@@ -742,10 +764,10 @@ class PAConfig():
         # define optimization bounds [0, inf)
         bounds = Bounds(lb=0, ub=math.inf)
 
-        print([obj.R for obj in self.lpa_prox + self.rpa_prox + [self.bcs['LPA_BC']] + [self.bcs['RPA_BC']]])
+        print([obj.R for obj in [self.lpa_prox, self.rpa_prox, self.bcs['LPA_BC'], self.bcs['RPA_BC']]])
 
         result = minimize(self.compute_steady_loss, 
-                          [obj.R for obj in self.lpa_prox + self.rpa_prox + [self.bcs['LPA_BC']] + [self.bcs['RPA_BC']]], 
+                          [obj.R for obj in [self.lpa_prox, self.rpa_prox, self.bcs['LPA_BC'], self.bcs['RPA_BC']]], 
                           method="Nelder-Mead", bounds=bounds)
 
         print([self.Q_rpa / self.clinical_targets.q, self.P_mpa, self.P_rpa, self.P_lpa])

@@ -167,7 +167,7 @@ def test_cwss_adaptation():
     
     repair_config = repair_dict['proximal']
 
-    preop.construct_cwss_trees(config_handler, result_handler, fig_dir='tests/cases/LPA_RPA_0d_steady/', d_min=0.49)
+    preop.construct_cwss_trees(config_handler, result_handler, d_min=0.49)
 
     operation.repair_stenosis(config_handler, result_handler, repair_config)
 
@@ -263,4 +263,5 @@ def test_simple_config():
 if __name__ == '__main__':
 
 
+    # test_run_from_file()
     test_run_from_file()

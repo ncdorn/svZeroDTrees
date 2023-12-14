@@ -390,7 +390,7 @@ class ConfigHandler():
         calc_R_eq(self.root)
 
 
-    def change_branch_resistance(self, branch_id: int, value: list or float):
+    def change_branch_resistance(self, branch_id: int, value):
         '''
         change the value of a zero d element in a branch
 
@@ -401,14 +401,24 @@ class ConfigHandler():
         # get the branch object and the segments in that branch
         print(self.branch_map[branch_id].R)
 
-        if type(value) == float:
+        if type(value) == list:
+            # we are given a list here, so we will distribute each R to each vessel in the branch
+            for idx, vessel in enumerate(self.get_segments(branch_id)):
+                vessel.R = value[idx]
+        else:
+            # we have a single value so we will distribute it amongst the branchs
             for idx, vessel in enumerate(self.get_segments(branch_id)):
                 vessel.R = value * (vessel.R / self.branch_map[branch_id].R)
 
-        elif type(value) == list:
-            for idx, vessel in enumerate(self.get_segments(branch_id)):
-                vessel.R = value[idx]
 
+    def get_branch_resistance(self, branch_id: int):
+        '''
+        get the resistance of a branch
+
+        :param branch: id of the branch to get the resistance of
+        '''
+
+        return sum(vessel.R for vessel in self.get_segments(branch_id))
 
     def get_segments(self, branch: int or str, dtype: str = 'vessel', junctions=False):
         '''
@@ -434,7 +444,8 @@ class ConfigHandler():
         self.assemble_config()
         return self._config
 
-class Vessel:
+
+class Vessel():
     '''
     class to handle BloodVessel LPN tree structure creation and dfs on the tree
     used for both vessels (vessel map) and branches (branch map)
@@ -465,6 +476,7 @@ class Vessel:
         self.ids = [config['vessel_id']]
         self.branch = get_branch_id(config)[0]
         self.zero_d_element_values = config['zero_d_element_values']
+        self._stenosis_coefficient = config['zero_d_element_values']['stenosis_coefficient']
         self._R = config['zero_d_element_values']['R_poiseuille']
         self._C = config['zero_d_element_values']['C']
         self._L = config['zero_d_element_values']['L']
@@ -500,6 +512,7 @@ class Vessel:
                     'R_poiseuille': self.R,
                     'C': self.C,
                     'L': self.L,
+                    'stenosis_coefficient': self.stenosis_coefficient
                 },
             }
         
@@ -514,6 +527,7 @@ class Vessel:
                     'R_poiseuille': self.R,
                     'C': self.C,
                     'L': self.L,
+                    'stenosis_coefficient': self.stenosis_coefficient
                 },
             }
 
@@ -590,6 +604,14 @@ class Vessel:
 
     def _update_L_eq(self):
         self._L_eq = self._L + (1 / sum([1 / child.R_eq for child in self.children]))
+
+    @property
+    def stenosis_coefficient(self):
+        return self._stenosis_coefficient
+    
+    @stenosis_coefficient.setter
+    def stenosis_coefficient(self, new_stenosis_coefficient):
+        self._stenosis_coefficient = new_stenosis_coefficient
         
     @property
     def children(self):
@@ -602,7 +624,7 @@ class Vessel:
         self._children = new_children
 
 
-class Junction:
+class Junction():
     '''
     class to handle junction LPN blocks
     '''
@@ -665,7 +687,7 @@ class Junction:
         }
     
 
-class BoundaryCondition:
+class BoundaryCondition():
     '''
     class to handle boundary conditions
     '''
@@ -720,9 +742,7 @@ class BoundaryCondition:
         self.values['R'] = new_R
     
 
-
-
-class SimParams:
+class SimParams():
     '''class to handle simulation parameters'''
 
     def __init__(self, config: dict):

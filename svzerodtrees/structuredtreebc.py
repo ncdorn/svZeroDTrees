@@ -3,6 +3,7 @@ import random
 from scipy.optimize import minimize, Bounds, LinearConstraint
 from svzerodtrees.treevessel import TreeVessel
 from svzerodtrees.utils import *
+from svzerodtrees._config_handler import ConfigHandler, Vessel, BoundaryCondition, SimParams
 import math
 
 class StructuredTreeOutlet():
@@ -10,14 +11,14 @@ class StructuredTreeOutlet():
     Structured tree which represents microvascular adaptation at the outlets of a 0D Windkessel model.
     utilizes the TreeVessel class which is recursive by nature to handle recursive tasks
     """
-    def __init__(self, params: dict = None, name: str = None, config: dict = None, simparams: dict = None, root: TreeVessel = None):
+    def __init__(self, params: dict = None, name: str = None, tree_config: dict = None, simparams: SimParams = None, root: TreeVessel = None):
         """
         Create a new StructuredTreeOutlet instance
         
         :param params: dict of 0D Windkessel parameters for the StructuredTreeOutlet class. 
             contains lenght, R, C, L, stenosis coeff, viscosity, inlet pressure and flow, bc values
         :param name: name of the StructuredTreeOutlet instance, e.g. OutletTree3
-        :param config: optional tree config dict, used to create a StructuredTreeOutlet instance from a pre-existing tree which has
+        :param tree_config: optional tree config dict, used to create a StructuredTreeOutlet instance from a pre-existing tree which has
             been saved in the model 0D config dict
         :param simparams: simulation parameters from the 0D model config file
         :param root: TreeVessel instance, required if the StructuredTreeOutlet instance is built from a pre-existing tree
@@ -31,14 +32,14 @@ class StructuredTreeOutlet():
         self.initialD = ((128 * self.params["eta"] * self.params["l"]) / (np.pi * self.params["R"])) ** (1 / 4)
 
         # set up empty block dict if not generated from pre-existing tree
-        if config is None:
+        if tree_config is None:
             self.name = name
             self.block_dict = {'name': name, 
                                'origin_d': self.initialD, 
                                'P_in': self.params["P_in"],
                                'Q_in': self.params["Q_in"],
                                'boundary_conditions': [],
-                               'simulation_parameters': simparams,
+                               'simulation_parameters': simparams.to_dict(),
                                'vessels': [], 
                                'junctions': [], 
                                'adaptations': 0}
@@ -46,8 +47,8 @@ class StructuredTreeOutlet():
             self.root = None
         else:
             # set up parameters from pre-existing tree config
-            self.name = config["name"]
-            self.block_dict = config
+            self.name = tree_config["name"]
+            self.block_dict = tree_config
             # initialize the root of the structured tree
             if root is None:
                 # if no TreeVessel instance is provided to create the new tree
@@ -56,13 +57,11 @@ class StructuredTreeOutlet():
             self.root = root
 
 
-
-
     @classmethod
     def from_outlet_vessel(cls, 
-                           config: dict, 
-                           simparams: dict,
-                           bc_config: dict,
+                           vessel: Vessel, 
+                           simparams: SimParams,
+                           bc_config: BoundaryCondition,
                            tree_exists=False, 
                            root: TreeVessel = None, 
                            P_outlet: list=[0.0], 
@@ -91,24 +90,24 @@ class StructuredTreeOutlet():
 
         params = dict(
             # need vessel length to determine vessel diameter
-            l=config.get("vessel_length"),
+            l=vessel.length,
             # windkessel element values
-            R=config["zero_d_element_values"].get("R_poiseuille"),
+            R=vessel.R,
             # Probably don't need C and L, just getting them for the sake of due diligence I guess
-            C=config["zero_d_element_values"].get("C", 0.0),
-            L=config["zero_d_element_values"].get("L", 0.0),
-            stenosis_coefficient=config["zero_d_element_values"].get(
-                "stenosis_coefficient", 0.0
-            ),
-            eta=simparams.get("viscosity"),
+            C=vessel.C,
+            L=vessel.L,
+            stenosis_coefficient=vessel.zero_d_element_values["stenosis_coefficient"],
+            eta=simparams.viscosity,
             P_in = P_outlet,
             Q_in = Q_outlet,
-            bc_values = bc_config["bc_values"]
+            bc_values = bc_config.values
         )
         if tree_exists:
-            return cls(params=params, config = config, simparams=simparams, root=root)
+            print("tree exists")
+            # probably need to change to a tree config parameter
+            return cls(params=params, config = vessel, simparams=simparams, root=root)
         else:
-            return cls(params=params, name="OutletTree" + str(get_branch_id(config)[0]), simparams=simparams)
+            return cls(params=params, name="OutletTree" + str(vessel.branch), simparams=simparams)
 
 
     def reset_tree(self, keep_root=False):
