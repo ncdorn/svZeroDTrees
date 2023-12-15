@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import json
 import math
+from multiprocess import Pool
 from svzerodtrees.utils import *
 from svzerodtrees.threedutils import *
 from svzerodtrees.post_processing.plotting import *
@@ -306,7 +307,7 @@ def construct_cwss_trees(config_handler, result_handler, log_file=None, d_min=0.
     for vessel in config_handler.vessel_map.values():
         if vessel.bc is not None:
             if "outlet" in vessel.bc:
-                print("** building tree for outlet " + str(outlet_count) + " of " + str(num_outlets) + " **, d_min = " + str(d_min) + " **")
+                # print("** building tree for outlet " + str(outlet_count) + " of " + str(num_outlets) + " **, d_min = " + str(d_min) + " **")
                 # get the bc object
                 bc = config_handler.bcs[vessel.bc["outlet"]]
                 # create outlet tree
@@ -318,13 +319,14 @@ def construct_cwss_trees(config_handler, result_handler, log_file=None, d_min=0.
 
                 # write to log file for debugging
                 write_to_log(log_file, "** building tree for resistance: " + str(bc.R) + " **")
+
                 
-                outlet_tree.optimize_tree_diameter(bc.R, log_file, d_min=d_min)
+                outlet_tree.optimize_tree_diameter(log_file, d_min=d_min)
 
                 # replace the bc resistance with the optimized value as it may be different than the initial value
                 bc.R = outlet_tree.root.R_eq
 
-                print(' the equivalent resistance being added as the outlet boundary condition is ' + str(outlet_tree.root.R_eq))
+                # print(' the equivalent resistance being added as the outlet boundary condition is ' + str(outlet_tree.root.R_eq))
 
                 # write to log file for debugging
                 write_to_log(log_file, "     the number of vessels is " + str(outlet_tree.count_vessels()))
@@ -340,16 +342,14 @@ def construct_cwss_trees(config_handler, result_handler, log_file=None, d_min=0.
     result_handler.add_unformatted_result(preop_result, 'preop')
 
 
-def construct_cwss_trees_parallel(config_handler, result_handler, log_file=None, d_min=0.0049):
+def construct_cwss_trees_parallel(config_handler, result_handler, n_procs=4, log_file=None, d_min=0.0049):
     '''
     construct cwss trees in parallel to increase computational speed
     '''
-    num_outlets = len(config_handler.bcs) - 2
-    outlet_count = 0
+
     for vessel in config_handler.vessel_map.values():
         if vessel.bc is not None:
             if "outlet" in vessel.bc:
-                print("** building tree for outlet " + str(outlet_count) + " of " + str(num_outlets) + " **, d_min = " + str(d_min) + " **")
                 # get the bc object
                 bc = config_handler.bcs[vessel.bc["outlet"]]
                 # create outlet tree
@@ -359,11 +359,23 @@ def construct_cwss_trees_parallel(config_handler, result_handler, log_file=None,
                 
                 config_handler.trees.append(outlet_tree)
 
+
     
     # run the optimization in parallel
-    for tree in config_handler.trees:
-        # this is where we can parallelize
-        tree.optimize_tree_diameter(bc.R, log_file, d_min=d_min)
+    def optimize_tree(tree):
+        tree.optimize_tree_diameter(log_file, d_min=d_min)
+
+    with Pool(n_procs) as p:
+        p.map(optimize_tree, config_handler.trees)
+    
+    config_handler.to_json('post_tree_config.json')
+    preop_result = run_svzerodplus(config_handler.config)
+
+    # leaving vessel radius fixed, update the hemodynamics of the StructuredTreeOutlet instances based on the preop result
+    # config_handler.update_stree_hemodynamics(preop_result)
+
+    result_handler.add_unformatted_result(preop_result, 'preop')
+
 
 def construct_pries_trees(config_handler, result_handler, log_file=None, d_min=0.0049, tol=0.01, vis_trees=False, fig_dir=None):
     '''

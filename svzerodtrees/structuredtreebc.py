@@ -280,7 +280,7 @@ class StructuredTreeOutlet():
         return R_old, R_new
 
 
-    def optimize_tree_diameter(self, Resistance=5.0,  log_file=None, d_min=0.0049, pries_secomb=False):
+    def optimize_tree_diameter(self, log_file=None, d_min=0.0049, pries_secomb=False):
         """ 
         Use Nelder-Mead to optimize the diameter and number of vessels with respect to the desired resistance
         
@@ -314,7 +314,7 @@ class StructuredTreeOutlet():
             R = self.root.R_eq
 
             # calculate squared relative difference
-            loss = ((Resistance - R) / Resistance) ** 2
+            loss = ((self.params["bc_values"]["R"] - R) / self.params["bc_values"]["R"]) ** 2
             return loss
 
         # define optimization bound (lower bound = r_min, which is the termination diameter)
