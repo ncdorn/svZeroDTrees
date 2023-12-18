@@ -1,6 +1,6 @@
 beginning experiment cwss_adaptation_test!
 with the following configuration: 
-{'name': 'cwss_adaptation_test', 'model': 'AS1_SU0308_prestent', 'adapt': 'cwss', 'optimized': False, 'is_full_pa_tree': True, 'trees_exist': False, 'mesh_surfaces_path': '/home/ndorn/Documents/Stanford/PhD/Simvascular/threed_models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces', 'repair': [{'type': 'stent', 'location': 'proximal', 'value': [1.2, 1.2]}]}
+{'name': 'cwss_adaptation_test', 'model': 'AS1_SU0308_prestent', 'adapt': 'cwss', 'optimized': False, 'is_full_pa_tree': True, 'trees_exist': False, 'mesh_surfaces_path': '/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/PPAS/svPPAS/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces', 'repair': [{'type': 'stent', 'location': 'proximal', 'value': [1.2, 1.2]}]}
 *** clinical targets ****
 Q: 97.30194600000002
 MPA pressures: 42
@@ -9,829 +9,647 @@ LPA pressures: 32
 wedge pressure: 20
 RPA flow split: 0.52
 *** optimized values ****
-MPA pressure: 42.000001751901145
+MPA pressure: 42.00000175190116
 RPA pressure: 31.99999916350333
-LPA pressure: 31.99999832469334
-RPA flow split: 0.5199999623753572
-** building tree for resistance: 6849.722382225958 **
-     Resistance after optimization is 6875.7455750089775
+LPA pressure: 31.999998324693365
+RPA flow split: 0.5199999623753573
+     Resistance after optimization is 26720.388700927026
 
-     the optimized diameter is 0.048622913010472196
+     the optimized diameter is 0.08578509145642277
 
-     the number of vessels is 3
-** building tree for resistance: 7841.162814282267 **
-     Resistance after optimization is 7897.076445959468
+     Resistance after optimization is 22769.699205089328
 
-     the optimized diameter is 0.04718375937875217
+     the optimized diameter is 0.09408382878374222
 
-     the number of vessels is 3
-** building tree for resistance: 7516.59784490982 **
-     Resistance after optimization is 7492.217457064663
+     Resistance after optimization is 24777.161317648228
 
-     the optimized diameter is 0.047588176728906015
+     the optimized diameter is 0.08271857697773347
 
-     the number of vessels is 3
-** building tree for resistance: 15120.191268793877 **
-     Resistance after optimization is 6036.5299626916385
+     Resistance after optimization is 34528.0538631589
 
-     the optimized diameter is 0.05555606824493951
+     the optimized diameter is 0.07711262961692927
 
-     the number of vessels is 5
-** building tree for resistance: 24781.928887553564 **
-     Resistance after optimization is 24682.853188616256
+     Resistance after optimization is 12602.521040295975
 
-     the optimized diameter is 0.03700767076130976
+     the optimized diameter is 0.11810002970780112
 
-     the number of vessels is 3
-** building tree for resistance: 34554.74802505377 **
-     Resistance after optimization is 34749.955032548794
+     Resistance after optimization is 16663.271123525854
 
-     the optimized diameter is 0.03466262470252238
+     the optimized diameter is 0.09957257958213767
 
-     the number of vessels is 3
-** building tree for resistance: 25138.883107283076 **
-     Resistance after optimization is 25260.343858051463
+     Resistance after optimization is 7672.2628089903
 
-     the optimized diameter is 0.03689863372513779
+     the optimized diameter is 0.14340070337152727
 
-     the number of vessels is 3
-** building tree for resistance: 22437.975678932107 **
-     Resistance after optimization is 22341.29542597451
+     Resistance after optimization is 25581.58683609464
 
-     the optimized diameter is 0.03769944800844747
+     the optimized diameter is 0.08232163452944039
 
-     the number of vessels is 3
-** building tree for resistance: 12772.301680655883 **
-     Resistance after optimization is 12770.128955021231
+     Resistance after optimization is 5785.914441270342
 
-     the optimized diameter is 0.04240864703143806
+     the optimized diameter is 0.15933368273939738
 
-     the number of vessels is 3
-** building tree for resistance: 16652.123218191547 **
-     Resistance after optimization is 16677.77902728544
+     Resistance after optimization is 10100.307243274054
 
-     the optimized diameter is 0.04008927130656062
+     the optimized diameter is 0.12906170288037155
 
-     the number of vessels is 3
-** building tree for resistance: 6623.601825759639 **
-     Resistance after optimization is 6601.568922138391
+     Resistance after optimization is 3247.1606639973793
 
-     the optimized diameter is 0.048962924893141704
+     the optimized diameter is 0.196706099081845
 
-     the number of vessels is 3
-** building tree for resistance: 11321.471078241524 **
-     Resistance after optimization is 11234.019633452317
+     Resistance after optimization is 2428.5529342518544
 
-     the optimized diameter is 0.043512777985395976
+     the optimized diameter is 0.2185711652336908
 
-     the number of vessels is 3
-** building tree for resistance: 14099.85162138406 **
-     Resistance after optimization is 14164.29028419493
+     Resistance after optimization is 2428.3557544733144
 
-     the optimized diameter is 0.041560239760736736
+     the optimized diameter is 0.2185729244772986
 
-     the number of vessels is 3
-** building tree for resistance: 7955.898419777589 **
-     Resistance after optimization is 7931.754286139565
+     Resistance after optimization is 2428.9382187311344
 
-     the optimized diameter is 0.04698634474677568
+     the optimized diameter is 0.2185667993345401
 
-     the number of vessels is 3
-** building tree for resistance: 11598.866556100687 **
-     Resistance after optimization is 11612.69352334593
+     Resistance after optimization is 7670.191637138023
 
-     the optimized diameter is 0.04328055432367163
+     the optimized diameter is 0.14340538817333315
 
-     the number of vessels is 3
-** building tree for resistance: 9514.990157711085 **
-     Resistance after optimization is 9537.283486304432
+     Resistance after optimization is 2428.8061392089494
 
-     the optimized diameter is 0.04516941907629832
+     the optimized diameter is 0.2185681157409233
 
-     the number of vessels is 3
-** building tree for resistance: 12580.394724696253 **
-     Resistance after optimization is 12538.141529719083
+     Resistance after optimization is 7670.385578692697
 
-     the optimized diameter is 0.04257494019932193
+     the optimized diameter is 0.14340477758768894
 
-     the number of vessels is 3
-** building tree for resistance: 10807.57435839683 **
-     Resistance after optimization is 10798.534107054176
+     Resistance after optimization is 13230.350796349414
 
-     the optimized diameter is 0.04396479902770838
+     the optimized diameter is 0.1161560768027559
 
-     the number of vessels is 3
-** building tree for resistance: 14118.366213106252 **
-     Resistance after optimization is 14035.85724525346
+     Resistance after optimization is 7115.276718238466
 
-     the optimized diameter is 0.041483663068265786
+     the optimized diameter is 0.14570853631939384
 
-     the number of vessels is 3
-** building tree for resistance: 11855.083692080958 **
-     Resistance after optimization is 11906.352547011003
+     Resistance after optimization is 1388.1694932097375
 
-     the optimized diameter is 0.043048931885790245
+     the optimized diameter is 0.26555369774846965
 
-     the number of vessels is 3
-** building tree for resistance: 9396.341484835611 **
-     Resistance after optimization is 9473.627281782123
+     Resistance after optimization is 4338.147437452215
 
-     the optimized diameter is 0.04532384596321919
+     the optimized diameter is 0.17704377369436966
 
-     the number of vessels is 3
-** building tree for resistance: 23564.504349039842 **
-     Resistance after optimization is 23533.968035685095
+     Resistance after optimization is 1388.1058817588478
 
-     the optimized diameter is 0.03736295831033047
+     the optimized diameter is 0.2655548588939949
 
-     the number of vessels is 3
-** building tree for resistance: 26672.863128427794 **
-     Resistance after optimization is 26688.322955889365
+     Resistance after optimization is 24537.7077005852
 
-     the optimized diameter is 0.03643644652353852
+     the optimized diameter is 0.08864104489764073
 
-     the number of vessels is 3
-** building tree for resistance: 22645.2593716317 **
-     Resistance after optimization is 22821.548502426405
+     Resistance after optimization is 3246.3433913714225
 
-     the optimized diameter is 0.037660688647493515
+     the optimized diameter is 0.19671174566497612
 
-     the number of vessels is 3
-** building tree for resistance: 25660.741749987457 **
-     Resistance after optimization is 25587.594784283698
+     Resistance after optimization is 12692.668941370155
 
-     the optimized diameter is 0.036742740411577615
+     the optimized diameter is 0.11802867216907272
 
-     the number of vessels is 3
-** building tree for resistance: 27928.208099074865 **
-     Resistance after optimization is 28091.95638180803
+     Resistance after optimization is 2429.1264404025255
 
-     the optimized diameter is 0.036120717165396526
+     the optimized diameter is 0.21856492279248246
 
-     the number of vessels is 3
-** building tree for resistance: 25587.649200908287 **
-     Resistance after optimization is 25691.377477311755
+     Resistance after optimization is 1011.7080938600328
 
-     the optimized diameter is 0.03676952783326468
+     the optimized diameter is 0.2998110597996545
 
-     the number of vessels is 3
-** building tree for resistance: 34872.252511086284 **
-     Resistance after optimization is 1695.8180954593631
+     Resistance after optimization is 7672.029891761457
 
-     the optimized diameter is 0.09262577176685219
+     the optimized diameter is 0.14340123670756866
 
-     the number of vessels is 19
-** building tree for resistance: 15385.892431225839 **
-     Resistance after optimization is 15393.798109128573
+     Resistance after optimization is 2428.584514174888
 
-     the optimized diameter is 0.04076559857873288
+     the optimized diameter is 0.21857061271011916
 
-     the number of vessels is 3
-** building tree for resistance: 24600.939052845973 **
-     Resistance after optimization is 24439.386989341678
+     Resistance after optimization is 3246.035569361287
 
-     the optimized diameter is 0.03702587286871504
+     the optimized diameter is 0.19671401714231096
 
-     the number of vessels is 3
-** building tree for resistance: 13211.684779068639 **
-     Resistance after optimization is 13267.906234687607
+     Resistance after optimization is 4339.278968694218
 
-     the optimized diameter is 0.04206476499855584
+     the optimized diameter is 0.17703808244535313
 
-     the number of vessels is 3
-** building tree for resistance: 27459.22710745491 **
-     Resistance after optimization is 27325.281637579472
+     Resistance after optimization is 4337.985871885184
 
-     the optimized diameter is 0.03620970185449658
+     the optimized diameter is 0.17704423760629945
 
-     the number of vessels is 3
-** building tree for resistance: 28280.805153639973 **
-     Resistance after optimization is 28206.935653114808
+     Resistance after optimization is 1356.298367328212
 
-     the optimized diameter is 0.036039931130594186
+     the optimized diameter is 0.2698410090886979
 
-     the number of vessels is 3
-** building tree for resistance: 13356.582334742485 **
-     Resistance after optimization is 13266.301743787535
+     Resistance after optimization is 1054.0219516328768
 
-     the optimized diameter is 0.04198950174190787
+     the optimized diameter is 0.2950765039686345
 
-     the number of vessels is 3
-** building tree for resistance: 13750.980822101821 **
-     Resistance after optimization is 13836.732447832517
+     Resistance after optimization is 7673.042926751821
 
-     the optimized diameter is 0.0417648433491297
+     the optimized diameter is 0.14339882420480365
 
-     the number of vessels is 3
-** building tree for resistance: 24026.193169916336 **
-     Resistance after optimization is 24218.01130100133
+     Resistance after optimization is 27784.431793756394
 
-     the optimized diameter is 0.03720976791053393
+     the optimized diameter is 0.08531587053553027
 
-     the number of vessels is 3
-** building tree for resistance: 21951.86274981253 **
-     Resistance after optimization is 22067.777756719137
+     Resistance after optimization is 7671.637771998065
 
-     the optimized diameter is 0.03790994887843188
+     the optimized diameter is 0.14340211300561378
 
-     the number of vessels is 3
-** building tree for resistance: 27908.31786967029 **
-     Resistance after optimization is 27867.526154074258
+     Resistance after optimization is 1816.5745147243924
 
-     the optimized diameter is 0.0361260959452569
+     the optimized diameter is 0.2428512897661953
 
-     the number of vessels is 3
-** building tree for resistance: 23101.8767576956 **
-     Resistance after optimization is 22987.80562694126
+     Resistance after optimization is 5784.50369554835
 
-     the optimized diameter is 0.037482929781098684
+     the optimized diameter is 0.1593386311529578
 
-     the number of vessels is 3
-** building tree for resistance: 15414.990423334993 **
-     Resistance after optimization is 6035.300856850901
+     Resistance after optimization is 7670.342714276947
 
-     the optimized diameter is 0.05555863624018775
+     the optimized diameter is 0.143405001410715
 
-     the number of vessels is 5
-** building tree for resistance: 20682.385304538868 **
-     Resistance after optimization is 20662.906236859417
+     Resistance after optimization is 4338.765912420692
 
-     the optimized diameter is 0.038359480146139005
+     the optimized diameter is 0.17704064372705716
 
-     the number of vessels is 3
-** building tree for resistance: 22557.570421132765 **
-     Resistance after optimization is 22465.47598363465
+     Resistance after optimization is 24485.932601919612
 
-     the optimized diameter is 0.03765709028536714
+     the optimized diameter is 0.0828456965918374
 
-     the number of vessels is 3
-** building tree for resistance: 29264.772713408987 **
-     Resistance after optimization is 29296.360190496594
+     Resistance after optimization is 10099.338609521434
 
-     the optimized diameter is 0.035772255175529094
+     the optimized diameter is 0.12906320842106522
 
-     the number of vessels is 3
-** building tree for resistance: 22774.404491792695 **
-     Resistance after optimization is 22650.472013354032
+     Resistance after optimization is 7671.180131564278
 
-     the optimized diameter is 0.03759599652721965
+     the optimized diameter is 0.14340312155404059
 
-     the number of vessels is 3
-** building tree for resistance: 24536.28308753264 **
-     Resistance after optimization is 24622.822028831433
+     Resistance after optimization is 22668.22301883123
 
-     the optimized diameter is 0.03702569671886698
+     the optimized diameter is 0.08951427744576107
 
-     the number of vessels is 3
-** building tree for resistance: 16803.41950684295 **
-     Resistance after optimization is 16759.497679931494
+     Resistance after optimization is 5785.865121979015
 
-     the optimized diameter is 0.04004853833334369
+     the optimized diameter is 0.15933386353693396
 
-     the number of vessels is 3
-** building tree for resistance: 13822.922317089993 **
-     Resistance after optimization is 13830.40047110089
+     Resistance after optimization is 4338.379103762091
 
-     the optimized diameter is 0.04169586868465191
+     the optimized diameter is 0.17704276628305626
 
-     the number of vessels is 3
-** building tree for resistance: 15674.182199183155 **
-     Resistance after optimization is 15782.48273954501
+     Resistance after optimization is 15726.782017418336
 
-     the optimized diameter is 0.040618827316814377
+     the optimized diameter is 0.10036781201509633
 
-     the number of vessels is 3
-** building tree for resistance: 8193.82209102263 **
-     Resistance after optimization is 8236.870501413952
+     Resistance after optimization is 15113.743383022076
 
-     the optimized diameter is 0.046748872385206044
+     the optimized diameter is 0.10778342983070627
 
-     the number of vessels is 3
-** building tree for resistance: 17045.784546232535 **
-     Resistance after optimization is 17168.712349069836
+     Resistance after optimization is 19472.19191774421
 
-     the optimized diameter is 0.03990941531001001
+     the optimized diameter is 0.097616949157976
 
-     the number of vessels is 3
-** building tree for resistance: 18927.908470377955 **
-     Resistance after optimization is 18861.323121120422
+     Resistance after optimization is 5785.530359611746
 
-     the optimized diameter is 0.03908218568154108
+     the optimized diameter is 0.15933506470166847
 
-     the number of vessels is 3
-** building tree for resistance: 16303.701591520976 **
-     Resistance after optimization is 16385.446875329068
+     Resistance after optimization is 5784.783931178827
 
-     the optimized diameter is 0.04029711094696615
+     the optimized diameter is 0.15933762046544975
 
-     the number of vessels is 3
-** building tree for resistance: 15118.56425605836 **
-     Resistance after optimization is 15073.211426522997
+     Resistance after optimization is 7671.707274489329
 
-     the optimized diameter is 0.040946023012146726
+     the optimized diameter is 0.14340195202321238
 
-     the number of vessels is 3
-** building tree for resistance: 17688.19359085576 **
-     Resistance after optimization is 17687.112847412373
+     Resistance after optimization is 7673.230076607941
 
-     the optimized diameter is 0.03960360066034778
+     the optimized diameter is 0.14340025732378214
 
-     the number of vessels is 3
-** building tree for resistance: 15286.347285313155 **
-     Resistance after optimization is 15200.483976925898
+     Resistance after optimization is 23849.007667477625
 
-     the optimized diameter is 0.04081139816298183
+     the optimized diameter is 0.08895243430667144
 
-     the number of vessels is 3
-** building tree for resistance: 23931.62638415129 **
-     Resistance after optimization is 23899.67147763719
+     Resistance after optimization is 5785.019959134447
 
-     the optimized diameter is 0.03724745233064698
+     the optimized diameter is 0.15933699542404378
 
-     the number of vessels is 3
-** building tree for resistance: 19539.53122941015 **
-     Resistance after optimization is 19540.617109840026
+     Resistance after optimization is 4339.4489742789665
 
-     the optimized diameter is 0.0387994990923437
+     the optimized diameter is 0.1770370973615656
 
-     the number of vessels is 3
-** building tree for resistance: 19405.536354287495 **
-     Resistance after optimization is 19414.622370571706
+     Resistance after optimization is 1816.4236993066288
 
-     the optimized diameter is 0.03885095403165052
+     the optimized diameter is 0.2428535172069725
 
-     the number of vessels is 3
-** building tree for resistance: 13896.350575424596 **
-     Resistance after optimization is 13988.669735499423
+     Resistance after optimization is 20181.086919086032
 
-     the optimized diameter is 0.04166868813712892
+     the optimized diameter is 0.09089413656410801
 
-     the number of vessels is 3
-** building tree for resistance: 13505.862267592995 **
-     Resistance after optimization is 13420.528488616932
+     Resistance after optimization is 14250.786591582742
 
-     the optimized diameter is 0.04188919329852224
+     the optimized diameter is 0.10864270664913342
 
-     the number of vessels is 3
-** building tree for resistance: 20198.562512323482 **
-     Resistance after optimization is 20123.36339468657
+     Resistance after optimization is 5786.3519214328935
 
-     the optimized diameter is 0.038567021697776954
+     the optimized diameter is 0.15933254338598896
 
-     the number of vessels is 3
-** building tree for resistance: 18504.37910730121 **
-     Resistance after optimization is 18522.84102259366
+     Resistance after optimization is 18211.118093569094
 
-     the optimized diameter is 0.03922805190441066
+     the optimized diameter is 0.09210767216767507
 
-     the number of vessels is 3
-** building tree for resistance: 20391.430388613997 **
-     Resistance after optimization is 20297.069831923567
+     Resistance after optimization is 7672.997385742198
 
-     the optimized diameter is 0.03844337856390781
+     the optimized diameter is 0.14339912583486822
 
-     the number of vessels is 3
-** building tree for resistance: 20245.49012469283 **
-     Resistance after optimization is 20293.47476136713
+     Resistance after optimization is 7671.494431160727
 
-     the optimized diameter is 0.038500809947148024
+     the optimized diameter is 0.14340239925530945
 
-     the number of vessels is 3
-** building tree for resistance: 14248.42888502996 **
-     Resistance after optimization is 14148.296518343346
+     Resistance after optimization is 20520.806044505447
 
-     the optimized diameter is 0.04143099034198858
+     the optimized diameter is 0.0953018814665776
 
-     the number of vessels is 3
-** building tree for resistance: 18173.375755215337 **
-     Resistance after optimization is 18264.170455717798
+     Resistance after optimization is 5785.162938011564
 
-     the optimized diameter is 0.03940000109128296
+     the optimized diameter is 0.15933632435167128
 
-     the number of vessels is 3
-** building tree for resistance: 21245.298245658876 **
-     Resistance after optimization is 21262.16995092618
+     Resistance after optimization is 3246.0964581285753
 
-     the optimized diameter is 0.03813710016296413
+     the optimized diameter is 0.19671385642424447
 
-     the number of vessels is 3
-** building tree for resistance: 20557.383178990753 **
-     Resistance after optimization is 20498.716916652662
+     Resistance after optimization is 7114.457328533068
 
-     the optimized diameter is 0.038421881995595014
+     the optimized diameter is 0.14571053956065366
 
-     the number of vessels is 3
-** building tree for resistance: 15078.008026117046 **
-     Resistance after optimization is 6035.4651401987285
+     Resistance after optimization is 4338.5401280880415
 
-     the optimized diameter is 0.055558308323714
+     the optimized diameter is 0.17704176753754572
 
-     the number of vessels is 5
-** building tree for resistance: 26532.690927114596 **
-     Resistance after optimization is 26355.350028920464
+     Resistance after optimization is 26559.15871900153
 
-     the optimized diameter is 0.03647432113925465
+     the optimized diameter is 0.0878458577438159
 
-     the number of vessels is 3
-** building tree for resistance: 23962.883706722103 **
-     Resistance after optimization is 24011.838778951875
+     Resistance after optimization is 7671.526254645361
 
-     the optimized diameter is 0.03721248617515814
+     the optimized diameter is 0.14340223723560958
 
-     the number of vessels is 3
-** building tree for resistance: 27523.888416424645 **
-     Resistance after optimization is 27336.77071341977
+     Resistance after optimization is 27509.445392894497
 
-     the optimized diameter is 0.036215332838563444
+     the optimized diameter is 0.08552246312823722
 
-     the number of vessels is 3
-** building tree for resistance: 17891.10021693761 **
-     Resistance after optimization is 17778.37294368656
+     Resistance after optimization is 10101.96390576378
 
-     the optimized diameter is 0.039497769642823505
+     the optimized diameter is 0.129059374459027
 
-     the number of vessels is 3
-** building tree for resistance: 18131.385950928077 **
-     Resistance after optimization is 18134.910874316083
+     Resistance after optimization is 7672.65485257109
 
-     the optimized diameter is 0.039399565493170155
+     the optimized diameter is 0.14340003377630361
 
-     the number of vessels is 3
-** building tree for resistance: 27429.93442990795 **
-     Resistance after optimization is 27410.610514414228
+     Resistance after optimization is 5784.987212124981
 
-     the optimized diameter is 0.03624427950862598
+     the optimized diameter is 0.15933686951275328
 
-     the number of vessels is 3
-** building tree for resistance: 22440.0715191173 **
-     Resistance after optimization is 22496.115954695175
+     Resistance after optimization is 18050.003016678173
 
-     the optimized diameter is 0.03770394249226408
+     the optimized diameter is 0.09852827257457497
 
-     the number of vessels is 3
-** building tree for resistance: 5548.484308152931 **
-     Resistance after optimization is 5539.4661191631
+     Resistance after optimization is 4338.429293822147
 
-     the optimized diameter is 0.056643325144966915
+     the optimized diameter is 0.17704220968735024
 
-     the number of vessels is 5
-** building tree for resistance: 23429.32131928933 **
-     Resistance after optimization is 23642.09012082747
+     Resistance after optimization is 18387.99101176893
 
-     the optimized diameter is 0.03739939794020686
+     the optimized diameter is 0.0919268637687463
 
-     the number of vessels is 3
-** building tree for resistance: 13181.987631378614 **
-     Resistance after optimization is 6035.4947767669755
+     Resistance after optimization is 6006.723899016081
 
-     the optimized diameter is 0.05555819793195389
+     the optimized diameter is 0.13898000797824214
 
-     the number of vessels is 5
-** building tree for resistance: 4919.82766442888 **
-     Resistance after optimization is 4935.470842564277
+     Resistance after optimization is 3246.2825377664185
 
-     the optimized diameter is 0.05820361356587843
+     the optimized diameter is 0.19671214435718995
 
-     the number of vessels is 5
-** building tree for resistance: 10756.826335758162 **
-     Resistance after optimization is 10658.773982511371
+     Resistance after optimization is 2428.8479585522796
 
-     the optimized diameter is 0.044000674328981346
+     the optimized diameter is 0.21856760666931285
 
-     the number of vessels is 3
-** building tree for resistance: 11368.767303449607 **
-     Resistance after optimization is 11271.846031070025
+     Resistance after optimization is 5785.163838134895
 
-     the optimized diameter is 0.04347952949407195
+     the optimized diameter is 0.15933636090011455
 
-     the number of vessels is 3
-** building tree for resistance: 10696.8184847978 **
-     Resistance after optimization is 10743.574111396836
+     Resistance after optimization is 4914.446500055062
 
-     the optimized diameter is 0.04409270399620971
+     the optimized diameter is 0.15784128470984238
 
-     the number of vessels is 3
-** building tree for resistance: 8723.065950144153 **
-     Resistance after optimization is 8729.91318119825
+     Resistance after optimization is 16817.959120501862
 
-     the optimized diameter is 0.046055354289692985
+     the optimized diameter is 0.09945730601783781
 
-     the number of vessels is 3
-** building tree for resistance: 6005.8505578163395 **
-     Resistance after optimization is 5963.315798313857
+     Resistance after optimization is 4338.72716305109
 
-     the optimized diameter is 0.05565672030793371
+     the optimized diameter is 0.17704098033844626
 
-     the number of vessels is 5
-** building tree for resistance: 23696.821485299188 **
-     Resistance after optimization is 23810.451871947582
+     Resistance after optimization is 11401.872583901686
 
-     the optimized diameter is 0.03733891981493653
+     the optimized diameter is 0.1118045044133276
 
-     the number of vessels is 3
-** building tree for resistance: 18438.998544363032 **
-     Resistance after optimization is 18538.41531074083
+     Resistance after optimization is 5786.056080313936
 
-     the optimized diameter is 0.039286092696657386
+     the optimized diameter is 0.15933336255213124
 
-     the number of vessels is 3
-** building tree for resistance: 16011.985800086015 **
-     Resistance after optimization is 15995.968383827627
+     Resistance after optimization is 1054.4563819675918
 
-     the optimized diameter is 0.040439594919818245
+     the optimized diameter is 0.29506846697678757
 
-     the number of vessels is 3
-** building tree for resistance: 19061.183744689657 **
-     Resistance after optimization is 19149.82897473077
+     Resistance after optimization is 1816.5910193014347
 
-     the optimized diameter is 0.0390230640049734
+     the optimized diameter is 0.24285115729194678
 
-     the number of vessels is 3
-** building tree for resistance: 16858.22403344201 **
-     Resistance after optimization is 16819.708512263012
+     Resistance after optimization is 1816.8403944753234
 
-     the optimized diameter is 0.04001869144198694
+     the optimized diameter is 0.24284703438475516
 
-     the number of vessels is 3
-** building tree for resistance: 7045.780722150184 **
-     Resistance after optimization is 7065.454407831507
+     Resistance after optimization is 4339.659576962939
 
-     the optimized diameter is 0.048272596949260296
+     the optimized diameter is 0.17703621255076543
 
-     the number of vessels is 3
 saving preop config with cwss trees...
 ** repairing stenoses in vessels ['lpa', 'rpa'] **
 ** adapting trees based on constant wall shear stress assumption **
 ** adaptation results for OutletTree3 **
-    R_new = 6742.111762856638, R_old = 6875.7455750089775
-    The change in resistance is -133.6338121523395
+    R_new = 1274.6000804582193, R_old = 1388.1058817588478
+    The change in resistance is -113.50580130062849
 ** adaptation results for OutletTree6 **
-    R_new = 7742.993944279646, R_old = 7897.076445959468
-    The change in resistance is -154.0825016798226
+    R_new = 1676.0059197336664, R_old = 1816.5745147243924
+    The change in resistance is -140.56859499072607
 ** adaptation results for OutletTree7 **
-    R_new = 7346.253852334057, R_old = 7492.217457064663
-    The change in resistance is -145.96360473060577
+    R_new = 933.680263191911, R_old = 1011.7080938600328
+    The change in resistance is -78.02783066812185
 ** adaptation results for OutletTree8 **
-    R_new = 5900.698241671407, R_old = 6036.5299626916385
-    The change in resistance is -135.83172102023127
+    R_new = 4000.03851765381, R_old = 4339.278968694218
+    The change in resistance is -339.24045104040806
 ** adaptation results for OutletTree9 **
-    R_new = 24182.740112087515, R_old = 24682.853188616256
-    The change in resistance is -500.11307652874166
+    R_new = 22836.639507342305, R_old = 24777.161317648228
+    The change in resistance is -1940.5218103059233
 ** adaptation results for OutletTree11 **
-    R_new = 34036.57517340841, R_old = 34749.955032548794
-    The change in resistance is -713.3798591403829
+    R_new = 31534.696029572195, R_old = 34528.0538631589
+    The change in resistance is -2993.357833586706
 ** adaptation results for OutletTree12 **
-    R_new = 24748.088133880745, R_old = 25260.343858051463
-    The change in resistance is -512.2557241707182
+    R_new = 20886.990662213015, R_old = 22769.699205089328
+    The change in resistance is -1882.708542876313
 ** adaptation results for OutletTree13 **
-    R_new = 21890.288746923357, R_old = 22341.29542597451
-    The change in resistance is -451.0066790511519
+    R_new = 7060.43471110683, R_old = 7672.2628089903
+    The change in resistance is -611.82809788347
 ** adaptation results for OutletTree15 **
-    R_new = 12517.282909947822, R_old = 12770.128955021231
-    The change in resistance is -252.8460450734092
+    R_new = 11653.88939064786, R_old = 12602.521040295975
+    The change in resistance is -948.631649648114
 ** adaptation results for OutletTree16 **
-    R_new = 16344.582345304887, R_old = 16677.77902728544
-    The change in resistance is -333.19668198055297
+    R_new = 15401.968741287994, R_old = 16663.271123525854
+    The change in resistance is -1261.30238223786
 ** adaptation results for OutletTree17 **
-    R_new = 6473.417027030202, R_old = 6601.568922138391
-    The change in resistance is -128.1518951081889
+    R_new = 1274.7216783184679, R_old = 1388.1694932097375
+    The change in resistance is -113.44781489126967
 ** adaptation results for OutletTree19 **
-    R_new = 11012.490793722542, R_old = 11234.019633452317
-    The change in resistance is -221.52883972977543
+    R_new = 2993.8715741897263, R_old = 3246.035569361287
+    The change in resistance is -252.1639951715606
 ** adaptation results for OutletTree20 **
-    R_new = 13882.878793350956, R_old = 14164.29028419493
-    The change in resistance is -281.4114908439751
+    R_new = 2994.9486655474807, R_old = 3247.1606639973793
+    The change in resistance is -252.2119984498986
 ** adaptation results for OutletTree21 **
-    R_new = 7776.975716263585, R_old = 7931.754286139565
-    The change in resistance is -154.77856987597988
+    R_new = 968.5951009314593, R_old = 1054.0219516328768
+    The change in resistance is -85.4268507014175
 ** adaptation results for OutletTree22 **
-    R_new = 11383.45713051501, R_old = 11612.69352334593
-    The change in resistance is -229.23639283092052
+    R_new = 2240.7455649125527, R_old = 2428.9382187311344
+    The change in resistance is -188.19265381858168
 ** adaptation results for OutletTree24 **
-    R_new = 9350.161392828784, R_old = 9537.283486304432
-    The change in resistance is -187.1220934756475
+    R_new = 1251.4979807042166, R_old = 1356.298367328212
+    The change in resistance is -104.80038662399534
 ** adaptation results for OutletTree25 **
-    R_new = 12290.027463838564, R_old = 12538.141529719083
-    The change in resistance is -248.11406588051977
+    R_new = 2240.6240594457045, R_old = 2428.8061392089494
+    The change in resistance is -188.18207976324493
 ** adaptation results for OutletTree26 **
-    R_new = 10585.856624125994, R_old = 10798.534107054176
-    The change in resistance is -212.67748292818214
+    R_new = 2240.4174846238056, R_old = 2428.584514174888
+    The change in resistance is -188.16702955108258
 ** adaptation results for OutletTree28 **
-    R_new = 13757.075270240923, R_old = 14035.85724525346
-    The change in resistance is -278.78197501253817
+    R_new = 2240.3882066516608, R_old = 2428.5529342518544
+    The change in resistance is -188.1647276001936
 ** adaptation results for OutletTree29 **
-    R_new = 11671.132126247918, R_old = 11906.352547011003
-    The change in resistance is -235.2204207630857
+    R_new = 2240.919909879097, R_old = 2429.1264404025255
+    The change in resistance is -188.20653052342868
 ** adaptation results for OutletTree32 **
-    R_new = 9287.788797602545, R_old = 9473.627281782123
-    The change in resistance is -185.8384841795778
+    R_new = 2240.205395880408, R_old = 2428.3557544733144
+    The change in resistance is -188.1503585929063
 ** adaptation results for OutletTree34 **
-    R_new = 23057.9675985035, R_old = 23533.968035685095
-    The change in resistance is -476.00043718159577
+    R_new = 7058.696581672706, R_old = 7670.385578692697
+    The change in resistance is -611.6889970199909
 ** adaptation results for OutletTree35 **
-    R_new = 26145.98175901315, R_old = 26688.322955889365
-    The change in resistance is -542.3411968762157
+    R_new = 24447.00593010458, R_old = 26720.388700927026
+    The change in resistance is -2273.3827708224453
 ** adaptation results for OutletTree37 **
-    R_new = 22360.493923579936, R_old = 22821.548502426405
-    The change in resistance is -461.05457884646967
+    R_new = 5329.195409749578, R_old = 5785.914441270342
+    The change in resistance is -456.71903152076356
 ** adaptation results for OutletTree39 **
-    R_new = 25068.535651150694, R_old = 25587.594784283698
-    The change in resistance is -519.0591331330033
+    R_new = 23582.072885021844, R_old = 25581.58683609464
+    The change in resistance is -1999.5139510727968
 ** adaptation results for OutletTree40 **
-    R_new = 27520.08140272258, R_old = 28091.95638180803
-    The change in resistance is -571.8749790854527
+    R_new = 9289.519423173628, R_old = 10100.307243274054
+    The change in resistance is -810.787820100426
 ** adaptation results for OutletTree42 **
-    R_new = 25169.91914409613, R_old = 25691.377477311755
-    The change in resistance is -521.4583332156253
+    R_new = 7058.517223111987, R_old = 7670.191637138023
+    The change in resistance is -611.6744140260362
 ** adaptation results for OutletTree43 **
-    R_new = 1653.8055126646145, R_old = 1695.8180954593631
-    The change in resistance is -42.012582794748596
+    R_new = 12165.117949861491, R_old = 13230.350796349414
+    The change in resistance is -1065.2328464879229
 ** adaptation results for OutletTree45 **
-    R_new = 15087.095145455447, R_old = 15393.798109128573
-    The change in resistance is -306.70296367312585
+    R_new = 3998.9910805728423, R_old = 4338.147437452215
+    The change in resistance is -339.15635687937265
 ** adaptation results for OutletTree46 **
-    R_new = 23944.38952552354, R_old = 24439.386989341678
-    The change in resistance is -494.9974638181375
+    R_new = 22666.247945477287, R_old = 24537.7077005852
+    The change in resistance is -1871.4597551079132
 ** adaptation results for OutletTree47 **
-    R_new = 13004.867971867214, R_old = 13267.906234687607
-    The change in resistance is -263.03826282039336
+    R_new = 2994.1641524484226, R_old = 3246.3433913714225
+    The change in resistance is -252.17923892299996
 ** adaptation results for OutletTree49 **
-    R_new = 26769.644607375707, R_old = 27325.281637579472
-    The change in resistance is -555.6370302037649
+    R_new = 7060.790759581894, R_old = 7672.029891761457
+    The change in resistance is -611.2391321795631
 ** adaptation results for OutletTree50 **
-    R_new = 27632.59619804749, R_old = 28206.935653114808
-    The change in resistance is -574.3394550673183
+    R_new = 6572.424600509429, R_old = 7115.276718238466
+    The change in resistance is -542.8521177290368
 ** adaptation results for OutletTree52 **
-    R_new = 13003.29483786608, R_old = 13266.301743787535
-    The change in resistance is -263.00690592145475
+    R_new = 11737.65709397875, R_old = 12692.668941370155
+    The change in resistance is -955.0118473914044
 ** adaptation results for OutletTree55 **
-    R_new = 13562.040488677238, R_old = 13836.732447832517
-    The change in resistance is -274.6919591552796
+    R_new = 3998.859516510374, R_old = 4337.985871885184
+    The change in resistance is -339.1263553748099
 ** adaptation results for OutletTree56 **
-    R_new = 23727.67285091491, R_old = 24218.01130100133
-    The change in resistance is -490.33845008641947
+    R_new = 5327.904483379966, R_old = 5784.50369554835
+    The change in resistance is -456.59921216838393
 ** adaptation results for OutletTree58 **
-    R_new = 21622.501602191536, R_old = 22067.777756719137
-    The change in resistance is -445.27615452760074
+    R_new = 7061.168790016983, R_old = 7673.042926751821
+    The change in resistance is -611.8741367348384
 ** adaptation results for OutletTree59 **
-    R_new = 27300.314797878833, R_old = 27867.526154074258
-    The change in resistance is -567.2113561954247
+    R_new = 25423.22631886611, R_old = 27784.431793756394
+    The change in resistance is -2361.2054748902847
 ** adaptation results for OutletTree60 **
-    R_new = 22523.261109277257, R_old = 22987.80562694126
-    The change in resistance is -464.54451766400234
+    R_new = 7059.8534426976485, R_old = 7671.637771998065
+    The change in resistance is -611.7843293004162
 ** adaptation results for OutletTree62 **
-    R_new = 5899.497585796278, R_old = 6035.300856850901
-    The change in resistance is -135.8032710546231
+    R_new = 3999.563693016268, R_old = 4338.765912420692
+    The change in resistance is -339.2022194044239
 ** adaptation results for OutletTree63 **
-    R_new = 20246.96149544241, R_old = 20662.906236859417
-    The change in resistance is -415.9447414170063
+    R_new = 7058.657976958264, R_old = 7670.342714276947
+    The change in resistance is -611.6847373186829
 ** adaptation results for OutletTree65 **
-    R_new = 22011.93059040755, R_old = 22465.47598363465
-    The change in resistance is -453.5453932270975
+    R_new = 7059.6437390163965, R_old = 7671.180131564278
+    The change in resistance is -611.5363925478814
 ** adaptation results for OutletTree66 **
-    R_new = 28698.91409144826, R_old = 29296.360190496594
-    The change in resistance is -597.4460990483349
+    R_new = 9288.493990356064, R_old = 10099.338609521434
+    The change in resistance is -810.8446191653693
 ** adaptation results for OutletTree68 **
-    R_new = 22193.093435352246, R_old = 22650.472013354032
-    The change in resistance is -457.3785780017861
+    R_new = 20931.67292153929, R_old = 22668.22301883123
+    The change in resistance is -1736.55009729194
 ** adaptation results for OutletTree69 **
-    R_new = 24123.985038665036, R_old = 24622.822028831433
-    The change in resistance is -498.8369901663973
+    R_new = 22566.92591253488, R_old = 24485.932601919612
+    The change in resistance is -1919.0066893847325
 ** adaptation results for OutletTree74 **
-    R_new = 17122.185836629116, R_old = 16759.497679931494
-    The change in resistance is 362.6881566976226
+    R_new = 6490.149008643141, R_old = 5785.865121979015
+    The change in resistance is 704.2838866641259
 ** adaptation results for OutletTree75 **
-    R_new = 14127.534981726583, R_old = 13830.40047110089
-    The change in resistance is 297.134510625694
+    R_new = 4861.293103899809, R_old = 4338.379103762091
+    The change in resistance is 522.9140001377173
 ** adaptation results for OutletTree76 **
-    R_new = 16123.265496684744, R_old = 15782.48273954501
-    The change in resistance is 340.7827571397338
+    R_new = 17534.228443818352, R_old = 15726.782017418336
+    The change in resistance is 1807.4464264000162
 ** adaptation results for OutletTree77 **
-    R_new = 8410.54566624922, R_old = 8236.870501413952
-    The change in resistance is 173.67516483526742
+    R_new = 2032.805255626803, R_old = 1816.4236993066288
+    The change in resistance is 216.38155632017424
 ** adaptation results for OutletTree78 **
-    R_new = 17540.61652957197, R_old = 17168.712349069836
-    The change in resistance is 371.9041805021334
+    R_new = 6490.676009605643, R_old = 5786.3519214328935
+    The change in resistance is 704.3240881727497
 ** adaptation results for OutletTree82 **
-    R_new = 19271.609848080294, R_old = 18861.323121120422
-    The change in resistance is 410.2867269598719
+    R_new = 6490.564610919336, R_old = 5785.530359611746
+    The change in resistance is 705.0342513075902
 ** adaptation results for OutletTree83 **
-    R_new = 16739.83449692183, R_old = 16385.446875329068
-    The change in resistance is 354.387621592763
+    R_new = 6489.99132829498, R_old = 5785.019959134447
+    The change in resistance is 704.971369160533
 ** adaptation results for OutletTree84 **
-    R_new = 15398.069657900087, R_old = 15073.211426522997
-    The change in resistance is 324.8582313770894
+    R_new = 16856.149141041307, R_old = 15113.743383022076
+    The change in resistance is 1742.4057580192311
 ** adaptation results for OutletTree85 **
-    R_new = 18070.761782819372, R_old = 17687.112847412373
-    The change in resistance is 383.64893540699995
+    R_new = 8618.609913780034, R_old = 7673.230076607941
+    The change in resistance is 945.3798371720932
 ** adaptation results for OutletTree88 **
-    R_new = 15528.257198330994, R_old = 15200.483976925898
-    The change in resistance is 327.7732214050957
+    R_new = 6489.703016476544, R_old = 5784.783931178827
+    The change in resistance is 704.9190852977172
 ** adaptation results for OutletTree90 **
-    R_new = 24424.49054347937, R_old = 23899.67147763719
-    The change in resistance is 524.8190658421809
+    R_new = 26633.274458475473, R_old = 23849.007667477625
+    The change in resistance is 2784.266790997848
 ** adaptation results for OutletTree91 **
-    R_new = 19966.04478561038, R_old = 19540.617109840026
-    The change in resistance is 425.4276757703519
+    R_new = 21704.825081971594, R_old = 19472.19191774421
+    The change in resistance is 2232.6331642273835
 ** adaptation results for OutletTree92 **
-    R_new = 19837.448055964822, R_old = 19414.622370571706
-    The change in resistance is 422.82568539311615
+    R_new = 8617.284367670762, R_old = 7671.707274489329
+    The change in resistance is 945.5770931814322
 ** adaptation results for OutletTree94 **
-    R_new = 14289.336400732649, R_old = 13988.669735499423
-    The change in resistance is 300.666665233226
+    R_new = 4862.486410549263, R_old = 4339.4489742789665
+    The change in resistance is 523.0374362702969
 ** adaptation results for OutletTree95 **
-    R_new = 13708.522288425143, R_old = 13420.528488616932
-    The change in resistance is 287.9937998082114
+    R_new = 3634.574418341113, R_old = 3246.0964581285753
+    The change in resistance is 388.4779602125377
 ** adaptation results for OutletTree98 **
-    R_new = 20562.25630594021, R_old = 20123.36339468657
-    The change in resistance is 438.8929112536389
+    R_new = 22540.441394940342, R_old = 20181.086919086032
+    The change in resistance is 2359.3544758543103
 ** adaptation results for OutletTree100 **
-    R_new = 18925.37157407234, R_old = 18522.84102259366
-    The change in resistance is 402.5305514786778
+    R_new = 6489.719059579752, R_old = 5785.162938011564
+    The change in resistance is 704.5561215681882
 ** adaptation results for OutletTree101 **
-    R_new = 20739.8429371184, R_old = 20297.069831923567
-    The change in resistance is 442.77310519483217
+    R_new = 8618.184770501139, R_old = 7672.997385742198
+    The change in resistance is 945.1873847589404
 ** adaptation results for OutletTree102 **
-    R_new = 20736.234588373172, R_old = 20293.47476136713
-    The change in resistance is 442.7598270060407
+    R_new = 7950.930854324209, R_old = 7114.457328533068
+    The change in resistance is 836.4735257911407
 ** adaptation results for OutletTree103 **
-    R_new = 14452.50653138652, R_old = 14148.296518343346
-    The change in resistance is 304.2100130431736
+    R_new = 15879.875157494265, R_old = 14250.786591582742
+    The change in resistance is 1629.088565911523
 ** adaptation results for OutletTree104 **
-    R_new = 18660.880638415438, R_old = 18264.170455717798
-    The change in resistance is 396.71018269763954
+    R_new = 20342.663330247935, R_old = 18211.118093569094
+    The change in resistance is 2131.5452366788413
 ** adaptation results for OutletTree106 **
-    R_new = 21726.99459075696, R_old = 21262.16995092618
-    The change in resistance is 464.8246398307783
+    R_new = 8617.025992321063, R_old = 7671.494431160727
+    The change in resistance is 945.5315611603364
 ** adaptation results for OutletTree107 **
-    R_new = 20946.157718613355, R_old = 20498.716916652662
-    The change in resistance is 447.4408019606926
+    R_new = 23132.49227014706, R_old = 20520.806044505447
+    The change in resistance is 2611.6862256416134
 ** adaptation results for OutletTree109 **
-    R_new = 6180.9747440269575, R_old = 6035.4651401987285
-    The change in resistance is 145.50960382822905
+    R_new = 4861.464640557053, R_old = 4338.5401280880415
+    The change in resistance is 522.9245124690115
 ** adaptation results for OutletTree112 **
-    R_new = 26936.90989465892, R_old = 26355.350028920464
-    The change in resistance is 581.5598657384544
+    R_new = 29659.662522648978, R_old = 26559.15871900153
+    The change in resistance is 3100.503803647447
 ** adaptation results for OutletTree113 **
-    R_new = 24539.545127978177, R_old = 24011.838778951875
-    The change in resistance is 527.7063490263026
+    R_new = 8617.060667546604, R_old = 7671.526254645361
+    The change in resistance is 945.5344129012428
 ** adaptation results for OutletTree114 **
-    R_new = 27941.004055991212, R_old = 27336.77071341977
-    The change in resistance is 604.2333425714423
+    R_new = 11355.869732267944, R_old = 10101.96390576378
+    The change in resistance is 1253.905826504164
 ** adaptation results for OutletTree116 **
-    R_new = 18164.152488893647, R_old = 17778.37294368656
-    The change in resistance is 385.7795452070859
+    R_new = 6489.923817171029, R_old = 5784.987212124981
+    The change in resistance is 704.9366050460485
 ** adaptation results for OutletTree117 **
-    R_new = 18528.743722531755, R_old = 18134.910874316083
-    The change in resistance is 393.83284821567213
+    R_new = 20121.285351394148, R_old = 18050.003016678173
+    The change in resistance is 2071.2823347159756
 ** adaptation results for OutletTree118 **
-    R_new = 28016.294848561127, R_old = 27410.610514414228
-    The change in resistance is 605.6843341468993
+    R_new = 31115.963142915705, R_old = 27509.445392894497
+    The change in resistance is 3606.5177500212085
 ** adaptation results for OutletTree119 **
-    R_new = 22989.077789694697, R_old = 22496.115954695175
-    The change in resistance is 492.96183499952167
+    R_new = 8618.108091701914, R_old = 7672.65485257109
+    The change in resistance is 945.4532391308239
 ** adaptation results for OutletTree121 **
-    R_new = 5672.640531092468, R_old = 5539.4661191631
-    The change in resistance is 133.17441192936803
+    R_new = 1185.9332250324028, R_old = 1054.4563819675918
+    The change in resistance is 131.47684306481096
 ** adaptation results for OutletTree123 **
-    R_new = 24161.314307278877, R_old = 23642.09012082747
-    The change in resistance is 519.2241864514071
+    R_new = 4862.655314378576, R_old = 4339.659576962939
+    The change in resistance is 522.9957374156365
 ** adaptation results for OutletTree124 **
-    R_new = 6180.9769069561535, R_old = 6035.4947767669755
-    The change in resistance is 145.48213018917795
+    R_new = 4861.201168228393, R_old = 4338.429293822147
+    The change in resistance is 522.7718744062458
 ** adaptation results for OutletTree125 **
-    R_new = 5053.6948277133215, R_old = 4935.470842564277
-    The change in resistance is 118.22398514904489
+    R_new = 5552.503414821481, R_old = 4914.446500055062
+    The change in resistance is 638.0569147664191
 ** adaptation results for OutletTree127 **
-    R_new = 10885.548258297269, R_old = 10658.773982511371
-    The change in resistance is 226.77427578589777
+    R_new = 2718.682968880122, R_old = 2428.8479585522796
+    The change in resistance is 289.8350103278426
 ** adaptation results for OutletTree128 **
-    R_new = 11512.153171583432, R_old = 11271.846031070025
-    The change in resistance is 240.30714051340692
+    R_new = 12709.885882734583, R_old = 11401.872583901686
+    The change in resistance is 1308.013298832897
 ** adaptation results for OutletTree129 **
-    R_new = 10972.154561502295, R_old = 10743.574111396836
-    The change in resistance is 228.58045010545902
+    R_new = 3634.325142107862, R_old = 3246.2825377664185
+    The change in resistance is 388.0426043414436
 ** adaptation results for OutletTree132 **
-    R_new = 8914.298809697833, R_old = 8729.91318119825
-    The change in resistance is 184.38562849958362
+    R_new = 2033.1221219055722, R_old = 1816.8403944753234
+    The change in resistance is 216.2817274302488
 ** adaptation results for OutletTree133 **
-    R_new = 6106.992205660879, R_old = 5963.315798313857
-    The change in resistance is 143.67640734702218
+    R_new = 6711.842844499243, R_old = 6006.723899016081
+    The change in resistance is 705.118945483162
 ** adaptation results for OutletTree135 **
-    R_new = 24333.54873950098, R_old = 23810.451871947582
-    The change in resistance is 523.0968675533986
+    R_new = 6491.159998219643, R_old = 5786.056080313936
+    The change in resistance is 705.103917905707
 ** adaptation results for OutletTree136 **
-    R_new = 18941.389830944332, R_old = 18538.41531074083
-    The change in resistance is 402.974520203501
+    R_new = 20540.243422223542, R_old = 18387.99101176893
+    The change in resistance is 2152.2524104546137
 ** adaptation results for OutletTree139 **
-    R_new = 16341.598926423881, R_old = 15995.968383827627
-    The change in resistance is 345.6305425962546
+    R_new = 4861.683523660676, R_old = 4338.72716305109
+    The change in resistance is 522.9563606095853
 ** adaptation results for OutletTree140 **
-    R_new = 19566.654210340297, R_old = 19149.82897473077
-    The change in resistance is 416.8252356095254
+    R_new = 6490.158203976637, R_old = 5785.163838134895
+    The change in resistance is 704.9943658417424
 ** adaptation results for OutletTree141 **
-    R_new = 17183.862334209396, R_old = 16819.708512263012
-    The change in resistance is 364.1538219463837
+    R_new = 18749.284220570957, R_old = 16817.959120501862
+    The change in resistance is 1931.3251000690943
 ** adaptation results for OutletTree142 **
-    R_new = 7213.679442597833, R_old = 7065.454407831507
-    The change in resistance is 148.22503476632664
+    R_new = 2032.9929019674248, R_old = 1816.5910193014347
+    The change in resistance is 216.40188266599012

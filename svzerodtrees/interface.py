@@ -267,8 +267,9 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
         # construct trees
         preop.construct_cwss_trees(config_handler,
                                            result_handler,
-                                           log_file,
-                                           d_min=.01) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
+                                           n_procs=12,
+                                           log_file=log_file,
+                                           d_min=.02) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
 
         # save preop config to as pickle, with StructuredTreeOutlet objects
         write_to_log(log_file, 'saving preop config with cwss trees...')

@@ -288,8 +288,7 @@ def assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info):
             bc_idx += 1
 
 
-
-def construct_cwss_trees(config_handler, result_handler, log_file=None, d_min=0.0049):
+def construct_cwss_trees_parallel(config_handler, result_handler, log_file=None, d_min=0.0049):
     '''
     construct structured trees at every outlet of the 0d model optimized against the outflow BC resistance,
     for the constant wall shear stress assumption.
@@ -326,8 +325,6 @@ def construct_cwss_trees(config_handler, result_handler, log_file=None, d_min=0.
                 # replace the bc resistance with the optimized value as it may be different than the initial value
                 bc.R = outlet_tree.root.R_eq
 
-                # print(' the equivalent resistance being added as the outlet boundary condition is ' + str(outlet_tree.root.R_eq))
-
                 # write to log file for debugging
                 write_to_log(log_file, "     the number of vessels is " + str(outlet_tree.count_vessels()))
 
@@ -342,7 +339,7 @@ def construct_cwss_trees(config_handler, result_handler, log_file=None, d_min=0.
     result_handler.add_unformatted_result(preop_result, 'preop')
 
 
-def construct_cwss_trees_parallel(config_handler, result_handler, n_procs=4, log_file=None, d_min=0.0049):
+def construct_cwss_trees(config_handler, result_handler, n_procs=4, log_file=None, d_min=0.0049):
     '''
     construct cwss trees in parallel to increase computational speed
     '''
@@ -361,14 +358,20 @@ def construct_cwss_trees_parallel(config_handler, result_handler, n_procs=4, log
 
 
     
-    # run the optimization in parallel
+    # function to run the tree diameter optimization
     def optimize_tree(tree):
         tree.optimize_tree_diameter(log_file, d_min=d_min)
+        return tree
 
+    # run the tree 
     with Pool(n_procs) as p:
-        p.map(optimize_tree, config_handler.trees)
+        config_handler.trees = p.map(optimize_tree, config_handler.trees)
     
-    config_handler.to_json('post_tree_config.json')
+    # update the resistance in the config according to the optimized tree resistance
+    for bc, tree in zip(list(config_handler.bcs.values())[1:], config_handler.trees):
+        bc.R = tree.root.R_eq
+
+
     preop_result = run_svzerodplus(config_handler.config)
 
     # leaving vessel radius fixed, update the hemodynamics of the StructuredTreeOutlet instances based on the preop result
