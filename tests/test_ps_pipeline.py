@@ -2,6 +2,7 @@ import json
 import sys
 import os
 import numpy as np
+import time
 sys.path.append('/home/ndorn/Documents/Stanford/PhD/Simvascular/svZeroDPlus/structured_trees/src')
 # print(sys.path)
 from svzerodtrees.structuredtreebc import StructuredTreeOutlet
@@ -15,6 +16,7 @@ from svzerodtrees import operation, preop, interface, postop
 from svzerodtrees._config_handler import ConfigHandler
 from svzerodtrees._result_handler import ResultHandler
 import pickle
+from deepdiff import DeepDiff
 
 
 def build_tree(config, result):
@@ -74,7 +76,7 @@ def test_cwss_tree_construction():
 
     write_to_log(log_file, 'testing tree construction', write=True)
 
-    preop.construct_cwss_trees(config_handler, result_handler, log_file, d_min=0.049)
+    preop.construct_cwss_trees(config_handler, result_handler, log_file, d_min=0.02)
 
     # print the number of vessels in the tree
     print("n_vessels = " + str([tree.count_vessels() for tree in config_handler.trees]))
@@ -157,26 +159,53 @@ def test_cwss_adaptation():
     test the constant wss tree adaptation algorithm
     '''
     
-    config_handler = ConfigHandler.from_file('tests/cases/LPA_RPA_0d_steady/preop_config.in')
+    config_handler = ConfigHandler.from_json('tests/cases/full_pa_test/preop_config.json')
 
-    with open('tests/cases/LPA_RPA_0d_steady/result_handler.out', 'rb') as ff:
-        result_handler = pickle.load(ff)
-    
+    result_handler = ResultHandler.from_config_handler(config_handler)
+
     with open('tests/cases/repair.json') as ff:
         repair_dict = json.load(ff)
     
     repair_config = repair_dict['proximal']
 
-    preop.construct_cwss_trees(config_handler, result_handler, fig_dir='tests/cases/LPA_RPA_0d_steady/', d_min=0.49)
+    preop.construct_cwss_trees_parallel(config_handler, result_handler, n_procs=24, d_min=0.02)
 
-
-    operation.repair_stenosis_coefficient(config_handler, result_handler, repair_config)
+    operation.repair_stenosis(config_handler, result_handler, repair_config)
 
     adapt_constant_wss(config_handler, result_handler)
 
     result_handler.format_results()
 
-    print(result_handler.clean_results)
+
+def compare_parallel_tree_construction():
+    '''
+    test parallelized tree construction vs unparallelized
+    '''
+
+    config_handler_par = ConfigHandler.from_json('tests/cases/full_pa_test/preop_config.json')
+    config_handler = ConfigHandler.from_json('tests/cases/full_pa_test/preop_config.json')
+
+    result_handler_par = ResultHandler.from_config_handler(config_handler_par)
+    result_handler = ResultHandler.from_config_handler(config_handler)
+
+    # unparallelized
+    unp_start_time = time.perf_counter()
+    preop.construct_cwss_trees(config_handler, result_handler, d_min=0.02)
+    unp_end_time = time.perf_counter()
+
+    # parallelized
+    par_start_time = time.perf_counter()
+    preop.construct_cwss_trees_parallel(config_handler_par, result_handler_par, n_procs=24, d_min=0.02)
+    par_end_time = time.perf_counter()
+
+
+    print(f"unparallelized tree construction took {unp_end_time - unp_start_time} seconds")
+    print(f"parallelized tree construction took {par_end_time - par_start_time} seconds")
+
+    # compare the results
+    # print(DeepDiff(result_handler_par.results, result_handler.results))
+
+
 
 
 def test_pries_adaptation():
@@ -210,8 +239,8 @@ def test_pries_adaptation():
 
 
 def test_run_from_file():
-    expfile = 'exp_config_test.json'
-    os.chdir('tests/cases/LPA_RPA_0d_steady/experiments')
+    expfile = 'pa_outlet_bc_test.json'
+    os.chdir('tests/cases/full_pa_test/experiments')
 
     interface.run_from_file(expfile, vis_trees=True)
 
@@ -242,8 +271,27 @@ def test_pa_optimizer():
     result_handler.to_file('pa_preop_result.out')
 
 
+def test_simple_config():
+    '''
+    test the simplest config
+    '''
+
+    os.chdir('tests/cases/full_pa_test')
+    input_file = 'pa_config.json'
+    
+    config_handler = ConfigHandler.from_json(input_file)
+
+    result_handler = ResultHandler.from_config_handler(config_handler)
+
+    config_handler.simulate(result_handler, 'preop')
+
+    result_handler.results_to_dict()
+
+    with open('pa_config_result.json', 'w') as ff:
+        json.dump(result_handler.results['preop'], ff, indent=4)
+
 if __name__ == '__main__':
 
 
-    # test_preop()
-    test_pa_optimizer()
+    # test_run_from_file()
+    test_cwss_adaptation()

@@ -36,7 +36,7 @@ def test_config_handler():
     '''
     test config handler on a small model
     '''
-    config_handler = ConfigHandler.from_json('tests/cases/LPA_RPA_0d_steady/preop_config.json')
+    config_handler = ConfigHandler.from_json('tests/cases/full_pa_test/preop_config.json')
 
     result = run_svzerodplus(config_handler.config)
 
@@ -46,8 +46,30 @@ def test_config_handler():
 
     result_comparison = DeepDiff(assembled_result, result)
 
-
+    print('ran simulations')
+    
     assert result_comparison == {}
+
+
+def test_config_handler_methods():
+    '''
+    test various methods within the config handler
+    '''
+    config_handler = ConfigHandler.from_json('tests/cases/LPA_RPA_0d_steady/preop_config.json')
+
+    old_R = []
+    for vessel in config_handler.get_segments(1):
+        old_R.append(vessel.R)
+    
+    config_handler.change_branch_resistance(1, 100)
+
+    new_R = []
+    for vessel in config_handler.get_segments(1):
+        new_R.append(vessel.R)
+    
+    print(old_R, new_R)
+    
+
 
 
 def test_stenosis_ops():
@@ -94,7 +116,7 @@ def test_pa_config():
 
 if __name__ == '__main__':
 
-    test_pa_config()
+    test_config_handler()
 
 
 

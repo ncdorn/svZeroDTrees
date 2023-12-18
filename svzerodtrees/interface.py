@@ -105,12 +105,11 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
     # optimize preoperative outlet boundary conditions
     if not optimized:
         if is_full_pa:
-            config_handler, result_handler = preop.optimize_pa_bcs(
+            config_handler, result_handler, pa_config = preop.optimize_pa_bcs(
                 input_file,
                 mesh_surfaces_path,
                 clinical_targets,
-                log_file,
-                show_optimization=False
+                log_file
             )
         else:
             config_handler, result_handler = preop.optimize_outlet_bcs(
@@ -269,8 +268,7 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
         preop.construct_cwss_trees(config_handler,
                                            result_handler,
                                            log_file,
-                                           fig_dir=fig_dir,
-                                           d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
+                                           d_min=.01) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
 
         # save preop config to as pickle, with StructuredTreeOutlet objects
         write_to_log(log_file, 'saving preop config with cwss trees...')
@@ -282,7 +280,7 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
             pickle.dump(result_handler, ff)
     
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
-    operation.repair_stenosis_coefficient(config_handler, 
+    operation.repair_stenosis(config_handler, 
                                           result_handler,
                                           repair_config[0], 
                                           log_file)
