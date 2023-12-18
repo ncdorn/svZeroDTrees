@@ -179,7 +179,7 @@ def optimize_pa_bcs(input_file,
                     show_optimization=True):
     '''
     optimize the outlet boundary conditions of a pulmonary arterial model by splitting the LPA and RPA
-    into two RCR blocks. Using Nelder-Mead optimization method.
+    into two Resistance blocks. Using Nelder-Mead optimization method.
 
     :param input_file: 0d solver json input file name string
     :param clinical_targets: clinical targets input csv
@@ -224,33 +224,6 @@ def optimize_pa_bcs(input_file,
     assign_pa_bcs(config_handler, clinical_targets.q, rpa_info, lpa_info, pa_config.bcs["LPA_BC"].R, pa_config.bcs["RPA_BC"].R, clinical_targets.wedge_p)
 
     return config_handler, result_handler, pa_config
-
-
-def pa_opt_loss_fcn(R, pa_config, targets):
-    '''
-    loss function for the PA optimization
-
-    :param R: list of resistances from optimizer
-    :param pa_config: pa config dict
-    :param targets: optimization targets [Q_RPA, P_MPA, P_RPA, P_LPA]
-
-    :return loss: sum of squares of differences between targets and model evaluation
-    '''
-
-    # write the optimization iteration resistances to the config
-    write_pa_config_resistances(pa_config, R)
-
-    # run the 0D solver
-    pa_result = run_svzerodplus(pa_config)
-
-    # get the result values to compare against targets [Q_rpa, P_mpa, P_rpa, P_lpa]
-    pa_eval = get_pa_optimization_values(pa_result)
-
-    loss = np.sum((pa_eval - targets) ** 2)
-
-    # print for debugging
-    # print(loss, pa_eval, targets)
-    return loss
 
 
 def assign_pa_bcs(config_handler, q_in, rpa_info, lpa_info, R_lpa, R_rpa, wedge_p=13332.2):
@@ -300,7 +273,7 @@ def assign_pa_bcs(config_handler, q_in, rpa_info, lpa_info, R_lpa, R_rpa, wedge_
             bc_idx += 1
 
 
-def construct_cwss_trees(config_handler, result_handler: ResultHandler, log_file=None, d_min=0.0049, vis_trees=False, fig_dir=None):
+def construct_cwss_trees(config_handler: ConfigHandler, result_handler: ResultHandler, log_file=None, d_min=0.0049, vis_trees=False, fig_dir=None):
     '''
     construct structured trees at every outlet of the 0d model optimized against the outflow BC resistance,
     for the constant wall shear stress assumption.
@@ -354,7 +327,7 @@ def construct_cwss_trees(config_handler, result_handler: ResultHandler, log_file
     result_handler.add_unformatted_result(preop_result, 'preop')
 
 
-def construct_pries_trees(config_handler, result_handler, log_file=None, d_min=0.0049, tol=0.01, vis_trees=False, fig_dir=None):
+def construct_pries_trees(config_handler: ConfigHandler, result_handler, log_file=None, d_min=0.0049, tol=0.01, vis_trees=False, fig_dir=None):
     '''
     construct trees for pries and secomb adaptation and perform initial integration
     :param config: 0D solver preop config
@@ -421,7 +394,6 @@ def optimize_ps_params():
     method to optimize the pries and secomb parameters to compare with Ingrid's. To be implemented
     '''
     pass
-
 
 
 class ClinicalTargets():
