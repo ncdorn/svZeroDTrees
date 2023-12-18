@@ -234,11 +234,7 @@ def optimize_pa_bcs(input_file,
     return config_handler, result_handler, pa_config
 
 
-<<<<<<< HEAD
-def assign_pa_bcs(config_handler, q_in, rpa_info, lpa_info, R_lpa, R_rpa, wedge_p=13332.2):
-=======
 def assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info):
->>>>>>> 754e2cef5c8c3ffb747629ae451096a337320227
     '''
     assign resistances proportional to outlet area to the RPA and LPA outlet bcs.
     this assumes that the rpa and lpa cap info has not changed info since export from simvascular.
@@ -253,7 +249,7 @@ def assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info):
 
     def Ri(Ai, A, R):
         return R * (A / Ai)
-    
+
     # get RPA and LPA total area
     a_RPA = sum(rpa_info.values())
     a_LPA = sum(lpa_info.values())
@@ -263,10 +259,10 @@ def assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info):
 
     for name, val in lpa_info.items():
         all_R[name] = Ri(val, a_LPA, pa_config.bcs["LPA_BC"].R)
-    
+
     for name, val in rpa_info.items():
         all_R[name] = Ri(val, a_RPA, pa_config.bcs["RPA_BC"].R)
-    
+
     # write the resistances to the config
     bc_idx = 0
 
@@ -275,7 +271,7 @@ def assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info):
 
     # set the inflow
     config_handler.set_inflow(pa_config.clinical_targets.q)
-    
+
     # change the proximal LPA and RPA branch resistances
     config_handler.change_branch_resistance(config_handler.lpa.branch, pa_config.lpa_prox.R)
     config_handler.change_branch_resistance(config_handler.rpa.branch, pa_config.rpa_prox.R)
@@ -292,12 +288,8 @@ def assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info):
             bc_idx += 1
 
 
-<<<<<<< HEAD
-def construct_cwss_trees(config_handler: ConfigHandler, result_handler: ResultHandler, log_file=None, d_min=0.0049, vis_trees=False, fig_dir=None):
-=======
-def construct_cwss_trees(config_handler, result_handler, log_file=None, d_min=0.0049):
 
->>>>>>> 754e2cef5c8c3ffb747629ae451096a337320227
+def construct_cwss_trees(config_handler, result_handler, log_file=None, d_min=0.0049):
     '''
     construct structured trees at every outlet of the 0d model optimized against the outflow BC resistance,
     for the constant wall shear stress assumption.
