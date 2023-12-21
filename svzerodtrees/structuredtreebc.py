@@ -207,7 +207,7 @@ class StructuredTreeOutlet():
                 # assume pressure is conserved at the junction. 
                 # Could later replace this with a function to account for pressure loss
                 current_vessel.left = TreeVessel.create_vessel(vessel_id, next_gen, left_dia, self.params["eta"])
-                if left_dia < d_min:
+                if left_dia < d_min or vessel_id > 10^6:
                     current_vessel.left.collapsed = True
                 queue.append(current_vessel.left)
                 self.block_dict["vessels"].append(current_vessel.left.info)
@@ -217,7 +217,7 @@ class StructuredTreeOutlet():
                 vessel_id += 1
                 right_dia = beta * current_vessel.d
                 current_vessel.right = TreeVessel.create_vessel(vessel_id, next_gen, right_dia, self.params["eta"])
-                if right_dia < d_min:
+                if right_dia < d_min or vessel_id > 10^6:
                     current_vessel.right.collapsed = True
                 queue.append(current_vessel.right)
                 self.block_dict["vessels"].append(current_vessel.right.info)

@@ -127,7 +127,7 @@ class ConfigHandler():
         '''
 
         with open(file_name, 'rb') as ff:
-            self.config = pickle.load(ff)
+            self._config = pickle.load(ff)
         
         self.trees = []
         for vessel_config in self.config["vessels"]:

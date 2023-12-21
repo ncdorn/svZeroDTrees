@@ -210,26 +210,71 @@ def optimize_pa_bcs(input_file,
 
     pa_config = PAConfig.from_config_handler(config_handler, clinical_targets)
 
-    pa_config.optimize()
 
-    print(pa_config.bcs["INFLOW"].to_dict())
+    iterations = 1
 
-    write_to_log(log_file, "*** optimized values ****")
-    write_to_log(log_file, "MPA pressure: " + str(pa_config.P_mpa))
-    write_to_log(log_file, "RPA pressure: " + str(pa_config.P_rpa))
-    write_to_log(log_file, "LPA pressure: " + str(pa_config.P_lpa))
-    write_to_log(log_file, "RPA flow split: " + str(pa_config.Q_rpa / clinical_targets.q))
+    for i in range(iterations):
+        print('beginning pa_config optimization iteration ' + str(i) + ' of ' + str(iterations) + '...')
+        # distribute amongst all resistance conditions in the config
+        pa_config.optimize()
 
-    # get outlet areas
-    rpa_info, lpa_info, inflow_info = vtp_info(mesh_surfaces_path)
-    
-    # calculate proportional outlet resistances
-    print('total number of outlets: ' + str(len(rpa_info) + len(lpa_info)))
-    print('RPA total area: ' + str(sum(rpa_info.values())) + '\n')
-    print('LPA total area: ' + str(sum(lpa_info.values())) + '\n')
+        write_to_log(log_file, "*** optimized values ****")
+        write_to_log(log_file, "MPA pressure: " + str(pa_config.P_mpa))
+        write_to_log(log_file, "RPA pressure: " + str(pa_config.P_rpa))
+        write_to_log(log_file, "LPA pressure: " + str(pa_config.P_lpa))
+        write_to_log(log_file, "RPA flow split: " + str(pa_config.Q_rpa / clinical_targets.q))
 
-    # distribute amongst all resistance conditions in the config
-    assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info)
+        # get outlet areas
+        rpa_info, lpa_info, inflow_info = vtp_info(mesh_surfaces_path)
+        
+        # calculate proportional outlet resistances
+        print('total number of outlets: ' + str(len(rpa_info) + len(lpa_info)))
+        print('RPA total area: ' + str(sum(rpa_info.values())) + '\n')
+        print('LPA total area: ' + str(sum(lpa_info.values())) + '\n')
+
+        assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info)
+
+        # run the simulation
+        result = run_svzerodplus(config_handler.config)
+
+        # get the actual Q_lpa and Q_rpa
+        Q_lpa = get_branch_result(result, 'flow_in', config_handler.lpa.branch, steady=steady)
+        Q_rpa = get_branch_result(result, 'flow_in', config_handler.rpa.branch, steady=steady)
+
+        flow_split = np.mean(Q_rpa) / (np.mean(Q_lpa) + np.mean(Q_rpa))
+        print('actual flow split:  ' + str(flow_split))
+
+        if abs(flow_split - clinical_targets.rpa_split) < 0.01:
+            print('flow split within tolerance')
+            break
+        else:
+            print('flow split not within tolerance, adjusting resistance values')
+            # get the mean outlet pressure
+            p_out_RPA = []
+            p_out_LPA = []
+            for vessel in config_handler.vessel_map.values():
+                if vessel.bc is not None:
+                    if "outlet" in vessel.bc:
+                        if config_handler.lpa.branch in vessel.path:
+                            p_out_LPA.append(np.mean(get_branch_result(result, 'pressure_out', vessel.branch, steady=steady)))
+                        elif config_handler.rpa.branch in vessel.path:
+                            p_out_RPA.append(np.mean(get_branch_result(result, 'pressure_out', vessel.branch, steady=steady)))
+            
+            p_mean_out_LPA = np.mean(p_out_LPA)
+            p_mean_out_RPA = np.mean(p_out_RPA)
+            print(p_mean_out_LPA, p_mean_out_RPA)
+
+            R_eq_LPA_dist = (m2d(clinical_targets.lpa_p) - p_mean_out_LPA) / Q_lpa
+            R_eq_RPA_dist = (m2d(clinical_targets.rpa_p) - p_mean_out_RPA) / Q_rpa
+
+            print(R_eq_LPA_dist, R_eq_RPA_dist)
+
+            # adjust the resistance values
+            # pa_config.lpa_dist.R = R_eq_LPA_dist
+            # pa_config.rpa_dist.R = R_eq_RPA_dist
+
+        print(pa_config.bcs["INFLOW"].to_dict())
+
 
     return config_handler, result_handler, pa_config
 
@@ -277,7 +322,9 @@ def assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info):
     config_handler.change_branch_resistance(config_handler.rpa.branch, pa_config.rpa_prox.R)
 
     print('LPA RESISTANCE: ' + str(config_handler.get_branch_resistance(config_handler.lpa.branch)))
+    print('LPA PRESSURE DROP: ' + str(d2m(config_handler.get_branch_resistance(config_handler.lpa.branch) * pa_config.clinical_targets.q)))
     print('RPA RESISTANCE: ' + str(config_handler.get_branch_resistance(config_handler.rpa.branch)))
+    print('RPA PRESSURE DROP: ' + str(d2m(config_handler.get_branch_resistance(config_handler.rpa.branch) * pa_config.clinical_targets.q)))
 
     # loop through boundary conditions to assign resistance values
     for bc in config_handler.bcs.values():
@@ -360,6 +407,7 @@ def construct_cwss_trees(config_handler, result_handler, n_procs=4, log_file=Non
     
     # function to run the tree diameter optimization
     def optimize_tree(tree):
+        print('building ' + tree.name + ' for resistance ' + str(tree.params["bc_values"]["R"]) + '...')
         tree.optimize_tree_diameter(log_file, d_min=d_min)
         return tree
 
@@ -636,7 +684,7 @@ class PAConfig():
         run the simulation with the current config
         '''
 
-        return run_svzerodplus(self.config)
+        return run_svzerodplus(self.config, dtype='dict')
     
 
     def initalize_bcs(self, inflow: BoundaryCondition, wedge_p: float):
@@ -785,6 +833,13 @@ class PAConfig():
                           method="Nelder-Mead", bounds=bounds)
 
         print([self.Q_rpa / self.clinical_targets.q, self.P_mpa, self.P_rpa, self.P_lpa])
+
+        # print some other random stuff
+        print('LPA RESISTANCE: ' + str(self.lpa_prox.R))
+        print('LPA PRESSURE DROP: ' + str(d2m(self.lpa_prox.R * (self.clinical_targets.q - self.Q_rpa))))
+        print('RPA RESISTANCE: ' + str(self.rpa_prox.R))
+        print('RPA PRESSURE DROP: ' + str(d2m(self.rpa_prox.R * self.Q_rpa)))
+
 
     @property
     def config(self):

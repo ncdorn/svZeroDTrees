@@ -167,7 +167,7 @@ def test_cwss_adaptation():
     
     repair_config = repair_dict['proximal']
 
-    preop.construct_cwss_trees_parallel(config_handler, result_handler, n_procs=12, d_min=0.03)
+    preop.construct_cwss_trees(config_handler, result_handler, n_procs=12, d_min=0.03)
 
     operation.repair_stenosis(config_handler, result_handler, repair_config)
 
@@ -247,21 +247,23 @@ def test_run_from_file():
 def test_pa_optimizer():
     # test the pa optimizer pipeline
 
-    os.chdir('tests/cases/full_pa_test')
-    input_file = 'AS1_SU0308_prestent.json'
-    log_file = 'full_pa_test.log'
+    os.chdir('tests/cases/AS2')
+    input_file = 'AS2_prestent.json'
+    log_file = 'AS2_test.log'
     clinical_targets = 'clinical_targets.csv'
-    mesh_surfaces_path = '/home/ndorn/Documents/Stanford/PhD/Simvascular/threed_models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces'
+    mesh_surfaces_path = '/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/PPAS/svPPAS/AS2_SU0313_prestent/Meshes/1.6M_elements/mesh-surfaces'
 
     config_handler, result_handler, pa_config = preop.optimize_pa_bcs(
         input_file,
         mesh_surfaces_path,
         clinical_targets,
-        log_file,
-        show_optimization=False,
+        log_file
     )
 
     pa_config.to_json('pa_reduced_config.json')
+
+    with open('pa_config_result.json', 'w') as ff:
+        json.dump(pa_config.simulate(), ff)
 
     # save the optimized pa config
     config_handler.to_json('pa_optimized_config.json')
@@ -291,4 +293,4 @@ def test_simple_config():
 
 if __name__ == '__main__':
 
-    test_run_from_file()
+    test_pa_optimizer()

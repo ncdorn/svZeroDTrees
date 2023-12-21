@@ -377,10 +377,11 @@ def assign_flow_to_root(result_array, root, steady=False):
     assign_flow(root)
 
 
-def run_svzerodplus(config: dict):
+def run_svzerodplus(config: dict, dtype='ndarray'):
     """Run the svzerodplus solver and return a dict of results.
 
     :param config: svzerodplus config dict
+    :param dtype: data type of the result arrays, either dict or ndarray. default is ndarray.
 
     :return output: the result of the simulation as a dict of dicts with each array denoted by its branch id
     """
@@ -423,6 +424,11 @@ def run_svzerodplus(config: dict):
             )
 
         last_seg_id = seg_id
+
+    if dtype == 'dict':
+        for field in output.keys():
+            for branch in output[field].keys():
+                output[field][branch] = output[field][branch].tolist()
 
     return output
 
@@ -882,3 +888,18 @@ def rebuild_trees(config: dict):
             if 'tree' in vessel_config:
                 
                 pass
+
+
+def m2d(mmHg):
+    '''
+    convert mmHg to dynes/cm2
+    '''
+
+    return mmHg * 1333.22
+
+def d2m(dynes):
+    '''
+    convert dynes/cm2 to mmHg
+    '''
+
+    return dynes / 1333.22

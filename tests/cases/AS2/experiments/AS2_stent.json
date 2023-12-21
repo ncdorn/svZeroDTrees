@@ -1,0 +1,15 @@
+{   "name": "AS2_5mm_stent_test",
+    "model": "AS2_prestent",
+    "adapt": "cwss",
+    "optimized": false,
+    "is_full_pa_tree": true,
+    "trees_exist": false,
+    "mesh_surfaces_path": "/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/PPAS/svPPAS/AS2_SU0313_prestent/Meshes/1.6M_elements/mesh-surfaces",
+    "repair": [
+        {
+        "type": "stent",
+        "location": "proximal",
+        "value": [0.5, 0.5]
+        }
+    ]
+}
