@@ -100,25 +100,13 @@ class ConfigHandler():
 
     def to_file_w_trees(self, file_name: str):
         '''
-        write the desired config with trees to a binary file via pickle
+        write the desired config handler with trees to a binary file via pickle
 
         :param file_name: name of the file to write to
         '''
 
-        outlet_idx = 0
-        for vessel_config in self.config["vessels"]:
-            if "boundary_conditions" in vessel_config:
-                if "outlet" in vessel_config["boundary_conditions"]:
-                    for bc_config in self.config["boundary_conditions"]:
-                        if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
-                            vessel_config["tree"] = self.trees[outlet_idx]
-
-                    outlet_idx += 1
-
         with open(file_name, 'wb') as ff:
-            pickle.dump(self.config, ff)
-
-        self.clear_config_trees()
+            pickle.dump(self, ff)
     
 
     def from_file_w_trees(self, file_name: str):
@@ -127,17 +115,7 @@ class ConfigHandler():
         '''
 
         with open(file_name, 'rb') as ff:
-            self._config = pickle.load(ff)
-        
-        self.trees = []
-        for vessel_config in self.config["vessels"]:
-            if "boundary_conditions" in vessel_config:
-                if "outlet" in vessel_config["boundary_conditions"]:
-                    for bc_config in self.config["boundary_conditions"]:
-                        if vessel_config["boundary_conditions"]["outlet"] == bc_config["bc_name"]:
-                            self.trees.append(vessel_config["tree"])
-
-        self.clear_config_trees()
+            self = pickle.load(ff)
 
 
     def simulate(self, result_handler: ResultHandler, label: str):
@@ -390,12 +368,13 @@ class ConfigHandler():
         calc_R_eq(self.root)
 
 
-    def change_branch_resistance(self, branch_id: int, value):
+    def change_branch_resistance(self, branch_id: int, value, remove_stenosis_coefficient=True):
         '''
         change the value of a zero d element in a branch
 
         :param branch: id of the branch to change
         :param value: a list of values to change the resistance for the zero d elements
+        :param remove_stenosis_coefficient: bool to keep or remove the stenosis coefficient
         '''
         
         # get the branch object and the segments in that branch
@@ -404,11 +383,18 @@ class ConfigHandler():
         if type(value) == list:
             # we are given a list here, so we will distribute each R to each vessel in the branch
             for idx, vessel in enumerate(self.get_segments(branch_id)):
+                if remove_stenosis_coefficient:
+                    vessel.stenosis_coefficient = 0.0
                 vessel.R = value[idx]
         else:
             # we have a single value so we will distribute it amongst the branchs
             for idx, vessel in enumerate(self.get_segments(branch_id)):
+                if remove_stenosis_coefficient:
+                    vessel.stenosis_coefficient = 0.0
                 vessel.R = value * (vessel.R / self.branch_map[branch_id].R)
+            
+            # set the branch resistance to the value
+            self.branch_map[branch_id].R = value
 
 
     def get_branch_resistance(self, branch_id: int):

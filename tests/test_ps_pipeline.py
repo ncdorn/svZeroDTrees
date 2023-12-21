@@ -152,7 +152,6 @@ def test_no_repair():
     # assert result
 
 
-
 def test_cwss_adaptation():
     '''
     test the constant wss tree adaptation algorithm
@@ -205,8 +204,6 @@ def compare_parallel_tree_construction():
     # print(DeepDiff(result_handler_par.results, result_handler.results))
 
 
-
-
 def test_pries_adaptation():
     '''
     test the constant wss tree adaptation algorithm
@@ -238,8 +235,8 @@ def test_pries_adaptation():
 
 
 def test_run_from_file():
-    expfile = 'pa_outlet_bc_test.json'
-    os.chdir('tests/cases/full_pa_test/experiments')
+    expfile = 'AS2_stent.json'
+    os.chdir('tests/cases/AS2/experiments')
 
     interface.run_from_file(expfile, vis_trees=True)
 
@@ -251,7 +248,7 @@ def test_pa_optimizer():
     input_file = 'AS2_prestent.json'
     log_file = 'AS2_test.log'
     clinical_targets = 'clinical_targets.csv'
-    mesh_surfaces_path = '/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/PPAS/svPPAS/AS2_SU0313_prestent/Meshes/1.6M_elements/mesh-surfaces'
+    mesh_surfaces_path = '/home/ndorn/Documents/Stanford/PhD/Simvascular/threed_models/AS2_prestent/Meshes/1.6M_elements/mesh-surfaces'
 
     config_handler, result_handler, pa_config = preop.optimize_pa_bcs(
         input_file,
@@ -293,4 +290,4 @@ def test_simple_config():
 
 if __name__ == '__main__':
 
-    test_pa_optimizer()
+    test_run_from_file()

@@ -207,7 +207,7 @@ class StructuredTreeOutlet():
                 # assume pressure is conserved at the junction. 
                 # Could later replace this with a function to account for pressure loss
                 current_vessel.left = TreeVessel.create_vessel(vessel_id, next_gen, left_dia, self.params["eta"])
-                if left_dia < d_min or vessel_id > 10^6:
+                if left_dia < d_min or vessel_id > 10**6:
                     current_vessel.left.collapsed = True
                 queue.append(current_vessel.left)
                 self.block_dict["vessels"].append(current_vessel.left.info)
@@ -290,7 +290,8 @@ class StructuredTreeOutlet():
         :param pries_secomb: True if the pries and secomb model is used to adapt the vessels, so pries and secomb integration
             is performed at every optimization iteration
         """
-
+        
+        # write_to_log(log_file, "Optimizing tree diameter for resistance " + str(self.params["bc_values"]["R"]) + " with d_min = " + str(d_min) + "...")
         # initial guess is oulet r
         d_guess = self.initialD / 2
 
@@ -330,8 +331,10 @@ class StructuredTreeOutlet():
         
         R_final = self.root.R_eq
 
-        write_to_log(log_file, "     Resistance after optimization is " + str(R_final) + "\n")
-        write_to_log(log_file, "     the optimized diameter is " + str(d_final.x[0]) + "\n")
+        # write_to_log(log_file, "     Resistance after optimization is " + str(R_final))
+        # write_to_log(log_file, "     the optimized diameter is " + str(d_final.x[0]))
+        write_to_log(log_file, "     the number of vessels is " + str(len(self.block_dict["vessels"])) + "\n")
+
 
         return d_final.x, R_final
     

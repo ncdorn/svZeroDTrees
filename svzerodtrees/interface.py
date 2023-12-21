@@ -124,8 +124,12 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
         
 
     else: # use previous optimization results
-
-        config_handler = ConfigHandler.from_json('preop_config.json')
+        if trees_exist:
+            # load the pickled config handler
+            with open('config_w_cwss_trees.in', 'rb') as ff:
+                config_handler = pickle.load(ff)
+        else:
+            config_handler = ConfigHandler.from_json('preop_config.json')
         
         # get preop result
         preop_flow = run_svzerodplus(config_handler.config)
@@ -257,7 +261,6 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
     '''
 
     if trees_exist:
-        config_handler.from_file_w_trees('config_w_cwss_trees.in')
 
         preop_result = run_svzerodplus(config_handler.config)
 
@@ -269,7 +272,7 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
                                            result_handler,
                                            n_procs=12,
                                            log_file=log_file,
-                                           d_min=.01) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
+                                           d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
 
         # save preop config to as pickle, with StructuredTreeOutlet objects
         write_to_log(log_file, 'saving preop config with cwss trees...')
@@ -290,6 +293,3 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
     adaptation.adapt_constant_wss(config_handler,
                                   result_handler,
                                   log_file)
-
-
-
