@@ -185,7 +185,17 @@ class TreeVessel:
             "outlet": "P_d" + str(self.id)
         }
 
-    def adapt_pries_secomb(self, ps_params, dt, H_d=0.45):
+    def adapt_pries_secomb(self, 
+                            k_p = 0.68,
+                            k_m = .70,
+                            k_c = 2.45,
+                            k_s = 1.72,
+                            L = 1.73,
+                            J0 = 27.9,
+                            tau_ref = .103,
+                            Q_ref = 3.3 * 10 ** -8,
+                            dt = 0.01, 
+                            H_d=0.45):
         '''
         calculate the diameter change in the vessel based on pries and secomb parameters
         :param ps_params: pries and secomb parameters in the following form [k_p, k_m, k_c, k_s, L (cm), S_0, tau_ref, Q_ref]
@@ -202,7 +212,15 @@ class TreeVessel:
 
         ## pries and secomb equations ##
 
-        self.k_p, self.k_m, self.k_c, self.k_s, self.L, self.S_0, self.tau_ref, self.Q_ref = tuple(ps_params)
+        self.k_p = k_p
+        self.k_m = k_m
+        self.k_c = k_c
+        self.k_s = k_s
+        self.L = L
+        self.J0 = J0
+        self.tau_ref = tau_ref
+        self.Q_ref = Q_ref
+
         self. H_d = H_d # hematocrit
 
         self.S_m = self.k_m * math.log(self.Q_ref / (self.Q * self.H_d) + 1)
@@ -220,7 +238,7 @@ class TreeVessel:
             else:
                 self.Sbar_c = self.left.S_m + self.right.S_m
 
-        self.S_c = self.k_c * (self.Sbar_c / (self.Sbar_c + self.S_0))
+        self.S_c = self.k_c * (self.Sbar_c / (self.Sbar_c + self.J0))
 
         self.S_s = -self.k_s
 

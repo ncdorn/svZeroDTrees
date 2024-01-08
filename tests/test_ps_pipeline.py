@@ -93,10 +93,9 @@ def test_cwss_tree_construction():
 
 def test_pries_tree_construction():
     # test pries and secomb tree building
-    config_handler = ConfigHandler.from_file('tests/cases/LPA_RPA_0d_steady/preop_config.in')
+    config_handler = ConfigHandler.from_json('tests/cases/LPA_RPA_0d_steady/preop_config.json')
 
-    with open('tests/cases/LPA_RPA_0d_steady/result_handler.out', 'rb') as ff:
-        result_handler = pickle.load(ff)
+    result_handler = ResultHandler.from_config_handler(config_handler)
 
     preop.construct_pries_trees(config_handler, result_handler, d_min=0.5, tol=0.1)
 
@@ -290,4 +289,4 @@ def test_simple_config():
 
 if __name__ == '__main__':
 
-    test_run_from_file()
+    test_pries_tree_construction()

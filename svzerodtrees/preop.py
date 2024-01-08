@@ -375,7 +375,7 @@ def construct_cwss_trees(config_handler, result_handler, n_procs=4, log_file=Non
     result_handler.add_unformatted_result(preop_result, 'preop')
 
 
-def construct_pries_trees(config_handler: ConfigHandler, result_handler, log_file=None, d_min=0.0049, tol=0.01, vis_trees=False, fig_dir=None):
+def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_procs=1, log_file=None, d_min=0.0049, tol=0.01, vis_trees=False, fig_dir=None):
     '''
     construct trees for pries and secomb adaptation and perform initial integration
     :param config: 0D solver preop config
@@ -404,28 +404,36 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler, log_fil
     p_outs = get_outlet_data(config_handler.config, pretree_result, "pressure_out", steady=True)
     outlet_idx = 0 # need this when iterating through outlets 
     # get the outlet vessel
-    for vessel_config in config_handler.config["vessels"]:
-        if "boundary_conditions" in vessel_config:
-            if "outlet" in vessel_config["boundary_conditions"]:
-                for bc_config in config_handler.config["boundary_conditions"]:
-                    if vessel_config["boundary_conditions"]["outlet"] == bc_config["bc_name"]:
-                        outlet_stree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, 
-                                                                               simparams,
-                                                                               bc_config, 
-                                                                               Q_outlet=[np.mean(q_outs[outlet_idx])],
-                                                                               P_outlet=[np.mean(p_outs[outlet_idx])])
-                        R = bc_config["bc_values"]["R"]
-
-                        write_to_log(log_file, "** building tree " + str(outlet_idx) + " for R = " + str(R) + " **")
-
-                        outlet_stree.optimize_tree_diameter(R, log_file, d_min=d_min, pries_secomb=True)
-
-                        bc_config["bc_values"]["R"] = outlet_stree.root.R_eq
-
-                        write_to_log(log_file, "     the number of vessels is " + str(outlet_stree.count_vessels()))
-
-                config_handler.trees.append(outlet_stree)
+    for vessel in config_handler.vessel_map.values():
+        if vessel.bc is not None:
+            if "outlet" in vessel.bc:
+                # get the bc object
+                bc = config_handler.bcs[vessel.bc["outlet"]]
+                # create outlet tree
+                outlet_tree = StructuredTreeOutlet.from_outlet_vessel(vessel, 
+                                                                      config_handler.simparams,
+                                                                      bc,
+                                                                      P_outlet=p_outs[outlet_idx],
+                                                                      Q_outlet=q_outs[outlet_idx],)
+                
+                config_handler.trees.append(outlet_tree)
+                # count up the outlets for indexing pressure and flow
                 outlet_idx += 1
+
+    # function to run the tree diameter optimization
+    def optimize_tree(tree):
+        print('building ' + tree.name + ' for resistance ' + str(tree.params["bc_values"]["R"]) + '...')
+        tree.optimize_tree_diameter(log_file, d_min=d_min, pries_secomb=True)
+        return tree
+
+    # run the tree 
+    with Pool(n_procs) as p:
+        config_handler.trees = p.map(optimize_tree, config_handler.trees)
+    
+    # update the resistance in the config according to the optimized tree resistance
+    for bc, tree in zip(list(config_handler.bcs.values())[1:], config_handler.trees):
+        bc.R = tree.root.R_eq
+
 
     # compute the preop result
     preop_result = run_svzerodplus(config_handler.config)
@@ -435,13 +443,6 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler, log_fil
 
     # add the preop result to the result handler
     result_handler.add_unformatted_result(preop_result, 'preop')
-
-    
-def optimize_ps_params():
-    '''
-    method to optimize the pries and secomb parameters to compare with Ingrid's. To be implemented
-    '''
-    pass
 
 
 class ClinicalTargets():
