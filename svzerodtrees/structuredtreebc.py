@@ -81,11 +81,11 @@ class StructuredTreeOutlet():
         :return: StructuredTreeOutlet instance
         """
         # if steady state, make the Q_outlet and P_outlet into a list of length two for svzerodplus config BC compatibility
-        if type(Q_outlet) is float:
-            Q_outlet = [Q_outlet[0],] * 2
+        if type(Q_outlet) is not list:
+            Q_outlet = [Q_outlet,] * 2
         
-        if type(P_outlet) is float:
-            P_outlet = [P_outlet[0],] * 2
+        if type(P_outlet) is not list:
+            P_outlet = [P_outlet,] * 2
         
 
         params = dict(
@@ -333,8 +333,7 @@ class StructuredTreeOutlet():
         write_to_log(log_file, "     the number of vessels is " + str(len(self.block_dict["vessels"])) + "\n")
 
         if pries_secomb:
-            self.pries_n_secomb = PriesnSecomb(self, dt=0.01, tol=0.01)
-            self.pries_n_secomb.optimize()
+            self.pries_n_secomb = PriesnSecomb(self)
 
 
         return d_final.x, R_final
@@ -417,7 +416,8 @@ class StructuredTreeOutlet():
         write_to_log(log_file, "     the optimized alpha value is " + str(r_final.x[2])  + "\n")
 
         return r_final.x[0], R_final
-    
+
+
     def create_bcs(self):
         ''''
         create the inflow and distal pressure BCs. This function will prepare a block_dict to be run by svzerodplus
@@ -457,6 +457,7 @@ class StructuredTreeOutlet():
         '''
         return len(self.block_dict["vessels"])
     
+
     def R(self):
         '''
         :return: the equivalent resistance of the tree
@@ -465,7 +466,8 @@ class StructuredTreeOutlet():
         '''
         return self.root.R_eq
     
-    def integrate_pries_secomb(self, ps_params=[0.68, .70, 2.45, 1.72, 1.73, 27.9, .103, 3.3 * 10 ** -8], dt=0.01, tol = .01, time_avg_q=True):
+
+    def adapt_pries_secomb(self):
         '''
         integrate pries and secomb diff eq by Euler integration for the tree until dD reaches some tolerance (default 10^-5)
 
@@ -483,66 +485,8 @@ class StructuredTreeOutlet():
         :return: equivalent resistance of the tree
         '''
 
-        # initialize sum of squared dD
-        SS_dD = 0.0
 
-        # initialize converged stop condition
-        converged = False
 
-        # intialize iteration count
-        iter = 0
-
-        og_d = self.root.d
-        # begin euler integration
-        while not converged:
-            
-            # create solver config from StructuredTreeOutlet and get tree flow result
-            self.create_bcs()
-            tree_result = run_svzerodplus(self.block_dict)
-
-            # assign flow result to TreeVessel instances to allow for pries and secomb downstream calculation
-            assign_flow_to_root(tree_result, self.root, steady=time_avg_q)
-
-            # initialize sum of squared dDs, to check dD against tolerance
-            next_SS_dD = 0.0 
-            def stimulate(vessel):
-                '''
-                postorder traversal to adapt each vessel according to Pries and Secomb equations
-
-                :param vessel: TreeVessel instance
-                '''
-                if vessel:
-
-                    # postorder traversal step
-                    stimulate(vessel.left)
-                    stimulate(vessel.right)
-
-                    # adapt vessel diameter
-                    vessel_dD = vessel.adapt_pries_secomb(ps_params, dt)
-
-                    # update sum of squared dD
-                    nonlocal next_SS_dD
-                    next_SS_dD += vessel_dD ** 2
-            
-            # begin traversal
-            stimulate(self.root)
-
-            # check if dD is below the tolerance. if so, end integration
-            dD_diff = abs(next_SS_dD ** 2 - SS_dD ** 2)
-            if iter == 0:
-                first_dD = dD_diff
-            
-            print(dD_diff / first_dD)
-            if dD_diff / first_dD < tol:
-                converged = True
-            
-            # if not converged, continue integration
-            SS_dD = next_SS_dD
-
-            # increase iteration count
-            iter += 1
-
-        print('Pries and Secomb integration completed! R = ' + str(self.root.R_eq) + ', dD = ' + str(og_d - self.root.d))
 
         return self.root.R_eq
     
@@ -609,11 +553,11 @@ class PriesnSecomb():
         while not converged:
             
             # create solver config from StructuredTreeOutlet and get tree flow result
-            self.create_bcs()
-            tree_result = run_svzerodplus(self.block_dict)
+            self.tree.create_bcs()
+            tree_result = run_svzerodplus(self.tree.block_dict)
 
             # assign flow result to TreeVessel instances to allow for pries and secomb downstream calculation
-            assign_flow_to_root(tree_result, self.root, steady=self.time_avg_q)
+            assign_flow_to_root(tree_result, self.tree.root, steady=self.time_avg_q)
 
             # initialize sum of squared dDs, to check dD against tolerance
             self.sumsq_dD = 0.0 
@@ -645,15 +589,14 @@ class PriesnSecomb():
                     self.sumsq_dD += vessel_dD ** 2
             
             # begin traversal
-            stimulate(self.root)
+            stimulate(self.tree.root)
 
             # check if dD is below the tolerance. if so, end integration
-            dD_diff = abs(next_SS_dD ** 2 - SS_dD ** 2)
+            dD_diff = abs(self.sumsq_dD ** 2 - SS_dD ** 2)
             if iter == 0:
                 first_dD = dD_diff
-            
-            print(dD_diff / first_dD)
-            if dD_diff / first_dD < tol:
+
+            if dD_diff / first_dD < self.tol:
                 converged = True
             
             # if not converged, continue integration
@@ -662,8 +605,10 @@ class PriesnSecomb():
             # increase iteration count
             iter += 1
 
+        print('Pries and Secomb integration completed! R = ' + str(self.tree.root.R_eq) + ', dD = ' + str(og_d - self.tree.root.d))
 
-    def optimize(self):
+
+    def optimize_params(self):
         '''
         optimize the pries and secomb parameters for stable adaptation with pre-inerventional hemodynamics
         '''
@@ -671,13 +616,14 @@ class PriesnSecomb():
         # print the initial parameters
         print('default parameters: ' + str(self.ps_params))
 
-        minimize(self.stimulate_vessels, self.ps_params, method='Nelder-Mead')
+        param_bounds = Bounds(lb=[0, 0, 0, 0, 0, 0, 0, 0], keep_feasible=True)
+        minimize(self.stimulate_vessels, self.ps_params, args=(True), method='Nelder-Mead', bounds=param_bounds)
 
         # print the optimized parameters
         print('optimized parameters: ' + str(self.ps_params))
 
 
-    def stimulate_vessels(self, ps_params):
+    def stimulate_vessels(self, ps_params, optimizing_params):
         '''
         stimulate the vessels and compute adaptation
         '''
@@ -692,6 +638,13 @@ class PriesnSecomb():
         self.J0 = ps_params[5]
         self.tau_ref = ps_params[6]
         self.Q_ref = ps_params[7]
+
+        # create solver config from StructuredTreeOutlet and get tree flow result
+        self.tree.create_bcs()
+        tree_result = run_svzerodplus(self.tree.block_dict)
+
+        # assign flow result to TreeVessel instances to allow for pries and secomb downstream calculation
+        assign_flow_to_root(tree_result, self.tree.root, steady=True)
 
 
         def stimulate(vessel):
@@ -716,15 +669,14 @@ class PriesnSecomb():
                                                         self.tau_ref,
                                                         self.Q_ref,
                                                         self.dt,
-                                                        self.H_d)
-                print('vessel_dD: ' + str(vessel_dD))
+                                                        self.H_d,
+                                                        optimizing_params=optimizing_params)
+
                 # update sum of squared dD
                 self.sumsq_dD += vessel_dD ** 2
             
         # begin traversal
         stimulate(self.tree.root)
-
-        print('sumsq_dD = ' + str(self.sumsq_dD))
 
         return self.sumsq_dD
 

@@ -97,7 +97,7 @@ def test_pries_tree_construction():
 
     result_handler = ResultHandler.from_config_handler(config_handler)
 
-    preop.construct_pries_trees(config_handler, result_handler, d_min=0.5, tol=0.1)
+    preop.construct_pries_trees(config_handler, result_handler, d_min=0.05, tol=0.1)
 
 
 def test_repair_stenosis():
@@ -208,10 +208,9 @@ def test_pries_adaptation():
     test the constant wss tree adaptation algorithm
     '''
     
-    config_handler = ConfigHandler.from_file('tests/cases/LPA_RPA_0d_steady/preop_config.in')
+    config_handler = ConfigHandler.from_json('tests/cases/LPA_RPA_0d_steady/preop_config.json')
 
-    with open('tests/cases/LPA_RPA_0d_steady/result_handler.out', 'rb') as ff:
-        result_handler = pickle.load(ff)
+    result_handler = ResultHandler.from_config_handler(config_handler)
     
     with open('tests/cases/repair.json') as ff:
         repair_dict = json.load(ff)
@@ -224,7 +223,7 @@ def test_pries_adaptation():
 
     preop.construct_pries_trees(config_handler, result_handler, log_file, d_min=0.49)
 
-    operation.repair_stenosis_coefficient(config_handler, result_handler, repair_config, log_file)
+    operation.repair_stenosis(config_handler, result_handler, repair_config, log_file)
 
     adapt_pries_secomb(config_handler, result_handler, log_file)
 
@@ -287,6 +286,8 @@ def test_simple_config():
     with open('pa_config_result.json', 'w') as ff:
         json.dump(result_handler.results['preop'], ff, indent=4)
 
+
+
 if __name__ == '__main__':
 
-    test_pries_tree_construction()
+    test_pries_adaptation()

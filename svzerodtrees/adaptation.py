@@ -24,39 +24,32 @@ def adapt_pries_secomb(config_handler: ConfigHandler, result_handler: ResultHand
 
     # initialize R_old and R_new for pre- and post-adaptation comparison
     R_old = [tree.root.R_eq for tree in config_handler.trees]
-    R_new = []
+    R_adapt = []
     outlet_idx = 0 # index through outlets
 
     write_to_log(log_file, "** adapting trees based on Pries and Secomb model **")
 
     # loop through the vessels and create StructuredTreeOutlet instances at the outlets, from the pre-adaptation tree instances
-    for vessel_config in config_handler.config["vessels"]:
-        if "boundary_conditions" in vessel_config:
-            if "outlet" in vessel_config["boundary_conditions"]:
-                for bc_config in config_handler.config["boundary_conditions"]:
-                    if vessel_config["boundary_conditions"]["outlet"] == bc_config["bc_name"]:
-                        # generate the postoperative tree with the postop outlet flowrate and pressure
-                        outlet_stree = config_handler.trees[outlet_idx]
-                        outlet_stree.block_dict["P_in"] = np.mean(postop_p[outlet_idx])
-                        outlet_stree.block_dict["Q_out"] = np.mean(postop_q[outlet_idx])
+    for vessel in config_handler.vessel_map.values():
+        if vessel.bc is not None:
+            if "outlet" in vessel.bc:
+                config_handler.trees[outlet_idx].block_dict["P_in"] = [np.mean(postop_p[outlet_idx]), ] * 2
+                config_handler.trees[outlet_idx].block_dict["Q_in"] =[np.mean(postop_q[outlet_idx]), ] * 2
 
-                        # integrate pries and secomb until dD tolerance is reached
-                        outlet_stree.integrate_pries_secomb(tol=tol)
+                config_handler.trees[outlet_idx].pries_n_secomb.integrate()
 
-                        write_to_log(log_file, 'pries and secomb integration completed for ' + outlet_stree.name)
-                        write_to_log(log_file, "    R_new = " + str(outlet_stree.root.R_eq) + ", R_old = " + str(R_old[outlet_idx]))
-                        write_to_log(log_file, "    The change in resistance is " + str(outlet_stree.root.R_eq - R_old[outlet_idx]))
+                # append the adapted equivalent resistance to the list of adapted resistances
+                R_adapt.append(config_handler.trees[outlet_idx].root.R_eq)
 
-                        # add the tree to the vessel config
-                        config_handler.trees[outlet_idx] = outlet_stree
+                # write results to log file for debugging
+                write_to_log(log_file, "** adaptation results for " + str(config_handler.trees[outlet_idx].name) + " **")
+                write_to_log(log_file, "    R_new = " + str(config_handler.trees[outlet_idx].root.R_eq) + ", R_old = " + str(R_old[outlet_idx]))
+                write_to_log(log_file, "    The change in resistance is " + str(config_handler.trees[outlet_idx].root.R_eq - R_old[outlet_idx]))
 
-                        R_new.append(outlet_stree.root.R_eq)
-
-                        # count up for outlets
-                        outlet_idx += 1
+                outlet_idx += 1
 
     # write adapted tree R_eq to the adapted_config
-    write_resistances(config_handler.config, R_new)
+    write_resistances(config_handler.config, R_adapt)
 
     # get the adapted flow and pressure result
     adapted_result = run_svzerodplus(config_handler.config)
@@ -64,7 +57,7 @@ def adapt_pries_secomb(config_handler: ConfigHandler, result_handler: ResultHand
     # add adapted result to the result handler
     result_handler.add_unformatted_result(adapted_result, 'adapted')
 
-    write_to_log(log_file, 'pries and secomb adaptation completed for all trees. R_old = ' + str(R_old) + ' R_new = ' + str(R_new))
+    write_to_log(log_file, 'pries and secomb adaptation completed for all trees. R_old = ' + str(R_old) + ' R_new = ' + str(R_adapt))
 
 
 
@@ -91,27 +84,22 @@ def adapt_constant_wss(config_handler: ConfigHandler, result_handler: ResultHand
 
     write_to_log(log_file, "** adapting trees based on constant wall shear stress assumption **")
 
-    for vessel_config in config_handler.config["vessels"]:
-        if "boundary_conditions" in vessel_config:
-            if "outlet" in vessel_config["boundary_conditions"]:
-                for bc_config in config_handler.config["boundary_conditions"]:
-                    if vessel_config["boundary_conditions"]["outlet"] == bc_config["bc_name"]:
-                        # adapt the cwss tree
-                        outlet_stree = config_handler.trees[outlet_idx]
 
-                        R_old, R_new = outlet_stree.adapt_constant_wss(Q=preop_q[outlet_idx], Q_new=postop_q[outlet_idx])
+    for vessel in config_handler.vessel_map.values():
+        if vessel.bc is not None:
+            if "outlet" in vessel.bc:
 
+                R_old, R_new = config_handler.trees[outlet_idx].adapt_constant_wss(Q=preop_q[outlet_idx], Q_new=postop_q[outlet_idx])
 
+                # append the adapted equivalent resistance to the list of adapted resistances
+                R_adapt.append(R_new)
 
-                        # append the adapted equivalent resistance to the list of adapted resistances
-                        R_adapt.append(R_new)
+                # write results to log file for debugging
+                write_to_log(log_file, "** adaptation results for " + str(config_handler.trees[outlet_idx].name) + " **")
+                write_to_log(log_file, "    R_new = " + str(config_handler.trees[outlet_idx].root.R_eq) + ", R_old = " + str(R_old))
+                write_to_log(log_file, "    The change in resistance is " + str(config_handler.trees[outlet_idx].root.R_eq - R_old))
 
-                        # write results to log file for debugging
-                        write_to_log(log_file, "** adaptation results for " + str(outlet_stree.name) + " **")
-                        write_to_log(log_file, "    R_new = " + str(outlet_stree.root.R_eq) + ", R_old = " + str(R_old))
-                        write_to_log(log_file, "    The change in resistance is " + str(outlet_stree.root.R_eq - R_old))
-
-                        outlet_idx += 1
+                outlet_idx += 1
 
     # write the adapted resistances to the config resistance boundary conditions
     # config_handler.to_json('experiments/AS1_no_repair/postop_config.json')

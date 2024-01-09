@@ -195,7 +195,8 @@ class TreeVessel:
                             tau_ref = .103,
                             Q_ref = 3.3 * 10 ** -8,
                             dt = 0.01, 
-                            H_d=0.45):
+                            H_d=0.45,
+                            optimizing_params=False):
         '''
         calculate the diameter change in the vessel based on pries and secomb parameters
         :param ps_params: pries and secomb parameters in the following form [k_p, k_m, k_c, k_s, L (cm), S_0, tau_ref, Q_ref]
@@ -223,6 +224,9 @@ class TreeVessel:
 
         self. H_d = H_d # hematocrit
 
+        if self.Q < 0.0:
+            raise ValueError("Q must be positive")
+
         self.S_m = self.k_m * math.log(self.Q_ref / (self.Q * self.H_d) + 1)
 
         self.tau_e = 50 / 86 * (100 - 86 * math.exp(-5000 * math.log(math.log(4.5 * self.P_in + 10)) ** 5.4) - 14) + 1
@@ -247,11 +251,13 @@ class TreeVessel:
         self.dD = self.d * self.S_tot * dt
 
         # make sure that the diameter change is positive
-        if self.d + self.dD > 0.0:
-            self.d += self.dD
-        else:
-            pass
-            # potentially add collapsed 
+        if not optimizing_params:
+            if self.d + self.dD > 0.0:
+                self.d += self.dD
+            elif self.d + self.dD <= 0.0049:
+                self.collapsed = True
+            else:
+                pass
 
         return self.dD
 

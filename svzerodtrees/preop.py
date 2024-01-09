@@ -420,15 +420,21 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_proc
                 # count up the outlets for indexing pressure and flow
                 outlet_idx += 1
 
-    # function to run the tree diameter optimization
-    def optimize_tree(tree):
-        print('building ' + tree.name + ' for resistance ' + str(tree.params["bc_values"]["R"]) + '...')
+    # optimize the trees not in parallel
+    for tree in config_handler.trees:
         tree.optimize_tree_diameter(log_file, d_min=d_min, pries_secomb=True)
-        return tree
+
+    # function to run the tree diameter optimization
+                
+    # def optimize_tree(tree):
+    #     print('building ' + tree.name + ' for resistance ' + str(tree.params["bc_values"]["R"]) + '...')
+    #     tree.optimize_tree_diameter(log_file, d_min=d_min, pries_secomb=True)
+    #     return tree
 
     # run the tree 
-    with Pool(n_procs) as p:
-        config_handler.trees = p.map(optimize_tree, config_handler.trees)
+
+    # with Pool(n_procs) as p:
+    #     config_handler.trees = p.map(optimize_tree, config_handler.trees)
     
     # update the resistance in the config according to the optimized tree resistance
     for bc, tree in zip(list(config_handler.bcs.values())[1:], config_handler.trees):
@@ -440,6 +446,9 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_proc
 
     # leaving vessel radius fixed, update the hemodynamics of the StructuredTreeOutlet instances based on the preop result
     config_handler.update_stree_hemodynamics(preop_result)
+
+    for tree in config_handler.trees:
+        tree.pries_n_secomb.optimize_params()
 
     # add the preop result to the result handler
     result_handler.add_unformatted_result(preop_result, 'preop')

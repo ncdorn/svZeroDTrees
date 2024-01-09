@@ -28,7 +28,7 @@ class ConfigHandler():
         # compute equivalent resistance
         # self.compute_R_eq()
 
-
+    #### I/O METHODS ####
     @classmethod
     def from_json(cls, file_name: str):
         '''
@@ -116,8 +116,9 @@ class ConfigHandler():
 
         with open(file_name, 'rb') as ff:
             self = pickle.load(ff)
-
-
+    
+    #### END OF I/O METHODS ####
+            
     def simulate(self, result_handler: ResultHandler, label: str):
         '''
         run the simulation
@@ -155,7 +156,7 @@ class ConfigHandler():
         # add the vessels
         self._config['vessels'] = [vessel.to_dict() for vessel in self.vessel_map.values()]
 
-
+    
     def convert_struct_trees_to_dict(self):
         '''
         convert the StructuredTreeOutlet instances into dict instances
@@ -193,7 +194,6 @@ class ConfigHandler():
                     for bc_config in self.config["boundary_conditions"]:
                         if vessel_config["boundary_conditions"]["outlet"] == bc_config["bc_name"]:
                             # update the outlet flowrate and pressure for the tree at that outlet
-                            print(outlet_idx, len(self.trees))
                             self.trees[outlet_idx].add_hemodynamics_from_outlet([q_outs[outlet_idx]], [p_outs[outlet_idx]])
 
                             # re-integrate pries and secomb --- this is not necesary at the moment because I think it will send us into an
@@ -405,6 +405,7 @@ class ConfigHandler():
         '''
 
         return sum(vessel.R for vessel in self.get_segments(branch_id))
+
 
     def get_segments(self, branch: int or str, dtype: str = 'vessel', junctions=False):
         '''

@@ -18,7 +18,7 @@
             "bc_name": "RESISTANCE_0",
             "bc_type": "RESISTANCE",
             "bc_values": {
-                "Pd": 13332.0,
+                "Pd": 26664.0,
                 "R": 657.9915153392565
             }
         },
@@ -26,7 +26,7 @@
             "bc_name": "RESISTANCE_1",
             "bc_type": "RESISTANCE",
             "bc_values": {
-                "Pd": 13332.0,
+                "Pd": 26664.0,
                 "R": 52.80607860012541
             }
         }
