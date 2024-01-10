@@ -1,9 +1,9 @@
-{   "name": "AS2_prox_stent_test",
+{   "name": "AS2_pries_adaptation",
     "model": "AS2_prestent",
-    "adapt": "cwss",
-    "optimized": true,
+    "adapt": "ps",
+    "optimized": false,
     "is_full_pa_tree": true,
-    "trees_exist": true,
+    "trees_exist": false,
     "mesh_surfaces_path": "/home/ndorn/Documents/Stanford/PhD/Simvascular/threed_models/AS2_prestent/Meshes/1.6M_elements/mesh-surfaces",
     "repair": [
         {

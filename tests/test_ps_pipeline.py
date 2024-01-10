@@ -221,7 +221,7 @@ def test_pries_adaptation():
 
     write_to_log(log_file, 'testing tree construction', write=True)
 
-    preop.construct_pries_trees(config_handler, result_handler, log_file, d_min=0.49)
+    preop.construct_pries_trees(config_handler, result_handler, n_procs=4, log_file=log_file, d_min=0.49)
 
     operation.repair_stenosis(config_handler, result_handler, repair_config, log_file)
 
@@ -229,7 +229,7 @@ def test_pries_adaptation():
 
     result_handler.format_results()
 
-    print(result_handler.results)
+    # print(result_handler.results)
 
 
 def test_run_from_file():
@@ -290,4 +290,5 @@ def test_simple_config():
 
 if __name__ == '__main__':
 
-    test_pries_adaptation()
+    # test_pries_adaptation()
+    test_run_from_file()

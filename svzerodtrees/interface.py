@@ -223,9 +223,9 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
     else:
         preop.construct_pries_trees(config_handler, 
                                     result_handler, 
-                                    log_file,
-                                    fig_dir=fig_dir, 
-                                    d_min=.3)
+                                    n_procs=12,
+                                    log_file=log_file,
+                                    d_min=.05)
         
         # save preop config to json
         config_handler.to_file_w_trees('config_w_pries_trees.in')

@@ -375,7 +375,7 @@ def construct_cwss_trees(config_handler, result_handler, n_procs=4, log_file=Non
     result_handler.add_unformatted_result(preop_result, 'preop')
 
 
-def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_procs=1, log_file=None, d_min=0.0049, tol=0.01, vis_trees=False, fig_dir=None):
+def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_procs=4, log_file=None, d_min=0.0049, tol=0.01, vis_trees=False, fig_dir=None):
     '''
     construct trees for pries and secomb adaptation and perform initial integration
     :param config: 0D solver preop config
@@ -421,20 +421,20 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_proc
                 outlet_idx += 1
 
     # optimize the trees not in parallel
-    for tree in config_handler.trees:
-        tree.optimize_tree_diameter(log_file, d_min=d_min, pries_secomb=True)
+    # for tree in config_handler.trees:
+    #     tree.optimize_tree_diameter(log_file, d_min=d_min, pries_secomb=True)
 
     # function to run the tree diameter optimization
-                
-    # def optimize_tree(tree):
-    #     print('building ' + tree.name + ' for resistance ' + str(tree.params["bc_values"]["R"]) + '...')
-    #     tree.optimize_tree_diameter(log_file, d_min=d_min, pries_secomb=True)
-    #     return tree
+
+    def optimize_tree(tree):
+        print('building ' + tree.name + ' for resistance ' + str(tree.params["bc_values"]["R"]) + '...')
+        tree.optimize_tree_diameter(log_file, d_min=d_min, pries_secomb=True)
+        return tree
 
     # run the tree 
 
-    # with Pool(n_procs) as p:
-    #     config_handler.trees = p.map(optimize_tree, config_handler.trees)
+    with Pool(n_procs) as p:
+        config_handler.trees = p.map(optimize_tree, config_handler.trees)
     
     # update the resistance in the config according to the optimized tree resistance
     for bc, tree in zip(list(config_handler.bcs.values())[1:], config_handler.trees):
