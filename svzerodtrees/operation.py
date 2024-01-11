@@ -36,7 +36,7 @@ def repair_stenosis(config_handler: ConfigHandler, result_handler: ResultHandler
         repair_branches = repair_config['location']
 
     for branch, value in zip(repair_branches, repair_config['value']):
-        branch_stenosis = Stenosis.create(config_handler, branch, repair_config['type'], value)
+        branch_stenosis = Stenosis.create(config_handler, branch, repair_config['type'], value, log_file=log_file)
         branch_stenosis.repair()
     
     config_handler.simulate(result_handler, 'postop')
@@ -61,7 +61,7 @@ class Stenosis:
         self.viscosity = viscosity
 
     @classmethod
-    def create(cls, config_handler: ConfigHandler, branch: int or str, repair_type, repair_value):
+    def create(cls, config_handler: ConfigHandler, branch: int or str, repair_type, repair_value, log_file=None):
         '''
         create a stenosis from a config handler
 
@@ -78,17 +78,20 @@ class Stenosis:
         # get the vessels in the branch
         vessels = config_handler.get_segments(branch)
 
-        return cls(vessels, branch, repair_type, repair_value, config_handler.simparams.viscosity)
+        return cls(vessels, branch, repair_type, repair_value, config_handler.simparams.viscosity, log_file)
 
     
     def repair(self):
         '''repair the stenosis according to the specs'''
         
         if self.repair_type == 'stenosis_coefficient':
+            write_to_log(self.log_file, "adjusting stenosis coefficient in branch " + str(self.branch) + " with stenosis coefficient " + str(self.repair_value))
             self.sc_repair()
         elif self.repair_type == 'stent':
+            write_to_log(self.log_file, "repairing stenosis in branch " + str(self.branch) + " with stent diameter " + str(self.repair_value))
             self.stent_repair()
         elif self.repair_type == 'resistance':
+            write_to_log(self.log_file, "repairing stenosis in branch " + str(self.branch) + " with resistance " + str(self.repair_value))
             self.resistance_repair()
             
     

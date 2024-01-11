@@ -1,14 +1,5 @@
 testing tree construction
-     the number of vessels is 3
+     the number of vessels is 307
 
-     the number of vessels is 3
+     the number of vessels is 391
 
-** repairing stenoses in vessels ['lpa', 'rpa'] **
-** adapting trees based on Pries and Secomb model **
-** adaptation results for OutletTree1 **
-    R_new = 622.0734128332617, R_old = 659.1556515736092
-    The change in resistance is -37.08223874034752
-** adaptation results for OutletTree2 **
-    R_new = 52.80983031125322, R_old = 52.847952642936264
-    The change in resistance is -0.038122331683041466
-pries and secomb adaptation completed for all trees. R_old = [659.1556515736092, 52.847952642936264] R_new = [622.0734128332617, 52.80983031125322]

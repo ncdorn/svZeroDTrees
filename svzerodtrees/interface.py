@@ -126,8 +126,13 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
     else: # use previous optimization results
         if trees_exist:
             # load the pickled config handler
-            with open('config_w_cwss_trees.in', 'rb') as ff:
-                config_handler = pickle.load(ff)
+            if adapt == 'cwss':
+                with open('config_w_cwss_trees.in', 'rb') as ff:
+                    config_handler = pickle.load(ff)
+            elif adapt == 'ps':
+                with open('config_w_pries_trees.in', 'rb') as ff:
+                    config_handler = pickle.load(ff)
+            
         else:
             config_handler = ConfigHandler.from_json('preop_config.json')
         
@@ -215,24 +220,20 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
     '''
 
     if trees_exist:
-        config_handler.from_file_w_trees('config_w_pries_trees.in')
 
-        with open('preop_result_handler.out', 'rb') as ff:
-            result_handler = pickle.load(ff)
+        preop_result = run_svzerodplus(config_handler.config)
+
+        result_handler.add_unformatted_result(preop_result, 'preop')
 
     else:
         preop.construct_pries_trees(config_handler, 
                                     result_handler, 
                                     n_procs=12,
                                     log_file=log_file,
-                                    d_min=.05)
+                                    d_min=.01)
         
         # save preop config to json
         config_handler.to_file_w_trees('config_w_pries_trees.in')
-
-        # json won't work for results dump
-        with open('preop_result_handler.out', 'wb') as ff:
-            pickle.dump(result_handler, ff)
 
 
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
@@ -245,6 +246,7 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
     adaptation.adapt_pries_secomb(config_handler,
                                   result_handler,
                                   log_file)
+    
 
 def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHandler, repair_config, log_file, vis_trees, fig_dir, trees_exist=False):
     '''
@@ -279,9 +281,6 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
 
         config_handler.to_file_w_trees('config_w_cwss_trees.in')
 
-        # json won't work for results dump
-        with open('preop_result_handler.out', 'wb') as ff:
-            pickle.dump(result_handler, ff)
     
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
     operation.repair_stenosis(config_handler, 

@@ -1,0 +1,153 @@
+beginning experiment AS2_big_pries_trees_no_repair!
+with the following configuration: 
+{'name': 'AS2_big_pries_trees_no_repair', 'model': 'AS2_prestent', 'adapt': 'ps', 'optimized': False, 'is_full_pa_tree': True, 'trees_exist': False, 'mesh_surfaces_path': '/home/ndorn/Documents/Stanford/PhD/Simvascular/threed_models/AS2_prestent/Meshes/1.6M_elements/mesh-surfaces', 'repair': [{'type': 'stenosis_coefficient', 'location': 'proximal', 'value': [0.0, 0.0]}]}
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: 24
+RPA pressures: 8
+LPA pressures: 11
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: 24.000001283051997
+RPA pressure: 7.999999631745728
+LPA pressure: 10.999999614329258
+RPA flow split: 0.38999998430793215
+     the number of vessels is 181
+
+     the number of vessels is 165
+
+     the number of vessels is 151
+
+     the number of vessels is 153
+
+     the number of vessels is 167
+
+     the number of vessels is 165
+
+     the number of vessels is 151
+
+     the number of vessels is 139
+
+     the number of vessels is 151
+
+     the number of vessels is 153
+
+     the number of vessels is 153
+
+     the number of vessels is 165
+
+     the number of vessels is 153
+
+     the number of vessels is 139
+
+     the number of vessels is 153
+
+     the number of vessels is 153
+
+     the number of vessels is 165
+
+     the number of vessels is 151
+
+     the number of vessels is 151
+
+     the number of vessels is 153
+
+     the number of vessels is 153
+
+     the number of vessels is 153
+
+     the number of vessels is 151
+
+     the number of vessels is 151
+
+     the number of vessels is 167
+
+     the number of vessels is 151
+
+     the number of vessels is 153
+
+     the number of vessels is 151
+
+     the number of vessels is 153
+
+     the number of vessels is 151
+
+     the number of vessels is 139
+
+     the number of vessels is 139
+
+     the number of vessels is 145
+
+     the number of vessels is 145
+
+     the number of vessels is 125
+
+     the number of vessels is 125
+
+     the number of vessels is 139
+
+     the number of vessels is 139
+
+     the number of vessels is 139
+
+     the number of vessels is 125
+
+     the number of vessels is 139
+
+     the number of vessels is 139
+
+     the number of vessels is 139
+
+     the number of vessels is 139
+
+     the number of vessels is 125
+
+     the number of vessels is 125
+
+     the number of vessels is 125
+
+     the number of vessels is 139
+
+     the number of vessels is 125
+
+     the number of vessels is 131
+
+     the number of vessels is 125
+
+     the number of vessels is 137
+
+     the number of vessels is 139
+
+     the number of vessels is 139
+
+     the number of vessels is 139
+
+     the number of vessels is 125
+
+     the number of vessels is 125
+
+     the number of vessels is 139
+
+     the number of vessels is 125
+
+     the number of vessels is 123
+
+     the number of vessels is 139
+
+     the number of vessels is 137
+
+     the number of vessels is 139
+
+     the number of vessels is 139
+
+     the number of vessels is 125
+
+     the number of vessels is 125
+
+     the number of vessels is 125
+
+     the number of vessels is 139
+
+     the number of vessels is 125
+

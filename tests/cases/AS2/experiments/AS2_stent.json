@@ -1,4 +1,4 @@
-{   "name": "AS2_pries_adaptation",
+{   "name": "AS2_big_pries_trees_no_repair",
     "model": "AS2_prestent",
     "adapt": "ps",
     "optimized": false,
@@ -7,9 +7,9 @@
     "mesh_surfaces_path": "/home/ndorn/Documents/Stanford/PhD/Simvascular/threed_models/AS2_prestent/Meshes/1.6M_elements/mesh-surfaces",
     "repair": [
         {
-        "type": "stent",
+        "type": "stenosis_coefficient",
         "location": "proximal",
-        "value": [0.2, 0.5]
+        "value": [0.0, 0.0]
         }
     ]
 }

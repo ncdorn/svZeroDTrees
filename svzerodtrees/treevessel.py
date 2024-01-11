@@ -236,6 +236,7 @@ class TreeVessel:
         self.S_p = -self.k_p * math.log(self.tau_e)
         
         self.Sbar_c = 0.0
+        
         if not self.collapsed:
             if self.left.Sbar_c > 0:
                 self.Sbar_c = self.left.S_m + self.right.S_m + self.left.Sbar_c * math.exp(-self.left.l / self.L) + self.right.Sbar_c * math.exp(-self.right.l / self.L)
@@ -254,8 +255,6 @@ class TreeVessel:
         if not optimizing_params:
             if self.d + self.dD > 0.0:
                 self.d += self.dD
-            elif self.d + self.dD <= 0.0049:
-                self.collapsed = True
             else:
                 pass
 

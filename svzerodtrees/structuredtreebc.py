@@ -647,6 +647,7 @@ class PriesnSecomb():
         assign_flow_to_root(tree_result, self.tree.root, steady=True)
 
 
+
         def stimulate(vessel):
             '''
             postorder traversal to adapt each vessel according to Pries and Secomb equations

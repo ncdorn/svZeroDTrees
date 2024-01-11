@@ -410,10 +410,10 @@ class PAanalyzer:
         fig, ax = plt.subplots(1, 2, sharey=True)
 
         ax[0].bar(timesteps, p_in)
-        ax[0].set_title('inlet pressure')
+        ax[0].set_title('MPA inlet pressure')
 
         ax[1].bar(timesteps, p_out)
-        ax[1].set_title('outlet pressure')
+        ax[1].set_title('MPA outlet pressure')
 
         ax[0].set_ylabel('pressure (mmHg)')
 

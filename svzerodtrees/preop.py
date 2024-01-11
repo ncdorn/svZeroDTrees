@@ -424,17 +424,22 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_proc
     # for tree in config_handler.trees:
     #     tree.optimize_tree_diameter(log_file, d_min=d_min, pries_secomb=True)
 
-    # function to run the tree diameter optimization
 
-    def optimize_tree(tree):
-        print('building ' + tree.name + ' for resistance ' + str(tree.params["bc_values"]["R"]) + '...')
-        tree.optimize_tree_diameter(log_file, d_min=d_min, pries_secomb=True)
-        return tree
+    if n_procs is None:
+        # don't run as parallel processes
+        for tree in config_handler.trees:
+            print('building ' + tree.name + ' for resistance ' + str(tree.params["bc_values"]["R"]) + '...')
+            tree.optimize_tree_diameter(log_file, d_min=d_min, pries_secomb=True)
+    else:
+        # run as a parallel process
+        def build_tree(tree):
+            print('building ' + tree.name + ' for resistance ' + str(tree.params["bc_values"]["R"]) + '...')
+            tree.optimize_tree_diameter(log_file, d_min=d_min, pries_secomb=True)
+            return tree
 
-    # run the tree 
 
-    with Pool(n_procs) as p:
-        config_handler.trees = p.map(optimize_tree, config_handler.trees)
+        with Pool(n_procs) as p:
+            config_handler.trees = p.map(build_tree, config_handler.trees)
     
     # update the resistance in the config according to the optimized tree resistance
     for bc, tree in zip(list(config_handler.bcs.values())[1:], config_handler.trees):
@@ -447,8 +452,17 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_proc
     # leaving vessel radius fixed, update the hemodynamics of the StructuredTreeOutlet instances based on the preop result
     config_handler.update_stree_hemodynamics(preop_result)
 
-    for tree in config_handler.trees:
-        tree.pries_n_secomb.optimize_params()
+    if n_procs is None:
+        for tree in config_handler.trees:
+            tree.pries_n_secomb.optimize_params()
+    else:
+        # parallel the parameter optimization for Pries and Secomb adaptation
+        def optimize_params(tree):
+            tree.pries_n_secomb.optimize_params()
+            return tree
+        
+        with Pool(n_procs) as p:
+            config_handler.trees = p.map(optimize_params, config_handler.trees)
 
     # add the preop result to the result handler
     result_handler.add_unformatted_result(preop_result, 'preop')
