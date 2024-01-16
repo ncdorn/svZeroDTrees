@@ -244,7 +244,22 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
         
         # save preop config to json
         config_handler.to_file_w_trees('config_w_ps_trees.in')
+    
 
+    # compute statistics on the optimized pries and secomb parameters
+    ps_param_set = np.empty((len(config_handler.trees), 8))
+
+    for i, tree in enumerate(config_handler.trees):
+        ps_param_set[i, :] = tree.pries_n_secomb.ps_params
+
+    # get the mean and standard deviation of the optimized parameters
+    ps_param_mean = np.mean(ps_param_set, axis=0)
+    ps_param_std = np.std(ps_param_set, axis=0)
+    # output this to the log file
+    write_to_log(log_file, "Pries and Secomb parameter statistics: ")
+    write_to_log(log_file, "of the form [k_p, k_m, k_c, k_s, L (cm), S_0, tau_ref, Q_ref]")
+    write_to_log(log_file, "    mean: " + str(ps_param_mean))
+    write_to_log(log_file, "    std: " + str(ps_param_std))
 
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
     operation.repair_stenosis(config_handler,
@@ -388,6 +403,8 @@ def optimize_stent_diameter(config_handler, result_handler, repair_config: dict,
     result = minimize(objective_function, repair_config["value"], args=(result_handler, repair_config, adapt), method='Nelder-Mead')
 
     print('optimized stent diameters: ' + str(result.x))
+    # write this to the log file as well
+    write_to_log(log_file, 'optimized stent diameters: ' + str(result.x))
 
 
  

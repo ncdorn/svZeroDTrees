@@ -461,20 +461,6 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_proc
         with Pool(n_procs) as p:
             config_handler.trees = p.map(optimize_params, config_handler.trees)
     
-    # compute statistics on the optimized pries and secomb parameters
-    ps_param_set = np.empty((len(config_handler.trees), 8))
-
-    for i, tree in enumerate(config_handler.trees):
-        ps_param_set[i, :] = tree.pries_n_secomb.ps_params
-
-    # get the mean and standard deviation of the optimized parameters
-    ps_param_mean = np.mean(ps_param_set, axis=0)
-    ps_param_std = np.std(ps_param_set, axis=0)
-    # output this to the log file
-    write_to_log(log_file, "Pries and Secomb parameter statistics: ")
-    write_to_log(log_file, "of the form [k_p, k_m, k_c, k_s, L (cm), S_0, tau_ref, Q_ref]")
-    write_to_log(log_file, "    mean: " + str(ps_param_mean))
-    write_to_log(log_file, "    std: " + str(ps_param_std))
 
 
     # add the preop result to the result handler

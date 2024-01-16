@@ -344,6 +344,8 @@ class PAanalyzer:
                 ax.text(timesteps[values.index(value)], value / 2 + bottom[values.index(value)], str(int(percent[vessel][values.index(value)])) + '%', ha='center', va='center')
             bottom += values
 
+
+
         ax.set_title('flow split')
         ax.set_ylabel('flowrate (cm3/s)')
         ax.legend()
@@ -409,10 +411,12 @@ class PAanalyzer:
         # make a barplot of the inlet and outlet pressure
         fig, ax = plt.subplots(1, 2, sharey=True)
 
-        ax[0].bar(timesteps, p_in)
+        p_i = ax[0].bar(timesteps, p_in)
+        ax[0].bar_label(p_i, label_type='center')
         ax[0].set_title('MPA inlet pressure')
 
-        ax[1].bar(timesteps, p_out)
+        p_o = ax[1].bar(timesteps, p_out)
+        ax[1].bar_label(p_o, label_type='center')
         ax[1].set_title('MPA outlet pressure')
 
         ax[0].set_ylabel('pressure (mmHg)')
