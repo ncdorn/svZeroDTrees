@@ -232,8 +232,30 @@ def test_pries_adaptation():
     # print(result_handler.results)
 
 
+def test_stent_optimization():
+    '''
+    test the stent diameter optimization method
+    '''
+
+    config_handler = ConfigHandler.from_json('tests/cases/LPA_RPA_0d_steady/preop_config.json')
+
+    result_handler = ResultHandler.from_config_handler(config_handler)
+
+    repair_config = {
+        "type": "optimize stent",
+        "location": "proximal",
+        "value": [0.5, 0.5],
+        "objective": "flow split"
+    }
+
+    os.chdir('tests/cases/LPA_RPA_0d_steady')
+
+    interface.optimize_stent_diameter(config_handler, result_handler, repair_config, adapt='cwss', trees_exist=False)
+
+
+
 def test_run_from_file():
-    expfile = 'AS2_stent.json'
+    expfile = 'AS2_stent_opt.json'
     os.chdir('tests/cases/AS2/experiments')
 
     interface.run_from_file(expfile, vis_trees=True)
@@ -290,5 +312,4 @@ def test_simple_config():
 
 if __name__ == '__main__':
 
-    # test_pries_adaptation()
-    test_pries_adaptation()
+    test_run_from_file()

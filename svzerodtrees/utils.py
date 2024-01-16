@@ -153,7 +153,7 @@ def find_outlets(config):
 
 def get_branch_result(result_array, data_name: str, branch: int, steady: bool=False):
     '''
-    get the flow, pressure or wss result for a model branch
+    get the flow, pressure or wss result for a model branch form an unformatted result
 
     :param result_array: svzerodplus result array
     :param data_name: q, p or wss
@@ -223,6 +223,7 @@ def write_resistances(config, resistances):
             bc_config['bc_values']['R'] = resistances[idx]
 
             idx += 1
+
 
 def write_rcrs(config, rcrs):
     '''

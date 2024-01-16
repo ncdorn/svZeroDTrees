@@ -237,3 +237,5 @@ class ResultHandler:
         for timestep in self.results.keys():
             for field in self.results[timestep].keys():
                 self.results[timestep][field] = {key: value.tolist() for key, value in self.results[timestep][field].items()}
+
+

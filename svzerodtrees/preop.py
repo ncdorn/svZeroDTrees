@@ -420,10 +420,6 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_proc
                 # count up the outlets for indexing pressure and flow
                 outlet_idx += 1
 
-    # optimize the trees not in parallel
-    # for tree in config_handler.trees:
-    #     tree.optimize_tree_diameter(log_file, d_min=d_min, pries_secomb=True)
-
 
     if n_procs is None:
         # don't run as parallel processes
@@ -459,10 +455,27 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_proc
         # parallel the parameter optimization for Pries and Secomb adaptation
         def optimize_params(tree):
             tree.pries_n_secomb.optimize_params()
+
             return tree
         
         with Pool(n_procs) as p:
             config_handler.trees = p.map(optimize_params, config_handler.trees)
+    
+    # compute statistics on the optimized pries and secomb parameters
+    ps_param_set = np.empty((len(config_handler.trees), 8))
+
+    for i, tree in enumerate(config_handler.trees):
+        ps_param_set[i, :] = tree.pries_n_secomb.ps_params
+
+    # get the mean and standard deviation of the optimized parameters
+    ps_param_mean = np.mean(ps_param_set, axis=0)
+    ps_param_std = np.std(ps_param_set, axis=0)
+    # output this to the log file
+    write_to_log(log_file, "Pries and Secomb parameter statistics: ")
+    write_to_log(log_file, "of the form [k_p, k_m, k_c, k_s, L (cm), S_0, tau_ref, Q_ref]")
+    write_to_log(log_file, "    mean: " + str(ps_param_mean))
+    write_to_log(log_file, "    std: " + str(ps_param_std))
+
 
     # add the preop result to the result handler
     result_handler.add_unformatted_result(preop_result, 'preop')
