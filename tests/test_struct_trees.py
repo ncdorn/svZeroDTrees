@@ -21,5 +21,13 @@ def build_simple_tree():
     '''
     build a simple tree for testing
     '''
+    
+    os.chdir('tests/cases/simple_config')
+    input_file = 'simple_config_2out.json'
+    
+    config_handler = ConfigHandler.from_json(input_file)
 
-    pass
+    result_handler = ResultHandler.from_config_handler(config_handler)
+
+    config_handler.simulate(result_handler, 'preop')
+    config_handler = ConfigHandler.from_config_file

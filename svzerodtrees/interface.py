@@ -383,9 +383,14 @@ def optimize_stent_diameter(config_handler, result_handler, repair_config: dict,
                                             log_file)
 
         # adapt trees
-        adaptation.adapt_constant_wss(config_handler,
-                                    result_handler,
-                                    log_file)
+        if adapt == 'cwss':
+            adaptation.adapt_constant_wss(config_handler,
+                                        result_handler,
+                                        log_file)
+        elif adapt == 'ps':
+            adaptation.adapt_pries_secomb(config_handler,
+                                        result_handler,
+                                        log_file)
 
         rpa_split = get_branch_result(result_handler.results['adapted'], 'flow_in', config_handler.rpa.branch, steady=True) / get_branch_result(result_handler.results['adapted'], 'flow_in', config_handler.mpa.branch, steady=True)
 
