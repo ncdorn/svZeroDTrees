@@ -39,36 +39,24 @@ def optimize_outlet_bcs(input_file,
     '''
 
     # get the clinical target values, pressures in mmHg
-    q, target_ps, rpa_ps, lpa_ps, wedge_p, rpa_split = get_clinical_targets(clinical_targets, log_file) 
-    print(target_ps)
+    # get the clinical target values
+    clinical_targets = ClinicalTargets.from_csv(clinical_targets, steady=steady)
 
-    # load input json as a config dict
-    with open(input_file) as ff:
-        preop_config = json.load(ff)
+    clinical_targets.log_clinical_targets(log_file)
 
-    # make inflow steady
-    if make_steady:
-        make_inflow_steady(preop_config)
-        write_to_log(log_file, "inlet BCs converted to steady")
+    # initialize the data handlers
+    config_handler = ConfigHandler.from_json(input_file)
+    result_handler = ResultHandler.from_config(config_handler.config)
 
-    # change boundary conditions to R
-    if change_to_R:
-        Pd = convert_RCR_to_R(preop_config)
-        write_to_log(log_file, "RCR BCs converted to R, Pd = " + str(Pd))
-
-    # add clinical flow values to the zerod input file
     if steady:
-        config_flow(preop_config, q)
+        for bc in config_handler.bcs.values():
+            if bc.type == 'RCR':
+                bc.change_to_R()
 
-    # get resistances from the zerod input file
-    if steady:
-        resistance = get_resistances(preop_config)
-    else:
-        rcr = get_rcrs(preop_config)
         
     # initialize the data handlers
-    result_handler = ResultHandler.from_config(preop_config)
-    config_handler = ConfigHandler(preop_config)
+    config_handler = ConfigHandler.from_json(input_file)
+    result_handler = ResultHandler.from_config_handler(config_handler)
 
     # scale the inflow
     # objective function value as global variable
@@ -81,7 +69,7 @@ def optimize_outlet_bcs(input_file,
                                      steady=steady,
                                      lpa_branch= result_handler.lpa_branch, # in general, this should be [1, 2]
                                      rpa_branch = result_handler.rpa_branch,
-                                     rpa_split=rpa_split
+                                     rpa_split=clinical_targets.rpa_split
                                      ):
         '''
         objective function for 0D boundary condition optimization
@@ -94,14 +82,11 @@ def optimize_outlet_bcs(input_file,
 
         :return: sum of SSE of pressure targets and flow split targets
         '''
-        # print("resistances: ", resistances)
+        print("resistances: ", resistances)
         # write the optimization iteration resistances to the config
-        if steady:
-            write_resistances(input_config, resistances)
-        else:
-            write_rcrs(input_config, resistances)
+        config_handler.update_bcs(resistances, rcr=not steady)
             
-        zerod_result = run_svzerodplus(input_config)
+        zerod_result = run_svzerodplus(config_handler.config)
 
         # get mean, systolic and diastolic pressures
         mpa_pressures, mpa_sys_p, mpa_dia_p, mpa_mean_p  = get_pressure(zerod_result, branch=0, convert_to_mmHg=True)
@@ -116,12 +101,14 @@ def optimize_outlet_bcs(input_file,
         else: # if unsteady, take sum of squares of mean, sys, dia pressure
             pred_p = np.array([
                 -mpa_sys_p,
-                -mpa_dia_p,
-                -mpa_mean_p
+                -mpa_dia_p
+                # -mpa_mean_p
             ])
             print("pred_p: ", pred_p)
-            # p_diff = np.sum(np.square(np.subtract(pred_p, target_ps)))
-            p_diff = (pred_p[0] - target_ps[0]) ** 2
+            p_diff = np.sum(np.square(np.subtract(pred_p, target_ps[:1]))) + \
+            np.sum(np.array([1 / bc.Rp for bc in list(config_handler.bcs.values())[1:]]) ** 2) + \
+            np.sum(np.array([1 / bc.Rd for bc in list(config_handler.bcs.values())[1:]]) ** 2)
+            # p_diff = (pred_p[0] - target_ps[0]) ** 2
 
         # penalty = 0
         # for i, p in enumerate(pred_p):
@@ -142,20 +129,40 @@ def optimize_outlet_bcs(input_file,
     # write to log file for debugging
     write_to_log(log_file, "Optimizing preop outlet resistance...")
 
+    # get the initial resistance values
+    initial_r = []
+    for bc in config_handler.bcs.values():
+        if bc.type == 'RESISTANCE':
+            initial_r.append(bc.R)
+        if bc.type == 'RCR':
+            initial_r.append(bc.Rp)
+            initial_r.append(bc.C)
+            initial_r.append(bc.Rd)
+
     # run the optimization algorithm
     if steady:
         result = minimize(zerod_optimization_objective,
-                        resistance,
-                        args=(config_handler.config, target_ps, steady, result_handler.lpa_branch, result_handler.rpa_branch, rpa_split),
+                        initial_r,
+                        args=(config_handler.config, 
+                              clinical_targets.mpa_p, 
+                              steady, 
+                              result_handler.lpa_branch, 
+                              result_handler.rpa_branch, 
+                              clinical_targets.rpa_split),
                         method="CG",
                         options={"disp": False},
                         )
     else:
         bounds = Bounds(lb=0, ub=math.inf)
         result = minimize(zerod_optimization_objective,
-                          rcr,
-                          args=(config_handler.config, target_ps, steady, result_handler.lpa_branch, result_handler.rpa_branch, rpa_split),
-                          method="CG",
+                          initial_r,
+                          args=(config_handler.config, 
+                                clinical_targets.mpa_p, 
+                                steady, 
+                                result_handler.lpa_branch, 
+                                result_handler.rpa_branch, 
+                                clinical_targets.rpa_split),
+                          method="Nelder-Mead",
                           options={"disp": False},
                           bounds=bounds
                           )
@@ -218,6 +225,7 @@ def optimize_pa_bcs(input_file,
 
     for i in range(iterations):
         print('beginning pa_config optimization iteration ' + str(i) + ' of ' + str(iterations) + '...')
+
         # distribute amongst all resistance conditions in the config
         pa_config.optimize()
 
@@ -500,16 +508,23 @@ class ClinicalTargets():
         # get the mpa pressures
         mpa_pressures = get_value_from_csv(clinical_targets, 'mpa pressures') # mmHg
         mpa_sys_p, mpa_dia_p = mpa_pressures.split("/")
+        mpa_sys_p = int(mpa_sys_p)
+        mpa_dia_p = int(mpa_dia_p)
         mpa_mean_p = int(get_value_from_csv(clinical_targets, 'mpa mean pressure'))
 
         # get the lpa pressures
         lpa_pressures = get_value_from_csv(clinical_targets, 'lpa pressures') # mmHg
         lpa_sys_p, lpa_dia_p = lpa_pressures.split("/")
+        lpa_sys_p = int(lpa_sys_p)
+        lpa_dia_p = int(lpa_dia_p)
         lpa_mean_p = int(get_value_from_csv(clinical_targets, 'lpa mean pressure'))
 
         # get the rpa pressures
         rpa_pressures = get_value_from_csv(clinical_targets, 'rpa pressures') # mmHg
         rpa_sys_p, rpa_dia_p = rpa_pressures.split("/")
+        rpa_sys_p = int(rpa_sys_p)
+        rpa_dia_p = int(rpa_dia_p)
+
         rpa_mean_p = int(get_value_from_csv(clinical_targets, 'rpa mean pressure'))
 
         # if steady, just take the mean

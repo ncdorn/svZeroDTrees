@@ -16,7 +16,7 @@
 	},
 	{
 		"bc_name": "LPA_BC",
-		"bc_type": "RESISTANCE",
+		"bc_type": "RCR",
 		"bc_values": {
 			"Pd": 10000.0,
 			"R": 1000.0
@@ -24,7 +24,7 @@
 	},
 	{
 		"bc_name": "RPA_BC",
-		"bc_type": "RESISTANCE",
+		"bc_type": "RCR",
 		"bc_values": {
 			"Pd": 10000.0,
 			"R": 1000.0

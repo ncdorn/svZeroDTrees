@@ -29,5 +29,4 @@ def build_simple_tree():
 
     result_handler = ResultHandler.from_config_handler(config_handler)
 
-    config_handler.simulate(result_handler, 'preop')
-    config_handler = ConfigHandler.from_config_file
+    

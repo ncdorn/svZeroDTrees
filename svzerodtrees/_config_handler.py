@@ -156,7 +156,34 @@ class ConfigHandler():
         # add the vessels
         self._config['vessels'] = [vessel.to_dict() for vessel in self.vessel_map.values()]
 
-    
+
+    def plot_inflow(self):
+        '''
+        plot the inflow
+        '''
+        plt.figure(2)
+        plt.plot(self.config['boundary_conditions'][0]['bc_values']['t'], self.config['boundary_conditions'][0]['bc_values']['Q'])
+        plt.show()
+
+
+    def update_bcs(self, vals: list, rcr: bool):
+        '''
+        adjust the boundary conditions for the tree by changing the R or RCR values
+
+        :param vals: list of values to change the boundary conditions to, with either R or Rp, C, Rd values
+        :param rcr: bool to indicate if changing RCR or R BCs
+        '''
+
+        if rcr:
+            for idx, bc in enumerate(list(self.bcs.values())[1:]):
+                bc.Rp = vals[idx * 3]
+                bc.C = vals[idx * 3 + 1]
+                bc.Rd = vals[idx * 3 + 2]
+        else:
+            for idx, bc in enumerate(self.bcs.values()):
+                bc.R = vals[idx]
+
+
     def convert_struct_trees_to_dict(self):
         '''
         convert the StructuredTreeOutlet instances into dict instances
@@ -685,6 +712,11 @@ class BoundaryCondition():
         self.values = config['bc_values']
         if self.type == 'RESISTANCE':
             self._R = self.values['R']
+        
+        if self.type == 'RCR':
+            self._Rp = self.values['Rp']
+            self._Rd = self.values['Rd']
+            self._C = self.values['C']
     
     @classmethod
     def from_config(cls, config):
@@ -727,6 +759,33 @@ class BoundaryCondition():
     def R(self, new_R):
         self._R = new_R
         self.values['R'] = new_R
+    
+    @property
+    def Rp(self):
+        return self._Rp
+    
+    @Rp.setter
+    def Rp(self, new_Rp):
+        self._Rp = new_Rp
+        self.values['Rp'] = new_Rp
+
+    @property
+    def Rd(self):
+        return self._Rd
+    
+    @Rd.setter
+    def Rd(self, new_Rd):
+        self._Rd = new_Rd
+        self.values['Rd'] = new_Rd
+
+    @property
+    def C(self):
+        return self._C
+    
+    @C.setter
+    def C(self, new_C):
+        self._C = new_C
+        self.values['C'] = new_C
     
 
 class SimParams():

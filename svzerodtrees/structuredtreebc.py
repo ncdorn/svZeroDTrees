@@ -605,7 +605,7 @@ class PriesnSecomb():
             # increase iteration count
             iter += 1
 
-        print('Pries and Secomb integration completed! R = ' + str(self.tree.root.R_eq) + ', dD = ' + str(og_d - self.tree.root.d))
+        print('Pries and Secomb integration completed in ' + str(iter) + ' iterations! R = ' + str(self.tree.root.R_eq) + ', dD = ' + str(og_d - self.tree.root.d))
 
 
     def optimize_params(self):

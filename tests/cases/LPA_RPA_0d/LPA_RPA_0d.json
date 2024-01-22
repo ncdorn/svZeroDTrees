@@ -418,9 +418,9 @@
             "bc_name": "RCR_0",
             "bc_type": "RCR",
             "bc_values": {
-                "Pd": 0.0,
+                "Pd": 20.0,
                 "Rp": 100.0,
-                "C": 0.1,
+                "C": 0.0001,
                 "Rd": 900.0
             }
         },
@@ -428,9 +428,9 @@
             "bc_name": "RCR_1",
             "bc_type": "RCR",
             "bc_values": {
-                "Pd": 0.0,
+                "Pd": 20.0,
                 "Rp": 100.0,
-                "C": 0.1,
+                "C": 0.0001,
                 "Rd": 900.0
             }
         }
@@ -441,7 +441,7 @@
                 0
             ],
             "junction_name": "J0",
-            "junction_type": "internal_junction",
+            "junction_type": "NORMAL_JUNCTION",
             "outlet_vessels": [
                 1,
                 4
@@ -530,8 +530,8 @@
             "zero_d_element_type": "BloodVessel",
             "zero_d_element_values": {
                 "C": 4.007119357246248e-07,
-                "L": 21.607973843286032,
-                "R_poiseuille": 56.60979882267242,
+                "L": 1.0,
+                "R_poiseuille": 10.0,
                 "stenosis_coefficient": 3.0993613148226786
             }
         },
@@ -545,8 +545,8 @@
             "zero_d_element_type": "BloodVessel",
             "zero_d_element_values": {
                 "C": 2.48164301775649e-07,
-                "L": 7.989880113872991,
-                "R_poiseuille": 16.17437182162761,
+                "L": 0.0,
+                "R_poiseuille": 10.0,
                 "stenosis_coefficient": 0.8034345943457993
             }
         },
@@ -569,8 +569,8 @@
             "zero_d_element_type": "BloodVessel",
             "zero_d_element_values": {
                 "C": 1.5912959286902213e-07,
-                "L": 26.97295325158528,
-                "R_poiseuille": 125.28640750690423,
+                "L": 0.0,
+                "R_poiseuille": 10.0,
                 "stenosis_coefficient": 11.847370548918812
             }
         },
@@ -584,8 +584,8 @@
             "zero_d_element_type": "BloodVessel",
             "zero_d_element_values": {
                 "C": 4.936310111636402e-07,
-                "L": 14.775667833809635,
-                "R_poiseuille": 28.84072303758497,
+                "L": 0.0,
+                "R_poiseuille": 10.0,
                 "stenosis_coefficient": 0.6492760093973661
             }
         }
