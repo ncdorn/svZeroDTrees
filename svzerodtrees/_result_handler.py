@@ -7,7 +7,7 @@ class ResultHandler:
     class to handle preop, postop and post adaptation results from the structured tree simulation
     '''
 
-    def __init__(self, vessels, lpa_branch, rpa_branch, viscosity):
+    def __init__(self, vessels, lpa_branch=None, rpa_branch=None, viscosity=None):
 
         self.lpa_branch = lpa_branch
         self.rpa_branch = rpa_branch
@@ -51,7 +51,10 @@ class ResultHandler:
         :return: ResultHandler instance
         '''
         # get rpa_lpa_branch ids
-        lpa_branch, rpa_branch = find_lpa_rpa_branches(config_handler.config)
+        if config_handler.is_pulmonary:
+            lpa_branch, rpa_branch = find_lpa_rpa_branches(config_handler.config)
+        else:
+            lpa_branch, rpa_branch = None, None
 
         # get vessel info and vessel ids (vessel info necessary for wss calculations)
         vessels = []
@@ -76,19 +79,20 @@ class ResultHandler:
                     self.vessels.append(id)
     
 
-    def format_results(self):
+    def format_results(self, is_pulmonary=True):
         '''
         format the results into preop, postop and adapted for each branch, for use in visualization
         '''
 
         # get summary results for the MPA
-        self.clean_results['mpa'] = self.format_branch_result(0)
+        if is_pulmonary:
+            self.clean_results['mpa'] = self.format_branch_result(0)
 
-        # get summary results for the RPA
-        self.clean_results['rpa'] = self.format_branch_result(self.rpa_branch)
+            # get summary results for the RPA
+            self.clean_results['rpa'] = self.format_branch_result(self.rpa_branch)
 
-        # get summary results for the LPA
-        self.clean_results['lpa'] = self.format_branch_result(self.lpa_branch)
+            # get summary results for the LPA
+            self.clean_results['lpa'] = self.format_branch_result(self.lpa_branch)
 
         # get summary results for all other vessels
         for vessel_config in self.vessels['vessels']:

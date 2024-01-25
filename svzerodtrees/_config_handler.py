@@ -10,7 +10,7 @@ class ConfigHandler():
     class to handle configs with and without trees
     '''
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, is_pulmonary=True):
         self._config = config
         self.trees = []
 
@@ -21,6 +21,8 @@ class ConfigHandler():
         self.bcs = {}
         self.simparams = None
 
+        self.is_pulmonary = is_pulmonary
+
         # build the config maps
         self.map_vessels_to_branches()
         self.build_config_map()
@@ -30,7 +32,7 @@ class ConfigHandler():
 
     #### I/O METHODS ####
     @classmethod
-    def from_json(cls, file_name: str):
+    def from_json(cls, file_name: str, is_pulmonary=True):
         '''
         load in a config dict from json file
 
@@ -40,7 +42,7 @@ class ConfigHandler():
         with open(file_name) as ff:
             config = json.load(ff)
 
-        return ConfigHandler(config)
+        return ConfigHandler(config, is_pulmonary)
     
     @classmethod
     def from_file(cls, file_name: str):
@@ -361,14 +363,16 @@ class ConfigHandler():
 
 
         # label the mpa, rpa and lpa
-        self.root.label = 'mpa'
-        self.root.children[0].label = 'lpa'
-        self.root.children[1].label = 'rpa'
-        
+        if self.is_pulmonary:
+            self.root.label = 'mpa'
+            self.root.children[0].label = 'lpa'
+            self.root.children[1].label = 'rpa'
+            
         # add these in incase we index using the mpa, lpa, rpa strings
-        self.mpa = self.root
-        self.lpa = self.root.children[0]
-        self.rpa = self.root.children[1]
+        if self.is_pulmonary:
+            self.mpa = self.root
+            self.lpa = self.root.children[0]
+            self.rpa = self.root.children[1]
 
 
         self.find_vessel_paths()
