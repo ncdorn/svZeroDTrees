@@ -10,7 +10,7 @@ class ConfigHandler():
     class to handle configs with and without trees
     '''
 
-    def __init__(self, config: dict, is_pulmonary=True):
+    def __init__(self, config: dict, is_pulmonary=True, is_threed_interface=False):
         self._config = config
         self.trees = []
 
@@ -22,6 +22,7 @@ class ConfigHandler():
         self.simparams = None
 
         self.is_pulmonary = is_pulmonary
+        self.threed_interface = is_threed_interface
 
         # build the config maps
         self.map_vessels_to_branches()
@@ -374,6 +375,10 @@ class ConfigHandler():
             self.lpa = self.root.children[0]
             self.rpa = self.root.children[1]
 
+        if self.threed_interface:
+            self.coupling_blocks = {}
+            for coupling_block in self._config['external_solver_coupling_blocks']:
+                self.coupling_blocks[coupling_block['name']] = CouplingBlocks.from_config(coupling_block)
 
         self.find_vessel_paths()
         self.assemble_config()
@@ -824,3 +829,40 @@ class SimParams():
             'number_of_time_pts_per_cardiac_cycle': self.number_of_time_pts_per_cardiac_cycle,
             'viscosity': self.viscosity
         }
+    
+
+class CouplingBlocks():
+    '''class to handle coupling blocks for 3d-0d coupling'''
+
+    def __init__(self, config: dict):
+        self.name = config['name']
+        self.type = config['type']
+        self.location = config['location']
+        self.connected_block = config['connected_block']
+        self.periodic = config['periodic']
+        self.values = config['values']
+    
+    @classmethod
+    def from_config(cls, config):
+        '''
+        create a coupling block from a config dict
+
+        :param config: config dict
+        '''
+
+        return cls(config)
+    
+    def to_dict(self):
+        '''
+        convert the coupling block to a dict for zerod solver use
+        '''
+
+        return {
+            'name': self.name,
+            'type': self.type,
+            'location': self.location,
+            'connected_block': self.connected_block,
+            'periodic': self.periodic,
+            'values': self.values
+        }
+    
