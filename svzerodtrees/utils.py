@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from io import StringIO
 import pandas as pd
 import copy
-import svzerodplus
+import pysvzerod
 
 # utilities for working with zero D trees
 
@@ -387,7 +387,7 @@ def run_svzerodplus(config: dict, dtype='ndarray'):
     :return output: the result of the simulation as a dict of dicts with each array denoted by its branch id
     """
 
-    output = svzerodplus.simulate(config)
+    output = pysvzerod.simulate(config)
     result = pd.read_csv(StringIO(output))
 
     output = {
