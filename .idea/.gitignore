@@ -1,0 +1,56 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
+# Byte-compiled / optimized / DLL files
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+**/__pycache__/
+=======
+__pycache__/
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+__pycache__/
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+__pycache__/
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+*.py[cod]
+
+# C extensions
+*.so
+
+# Distribution / packaging
+bin/
+build/
+develop-eggs/
+dist/
+eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# models
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+models/
+=======
+models/
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+models/
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f
+=======
+models/
+>>>>>>> 0e1d702ea2dc39d05c3b5ba2c37058652714188f

@@ -1,0 +1,17 @@
+{   "name": "exp_config_test_9.5.23",
+    "model": "LPA_RPA_0d_steady",
+    "adapt": "cwss",
+    "optimized": false,
+    "is_full_pa_tree": false,
+    "trees_exist": false,
+    "mesh_surfaces_path": "/home/ndorn/Documents/Stanford/PhD/PPAS/svPPAS/models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces",
+    "repair": [
+        {
+        "type": "stenosis_coefficient",
+        "location": "proximal",
+        "degree": [0.0, 0.0]
+        }
+    ]
+
+}
+

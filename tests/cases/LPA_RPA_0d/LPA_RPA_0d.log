@@ -1,0 +1,20 @@
+unsteady test started
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressures: [90, 18, 42]
+RPA pressures: [50, 18, 32]
+LPA pressures: [50, 18, 32]
+wedge pressure: 20
+RPA flow split: 0.52
+Optimizing preop outlet resistance...
+0D optimization optimization completed! 
+
+     Optimization solution: [7.82755964e-01 1.57234091e-04 8.73872375e-01 8.93269822e-01
+ 3.15219596e-04 1.65446314e+00]
+
+     Objective function value: 9005.195278419334
+
+     Number of iterations: 742
+
+Outlet resistances optimized! [7.82755964e-01 1.57234091e-04 8.73872375e-01 8.93269822e-01
+ 3.15219596e-04 1.65446314e+00]
