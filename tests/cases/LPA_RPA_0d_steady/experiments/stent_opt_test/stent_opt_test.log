@@ -1,0 +1,14 @@
+beginning experiment stent_opt_test!
+with the following configuration: 
+{'name': 'stent_opt_test', 'model': 'LPA_RPA_0d_steady', 'adapt': 'cwss', 'optimized': False, 'is_full_pa_tree': False, 'trees_exist': False, 'mesh_surfaces_path': '/home/ndorn/Documents/Stanford/PhD/PPAS/svPPAS/models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces', 'repair': [{'type': 'optimize stent', 'location': 'proximal', 'value': [0.5, 0.5], 'objective': 'flow split'}]}
+Getting clinical target values...
+Optimizing preop outlet resistance...
+0D optimization optimization completed! 
+
+     Optimization solution: [657.99576658  52.80157556]
+
+     Objective function value: 3.780413374484652e-10
+
+     Number of iterations: 6
+
+Outlet resistances optimized! [657.99576658  52.80157556]

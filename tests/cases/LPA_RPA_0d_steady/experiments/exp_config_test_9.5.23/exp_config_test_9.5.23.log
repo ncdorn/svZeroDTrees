@@ -1,0 +1,49 @@
+beginning experiment exp_config_test_9.5.23!
+with the following configuration: 
+{'name': 'exp_config_test_9.5.23', 'model': 'LPA_RPA_0d_steady', 'adapt': 'cwss', 'optimized': False, 'is_full_pa_tree': False, 'trees_exist': False, 'mesh_surfaces_path': '/home/ndorn/Documents/Stanford/PhD/PPAS/svPPAS/models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces', 'repair': [{'type': 'stenosis_coefficient', 'location': 'proximal', 'degree': [0.0, 0.0]}]}
+Getting clinical target values...
+Optimizing preop outlet resistance...
+0D optimization optimization completed! 
+
+     Optimization solution: [657.99151534  52.8060786 ]
+
+     Objective function value: 2.349770970146186e-08
+
+     Number of iterations: 5
+
+Outlet resistances optimized! [657.99151534  52.8060786 ]
+** building tree for resistance: 657.9915153392565 **
+     Resistance after optimization is 659.1556515736092
+
+     the optimized diameter is 0.08553061016727392
+
+     the number of vessels is 3
+** building tree for resistance: 52.80607860012541 **
+     Resistance after optimization is 52.847952642936264
+
+     the optimized diameter is 0.16491289955850844
+
+     the number of vessels is 3
+saving preop config with cwss trees...
+making repair according to repair config: {'type': 'stenosis_coefficient', 'location': 'proximal', 'degree': [0.0, 0.0]}
+** repairing stenoses in vessels [1, 2] **
+     vessel 1 has been repaired by degree 0.0
+     the new stenosis coefficient is 3.278070397561343e-07
+     vessel 2 has been repaired by degree 0.0
+     the new stenosis coefficient is 3.0993613148226786
+     vessel 3 has been repaired by degree 0.0
+     the new stenosis coefficient is 0.8034345943457993
+     vessel 4 has been repaired by degree 0.0
+     the new stenosis coefficient is 0.04304918134756488
+     vessel 5 has been repaired by degree 0.0
+     the new stenosis coefficient is 11.847370548918812
+     vessel 6 has been repaired by degree 0.0
+     the new stenosis coefficient is 0.6492760093973661
+all stenosis repairs completed
+** adapting trees based on constant wall shear stress assumption **
+** adaptation results for OutletTree1 **
+    R_new = 659.1556515736092, R_old = 659.1556515736092
+    The change in resistance is 0.0
+** adaptation results for OutletTree2 **
+    R_new = 52.847952642936264, R_old = 52.847952642936264
+    The change in resistance is 0.0
