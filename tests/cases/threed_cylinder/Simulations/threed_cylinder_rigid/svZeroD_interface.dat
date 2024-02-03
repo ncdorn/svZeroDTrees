@@ -1,0 +1,16 @@
+interface library path: /home/ndorn/Documents/Stanford/PhD/Simvascular/svZeroDSolver/Release/src/interface/libsvzero_interface.so
+
+svZeroD input file: /home/ndorn/Documents/Stanford/PhD/Simvascular/threed_models/simple_vessel/Simulations/simple_vessel_rigid/svzerod_3Dcoupling.json
+
+svZeroD external coupling block names to surface IDs (where surface IDs are from *.svpre file): 
+RCR_coupling 3
+
+Initialize external coupling block flows: 0
+
+External coupling block initial flows (one number is procided, it is applied to all coupling blocks: 0.0
+
+Initialize external coupling block pressures: 1
+
+External coupling block initial pressures (one number is provided, it is applied to all coupling blocks): 60.0
+
+

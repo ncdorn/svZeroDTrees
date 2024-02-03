@@ -5,6 +5,7 @@ import pickle
 from svzerodtrees import preop, operation, adaptation, postop
 from svzerodtrees.post_processing import plotting
 from svzerodtrees.utils import *
+from svzerodtrees.threedutils import *
 from svzerodtrees._result_handler import ResultHandler
 from svzerodtrees._config_handler import ConfigHandler
 from svzerodtrees.post_processing.pa_plotter import PAanalyzer
@@ -296,10 +297,10 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
     else:
         # construct trees
         preop.construct_cwss_trees(config_handler,
-                                           result_handler,
-                                           n_procs=n_procs,
-                                           log_file=log_file,
-                                           d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
+                                    result_handler,
+                                    n_procs=n_procs,
+                                    log_file=log_file,
+                                    d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
 
         # save preop config to as pickle, with StructuredTreeOutlet objects
         write_to_log(log_file, 'saving preop config with cwss trees...')
@@ -412,4 +413,15 @@ def optimize_stent_diameter(config_handler, result_handler, repair_config: dict,
     write_to_log(log_file, 'optimized stent diameters: ' + str(result.x))
 
 
- 
+def compute_threed_adaptation(config_handler, preop_flow, postop_flow, simulation_dir):
+    '''
+    compute the microvasular adaptation for a 3d coupled soluiton and output an adapted config handler
+    '''
+
+    # assign vtp surfaces to each coupling surface based on the svpre file
+    
+    preop.construct_coupled_cwss_trees(config_handler, simulation_dir)
+
+
+    
+
