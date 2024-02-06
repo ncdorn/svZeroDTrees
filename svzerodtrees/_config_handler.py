@@ -1,5 +1,6 @@
 from svzerodtrees.utils import *
 from svzerodtrees._result_handler import ResultHandler
+from svzerodtrees.threedutils import get_coupled_surfaces
 import json
 import pickle
 
@@ -12,6 +13,7 @@ class ConfigHandler():
 
     def __init__(self, config: dict, is_pulmonary=True, is_threed_interface=False):
         self._config = config
+
         self.trees = []
 
         # initialize config maps
@@ -42,19 +44,24 @@ class ConfigHandler():
 
         with open(file_name) as ff:
             config = json.load(ff)
+        if "external_solver_coupling_blocks" in config:
+            is_threed_interface = True
 
-        return ConfigHandler(config, is_pulmonary)
+        return ConfigHandler(config, is_pulmonary, is_threed_interface)
     
     @classmethod
-    def from_file(cls, file_name: str):
+    def from_file(cls, file_name: str, is_pulmonary=True):
         '''
         load in a config dict from binary file via pickle
         '''
 
         with open(file_name, 'rb') as ff:
             config = pickle.load(ff)
+        
+        if "external_solver_coupling_blocks" in config:
+            is_threed_interface = True
 
-        return ConfigHandler(config)
+        return ConfigHandler(config, is_pulmonary, is_threed_interface)
 
 
     def to_json(self, file_name: str):
@@ -163,6 +170,9 @@ class ConfigHandler():
 
         # add the vessels
         self._config['vessels'] = [vessel.to_dict() for vessel in self.vessel_map.values()]
+
+        if self.threed_interface:
+            self._config['external_solver_coupling_blocks'] = [coupling_block.to_dict() for coupling_block in self.coupling_blocks.values()]
 
 
     def plot_inflow(self):
@@ -356,17 +366,18 @@ class ConfigHandler():
                 parent_vessel.children.append(child_vessel)
 
         # find the root vessel
-        self.root = None
-        for vessel in self.vessel_map.values():
-            # this takes from the vessel map as opposed to the branch map. since the vessels are nonlinear we may have to use the vessel
-            # map in the future
-            if not any(vessel in child_vessel.children for child_vessel in self.vessel_map.values()):
-                self.root = vessel
-        
-        # organize the children in numerical order
-        # we assume that the branches are sorted alphabetically, and therefore the lpa comes first.
-        self.root.children.sort(key=lambda x: x.branch)
-
+        if self._config['vessels'] != []:
+            self.root = None
+            for vessel in self.vessel_map.values():
+                # this takes from the vessel map as opposed to the branch map. since the vessels are nonlinear we may have to use the vessel
+                # map in the future
+                if not any(vessel in child_vessel.children for child_vessel in self.vessel_map.values()):
+                    self.root = vessel
+            # organize the children in numerical order
+            # we assume that the branches are sorted alphabetically, and therefore the lpa comes first.
+            self.root.children.sort(key=lambda x: x.branch)
+            # find the vessel paths
+            self.find_vessel_paths()
 
         # label the mpa, rpa and lpa
         if self.is_pulmonary:
@@ -382,10 +393,10 @@ class ConfigHandler():
 
         if self.threed_interface:
             self.coupling_blocks = {}
-            for coupling_block in self._config['external_solver_coupling_blocks']:
-                self.coupling_blocks[coupling_block['name']] = CouplingBlocks.from_config(coupling_block)
+            for coupling_block in self._config["external_solver_coupling_blocks"]:
+                # create a mapping from connected block name to coupling block
+                self.coupling_blocks[coupling_block['connected_block']] = CouplingBlocks.from_config(coupling_block)
 
-        self.find_vessel_paths()
         self.assemble_config()
 
 
@@ -418,8 +429,6 @@ class ConfigHandler():
         :param remove_stenosis_coefficient: bool to keep or remove the stenosis coefficient
         '''
         
-        # get the branch object and the segments in that branch
-        print(self.branch_map[branch_id].R)
 
         if type(value) == list:
             # we are given a list here, so we will distribute each R to each vessel in the branch
@@ -805,12 +814,27 @@ class BoundaryCondition():
 class SimParams():
     '''class to handle simulation parameters'''
 
-    def __init__(self, config: dict):
-        self.density = config['density']
-        self.model_name = config['model_name']
-        self.number_of_cardiac_cycles = config['number_of_cardiac_cycles']
-        self.number_of_time_pts_per_cardiac_cycle = config['number_of_time_pts_per_cardiac_cycle']
-        self.viscosity = config['viscosity']
+    def __init__(self, config: dict, threed_coupled=False):
+        
+        # this is probably an inefficient method but can be reimplemented later
+        if 'coupled_simulation' in config.keys():
+            self.coupled_simulation = config['coupled_simulation']
+        if 'number_of_time_pts' in config.keys():
+            self.number_of_time_pts = config["number_of_time_pts"]
+        if 'output_all_cycles' in config.keys():
+            self.output_all_cycles = config["output_all_cycles"]
+        if 'steady_initial' in config.keys():
+            self.steady_initial = config["steady initial"]
+        if 'density' in config.keys():
+            self.density = config['density']
+        if 'model_name' in config.keys():
+            self.model_name = config['model_name']
+        if 'number_of_cardiac_cycles' in config.keys():
+            self.number_of_cardiac_cycles = config['number_of_cardiac_cycles']
+        if 'number_of_time_pts_per_cardiac_cycle' in config.keys():
+            self.number_of_time_pts_per_cardiac_cycle = config['number_of_time_pts_per_cardiac_cycle']
+        if 'viscosity' in config.keys():
+            self.viscosity = config['viscosity']
 
     @classmethod
     def from_config(cls, config):
@@ -819,21 +843,18 @@ class SimParams():
 
         :param config: config dict
         '''
+        if "coupled_simulation" in config.keys():
+            # this is probably a 3d coupled simulation and the simulation parameters will be different
+            threed_coupled = config["coupled_simulation"]
 
-        return cls(config)
+        return cls(config, threed_coupled)
     
     def to_dict(self):
         '''
         convert the simulation parameters to a dict for zerod solver use
         '''
 
-        return {
-            'density': self.density,
-            'model_name': self.model_name,
-            'number_of_cardiac_cycles': self.number_of_cardiac_cycles,
-            'number_of_time_pts_per_cardiac_cycle': self.number_of_time_pts_per_cardiac_cycle,
-            'viscosity': self.viscosity
-        }
+        return self.__dict__
     
 
 class CouplingBlocks():
@@ -846,6 +867,8 @@ class CouplingBlocks():
         self.connected_block = config['connected_block']
         self.periodic = config['periodic']
         self.values = config['values']
+        # to be added later
+        self.surface = None
     
     @classmethod
     def from_config(cls, config):
@@ -856,18 +879,12 @@ class CouplingBlocks():
         '''
 
         return cls(config)
+        
     
     def to_dict(self):
         '''
         convert the coupling block to a dict for zerod solver use
         '''
 
-        return {
-            'name': self.name,
-            'type': self.type,
-            'location': self.location,
-            'connected_block': self.connected_block,
-            'periodic': self.periodic,
-            'values': self.values
-        }
+        return self.__dict__
     

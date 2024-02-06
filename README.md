@@ -3,12 +3,14 @@ This is a package to generate structured and morphometric trees to simulate micr
 
 ## Installing
 
-1. Run `git clone https://github.com/ncdorn/svZeroDTrees.git`
-2. In desired python environment run `pip install -e .`
+1. Clone the repository with `git clone https://github.com/ncdorn/svZeroDTrees.git`
+2. In desired python environment run
 
-To use the svZeroDPlus solver (required), it must be installed separately.
+   `cd svZeroDTrees`
+   
+   `pip install -e .`
 
-3. Install solver following directions at https://stanfordcbcl.github.io/svZeroDPlus/cpp/
+Our [svZeroDSolver](https://github.com/SimVascular/svZeroDSolver) package is required and must be installed separately.
 
 ## Overview
 Generate structured trees at the outlet of 0d models created in SimVascular based on outflow boundary conditions to simulate microvasculature. Adapt these trees to changes in flow at the outlet based on upstream changes, such as stenosis relief.

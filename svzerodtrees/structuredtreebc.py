@@ -29,7 +29,7 @@ class StructuredTreeOutlet():
         self.params = params
         self.simparams = simparams
         # initial diameter (in cm) of the vessel from which the tree starts
-        self.initialD = ((128 * self.params["eta"] * self.params["l"]) / (np.pi * self.params["R"])) ** (1 / 4)
+        self.initialD = self.params["diameter"]
 
         # set up empty block dict if not generated from pre-existing tree
         if tree_config is None:
@@ -61,7 +61,7 @@ class StructuredTreeOutlet():
     def from_outlet_vessel(cls, 
                            vessel: Vessel, 
                            simparams: SimParams,
-                           bc_config: BoundaryCondition,
+                           bc: BoundaryCondition,
                            tree_exists=False, 
                            root: TreeVessel = None, 
                            P_outlet: list=[0.0], 
@@ -90,24 +90,49 @@ class StructuredTreeOutlet():
 
         params = dict(
             # need vessel length to determine vessel diameter
-            l=vessel.length,
-            # windkessel element values
-            R=vessel.R,
-            # Probably don't need C and L, just getting them for the sake of due diligence I guess
-            C=vessel.C,
-            L=vessel.L,
-            stenosis_coefficient=vessel.zero_d_element_values["stenosis_coefficient"],
+            diameter = vessel.diameter,
             eta=simparams.viscosity,
             P_in = P_outlet,
             Q_in = Q_outlet,
-            bc_values = bc_config.values
+            bc_values = bc.values
         )
+
         if tree_exists:
             print("tree exists")
             # probably need to change to a tree config parameter
             return cls(params=params, config = vessel, simparams=simparams, root=root)
         else:
             return cls(params=params, name="OutletTree" + str(vessel.branch), simparams=simparams)
+
+
+    @classmethod
+    def from_bc_config(cls,
+                       bc: BoundaryCondition,
+                       simparams: SimParams,
+                       diameter: float,
+                       P_outlet: list=[0.0], 
+                       Q_outlet: list=[0.0]) -> "StructuredTreeOutlet":
+        '''
+        Class method to create an instance from the config dictionary of an outlet boundary condition
+        '''
+
+        # if steady state, make the Q_outlet and P_outlet into a list of length two for svzerodplus config BC compatibility
+        if type(Q_outlet) is not list:
+            Q_outlet = [Q_outlet,] * 2
+
+        if type(P_outlet) is not list:
+            P_outlet = [P_outlet,] * 2
+
+        params = dict(
+            # need vessel length to determine vessel diameter
+            diameter = diameter,
+            eta=simparams.viscosity,
+            P_in = P_outlet,
+            Q_in = Q_outlet,
+            bc_values = bc.values
+        )
+        
+        return cls(params=params, name="OutletTree" + str(bc.name), simparams=simparams)
 
 
     def reset_tree(self, keep_root=False):

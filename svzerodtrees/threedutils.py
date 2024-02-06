@@ -2,6 +2,8 @@ import vtk
 import glob
 
 def find_vtp_area(infile):
+    # with open(infile):
+        # print('file able to be opened!')
     reader = vtk.vtkXMLPolyDataReader()
     reader.SetFileName(infile)
     reader.Update()
@@ -54,3 +56,45 @@ def compute_flow():
     awaiting advice from Martin on how to do this'''
     
     pass
+
+def get_coupled_surfaces(simulation_dir):
+    '''
+    get a map of coupled surfaces to vtp file to find areas and diameters for tree initialization and coupling
+    '''
+
+    # get a map of surface id's to vtp files
+    simulation_name = simulation_dir.split('/')[-2]
+    surface_id_map = {}
+    with open(simulation_dir + simulation_name + '.svpre', 'r') as ff:
+        for line in ff:
+            line = line.strip()
+            if line.startswith('set_surface_id'):
+                line_objs = line.split(' ')
+                vtp_file = line_objs[1]
+                surface_id = line_objs[2]
+                surface_id_map[surface_id] = simulation_dir + vtp_file
+    
+    # get a map of sruface id's to coupling blocks
+    coupling_map = {}
+    reading_coupling_blocks=False
+    with open(simulation_dir + '/svZeroD_interface.dat', 'r') as ff:
+        for line in ff:
+            line = line.strip()
+            if not reading_coupling_blocks:
+                if line.startswith('svZeroD external coupling block names'):
+                    reading_coupling_blocks=True
+                    pass
+                else:
+                    continue
+            else:
+                if line == '':
+                    break
+                else:
+                    line_objs = line.split(' ')
+                    coupling_block = line_objs[0]
+                    surface_id = line_objs[1]
+                    coupling_map[surface_id] = coupling_block
+    
+    block_surface_map = {coupling_map[id]: surface_id_map[id] for id in coupling_map.keys()}
+
+    return block_surface_map
