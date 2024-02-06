@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import pickle
 from svzerodtrees import preop, operation, adaptation, postop
@@ -6,8 +7,10 @@ from svzerodtrees.post_processing import plotting
 from svzerodtrees.utils import *
 from svzerodtrees._result_handler import ResultHandler
 from svzerodtrees._config_handler import ConfigHandler
+from svzerodtrees.post_processing.pa_plotter import PAanalyzer
+from scipy.optimize import minimize
 
-def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=False):
+def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=True):
     '''
     run the structured tree optimization pipeline from an experiment config file
 
@@ -31,14 +34,35 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
     repair_config = exp_config["repair"]
 
     # check if we are in an experiments directory, if not assume we are in it
+
     if os.path.exists('../experiments'): # we are in the experiments directory already
 
-        os.system('mkdir ' + expname)
+        if os.path.exists(expname):
+            ovwrite_dir = input('experiment ' + expname + ' already exists, do you want to overwrite? (y/n) ')
 
-    elif os.path.exists('experiments'): # we are ond directory above the experiments directory
+            if ovwrite_dir == 'y':
+                pass
 
-        os.chdir('experiments')
-        os.system('mkdir ' + expname)
+            else:
+                sys.exit()
+        
+        else:
+            os.system('mkdir ' + expname)
+
+    elif os.path.exists('experiments'): # we are in the directory above the experiments directory
+        
+        if os.path.exists(expname):
+            ovwrite_dir = input('experiment ' + expname + ' already exists, do you want to overwrite? (y/n) ')
+            
+            if ovwrite_dir == 'y':
+                pass
+
+            else:
+                sys.exit()
+        
+        else:
+            os.chdir('experiments')
+            os.system('mkdir ' + expname)
 
     else: # we are not in the experiments directory and need to create one
 
@@ -76,16 +100,17 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
 
     # initialize log file
     write_to_log(log_file, 'beginning experiment ' + expname + '!',  write=True)
+    write_to_log(log_file, 'with the following configuration: ')
+    write_to_log(log_file, str(exp_config))
 
     # optimize preoperative outlet boundary conditions
     if not optimized:
         if is_full_pa:
-            config_handler, result_handler = preop.optimize_pa_bcs(
+            config_handler, result_handler, pa_config = preop.optimize_pa_bcs(
                 input_file,
                 mesh_surfaces_path,
                 clinical_targets,
-                log_file,
-                show_optimization=False
+                log_file
             )
         else:
             config_handler, result_handler = preop.optimize_outlet_bcs(
@@ -98,39 +123,59 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
         # save optimized config and result
         config_handler.to_json('preop_config.json')
         
-        # json won't work for results dump
-        with open('preop_result_handler.out', 'wb') as ff:
-            pickle.dump(result_handler, ff)
 
     else: # use previous optimization results
-
-        config_handler = ConfigHandler.from_json('preop_config.json')
-
-        # json won't work for results load
-        with open('preop_result_handler.out', 'rb') as ff:
-            result_handler = pickle.load(ff)
-
-    if adapt == 'ps': # use pries and secomb adaptation scheme
+        if trees_exist:
+            # load the pickled config handler
+            if adapt == 'cwss':
+                with open('config_w_cwss_trees.in', 'rb') as ff:
+                    config_handler = pickle.load(ff)
+            elif adapt == 'ps':
+                with open('config_w_ps_trees.in', 'rb') as ff:
+                    config_handler = pickle.load(ff)
+            
+        else:
+            config_handler = ConfigHandler.from_json('preop_config.json')
         
-        run_pries_secomb_adaptation(config_handler, 
-                                    result_handler, 
-                                    repair_config, 
-                                    log_file, vis_trees, 
-                                    fig_dir,
-                                    trees_exist)
+        # get preop result
+        preop_flow = run_svzerodplus(config_handler.config)
 
-    elif adapt == 'cwss': # use constant wall shear stress adaptation scheme
-        
-        run_cwss_adaptation(config_handler, 
-                            result_handler, 
-                            repair_config, 
-                            log_file, 
-                            vis_trees, 
-                            fig_dir,
-                            trees_exist)
+        # load a new result handler
+        result_handler = ResultHandler.from_config(config_handler.config)
 
+        # add result to the handler
+        result_handler.add_unformatted_result(preop_flow, 'preop')
+
+
+    if repair_config[0]['type'] == 'optimize stent':
+        print("optimizing stent diameter...")
+        optimize_stent_diameter(config_handler,
+                                result_handler,
+                                repair_config[0],
+                                adapt,
+                                n_procs=12,
+                                trees_exist=trees_exist)
     else:
-        raise Exception('invalid adaptation scheme chosen')
+        if adapt == 'ps': # use pries and secomb adaptation scheme
+            
+            run_pries_secomb_adaptation(config_handler, 
+                                        result_handler, 
+                                        repair_config, 
+                                        log_file,
+                                        n_procs=12,
+                                        trees_exist=trees_exist)
+
+        elif adapt == 'cwss': # use constant wall shear stress adaptation scheme
+            
+            run_cwss_adaptation(config_handler, 
+                                result_handler, 
+                                repair_config, 
+                                log_file,
+                                n_procs=12,
+                                trees_exist=trees_exist)
+
+        else:
+            raise Exception('invalid adaptation scheme chosen')
     
     # format the results
     result_handler.format_results()
@@ -140,13 +185,37 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=F
     
     # save the result
     result_handler.to_json(expdir_path + 'full_results.json')
+
+    # save the result handler to use later
+    result_handler.to_file(expdir_path + 'result_handler.out')
     
     if vis_trees:
-        plotting.plot_LPA_RPA_changes(fig_dir, result_handler.clean_results, modelname + ' LPA, RPA')
-        plotting.plot_MPA_changes(fig_dir, result_handler.clean_results, modelname + ' MPA')
+        # initialize the data plotter
+        plotter = PAanalyzer.from_files('preop_config.json', expdir_path + 'full_results.json', expdir_path + 'figures/')
+
+        # scatter outflow vs. distance
+        plotter.scatter_qoi_adaptation_distance('all', 'q_out')
+        plotter.scatter_qoi_adaptation_distance('outlets', 'q_out', filename='adaptation_scatter_outlets.png')
+
+        # scatter pressure vs. distance
+        plotter.scatter_qoi_adaptation_distance('all', 'p_out')
+        plotter.scatter_qoi_adaptation_distance('outlets', 'p_out', filename='adaptation_scatter_outlets.png')
+
+        # scatter wss vs. distance
+        plotter.scatter_qoi_adaptation_distance('all', 'wss')
+        plotter.scatter_qoi_adaptation_distance('outlets', 'wss', filename='adaptation_scatter_outlets.png')
+
+        # plot lpa and rpa flow adaptation
+        plotter.plot_lpa_rpa_adaptation()
+
+        # plot lpa and rpa changes
+        plotter.plot_lpa_rpa_diff()
+
+        # plot the mpa pressure changes
+        plotter.plot_mpa_pressure()
 
 
-def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, repair_config, log_file, vis_trees, fig_dir, trees_exist=False):
+def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, repair_config, log_file, n_procs=12, trees_exist=False):
     '''
     run the pries and secomb adaptation scheme from preop config to result
 
@@ -161,30 +230,50 @@ def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, r
     '''
 
     if trees_exist:
-        config_handler.from_file_w_trees('config_w_pries_trees.in')
+
+        preop_result = run_svzerodplus(config_handler.config)
+
+        result_handler.add_unformatted_result(preop_result, 'preop')
+
     else:
-        # construct trees
         preop.construct_pries_trees(config_handler, 
                                     result_handler, 
-                                    log_file,
-                                    fig_dir=fig_dir, 
-                                    d_min=.0049)
+                                    n_procs=n_procs,
+                                    log_file=log_file,
+                                    d_min=.01)
         
         # save preop config to json
-        config_handler.to_file_w_trees('config_w_pries_trees.in')
+        config_handler.to_file_w_trees('config_w_ps_trees.in')
+    
+
+    # compute statistics on the optimized pries and secomb parameters
+    ps_param_set = np.empty((len(config_handler.trees), 8))
+
+    for i, tree in enumerate(config_handler.trees):
+        ps_param_set[i, :] = tree.pries_n_secomb.ps_params
+
+    # get the mean and standard deviation of the optimized parameters
+    ps_param_mean = np.mean(ps_param_set, axis=0)
+    ps_param_std = np.std(ps_param_set, axis=0)
+    # output this to the log file
+    write_to_log(log_file, "Pries and Secomb parameter statistics: ")
+    write_to_log(log_file, "of the form [k_p, k_m, k_c, k_s, L (cm), S_0, tau_ref, Q_ref]")
+    write_to_log(log_file, "    mean: " + str(ps_param_mean))
+    write_to_log(log_file, "    std: " + str(ps_param_std))
 
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
-    operation.repair_stenosis_coefficient(config_handler,
-                                          result_handler, 
-                                          repair_config[0], 
-                                          log_file)
+    operation.repair_stenosis(config_handler,
+                              result_handler, 
+                              repair_config[0], 
+                              log_file)
 
     # adapt trees
     adaptation.adapt_pries_secomb(config_handler,
                                   result_handler,
                                   log_file)
+    
 
-def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHandler, repair_config, log_file, vis_trees, fig_dir, trees_exist=False):
+def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHandler, repair_config, log_file, n_procs=12, trees_exist=False):
     '''
     run the constant wall shear stress adaptation scheme from preop config to result
 
@@ -199,21 +288,27 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
     '''
 
     if trees_exist:
-        config_handler.from_file_w_trees('config_w_cwss_trees.in')
+
+        preop_result = run_svzerodplus(config_handler.config)
+
+        result_handler.add_unformatted_result(preop_result, 'preop')
 
     else:
         # construct trees
         preop.construct_cwss_trees(config_handler,
                                            result_handler,
-                                           log_file,
-                                           fig_dir=fig_dir,
-                                           d_min=.0049)
+                                           n_procs=n_procs,
+                                           log_file=log_file,
+                                           d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
 
         # save preop config to as pickle, with StructuredTreeOutlet objects
+        write_to_log(log_file, 'saving preop config with cwss trees...')
+
         config_handler.to_file_w_trees('config_w_cwss_trees.in')
+
     
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
-    operation.repair_stenosis_coefficient(config_handler, 
+    operation.repair_stenosis(config_handler, 
                                           result_handler,
                                           repair_config[0], 
                                           log_file)
@@ -222,6 +317,99 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
     adaptation.adapt_constant_wss(config_handler,
                                   result_handler,
                                   log_file)
+    
+
+def optimize_stent_diameter(config_handler, result_handler, repair_config: dict, adapt='ps' or 'cwss', log_file=None, n_procs=12, trees_exist=True):
+    '''
+    optimize stent diameter based on some objective function containing flow splits or pressures
+    
+    :param config_handler: ConfigHandler instance
+    :param result_handler: ResultHandler instance
+    :param repair_config: repair config dict containing 
+                        "type"="optimize stent", 
+                        "location"="proximal" or some list of locations, 
+                        "objective"="flow split" or "mpa pressure" or "all"
+    :param adaptation: adaptation scheme to use, either 'ps' or 'cwss'
+    :param n_procs: number of processors to use for tree construction
+    '''
+
+    if trees_exist:
+        # compute preop result
+        preop_result = run_svzerodplus(config_handler.config)
+        # add the preop result to the result handler
+        result_handler.add_unformatted_result(preop_result, 'preop')
+
+    else:
+        # construct trees
+        if adapt == 'ps':
+            # pries and secomb adaptationq
+            preop.construct_pries_trees(config_handler,
+                                        result_handler,
+                                        n_procs=n_procs,
+                                        log_file=log_file,
+                                        d_min=.01)
+            
+        elif adapt == 'cwss':
+            # constant
+            preop.construct_cwss_trees(config_handler,
+                                            result_handler,
+                                            n_procs=n_procs,
+                                            log_file=log_file,
+                                            d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
+
+        # save preop config to as pickle, with StructuredTreeOutlet objects
+        write_to_log(log_file, 'saving preop config with' + adapt + 'trees...')
+
+        # pickle the config handler with the trees
+        config_handler.to_file_w_trees('config_w_' + adapt + '_trees.in')
+
+    
+
+    def objective_function(diameters, result_handler, repair_config, adapt):
+        '''
+        objective function to minimize based on input stent diameters
+        '''
+
+        repair_config['type'] = 'stent'
+        repair_config['value'] = diameters
+
+        with open('config_w_' + adapt + '_trees.in', 'rb') as ff:
+            config_handler = pickle.load(ff)
+
+        # perform repair. this needs to be updated to accomodate a list of repairs > length 1
+        operation.repair_stenosis(config_handler, 
+                                            result_handler,
+                                            repair_config, 
+                                            log_file)
+
+        # adapt trees
+        if adapt == 'cwss':
+            adaptation.adapt_constant_wss(config_handler,
+                                        result_handler,
+                                        log_file)
+        elif adapt == 'ps':
+            adaptation.adapt_pries_secomb(config_handler,
+                                        result_handler,
+                                        log_file)
+
+        rpa_split = get_branch_result(result_handler.results['adapted'], 'flow_in', config_handler.rpa.branch, steady=True) / get_branch_result(result_handler.results['adapted'], 'flow_in', config_handler.mpa.branch, steady=True)
+
+        mpa_pressure = get_branch_result(result_handler.results['adapted'], 'pressure_in', config_handler.mpa.branch, steady=True)
+
+        if repair_config['objective'] == 'flow split':
+            return (rpa_split - 0.5) ** 2
+        elif repair_config['objective'] == 'mpa pressure':
+            return (mpa_pressure - 20) ** 2
+        elif repair_config['objective'] == 'all':
+            return ((rpa_split - 0.5) * 100) ** 2 + mpa_pressure
+        else:
+            raise Exception('invalid objective function specified')
+    
+    result = minimize(objective_function, repair_config["value"], args=(result_handler, repair_config, adapt), method='Nelder-Mead')
+
+    print('optimized stent diameters: ' + str(result.x))
+    # write this to the log file as well
+    write_to_log(log_file, 'optimized stent diameters: ' + str(result.x))
 
 
-
+ 

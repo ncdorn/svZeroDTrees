@@ -47,13 +47,9 @@ class TreeVessel:
 
         :return: TreeVessel instance
         '''
-        if diameter > .03 or id == 0:
-            # if we allow the first vessel to experience FL effects, the optimization does not work as the resistance is
-            # decreased by an order of magnitude. Therefore the first vessel automatically does not experience FL.
-            viscosity = eta
-        else: 
-            # Implemented Fahraeus-Lindqvist effect according to empirical relationship in Lan et al. and Pries and Secomb
-            viscosity = cls.fl_visc(cls, diameter)
+
+        # Viscosity is always governed by fahraeus lindqvist effect
+        viscosity = cls.fl_visc(cls, diameter)
         
         # initialize the 0D parameters of the treee
         R, C, L, l = cls.calc_zero_d_values(cls, diameter, viscosity)
@@ -114,10 +110,12 @@ class TreeVessel:
 
     @property
     def R_eq(self):
-        return self._R + (1 / (self._left._R_eq ** -1 + self._right._R_eq ** -1))
+        if self.left is not None and self.right is not None:
+            self._update_R_eq()
+        return self._R_eq
 
     def _update_R_eq(self):
-        self._R_eq = self._R + (1 / (self._left._R_eq ** -1 + self._right._R_eq ** -1))
+        self._R_eq = self._R + (1 / (self._left.R_eq ** -1 + self._right.R_eq ** -1))
 
     @property
     def collapsed(self):
@@ -164,15 +162,14 @@ class TreeVessel:
         update vessel info dict based on changes to vessel diameter
         '''
 
-        if self._d < .03 and self.id > 0: 
-        # if we allow the first vessel to experience FL effects, the optimization does not work as the resistance is decreased
-        # by an order of magnitude
-            self.eta = self.fl_visc(self.d)
-            self.info["viscosity"] = self.eta
+        # update viscosity
+        self.eta = self.fl_visc(self.d)
+        self.info["viscosity"] = self.eta
+        
         R, C, L, l = self.calc_zero_d_values(self._d, self.eta)
         self.info["vessel_length"] = l
         self.info["vessel_D"] = self.d
-        self.info["zero_d_element_values"]["R_poiseulle"] = R
+        self.info["zero_d_element_values"]["R_poiseuille"] = R
         self.info["zero_d_element_values"]["C"] = C
         self.info["zero_d_element_values"]["L"] = L
         self.R = R
@@ -188,7 +185,18 @@ class TreeVessel:
             "outlet": "P_d" + str(self.id)
         }
 
-    def adapt_pries_secomb(self, ps_params, dt, H_d=0.45):
+    def adapt_pries_secomb(self, 
+                            k_p = 0.68,
+                            k_m = .70,
+                            k_c = 2.45,
+                            k_s = 1.72,
+                            L = 1.73,
+                            J0 = 27.9,
+                            tau_ref = .103,
+                            Q_ref = 3.3 * 10 ** -8,
+                            dt = 0.01, 
+                            H_d=0.45,
+                            optimizing_params=False):
         '''
         calculate the diameter change in the vessel based on pries and secomb parameters
         :param ps_params: pries and secomb parameters in the following form [k_p, k_m, k_c, k_s, L (cm), S_0, tau_ref, Q_ref]
@@ -205,8 +213,19 @@ class TreeVessel:
 
         ## pries and secomb equations ##
 
-        self.k_p, self.k_m, self.k_c, self.k_s, self.L, self.S_0, self.tau_ref, self.Q_ref = tuple(ps_params)
+        self.k_p = k_p
+        self.k_m = k_m
+        self.k_c = k_c
+        self.k_s = k_s
+        self.L = L
+        self.J0 = J0
+        self.tau_ref = tau_ref
+        self.Q_ref = Q_ref
+
         self. H_d = H_d # hematocrit
+
+        if self.Q < 0.0:
+            raise ValueError("Q must be positive")
 
         self.S_m = self.k_m * math.log(self.Q_ref / (self.Q * self.H_d) + 1)
 
@@ -217,13 +236,14 @@ class TreeVessel:
         self.S_p = -self.k_p * math.log(self.tau_e)
         
         self.Sbar_c = 0.0
+        
         if not self.collapsed:
             if self.left.Sbar_c > 0:
                 self.Sbar_c = self.left.S_m + self.right.S_m + self.left.Sbar_c * math.exp(-self.left.l / self.L) + self.right.Sbar_c * math.exp(-self.right.l / self.L)
             else:
                 self.Sbar_c = self.left.S_m + self.right.S_m
 
-        self.S_c = self.k_c * (self.Sbar_c / (self.Sbar_c + self.S_0))
+        self.S_c = self.k_c * (self.Sbar_c / (self.Sbar_c + self.J0))
 
         self.S_s = -self.k_s
 
@@ -232,24 +252,31 @@ class TreeVessel:
         self.dD = self.d * self.S_tot * dt
 
         # make sure that the diameter change is positive
-        if self.d + self.dD > 0.0:
-            self.d += self.dD
-        else:
-            pass
-            # potentially add collapsed 
+        if not optimizing_params:
+            if self.d + self.dD > 0.0:
+                self.d += self.dD
+            else:
+                pass
 
         return self.dD
 
-    def fl_visc(self, diameter):
+    def fl_visc(self, diameter, H_d=0.45):
         '''
         calculate the viscosity within a vessel of diameter < 300 um based on empirical relationship describing 
         fahraeus-lindqvist effect
 
-        :param diameter: vessel diameter
+        :param diameter: vessel diameter in cm
+        :param H_d: hematocrit
         '''
-        H_d = 0.45 # hematocrit
+
+        diameter = diameter * 100 # convert to um
+
         u_45 = 6 * math.exp(-0.085 * diameter) + 3.2 - 2.44 * math.exp(-0.06 * diameter ** 0.645)
         C = (0.8 + math.exp(-0.075 * diameter)) * (-1 + (1 + 10 ** -11 * diameter ** 12) ** -1) + (1 + 10 ** -11 * diameter ** 12) ** -1
-        viscosity = .012 * (1 + (u_45 - 1) * (((1 - H_d) ** C - 1) / ((1 - 0.45) ** C - 1)) * (diameter / (diameter - 1.1)) ** 2) * (diameter / (diameter - 1.1)) ** 2
+        rel_viscosity = .012 * (1 + (u_45 - 1) * (((1 - H_d) ** C - 1) / ((1 - 0.45) ** C - 1)) * (diameter / (diameter - 1.1)) ** 2) * (diameter / (diameter - 1.1)) ** 2
+
+        plasma_viscosity = .012 # poise
+
+        viscosity = plasma_viscosity * rel_viscosity
 
         return viscosity

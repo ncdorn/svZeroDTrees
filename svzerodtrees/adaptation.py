@@ -60,7 +60,6 @@ def adapt_pries_secomb(config_handler: ConfigHandler, result_handler: ResultHand
     write_to_log(log_file, 'pries and secomb adaptation completed for all trees. R_old = ' + str(R_old) + ' R_new = ' + str(R_adapt))
 
 
-
 def adapt_constant_wss(config_handler: ConfigHandler, result_handler: ResultHandler, log_file: str = None):
     '''
     adapt structured trees based on the constant wall shear stress assumption

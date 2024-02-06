@@ -7,8 +7,10 @@ class ResultHandler:
     class to handle preop, postop and post adaptation results from the structured tree simulation
     '''
 
-    def __init__(self, vessels, rpa_lpa_branch, viscosity):
-        self.rpa_lpa_branch = rpa_lpa_branch
+    def __init__(self, vessels, lpa_branch=None, rpa_branch=None, viscosity=None):
+
+        self.lpa_branch = lpa_branch
+        self.rpa_branch = rpa_branch
         # vessel list in a dict to be compatible with utils
         self.vessels = {'vessels': vessels}
         self.viscosity = viscosity # for wss calculations
@@ -26,7 +28,7 @@ class ResultHandler:
         '''
 
         # get rpa_lpa_branch ids
-        rpa_lpa_branch = find_rpa_lpa_branches(config)
+        lpa_branch, rpa_branch = find_lpa_rpa_branches(config)
 
         # get vessel info and vessel ids (vessel info necessary for wss calculations)
         vessels = []
@@ -37,42 +39,68 @@ class ResultHandler:
         # get the viscosity
         viscosity = config['simulation_parameters']['viscosity']
 
-        return ResultHandler(vessels, rpa_lpa_branch, viscosity)
+        return ResultHandler(vessels, lpa_branch, rpa_branch, viscosity)
+
+    @classmethod
+    def from_config_handler(cls, config_handler):
+        '''
+        class method to generate the results handler from a config handler
+        
+        :param config_handler: ConfigHandler instance
+        
+        :return: ResultHandler instance
+        '''
+        # get rpa_lpa_branch ids
+        if config_handler.is_pulmonary:
+            lpa_branch, rpa_branch = find_lpa_rpa_branches(config_handler.config)
+        else:
+            lpa_branch, rpa_branch = None, None
+
+        # get vessel info and vessel ids (vessel info necessary for wss calculations)
+        vessels = []
+        for vessel_config in config_handler.config['vessels']:
+            # add to the vessel list
+            vessels.append(vessel_config)
+
+        # get the viscosity
+        viscosity = config_handler.config['simulation_parameters']['viscosity']
+
+        return ResultHandler(vessels, lpa_branch, rpa_branch, viscosity)
 
     def get_branches(self, config):
 
-        if self.rpa_lpa_branch is None:
-            self.rpa_lpa_branch = find_rpa_lpa_branches(config)
+        if self.rpa_branch is None and self.lpa_branch is None:
+            self.lpa_branch, self.rpa_branch = find_lpa_rpa_branches(config)
 
         for vessel_config in config['vessels']:
-            id = get_branch_id(vessel_config)
-            if id not in [0, self.rpa_lpa_branch[0], self.rpa_lpa_branch[1]]:
+            id = get_branch_id(vessel_config)[0]
+            if id not in [0, self.lpa_branch, self.rpa_branch]:
                 if id not in self.vessels:
                     self.vessels.append(id)
     
 
-    def format_results(self):
+    def format_results(self, is_pulmonary=True):
         '''
         format the results into preop, postop and adapted for each branch, for use in visualization
         '''
 
         # get summary results for the MPA
-        self.clean_results['mpa'] = self.format_branch_result(0)
+        if is_pulmonary:
+            self.clean_results['mpa'] = self.format_branch_result(0)
 
-        # get summary results for the RPA
-        self.clean_results['rpa'] = self.format_branch_result(self.rpa_lpa_branch[0])
+            # get summary results for the RPA
+            self.clean_results['rpa'] = self.format_branch_result(self.rpa_branch)
 
-        # get summary results for the LPA
-        self.clean_results['lpa'] = self.format_branch_result(self.rpa_lpa_branch[1])
+            # get summary results for the LPA
+            self.clean_results['lpa'] = self.format_branch_result(self.lpa_branch)
 
         # get summary results for all other vessels
         for vessel_config in self.vessels['vessels']:
-            id = get_branch_id(vessel_config)
-            if id not in [0, self.rpa_lpa_branch[0], self.rpa_lpa_branch[1]]:
+            id = get_branch_id(vessel_config)[0]
+            if id not in [0, self.lpa_branch, self.rpa_branch]:
                 self.clean_results[id] = self.format_branch_result(id)
 
     
-
     def format_branch_result(self, branch: int):
         '''
         get a dict containing the preop, postop and final q, p, wss for a specified branch
@@ -149,3 +177,69 @@ class ResultHandler:
 
         with open(file_name, 'w') as ff:
             json.dump(self.clean_results, ff)
+
+
+    def format_result_for_cl_projection(self, timestep):
+        '''format a pressure or flow result for the centerline projection
+
+        Args:
+            timestep (str): timestep to format, ['preop', 'postop', 'adapted']
+        
+        
+        '''
+
+        cl_mappable_result = {"flow": {}, "pressure": {}, "distance": {},"time": {}, "resistance": {}, "WU m2": {}}
+
+        branches = list(self.clean_results.keys())
+        for branch in branches:
+            if branch == 'mpa':
+                branches[branches.index(branch)] = 0
+            elif branch == 'lpa':
+                branches[branches.index(branch)] = self.lpa_branch
+            elif branch == 'rpa':
+                branches[branches.index(branch)] = self.rpa_branch
+
+        fields = list(self.results['preop'].keys())
+
+        fields.sort() # should be ['flow_in', 'flow_out', 'pressure_in', 'pressure_out']
+
+        if timestep == 'adaptation':
+            for field in ['flow', 'pressure']:
+                    cl_mappable_result[field] = {
+                        branch: [(self.results['postop'][field + "_in"][branch] - 
+                                 self.results['adapted'][field + "_in"][branch]) / 
+                                 self.results['postop'][field + "_in"][branch], 
+                                (self.results['postop'][field + "_out"][branch] - 
+                                 self.results['adapted'][field + "_out"][branch]) / 
+                                 self.results['postop'][field + "_out"][branch], ]
+                        for branch in branches}
+        else:
+            for field in ['flow', 'pressure']:
+                    cl_mappable_result[field] = {
+                        branch: [self.results[timestep][field + "_in"][branch], 
+                                self.results[timestep][field + "_out"][branch]]
+                        for branch in branches}
+                    # now, change the branch id for mpa, lpa, rpa
+                    for branch in cl_mappable_result[field].keys():
+                        if branch == 'mpa':
+                            cl_mappable_result[field][0] = cl_mappable_result[field].pop(branch)
+                        elif branch == 'lpa':
+                            cl_mappable_result[field][self.lpa_branch] = cl_mappable_result[field].pop(branch)
+                        elif branch == 'rpa':
+                            cl_mappable_result[field][self.rpa_branch] = cl_mappable_result[field].pop(branch)
+        
+        # construct the distance dict
+
+        return cl_mappable_result
+
+
+    def results_to_dict(self):
+        '''
+        convert the results to dict which are json serializeable
+        '''
+
+        for timestep in self.results.keys():
+            for field in self.results[timestep].keys():
+                self.results[timestep][field] = {key: value.tolist() for key, value in self.results[timestep][field].items()}
+
+

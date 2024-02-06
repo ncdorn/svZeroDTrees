@@ -61,6 +61,7 @@ class PAanalyzer:
 
         return cls(config, result, fig_dir)
     
+
     def remove_trees(self):
         '''
         remove the structured tree objects from the config and dump to a json file
@@ -74,6 +75,7 @@ class PAanalyzer:
 
         with open('config_no_trees.json', 'w') as ff:
             json.dump(config, ff)
+
 
     def make_figure(self, plot_config: dict, fig_title: str, filename: str, sharex=False, sharey=False):
         '''
@@ -139,10 +141,7 @@ class PAanalyzer:
 
         plt.tight_layout()
         plt.savefig(self.fig_dir + '/' + filename)
-    
-    def make_subfigure(self, result, title, ylabel, xlabel):
-        
-        pass
+
 
     def make_scatterplot(self, ax, result_x, result_y, title=None, labels=False, ylabel=None, xlabel=None):
         '''
@@ -170,6 +169,7 @@ class PAanalyzer:
         # return the plot object
         return plot
     
+
     def make_histogram(self, ax, result, labels=False, title=None, ylabel=None, xlabel=None):
         '''
         make a histogram given a list, with auto binning
@@ -190,6 +190,7 @@ class PAanalyzer:
         
         return plot
     
+
     def make_barplot(self, ax, x, result, labels=False, title=None, ylabel=None, xlabel=None):
         '''
         make a barplot given a list
@@ -210,6 +211,7 @@ class PAanalyzer:
             ax.set_title(title)
         
         # return plot
+
 
     def plot_distal_wss(self):
         '''
@@ -282,14 +284,17 @@ class PAanalyzer:
         fig = plt.figure()
         ax = fig.subplots(1, 3)
 
-        print([self.lpa.branch, self.rpa.branch])
         # plot the changes in q, p, wss in subfigures
-        self.plot_changes_subfig([self.lpa.branch, self.rpa.branch],
-                                 'q_out',
-                                 title='outlet flowrate',
-                                 ylabel='q (cm3/s)',
-                                 ax=ax[0])
+        # self.plot_changes_subfig([self.lpa.branch, self.rpa.branch],
+        #                          'q_out',
+        #                          title='outlet flowrate',
+        #                          ylabel='q (cm3/s)',
+        #                          ax=ax[0])
         
+        self.plot_flow_split(ax[0])
+        
+        print([self.lpa.branch, self.rpa.branch])
+
         self.plot_changes_subfig([self.lpa.branch, self.rpa.branch],
                                  'p_out',
                                  title='outlet pressure',
@@ -298,19 +303,53 @@ class PAanalyzer:
         
         self.plot_changes_subfig([self.lpa.branch, self.rpa.branch],
                                  'wss',
-                                 title='wss',
+                                 title='wall shear stress',
                                  ylabel='wss (dynes/cm2)',
                                  ax=ax[2])
 
         plt.suptitle('Hemodynamic changes in LPA and RPA')
         plt.tight_layout()
-        plt.savefig(self.fig_dir + '/lpa_rpa_diff.png')
+        plt.savefig(self.fig_dir + '/lpa_rpa_diff_w_bar.png')
 
 
-    def plot_flow_split(self):
+    def plot_flow_split(self, ax):
         '''
         plot the flow split between the LPA and RPA as a stacked bar graph
+
+        :param ax: pyplot axis
         '''
+        
+        timesteps = ['preop', 'postop', 'final']
+
+        # get flow splits
+        preop_q = self.get_result([self.lpa.branch, self.rpa.branch], 'q_out', 'preop', type='np')
+        postop_q = self.get_result([self.lpa.branch, self.rpa.branch], 'q_out', 'postop', type='np')
+        final_q = self.get_result([self.lpa.branch, self.rpa.branch], 'q_out', 'final', type='np')
+
+        preop_split = preop_q / sum(preop_q)
+        postop_split = postop_q / sum(postop_q)
+        final_split = final_q / sum(final_q)
+
+        percent = {'lpa': [preop_split[0] * 100, postop_split[0] * 100, final_split[0] * 100],
+                     'rpa': [preop_split[1] * 100, postop_split[1] * 100, final_split[1] * 100]}
+        
+        q = {'lpa': [preop_q[0], postop_q[0], final_q[0]],
+             'rpa': [preop_q[1], postop_q[1], final_q[1]]}
+
+        # plot the stacked bar graph
+        bottom = np.zeros(len(timesteps))
+        for vessel, values in q.items():
+            ax.bar(timesteps, values, label=vessel, bottom=bottom)
+            for value in values:
+                ax.text(timesteps[values.index(value)], value / 2 + bottom[values.index(value)], str(int(percent[vessel][values.index(value)])) + '%', ha='center', va='center')
+            bottom += values
+
+
+
+        ax.set_title('flow split')
+        ax.set_ylabel('flowrate (cm3/s)')
+        ax.legend()
+
 
     def plot_changes_subfig(self, branches, qoi, title, ylabel, xlabel=None, ax=None):
         '''
@@ -327,7 +366,6 @@ class PAanalyzer:
 
         '''
 
-        # intialize plot dict
         timesteps = ['preop', 'postop', 'final']
 
         bar_width = 1 / (len(branches) + 1)
@@ -355,23 +393,197 @@ class PAanalyzer:
         ax.set_xticks([0, 1, 2], timesteps)
         ax.legend(['lpa', 'rpa'])
 
+
+    def plot_mpa_pressure(self):
+        '''
+        plot the inlet and outlet pressure in the mpa for the preop, postop and final cases
+        '''
+
+        # initialize timesteps
+        timesteps = ['preop', 'postop', 'final']
+
+        # get the inlet pressure
+        p_in = [self.result[str(self.mpa.branch)]['p_in'][timestep] for timestep in timesteps]
+
+        # get the outlet pressure
+        p_out = [self.result[str(self.mpa.branch)]['p_out'][timestep] for timestep in timesteps]
+
+        # make a barplot of the inlet and outlet pressure
+        fig, ax = plt.subplots(1, 2, sharey=True)
+
+        p_i = ax[0].bar(timesteps, p_in)
+        ax[0].bar_label(p_i, label_type='center')
+        ax[0].set_title('MPA inlet pressure')
+
+        p_o = ax[1].bar(timesteps, p_out)
+        ax[1].bar_label(p_o, label_type='center')
+        ax[1].set_title('MPA outlet pressure')
+
+        ax[0].set_ylabel('pressure (mmHg)')
+
+        plt.tight_layout()
+
+        plt.savefig(self.fig_dir + '/mpa_pressure.png')
+
+
+    def plot_lpa_rpa_adaptation(self):
+        '''
+        make a barplot of the flow adaptation in the lpa and rpa
+        '''
+
+        percent_adapt = self.get_qoi_adaptation(['lpa', 'rpa'], 'q_out')
+
+        fig, ax = plt.subplots()
+
+        ax.bar(['lpa', 'rpa'], percent_adapt)
+
+        ax.set_title('flow adaptation in LPA and RPA')
+        ax.set_ylabel('percent flow adaptation (%)')
+
+        plt.tight_layout()
+
+        plt.savefig(self.fig_dir + '/lpa_rpa_flow_adaptation.png')
+
+
     def get_qoi_adaptation(self, vessels, qoi: str,  threshold=0):
         '''
         get a list of the percent flow adapatation for a given list of vessels
 
-        :param vessels: list of vessels
+        :param vessels: list of branches
         :param qoi: quantity of interest, either 'p_in', 'p_out', 'q_in', 'q_out', or 'wss'
         :param threshold: threshold for flow adaptation
         '''
+
+        if 'lpa' in vessels:
+            vessels[vessels.index('lpa')] = self.lpa.branch
+        if 'rpa' in vessels:
+            vessels[vessels.index('rpa')] = self.rpa.branch
 
         postop = self.get_result(vessels, qoi, 'postop', type='np')
         adapted = self.get_result(vessels, qoi, 'final', type='np')
 
         percent_adapt = np.subtract(adapted, postop) / postop * 100
 
-        percent_adapt = percent_adapt[abs(percent_adapt) > threshold]
+        percent_adapt = percent_adapt[abs(percent_adapt) >= threshold]
         
         return percent_adapt
+
+
+    def scatter_qoi_vs_distance(self, branches, qoi, filename=None):
+        '''
+        scatter plot of vessel resistance vs distance from MPA
+
+        :param branches: list of branches to plot
+        :param filename: filename to save figure
+        '''
+
+        # get branches as list of str and vessels as list
+        branches, vessels = self.get_vessels(branches)
+        
+        # handle qoi names such as "q_out postop"
+        if ' ' in qoi:
+            qoi, timestep = qoi.split(' ')
+        else:
+            timestep = ''
+
+        print(branches, vessels)
+        # assess qoi and make list
+        qois = self.get_qoi(qoi, vessels, branches, timestep=timestep)
+
+        distances = self.get_distance_from_mpa(vessels)
+
+        # color the vessels red or blue depending on if they are LPA or RPA
+        rpa_distances, lpa_distances = self.sort_into_rpa_lpa(vessels, distances)
+        rpa_qois, lpa_qois = self.sort_into_rpa_lpa(vessels, qois)
+        
+        fig, ax = plt.subplots()
+        ax.scatter(rpa_distances, rpa_qois, s=100, c='red')
+        ax.scatter(lpa_distances, lpa_qois, s=100, c='blue')
+
+        # add horizontal line at zero
+        # ax.axhline(0, color='red', linestyle='--', label='0% adaptation')
+
+        # add grid
+        ax.grid(True)
+
+        ax.set_xlabel('distance from MPA (cm)')
+        ax.set_ylabel(qoi)
+
+        # symmetric log y axis
+        ax.set_yscale('log')
+
+        ax.legend(['RPA', 'LPA'])
+        ax.set_title(qoi + ' ' + timestep + ' vs distance from MPA')
+
+        if filename is None:
+            filename = qoi + '_' + timestep + '_vs_distance.png'
+        
+        plt.savefig(str(self.fig_dir + '/') + filename)
+
+
+    def plot_3d_scatter(self, branches, qoi1, qoi2, qoi3, filename=None):
+        '''
+        plot a 3d scatter plot of tree qois for a given list of branches
+
+        :param branches: list of branches to plot
+        :param qoi1: quantity of interest 1 to be plotted on the x axis
+        :param qoi2: quantity of interest 2 to be plotted on the y axis
+        :param qoi3: quantity of interest 3 to be plotted on the z axis
+        :param filename: filename to save figure
+        '''
+
+        # get branches as list of str and vessels as list
+        branches, vessels = self.get_vessels(branches)
+
+        # get qois
+        qois = []
+        for qoi in [qoi1, qoi2, qoi3]:
+            qois.append(self.get_qoi(qoi, vessels, branches))
+        
+
+    def scatter_qoi_vs_qoi(self, branches, qoi1, qoi2, yscale = None, filename=None):
+        '''
+        plot a scatter plot of qoi1 vs qoi2 for a given list of branches
+
+        :param branches: list of branches to plot
+        :param qoi1: quantity of interest 1 to be plotted on the x axis
+        :param qoi2: quantity of interest 2 to be plotted on the y axis
+        :param filename: filename to save figure
+        '''
+
+        # get branches as list of str and vessels as list
+        branches, vessels = self.get_vessels(branches)
+
+        # get qois
+        rpa_qois = []
+        lpa_qois = []
+        for qoi in [qoi1, qoi2]:
+            all_qois = self.get_qoi(qoi, vessels, branches)
+            rpa_qoi, lpa_qoi = self.sort_into_rpa_lpa(vessels, all_qois)
+            rpa_qois.append(rpa_qoi)
+            lpa_qois.append(lpa_qoi)
+        
+        fig, ax = plt.subplots()
+        ax.scatter(rpa_qois[0], rpa_qois[1], s=100, c='red')
+        ax.scatter(lpa_qois[0], lpa_qois[1], s=100, c='blue')
+
+        # add grid
+        ax.grid(True)
+
+        ax.set_xlabel(qoi1)
+        ax.set_ylabel(qoi2)
+
+        if yscale is not None:
+            ax.set_yscale(yscale)
+
+        ax.legend(['RPA', 'LPA'])
+
+        ax.set_title(qoi1 + ' vs ' + qoi2)
+
+        if filename is None:
+            filename = qoi1 + '_vs_' + qoi2 + '.png'
+        
+        plt.savefig(str(self.fig_dir + '/') + filename)
 
 
     def plot_flow_adaptation(self, vessels, filename='flow_adaptation.png', threshold=100.0):
@@ -389,6 +601,9 @@ class PAanalyzer:
             vessels = [str(vessel) for vessel in outlet_vessels]
 
         percents_adapt = self.get_qoi_adaptation(vessels, 'q_out', threshold=threshold)
+
+        if vessels == [self.lpa.branch, self.rpa.branch]:
+            vessels = ['lpa', 'rpa']
         
         plot_config = {
             'flow_adaptation':
@@ -404,6 +619,7 @@ class PAanalyzer:
         
         self.make_figure(plot_config, '% flow adaptation in vessels', filename, sharex=False, sharey=False)
 
+
     def scatter_qoi_adaptation_distance(self, branches, qoi: str, filename= 'adaptation_scatter.png', threshold=0.0):
         '''
         create a scatterplot of flow adaptation vs distance from MPA where the points are colored red and blue for
@@ -411,17 +627,7 @@ class PAanalyzer:
 
         '''
 
-        if branches == 'all':
-            branches = list(self.result.keys())
-            vessels = list(self.vessel_map.values())
-
-        elif branches == 'outlets':
-            outlet_branches, outlet_d = find_outlets(self.config)
-            branches = [str(branch) for branch in outlet_branches]
-            vessels = [self.vessel_map[branch] for branch in outlet_branches]
-        else:
-            branches = str(branches)
-            vessels = [self.vessel_map[branch] for branch in branches]
+        branches, vessels = self.get_vessels(branches)
         percents_adapt = self.get_qoi_adaptation(branches, qoi, threshold=threshold)
         distances = self.get_distance_from_mpa(vessels)
 
@@ -433,8 +639,18 @@ class PAanalyzer:
         ax.scatter(rpa_distances, rpa_percents_adapt, s=100, c='red')
         ax.scatter(lpa_distances, lpa_percents_adapt, s=100, c='blue')
 
+        # add horizontal line at zero
+        # ax.axhline(0, color='red', linestyle='--', label='0% adaptation')
+
+        # add grid
+        ax.grid(True)
+
         ax.set_xlabel('distance from MPA (cm)')
         ax.set_ylabel('% ' + qoi + ' adaptation')
+
+        # symmetric log y axis
+        # ax.set_yscale('symlog')
+
         ax.legend(['RPA', 'LPA'])
         ax.set_title(qoi + ' adaptation vs distance from MPA')
 
@@ -452,11 +668,11 @@ class PAanalyzer:
 
     def map_vessels_to_branches(self):
         '''
-        map each vessel to a branch id
+        map each vessel id to a branch id
         '''
 
         for vessel in self.vessels:
-            self.vessel_branch_map[vessel['vessel_id']] = get_branch_id(vessel)
+            self.vessel_branch_map[vessel['vessel_id']] = get_branch_id(vessel)[0]
 
 
     def build_tree_map(self):
@@ -469,10 +685,13 @@ class PAanalyzer:
 
         # initialize the vessel map (dict of branches)
         for vessel_config in self.vessels:
-            if get_branch_id(vessel_config) not in self.vessel_map.keys():
-                self.vessel_map[get_branch_id(vessel_config)] = self.Vessel(vessel_config)
+            branch = get_branch_id(vessel_config)[0]
+            if branch not in self.vessel_map.keys():
+                self.vessel_map[branch] = self.Vessel(vessel_config)
             else: 
-                self.vessel_map[get_branch_id(vessel_config)] = self.combine_vessels(self.vessel_map[get_branch_id(vessel_config)], self.Vessel(vessel_config))
+                self.vessel_map[branch] = self.combine_vessels(self.vessel_map[branch], self.Vessel(vessel_config))
+            
+            self.vessel_map[branch].d = get_branch_d(self.config, self.config["simulation_parameters"]["viscosity"], branch)
             # map vessel id to branch
         
         # loop through junctions and add children to parent vessels
@@ -503,21 +722,26 @@ class PAanalyzer:
         for vessel in self.vessel_map.values():
             if not any(vessel in child_vessel.children for child_vessel in self.vessel_map.values()):
                 self.root = vessel
+        
+        # organize the children in numerical order
+        # we assume that the branches are sorted alphabetically, and therefore the lpa comes first.
+        self.root.children.sort(key=lambda x: x.branch)
+
 
         # label the mpa, rpa and lpa
         self.root.label = 'mpa'
-        self.root.children[0].label = 'rpa'
-        self.root.children[1].label = 'lpa'
+        self.root.children[0].label = 'lpa'
+        self.root.children[1].label = 'rpa'
         
         # add these in incase we index using the mpa, lpa, rpa strings
         self.mpa = self.root
-        self.rpa = self.root.children[0]
-        self.lpa = self.root.children[1]
+        self.lpa = self.root.children[0]
+        self.rpa = self.root.children[1]
 
         # modify the self.result array to include the mpa, rpa, lpa with numerical ids
-        self.result[str(self.root.branch)] = self.result.pop('mpa')
-        self.result[str(self.root.children[0].branch)] = self.result.pop('rpa')
-        self.result[str(self.root.children[1].branch)] = self.result.pop('lpa')
+        self.result[str(self.mpa.branch)] = self.result.pop('mpa')
+        self.result[str(self.rpa.branch)] = self.result.pop('rpa')
+        self.result[str(self.lpa.branch)] = self.result.pop('lpa')
 
         keys = list(self.result.keys())
         keys.sort(key=int)
@@ -566,6 +790,7 @@ class PAanalyzer:
             
         return distances
     
+
     def sort_into_rpa_lpa(self, vessels, data):
         rpa_data = []
         lpa_data = []
@@ -577,6 +802,7 @@ class PAanalyzer:
         
         return rpa_data, lpa_data
 
+
     def map_branches_to_vessels(self):
         '''
         organize the vessel map by branch
@@ -587,8 +813,10 @@ class PAanalyzer:
         for branch_id in branches:
             # create a branch map where each branch id keeps a list of vessels in that branch if multiple segments have been made
             self.branch_map[branch_id] = [vessel for vessel in self.vessel_map.values() if vessel.branch == branch_id]
+            
             # sort the list from least to most distal vessels
             self.branch_map[branch_id].sort(key=lambda x: x.gen)
+
 
     def get_result(self, branches, qoi: str, time: str, type='np'):
         '''
@@ -616,7 +844,102 @@ class PAanalyzer:
             return np.array(values)
         else:
             return values
+
+
+    def get_qoi(self, qoi: str, vessels, branches=None, timestep='final'):
+        ''' get a list of qois depending on a string input name
         
+        :param qoi: string describing the quantity of interest
+        :param vessels: list of vessels to get qoi for
+        :param branches: optional param describing list of branches to get qoi for
+        :param timestep: optional param describing timestep to get qoi for
+        '''
+
+        # split the input qoi if we are looking for adaptation
+        if ' ' in qoi:
+            qoi, adapt = qoi.split(' ')
+            adapt = True
+        else:
+            adapt = False
+
+        # current supported qois: 
+        # [resistance, diameter, aspect (d / l), generation, 
+        #  tree_resistance, [p_in, p_out, q_in, q_out, wss] with adaptation, 
+        #  length, distance, Re, dist_index]
+
+        if qoi == 'resistance':
+            qois = [vessel.zero_d_element_values['R_poiseuille'] for vessel in vessels]
+        elif qoi == 'diameter':
+            qois = [vessel.d for vessel in vessels]
+        elif qoi == 'aspect':
+            qois = [vessel.d / vessel.length for vessel in vessels]
+        elif qoi == 'gen':
+            qois = [vessel.gen for vessel in vessels]
+        elif qoi == 'tree_resistance':
+            qois = []
+            for vessel in self.config['vessels']:
+                if str(get_branch_id(vessel)[0]) in branches:
+                    if 'tree' in vessel.keys():
+                        qois.append(vessel["tree"].root.R_eq)
+        elif qoi in ['p_in', 'p_out', 'q_in', 'q_out', 'wss']:
+            if adapt:
+                qois = self.get_qoi_adaptation(branches, qoi, threshold=0)
+            else:
+                qois = self.get_result(branches, qoi, timestep, type='np')
+        elif qoi == 'length':
+            qois = [vessel.length for vessel in vessels]
+        elif qoi== 'distance':
+            qois = self.get_distance_from_mpa(vessels)
+        elif qoi == 'Re':
+            qois = []
+            for vessel in vessels:
+                q = self.get_result([vessel.branch], 'q_in', timestep, type='np')
+                r = vessel.d / 2
+                print(q, r)
+                rho = self.config['simulation_parameters']['density']
+                mu = self.config['simulation_parameters']['viscosity']
+                qois.append(abs(2 * rho * q / (np.pi * r * mu)))
+        elif qoi == 'dist_index':
+            qois = []
+            for vessel in vessels:
+                dist = self.get_distance_from_mpa([vessel])
+                if vessel.gen == 0:
+                    qois.append(0)
+                else:
+                    qois.append(dist[0] / vessel.gen)
+        else:
+            raise Exception('qoi not recognized')
+        
+        return qois
+    
+
+    def get_vessels(self, branches):
+        '''
+        get a list of vessels from a list of branches
+
+        :param branches: list of branches, or str
+        '''
+
+        if branches == 'all':
+            branches = list(self.result.keys())
+            vessels = list(self.vessel_map.values())
+
+        elif branches == 'outlets':
+            outlet_branches, outlet_d = find_outlets(self.config)
+            branches = [str(branch) for branch in outlet_branches]
+            vessels = [self.vessel_map[branch] for branch in outlet_branches]
+        else:
+            if 'rpa' in branches:
+                branches[branches.index('rpa')] = self.rpa.branch
+            if 'lpa' in branches:
+                branches[branches.index('lpa')] = self.lpa.branch
+
+            vessels = [self.vessel_map[branch] for branch in branches]
+            branches = [str(branch) for branch in branches]
+        
+        return branches, vessels
+        
+
     def combine_vessels(self, vessel1, vessel2):
         '''
         combine two vessels of the same branch into one vessel
@@ -641,8 +964,25 @@ class PAanalyzer:
 
         return self.Vessel(vessel_config)
 
-    
 
+    def get_R_eq(self):
+        '''
+        calculate the equivalent resistance for a vessel
+
+        :param vessel: vessel to calculate resistance for
+        '''
+
+        # get the resistance of the children
+        def calc_R_eq(vessel):
+            if len(vessel.children) != 0:
+                calc_R_eq(vessel.children[0])
+                calc_R_eq(vessel.children[1])
+                vessel.R_eq = vessel.zero_d_element_values['R_poiseuille'] + (1 / sum([1 / child.R_eq for child in vessel.children]))
+            else:
+                vessel.R_eq = vessel.zero_d_element_values['R_poiseuille']
+        
+        calc_R_eq(self.root)
+    
     class Vessel:
         '''
         class to handle tree structure creation and dfs on the tree
@@ -661,8 +1001,11 @@ class PAanalyzer:
             # get info from vessel config
             self.length = config['vessel_length']
             self.id = config['vessel_id']
-            self.branch = get_branch_id(config)
+            self.branch = get_branch_id(config)[0]
             self.zero_d_element_values = config['zero_d_element_values']
+            self.R_eq = 0.0
+            # get the branch diameter
+            self.d = 0.0
 
 
 

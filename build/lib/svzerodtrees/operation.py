@@ -4,78 +4,122 @@ from svzerodtrees._config_handler import ConfigHandler
 
 import copy
 
-def repair_stenosis_coefficient(config_handler: ConfigHandler, result_handler: ResultHandler, repair_config=None, log_file=None):
+def repair_stenosis(config_handler: ConfigHandler, result_handler: ResultHandler, repair_config=None, log_file=None):
     '''
-    perform a virtual stenosis repair in 0d by adjusting the stenosis coefficient according to the repair config
-
-    :param preop_config: preop config dict
-    :param repair_config: repair config dict, with keys 'location' and 'repair degrees'. If location is a list, adjust those vessels
-
-    :return postop_config: config dict with post-operative changes
-    :return postop_result: postop flow result
+    repair the stenosis
     '''
-
-    write_to_log(log_file, 'making repair according to repair config: ' + str(repair_config))
-
-    # initialize list of vessels to repair
-    repair_vessels = []
 
     # proximal stenosis repair case
     if repair_config['location'] == 'proximal': 
         # repair only the LPA and RPA (should be the outlets of the first junction in the config file)
-        repair_config['vessels'] = result_handler.rpa_lpa_branch
+        repair_branches = ['lpa', 'rpa']
 
         # if an improper number of repair degrees are specified
-        if len(repair_config['degree']) != 2: 
+        if len(repair_config['value']) != 2: 
             raise Exception("repair config must specify 2 degrees for LPA and RPA")
         
-        write_to_log(log_file, "** repairing stenoses in vessels " + str(repair_vessels) + " **")
+        write_to_log(log_file, "** repairing stenoses in vessels " + str(repair_branches) + " **")
 
     # extensive repair case (all vessels)
     elif repair_config['location'] == 'extensive': 
 
         # get list of vessels with no duplicates
-        repair_config['vessels'] = list(set([get_branch_id(vessel) for vessel in config_handler.config["vessels"]])) 
+        repair_branches = list(config_handler.branch_map.keys())
 
         # match the length of the repair degrees to the number of vessels
-        repair_config['degree'] *= len(repair_config['vessels']) 
+        repair_config['value'] *= len(repair_branches)
 
         write_to_log(log_file, "** repairing all stenoses **")
 
     # custom repair case
     elif type(repair_config['location']) is list: 
+        repair_branches = repair_config['location']
 
-        # repair vessels specified in the repair config
-        repair_config['vessels'] = repair_config['location']
+    for branch, value in zip(repair_branches, repair_config['value']):
+        branch_stenosis = Stenosis.create(config_handler, branch, repair_config['type'], value, log_file=log_file)
+        branch_stenosis.repair()
+    
+    config_handler.simulate(result_handler, 'postop')
+
+
+class Stenosis:
+    '''
+    a class to handle stenoses in 0D
+    '''
+
+    def __init__(self, vessels: list, branch: int, repair_type: str, repair_value: float, viscosity: float, log_file=None):
+        '''
+        :param vessel_config: the vessel config dict or a list if multiple segments
+        :param repair_config: the repair config dict
+        :param log_file: the log file to write to'''
+        self.branch = branch
+        self.ids = [vessel.id for vessel in vessels]
+        self.repair_type = repair_type
+        self.repair_value = repair_value
+        self.log_file = log_file
+        self.vessels = vessels
+        self.viscosity = viscosity
+
+    @classmethod
+    def create(cls, config_handler: ConfigHandler, branch: int or str, repair_type, repair_value, log_file=None):
+        '''
+        create a stenosis from a config handler
+
+        :param config_handler: the config handler
+        :param branch: the branch id
+        :param repair: the repair dict with type and value
+        '''
+
+        if branch == 'lpa':
+            branch = config_handler.lpa.branch
+        elif branch == 'rpa':
+            branch = config_handler.rpa.branch
+
+        # get the vessels in the branch
+        vessels = config_handler.get_segments(branch)
+
+        return cls(vessels, branch, repair_type, repair_value, config_handler.simparams.viscosity, log_file)
+
+    
+    def repair(self):
+        '''repair the stenosis according to the specs'''
         
-        # repair degree specified in the repair config
-        repair_config['degree'] = repair_config['degree']
-
-        write_to_log(log_file, "** repairing stenoses in vessels " + str(repair_vessels) + " **")
-
-    # perform the virtual stenosis repair
-    for vessel_config in config_handler.config["vessels"]:
-
-        if get_branch_id(vessel_config) in repair_config['vessels']:
-
-            # get the repair index to match with the appropriate repair degree
-            repair_idx = repair_config['vessels'].index(get_branch_id(vessel_config))
-
-            # adjust the stenosis coefficient
-            vessel_config["zero_d_element_values"]["stenosis_coefficient"] = vessel_config["zero_d_element_values"].get("stenosis_coefficient") * (1-repair_config['degree'][repair_idx])
+        if self.repair_type == 'stenosis_coefficient':
+            write_to_log(self.log_file, "adjusting stenosis coefficient in branch " + str(self.branch) + " with stenosis coefficient " + str(self.repair_value))
+            self.sc_repair()
+        elif self.repair_type == 'stent':
+            write_to_log(self.log_file, "repairing stenosis in branch " + str(self.branch) + " with stent diameter " + str(self.repair_value))
+            self.stent_repair()
+        elif self.repair_type == 'resistance':
+            write_to_log(self.log_file, "repairing stenosis in branch " + str(self.branch) + " with resistance " + str(self.repair_value))
+            self.resistance_repair()
             
-            # if we write to the log file for every vessel in the extensive case we could clog the log file
-            if repair_config['location'] != 'extensive': 
-                write_to_log(log_file, "     vessel " + str(vessel_config["vessel_id"]) + " has been repaired")
-                
-    write_to_log(log_file, 'all stenosis repairs completed')
+    
+    def sc_repair(self):
+        '''
+        repair the stenosis by adjusting the stenosis coefficient
+        '''
 
-    postop_result = run_svzerodplus(config_handler.config)
+        # change the stenosis coefficient
+        for vessel in self.vessels:
+            vessel.stenosis_coefficient *= (1 - self.repair_value)
 
-    result_handler.add_unformatted_result(postop_result, 'postop')
+    def stent_repair(self):
+        '''
+        repair the stenosis by changing the diameter according to stent diameter'''
 
+        for vessel in self.vessels:
+            # set stenosis coefficient to zero
+            R_old = vessel.zero_d_element_values['R_poiseuille']
+            vessel.stenosis_coefficient = 0.0
+            vessel.R = (8 * self.viscosity * vessel.length) / (np.pi * (self.repair_value / 2) ** 4)
+            R_change = R_old - vessel.R
+    
 
-def repair_stenosis_resistance(preop_config: dict, repair_config=None, log_file=None):
-    # adjust the resistance of the stenosed vessel, as opposed to the stenosis coefficient
-    # to be implemented
-    pass
+    def resistance_repair(self):
+        '''
+        repair the stenosis by adjusting the resistance
+        '''
+
+        for vessel in self.vessels:
+            vessel.R *= self.repair_value

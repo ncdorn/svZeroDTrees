@@ -45,3 +45,12 @@ def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_
     
 
     return rpa_info, lpa_info, inflow_info
+
+
+def compute_flow():
+    '''
+    compute the flow at the outlet surface of a mesh
+    
+    awaiting advice from Martin on how to do this'''
+    
+    pass

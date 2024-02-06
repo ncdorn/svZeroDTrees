@@ -156,7 +156,7 @@ def test_cwss_adaptation():
     test the constant wss tree adaptation algorithm
     '''
     
-    config_handler = ConfigHandler.from_json('tests/cases/full_pa_test/preop_config.json')
+    config_handler = ConfigHandler.from_json('tests/cases/LPA_RPA_0d_steady/preop_config.json')
 
     result_handler = ResultHandler.from_config_handler(config_handler)
 

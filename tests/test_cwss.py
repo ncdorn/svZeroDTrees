@@ -40,7 +40,7 @@ def verify_single_tree():
 
     result_handler = ResultHandler.from_config_handler(config_handler)
 
-    preop.construct_cwss_trees(config_handler, result_handler, n_procs=12, d_min=0.5)
+    preop.construct_cwss_trees(config_handler, result_handler, n_procs=12, d_min=0.8)
 
     print([tree.root.d / 2 for tree in config_handler.trees])
     print('tree resistance: ', config_handler.trees[0].root.R_eq)
@@ -53,7 +53,10 @@ def verify_single_tree():
 
     result_handler.format_results(is_pulmonary=False)
 
-    print(result_handler.clean_results)
+    print('R_adapted: ', config_handler.trees[0].root.R_eq)
+    print('adapted radius: ', config_handler.trees[0].root.d / 2)
+
+    # print(result_handler.clean_results)
 
 
 

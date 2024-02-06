@@ -114,9 +114,14 @@ class ConfigHandler():
 
     def from_file_w_trees(self, file_name: str):
         '''
-        load in a config dict with trees from a binary file via pickle
-        '''
+        Load a config dictionary with trees from a binary file via pickle.
 
+        Parameters:
+            file_name (str): The name of the binary file to load.
+
+        Returns:
+            None
+        '''
         with open(file_name, 'rb') as ff:
             self = pickle.load(ff)
     
@@ -325,8 +330,8 @@ class ConfigHandler():
             # make sure we ignore internal junctions since we are just dealing with branches
             if junction.type == 'NORMAL_JUNCTION':
 
-                if len(junction.inlet_branches) > 1:
-                    raise Exception("there is more than one inlet to this junction")
+                # if len(junction.inlet_branches) > 1:
+                #     raise Exception("there is more than one inlet to this junction")
 
                 parent_branch = self.branch_map[self.vessel_branch_map[junction.inlet_branches[0]]]
                 # from the vessel map

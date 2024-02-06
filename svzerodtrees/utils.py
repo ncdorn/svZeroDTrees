@@ -86,7 +86,7 @@ def get_wss(vessels, viscosity, result_array, branch, steady=False):
     '''
     get the wss of a branch
 
-    :param vessels: dict with key "vessels" and value [list of vessel config dicts]
+    :param vessel: vessel config dict
     :param result_array: svzerodplus result array from result handler
     :param branch: branch id
     :param steady: True if the model has steady inflow
@@ -106,6 +106,7 @@ def get_wss(vessels, viscosity, result_array, branch, steady=False):
 
 def get_branch_d(config, viscosity, branch):
     '''
+    this is the worst method ever made, I'm sorry to anyone that is reading this. Will update soon.
     get the diameter of a branch
 
     :param config: svzerodplus config dict
@@ -387,8 +388,7 @@ def run_svzerodplus(config: dict, dtype='ndarray'):
     :return output: the result of the simulation as a dict of dicts with each array denoted by its branch id
     """
 
-    output = pysvzerod.simulate(config)
-    result = pd.read_csv(StringIO(output))
+    result = pysvzerod.simulate(config)
 
     output = {
         "pressure_in": {},
