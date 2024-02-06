@@ -35,7 +35,7 @@ class ConfigHandler():
 
     #### I/O METHODS ####
     @classmethod
-    def from_json(cls, file_name: str, is_pulmonary=True):
+    def from_json(cls, file_name: str, is_pulmonary=True, is_threed_interface=False):
         '''
         load in a config dict from json file
 
@@ -337,8 +337,11 @@ class ConfigHandler():
 
         # loop through junctions and add children to parent BRANCHES
         for junction in self.junctions.values():
+            # make sure all junctions are of type NORMAL_JUNCTION
+            if junction.type != 'NORMAL_JUNCTION':
+                junction.type = 'NORMAL_JUNCTION'
             # make sure we ignore internal junctions since we are just dealing with branches
-            if junction.type == 'NORMAL_JUNCTION':
+            if len(junction.inlet_branches) > 1 or len(junction.outlet_branches) > 1:
 
                 # if len(junction.inlet_branches) > 1:
                 #     raise Exception("there is more than one inlet to this junction")
@@ -694,11 +697,10 @@ class Junction():
         # determine if tehere are outlet vessels
         if len(inlet_vessel.children) == 0:
             return None
-        # determine if it is a normal junction or internal junction
-        if len(inlet_vessel.children) == 1:
-            junction_type = 'internal_junction'
-        else:
-            junction_type = 'NORMAL_JUNCTION'
+        # always a normal junction
+
+        junction_type = 'NORMAL_JUNCTION'
+        
         config = {
             'junction_name': 'J' + str(inlet_vessel.id),
             'junction_type': junction_type,

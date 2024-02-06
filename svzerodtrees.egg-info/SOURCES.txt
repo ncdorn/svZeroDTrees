@@ -30,4 +30,5 @@ tests/test_post_processing.py
 tests/test_ps_pipeline.py
 tests/test_struct_trees.py
 tests/test_svzerodplus.py
+tests/test_threed_coupling.py
 tests/test_unsteady.py
