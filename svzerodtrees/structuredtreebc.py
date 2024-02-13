@@ -252,11 +252,11 @@ class StructuredTreeOutlet():
                 junction_info = {"junction_name": "J" + str(junc_id),
                                  "junction_type": "NORMAL_JUNCTION",
                                  "inlet_vessels": [current_vessel.id],
-                                 "outlet_vessels": [current_vessel.left.id, current_vessel.right.id],
-                                 "junction_values": {"C": [0, 0, 0], 
-                                                     "L": [0, 0, 0], 
-                                                     "R_poiseuille": [0, 0, 0], 
-                                                     "stenosis_coefficient": [0, 0, 0]},
+                                 "outlet_vessels": [current_vessel.left.id, current_vessel.right.id]
+                                #  "junction_values": {"C": [0, 0, 0],  
+                                #                      "L": [0, 0, 0],      MAYBE THIS WILL BE FOR ANOTHER TIME
+                                #                      "R_poiseuille": [0, 0, 0], 
+                                #                      "stenosis_coefficient": [0, 0, 0]},
                                  }
                 self.block_dict["junctions"].append(junction_info)
                 junc_id += 1
