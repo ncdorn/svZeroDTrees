@@ -416,9 +416,9 @@ class ConfigHandler():
                 for child in vessel.children:
                     calc_R_eq(child)
                     # we assume here that the stenosis coefficient is linear, which is not true but a reasonable approximation
-                vessel.R_eq = vessel.R + vessel.zero_d_element_values['stenosis_coefficient'] + (1 / sum([1 / child.R_eq for child in vessel.children]))
+                vessel.R_eq = vessel.R + vessel.stenosis_coefficient + (1 / sum([1 / child.R_eq for child in vessel.children]))
             else:
-                vessel.R_eq = vessel.R + vessel.zero_d_element_values['stenosis_coefficient']
+                vessel.R_eq = vessel.R + vessel.stenosis_coefficient
         
         calc_R_eq(self.root)
 
@@ -460,7 +460,7 @@ class ConfigHandler():
         return sum(vessel.R for vessel in self.get_segments(branch_id))
 
 
-    def get_segments(self, branch: int or str, dtype: str = 'vessel', junctions=False):
+    def get_segments(self, branch, dtype: str = 'vessel', junctions=False):
         '''
         get the vessels in a branch
 
@@ -515,7 +515,6 @@ class Vessel():
         # list of ids if multiple segments
         self.ids = [config['vessel_id']]
         self.branch = get_branch_id(config)[0]
-        self.zero_d_element_values = config['zero_d_element_values']
         self._stenosis_coefficient = config['zero_d_element_values']['stenosis_coefficient']
         self._R = config['zero_d_element_values']['R_poiseuille']
         self._C = config['zero_d_element_values']['C']
@@ -525,7 +524,7 @@ class Vessel():
         self._C_eq = self._C
         self._L_eq = self._L
         # get diameter with viscosity 0.04
-        self.diameter = ((128 * 0.04 * self.length) / (np.pi * self.zero_d_element_values['R_poiseuille'])) ** (1 / 4)
+        self.diameter = ((128 * 0.04 * self.length) / (np.pi * self._R)) ** (1 / 4)
     
     @classmethod
     def from_config(cls, config):
@@ -571,7 +570,6 @@ class Vessel():
                 },
             }
 
-        return 
 
     def add_segment(self, config: dict):
         '''
@@ -583,9 +581,9 @@ class Vessel():
         self.ids.append(config['vessel_id'])
         # add zero d element values
         self.R += config['zero_d_element_values']['R_poiseuille']
-        self.C = 1 / ((1 / self.zero_d_element_values['C']) + (1 / config['zero_d_element_values']['C']))
+        self.C = 1 / ((1 / self._C) + (1 / config['zero_d_element_values']['C']))
         self.L += config['zero_d_element_values']['L']
-        self.zero_d_element_values['stenosis_coefficient'] += config['zero_d_element_values']['stenosis_coefficient']
+        self._stenosis_coefficient += config['zero_d_element_values']['stenosis_coefficient']
         # add the segment number
         self.segs.append(get_branch_id(config)[1])
 
@@ -848,8 +846,10 @@ class SimParams():
         if "coupled_simulation" in config.keys():
             # this is probably a 3d coupled simulation and the simulation parameters will be different
             threed_coupled = config["coupled_simulation"]
+        else:
+            threed_coupled = False
 
-        return cls(config, threed_coupled)
+        return cls(config, threed_coupled=threed_coupled)
     
     def to_dict(self):
         '''

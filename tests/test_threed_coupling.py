@@ -24,7 +24,7 @@ def test_config_handler():
     # load the config file
     threed_coupling_config = 'tests/cases/threed_cylinder/Simulations/threed_cylinder_rigid/svzerod_3Dcoupling.json'
 
-    config_handler = ConfigHandler.from_json(threed_coupling_config, is_pulmonary=False)
+    config_handler = ConfigHandler.from_json(threed_coupling_config, is_pulmonary=False, is_threed_interface=True)
 
     print(config_handler.config)
 
@@ -36,9 +36,11 @@ def test_coupled_tree_construction():
     threed_coupling_config = 'tests/cases/threed_cylinder/Simulations/threed_cylinder_rigid/svzerod_3Dcoupling.json'
     simulation_dir = 'tests/cases/threed_cylinder/Simulations/threed_cylinder_rigid/'
 
-    config_handler = ConfigHandler.from_json(threed_coupling_config, is_pulmonary=False)
+    config_handler = ConfigHandler.from_json(threed_coupling_config, is_pulmonary=False, is_threed_interface=True)
 
     preop.construct_coupled_cwss_trees(config_handler, simulation_dir)
+
+    
 
 
 

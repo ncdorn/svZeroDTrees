@@ -281,4 +281,4 @@ class TreeVessel:
 
         viscosity = plasma_viscosity * rel_viscosity
 
-        return 0.04
+        return viscosity

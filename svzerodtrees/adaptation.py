@@ -110,3 +110,9 @@ def adapt_constant_wss(config_handler: ConfigHandler, result_handler: ResultHand
     # add adapted result to the result handler
     result_handler.add_unformatted_result(adapted_result, 'adapted')
 
+
+def adapt_constant_wss_threed(config_handler: ConfigHandler, log_file: str = None):
+    '''
+    adapt structured trees coupled to a 3d simulation based on the constant wall shear stress assumption'''
+
+    
