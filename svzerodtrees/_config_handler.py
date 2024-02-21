@@ -740,6 +740,14 @@ class BoundaryCondition():
             self._Rp = self.values['Rp']
             self._Rd = self.values['Rd']
             self._C = self.values['C']
+        
+        if self.type == 'FLOW':
+            self._Q = self.values['Q']
+            self._t = self.values['t']
+        
+        if self.type == 'PRESSURE':
+            self._P = self.values['P']
+            self._t = self.values['t']
     
     @classmethod
     def from_config(cls, config):
@@ -809,6 +817,34 @@ class BoundaryCondition():
     def C(self, new_C):
         self._C = new_C
         self.values['C'] = new_C
+
+    @property
+    def Q(self):
+        return self._Q
+    
+    @Q.setter
+    def Q(self, new_Q):
+        self._Q = new_Q
+        self.values['Q'] = new_Q
+
+    @property
+    def P(self):
+        return self._P
+    
+    @P.setter
+    def P(self, new_P):
+        self._P = new_P
+        self.values['P'] = new_P
+
+    @property
+    def t(self):
+        return self._t
+    
+    @t.setter
+    def t(self, new_t):
+        self._t = new_t
+        self.values['t'] = new_t
+
     
 
 class SimParams():

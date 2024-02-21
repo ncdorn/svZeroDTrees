@@ -891,6 +891,8 @@ def rebuild_trees(config: dict):
                 pass
 
 
+### UNIT CONVERSIONS ###
+            
 def m2d(mmHg):
     '''
     convert mmHg to dynes/cm2
@@ -904,3 +906,10 @@ def d2m(dynes):
     '''
 
     return dynes / 1333.22
+
+def nlmin2cm3s(nlmin):
+    '''
+    convert nl/min to cm3/s
+    '''
+
+    return nlmin * 1.667e-8

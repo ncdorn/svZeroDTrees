@@ -11,7 +11,7 @@
 		{
 			"name": "RCR_coupling",
 			"type": "FLOW",
-			"location": "inlet",
+			"location": "outlet",
 			"connected_block": "RCR",
 			"periodic": false,
 			"values": {
@@ -23,9 +23,11 @@
 	"boundary_conditions": [
 		{
 			"bc_name": "RCR",
-			"bc_type": "RESISTANCE",
+			"bc_type": "RCR",
 			"bc_values": {
-				"R": 100.0,
+				"Rp": 121.0,
+				"Rd": 1212.0,
+				"C": 1.5e-4,
 				"Pd": 0.0
 			}
 		}
