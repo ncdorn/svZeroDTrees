@@ -14,6 +14,7 @@ from svzerodtrees.adaptation import *
 from svzerodtrees import operation, preop, interface
 from svzerodtrees._config_handler import ConfigHandler
 from svzerodtrees._result_handler import ResultHandler
+from svzerodtrees.threedutils import *
 import pickle
 
 
@@ -40,9 +41,25 @@ def test_coupled_tree_construction():
 
     preop.construct_coupled_cwss_trees(config_handler, simulation_dir)
 
-    
 
+def test_data_handling():
+    '''
+    test random data handlers'''
+
+    Q_svZeroD = 'tests/cases/test_cylinder/Simulations/steady/Q_svZeroD'
+
+    df = get_outlet_flow(Q_svZeroD)
+
+    print(df)
+
+
+def test_interface():
+    '''
+    test the interface
+    '''
+    preop_dir = 'tests/cases/test_cylinder/Simulations/steady'
+    interface.run_threed_adaptation(preop_dir, ' ')
 
 
 if __name__ == '__main__':
-    test_coupled_tree_construction()
+    test_interface()
