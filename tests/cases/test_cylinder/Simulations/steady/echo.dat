@@ -1,0 +1,84 @@
+Default Ensa Case                                                     23/02/24 
+
+ M a i n   C o n t r o l   P a r a m e t e r s        
+
+ number of processing elements . . . . . . . (numpe )=         1
+
+ number of mesh nodes  . . . . . . . . . . . (numnp )=      8595
+
+ number of elements  . . . . . . . . . . . . (numel )=     45754
+
+ number of boundary elements . . . . . . . . (numelb)=      5420
+
+ number of element nodes . . . . . . . . . . (nen   )=         4
+
+ number of element faces . . . . . . . . . . (nfaces)=         0
+
+ number of space dimensions  . . . . . . . . (nsd   )=         3
+
+ number of boundary flux nodes . . . . . . . (numflx)=         0
+
+ frame of reference  . . . . . . . . . . . . (iALE  )=         0
+
+    eq. 0, Eulerian                                   
+    eq. 1, arbitrary Lagrangian-Eulerian              
+
+ equation type . . . . . . . . . . . . . . . (navier)=         1
+
+    eq. 0, Euler (inviscid)                           
+    eq. 1, Navier-Stokes (viscous)                    
+
+ input echo parameter  . . . . . . . . . . . (necho )=         3
+Default Ensa Case                                                     23/02/24 
+
+ S o l u t i o n   P a r a m e t e r s                
+
+ number of time sequences  . . . . . . . . . (ntseq )=         1
+
+ variational formulation . . . . . . . . . . (ivart )=         2
+
+    eq. 1, Galerkin                                   
+    eq. 2, Galerkin/least-squares                     
+    eq. 3, plus discontinuity-capturing operator      
+
+ discontinuity-capturing type  . . . . . . . (iDC   )=         0
+
+    eq. 1, DC-mallet                                  
+    eq. 2, quadratic DC                               
+    eq. 3, smallest of the previous two DCs           
+
+ dimension of Krylov space . . . . . . . . . (kspace)=       100
+
+ maximum number of GMRES cycles  . . . . . . (ngmres)=         1
+Default Ensa Case                                                     23/02/24 
+
+ S o l v e r   I n f o r m a t i o n                    
+
+ Seq num    Nstep    Niter    Impl      Nupdate     Eps_Tol
+     1       200        0      10          1      0.50000E-01
+Default Ensa Case                                                     23/02/24 
+
+ S p a t i a l   a n d   T i m e   I n t e g r a t i o n
+
+ Seq num  Elem Int.  Bound Int.  Level  LCtime    Delt       CFLfld    CFLsld
+     1       2           3   0.5000E+00       0   3.0000E-02    0.0000    0.0000
+Default Ensa Case                                                     23/02/24 
+
+ O u t p u t   I n f o r m a t i o n                  
+
+ number of time steps per output . . . . . . (ntout )=        10
+
+ I/O format  . . . . . . . . . . . . . . . . (ioform)=         1
+
+    eq. 0, ASCII                                      
+    eq. 1, binary                                     
+
+ scaling factor for density  . . . . . . . . (ro    )=    1.00000E+00
+
+ scaling factor for velocity . . . . . . . . (vel   )=    1.00000E+00
+
+ scaling factor for temperature. . . . . . . (temper)=    1.00000E+00
+
+ scaling factor for pressure . . . . . . . . (press )=    1.00000E+00
+
+ scaling factor for entropy  . . . . . . . . (entrop)=    1.00000E+00

@@ -1,0 +1,655 @@
+beginning experiment cwss_adaptation_test!
+with the following configuration: 
+{'name': 'cwss_adaptation_test', 'model': 'AS1_SU0308_prestent', 'adapt': 'cwss', 'optimized': False, 'is_full_pa_tree': True, 'trees_exist': False, 'mesh_surfaces_path': '/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/PPAS/svPPAS/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces', 'repair': [{'type': 'stent', 'location': 'proximal', 'value': [1.2, 1.2]}]}
+*** clinical targets ****
+Q: 97.30194600000002
+MPA pressures: 42
+RPA pressures: 32
+LPA pressures: 32
+wedge pressure: 20
+RPA flow split: 0.52
+*** optimized values ****
+MPA pressure: 42.00000175190116
+RPA pressure: 31.99999916350333
+LPA pressure: 31.999998324693365
+RPA flow split: 0.5199999623753573
+     Resistance after optimization is 12690.943996484644
+
+     the optimized diameter is 0.07730183762692458
+
+     Resistance after optimization is 14165.530444076157
+
+     the optimized diameter is 0.07383104319887793
+
+     Resistance after optimization is 11786.650321701998
+
+     the optimized diameter is 0.07837637015643074
+
+     Resistance after optimization is 3459.9916895622355
+
+     the optimized diameter is 0.13278131157788772
+
+     Resistance after optimization is 2087.325117864726
+
+     the optimized diameter is 0.16133927596316555
+
+     Resistance after optimization is 22781.504223341486
+
+     the optimized diameter is 0.06478691893205216
+
+     Resistance after optimization is 6844.503639289261
+
+     the optimized diameter is 0.09413177428881365
+
+     Resistance after optimization is 7491.871384548192
+
+     the optimized diameter is 0.09262500598749815
+
+     Resistance after optimization is 22448.94126292986
+
+     the optimized diameter is 0.061747126207775525
+
+     Resistance after optimization is 6615.548236005533
+
+     the optimized diameter is 0.10057670877731273
+
+     Resistance after optimization is 9513.220327993093
+
+     the optimized diameter is 0.08688735430291333
+
+     Resistance after optimization is 2088.4221095122975
+
+     the optimized diameter is 0.16133298325263917
+
+     Resistance after optimization is 1190.4992921350863
+
+     the optimized diameter is 0.1991905714596475
+
+     Resistance after optimization is 7881.17968960114
+
+     the optimized diameter is 0.09588957551165808
+
+     Resistance after optimization is 1190.4500206286748
+
+     the optimized diameter is 0.19919229199610333
+
+     Resistance after optimization is 879.6398724178779
+
+     the optimized diameter is 0.21781409344273212
+
+     Resistance after optimization is 2742.6239650611064
+
+     the optimized diameter is 0.14520829267272958
+
+     Resistance after optimization is 25530.702007776777
+
+     the optimized diameter is 0.060399025334100256
+
+     Resistance after optimization is 27993.444461270035
+
+     the optimized diameter is 0.0595629591079821
+
+     Resistance after optimization is 1581.5884065218725
+
+     the optimized diameter is 0.17926209026071852
+
+     Resistance after optimization is 25676.447041897864
+
+     the optimized diameter is 0.06045541999579725
+
+     Resistance after optimization is 879.3825503944335
+
+     the optimized diameter is 0.2178259300062419
+
+     Resistance after optimization is 894.2767616434741
+
+     the optimized diameter is 0.2213064638252749
+
+     Resistance after optimization is 34835.661347386565
+
+     the optimized diameter is 0.05015503786680015
+
+     Resistance after optimization is 10746.835322148976
+
+     the optimized diameter is 0.08193050267151869
+
+     Resistance after optimization is 23572.368800092398
+
+     the optimized diameter is 0.06412691576876059
+
+     Resistance after optimization is 28271.688660337688
+
+     the optimized diameter is 0.05584209109245909
+
+     Resistance after optimization is 1191.213233899733
+
+     the optimized diameter is 0.19918013112759433
+
+     Resistance after optimization is 13681.580766253066
+
+     the optimized diameter is 0.07418370776698607
+
+     Resistance after optimization is 21960.73528260542
+
+     the optimized diameter is 0.06509849033968249
+
+     Resistance after optimization is 27766.510274213822
+
+     the optimized diameter is 0.05959047258842101
+
+     Resistance after optimization is 1581.8959807129843
+
+     the optimized diameter is 0.17925671488177597
+
+     Resistance after optimization is 1148.840890859029
+
+     the optimized diameter is 0.19601394232037384
+
+     Resistance after optimization is 30031.281929806657
+
+     the optimized diameter is 0.05143941136090836
+
+     Resistance after optimization is 2086.963365466737
+
+     the optimized diameter is 0.16134399364485755
+
+     Resistance after optimization is 23077.351896848148
+
+     the optimized diameter is 0.06146516904833681
+
+     Resistance after optimization is 15366.595571427755
+
+     the optimized diameter is 0.0689531299886056
+
+     Resistance after optimization is 2597.4780715609854
+
+     the optimized diameter is 0.1475370508824668
+
+     Resistance after optimization is 1190.7714369438954
+
+     the optimized diameter is 0.19918292735388826
+
+     Resistance after optimization is 20760.52665747999
+
+     the optimized diameter is 0.06574277521320399
+
+     Resistance after optimization is 29271.909214271047
+
+     the optimized diameter is 0.05914003049882478
+
+     Resistance after optimization is 22515.986850696958
+
+     the optimized diameter is 0.06484116002024462
+
+     Resistance after optimization is 22963.055982195023
+
+     the optimized diameter is 0.06445027976094797
+
+     Resistance after optimization is 24438.66411393155
+
+     the optimized diameter is 0.060831931371693904
+
+     Resistance after optimization is 13799.659156963871
+
+     the optimized diameter is 0.07858320906917873
+
+     Resistance after optimization is 16859.198957560115
+
+     the optimized diameter is 0.07183829462085864
+
+     Resistance after optimization is 15660.988370003397
+
+     the optimized diameter is 0.06990369152748546
+
+     Resistance after optimization is 15291.624375165797
+
+     the optimized diameter is 0.06907984367954279
+
+     Resistance after optimization is 390.0727522296317
+
+     the optimized diameter is 0.2987473121519764
+
+     Resistance after optimization is 8232.465133441496
+
+     the optimized diameter is 0.09703337377433557
+
+     Resistance after optimization is 19499.00200050642
+
+     the optimized diameter is 0.06635361984381109
+
+     Resistance after optimization is 13910.044280090386
+
+     the optimized diameter is 0.0740533001454591
+
+     Resistance after optimization is 19302.107608695485
+
+     the optimized diameter is 0.06640603596599298
+
+     Resistance after optimization is 20446.194147830694
+
+     the optimized diameter is 0.06590293468098482
+
+     Resistance after optimization is 2088.3262582632797
+
+     the optimized diameter is 0.16133394899389134
+
+     Resistance after optimization is 20352.481773351436
+
+     the optimized diameter is 0.0628260639491017
+
+     Resistance after optimization is 13474.381527606274
+
+     the optimized diameter is 0.07444518037088249
+
+     Resistance after optimization is 2088.276173703086
+
+     the optimized diameter is 0.16133446864334341
+
+     Resistance after optimization is 14828.82289574993
+
+     the optimized diameter is 0.06950052319573477
+
+     Resistance after optimization is 21288.681179489795
+
+     the optimized diameter is 0.062296349134977815
+
+     Resistance after optimization is 17775.77014281984
+
+     the optimized diameter is 0.07103784871811272
+
+     Resistance after optimization is 2744.917679273259
+
+     the optimized diameter is 0.14519608732594885
+
+     Resistance after optimization is 2088.5825399778987
+
+     the optimized diameter is 0.16133106533003
+
+     Resistance after optimization is 2088.9634195520466
+
+     the optimized diameter is 0.16132578716042587
+
+     Resistance after optimization is 23900.686384233955
+
+     the optimized diameter is 0.06398660459595366
+
+     Resistance after optimization is 13977.085444086646
+
+     the optimized diameter is 0.07841386181806789
+
+     Resistance after optimization is 27478.841095748787
+
+     the optimized diameter is 0.05610962234454758
+
+     Resistance after optimization is 26567.64828107186
+
+     the optimized diameter is 0.060065996876127466
+
+     Resistance after optimization is 2089.0731153913994
+
+     the optimized diameter is 0.16132435385123123
+
+     Resistance after optimization is 2744.7638254367043
+
+     the optimized diameter is 0.14519735159075572
+
+     Resistance after optimization is 2088.326192699529
+
+     the optimized diameter is 0.1613340492171737
+
+     Resistance after optimization is 3612.1858911348345
+
+     the optimized diameter is 0.13067742131273857
+
+     Resistance after optimization is 2597.9741959649723
+
+     the optimized diameter is 0.14753208373229354
+
+     Resistance after optimization is 22333.547364686605
+
+     the optimized diameter is 0.06174625674910049
+
+     Resistance after optimization is 2088.194911682778
+
+     the optimized diameter is 0.1613356477749204
+
+     Resistance after optimization is 5541.86023854795
+
+     the optimized diameter is 0.1036415020454349
+
+     Resistance after optimization is 2745.0895810386533
+
+     the optimized diameter is 0.14519415137591218
+
+     Resistance after optimization is 1581.8836289310605
+
+     the optimized diameter is 0.1792565659221831
+
+     Resistance after optimization is 19056.283230628855
+
+     the optimized diameter is 0.06660186404694976
+
+     Resistance after optimization is 16745.947029542072
+
+     the optimized diameter is 0.0715993332155862
+
+     Resistance after optimization is 2088.9592735217416
+
+     the optimized diameter is 0.16132581134592752
+
+     Resistance after optimization is 1191.5561660774977
+
+     the optimized diameter is 0.19917055051525198
+
+     Resistance after optimization is 1580.3490035400353
+
+     the optimized diameter is 0.17927628065655904
+
+     Resistance after optimization is 4758.704740175064
+
+     the optimized diameter is 0.1176174012752057
+
+     Resistance after optimization is 893.4592048490539
+
+     the optimized diameter is 0.22132869316084036
+
+     Resistance after optimization is 8713.621426984584
+
+     the optimized diameter is 0.08498874657582628
+
+     Resistance after optimization is 1582.0968585438463
+
+     the optimized diameter is 0.17925304636671419
+
+     Resistance after optimization is 670.2104727763751
+
+     the optimized diameter is 0.24592051316733332
+
+     Resistance after optimization is 512.4090003804254
+
+     the optimized diameter is 0.2688996196272862
+
+     Resistance after optimization is 1191.150917187731
+
+     the optimized diameter is 0.19918163580045262
+
+     Resistance after optimization is 2088.35345164738
+
+     the optimized diameter is 0.16132572413239255
+
+saving preop config with cwss trees...
+** repairing stenoses in vessels ['lpa', 'rpa'] **
+** adapting trees based on constant wall shear stress assumption **
+** adaptation results for OutletTree3 **
+    R_new = 6528.73613750169, R_old = 6844.503639289261
+    The change in resistance is -315.76750178757084
+** adaptation results for OutletTree6 **
+    R_new = 7487.556319373103, R_old = 7881.17968960114
+    The change in resistance is -393.62337022803695
+** adaptation results for OutletTree7 **
+    R_new = 7147.929549206122, R_old = 7491.871384548192
+    The change in resistance is -343.9418353420697
+** adaptation results for OutletTree8 **
+    R_new = 1506.3495762090977, R_old = 1581.5884065218725
+    The change in resistance is -75.23883031277478
+** adaptation results for OutletTree9 **
+    R_new = 1134.167808850412, R_old = 1190.4992921350863
+    The change in resistance is -56.33148328467428
+** adaptation results for OutletTree11 **
+    R_new = 2612.1248081702465, R_old = 2742.6239650611064
+    The change in resistance is -130.49915689085992
+** adaptation results for OutletTree12 **
+    R_new = 1987.7777278108051, R_old = 2087.325117864726
+    The change in resistance is -99.54739005392094
+** adaptation results for OutletTree13 **
+    R_new = 21419.080174897084, R_old = 22448.94126292986
+    The change in resistance is -1029.861088032776
+** adaptation results for OutletTree15 **
+    R_new = 12079.129135378364, R_old = 12690.943996484644
+    The change in resistance is -611.8148611062807
+** adaptation results for OutletTree16 **
+    R_new = 1988.824956021889, R_old = 2088.4221095122975
+    The change in resistance is -99.59715349040857
+** adaptation results for OutletTree17 **
+    R_new = 6308.317278620984, R_old = 6615.548236005533
+    The change in resistance is -307.2309573845487
+** adaptation results for OutletTree19 **
+    R_new = 1134.8496988570587, R_old = 1191.213233899733
+    The change in resistance is -56.36353504267436
+** adaptation results for OutletTree20 **
+    R_new = 1134.1615579021466, R_old = 1190.4500206286748
+    The change in resistance is -56.28846272652822
+** adaptation results for OutletTree21 **
+    R_new = 371.002626528278, R_old = 390.0727522296317
+    The change in resistance is -19.07012570135373
+** adaptation results for OutletTree22 **
+    R_new = 11217.116189796652, R_old = 11786.650321701998
+    The change in resistance is -569.5341319053459
+** adaptation results for OutletTree24 **
+    R_new = 9041.526885708354, R_old = 9513.220327993093
+    The change in resistance is -471.6934422847389
+** adaptation results for OutletTree25 **
+    R_new = 836.0669140827581, R_old = 879.6398724178779
+    The change in resistance is -43.57295833511978
+** adaptation results for OutletTree26 **
+    R_new = 10274.791693637591, R_old = 10746.835322148976
+    The change in resistance is -472.04362851138467
+** adaptation results for OutletTree28 **
+    R_new = 13568.15006180783, R_old = 14165.530444076157
+    The change in resistance is -597.3803822683276
+** adaptation results for OutletTree29 **
+    R_new = 835.8203958169896, R_old = 879.3825503944335
+    The change in resistance is -43.562154577443835
+** adaptation results for OutletTree32 **
+    R_new = 852.1589252079011, R_old = 894.2767616434741
+    The change in resistance is -42.11783643557294
+** adaptation results for OutletTree34 **
+    R_new = 22550.342359172773, R_old = 23572.368800092398
+    The change in resistance is -1022.0264409196243
+** adaptation results for OutletTree35 **
+    R_new = 3302.8695932770274, R_old = 3459.9916895622355
+    The change in resistance is -157.12209628520804
+** adaptation results for OutletTree37 **
+    R_new = 21834.967282660386, R_old = 22781.504223341486
+    The change in resistance is -946.5369406811005
+** adaptation results for OutletTree39 **
+    R_new = 24363.330801713913, R_old = 25530.702007776777
+    The change in resistance is -1167.371206062864
+** adaptation results for OutletTree40 **
+    R_new = 26716.46290350524, R_old = 27993.444461270035
+    The change in resistance is -1276.981557764797
+** adaptation results for OutletTree42 **
+    R_new = 24502.538011162487, R_old = 25676.447041897864
+    The change in resistance is -1173.9090307353763
+** adaptation results for OutletTree43 **
+    R_new = 33298.33087118661, R_old = 34835.661347386565
+    The change in resistance is -1537.3304761999534
+** adaptation results for OutletTree45 **
+    R_new = 1506.6432334054834, R_old = 1581.8959807129843
+    The change in resistance is -75.25274730750084
+** adaptation results for OutletTree46 **
+    R_new = 2478.4084968409047, R_old = 2597.4780715609854
+    The change in resistance is -119.06957472008071
+** adaptation results for OutletTree47 **
+    R_new = 1091.6386846277744, R_old = 1148.840890859029
+    The change in resistance is -57.20220623125465
+** adaptation results for OutletTree49 **
+    R_new = 28698.54865326314, R_old = 30031.281929806657
+    The change in resistance is -1332.7332765435167
+** adaptation results for OutletTree50 **
+    R_new = 26946.666958834325, R_old = 28271.688660337688
+    The change in resistance is -1325.0217015033631
+** adaptation results for OutletTree52 **
+    R_new = 1134.427967893584, R_old = 1190.7714369438954
+    The change in resistance is -56.34346905031134
+** adaptation results for OutletTree55 **
+    R_new = 13103.4803763993, R_old = 13681.580766253066
+    The change in resistance is -578.1003898537656
+** adaptation results for OutletTree56 **
+    R_new = 1987.4867328700739, R_old = 2086.963365466737
+    The change in resistance is -99.47663259666297
+** adaptation results for OutletTree58 **
+    R_new = 21046.778509310036, R_old = 21960.73528260542
+    The change in resistance is -913.9567732953838
+** adaptation results for OutletTree59 **
+    R_new = 26499.57628321323, R_old = 27766.510274213822
+    The change in resistance is -1266.933991000591
+** adaptation results for OutletTree60 **
+    R_new = 22019.401931580906, R_old = 23077.351896848148
+    The change in resistance is -1057.949965267242
+** adaptation results for OutletTree62 **
+    R_new = 14716.72263686671, R_old = 15366.595571427755
+    The change in resistance is -649.8729345610445
+** adaptation results for OutletTree63 **
+    R_new = 19894.310639691357, R_old = 20760.52665747999
+    The change in resistance is -866.2160177886326
+** adaptation results for OutletTree65 **
+    R_new = 21580.009199929646, R_old = 22515.986850696958
+    The change in resistance is -935.9776507673123
+** adaptation results for OutletTree66 **
+    R_new = 27938.072005069695, R_old = 29271.909214271047
+    The change in resistance is -1333.8372092013524
+** adaptation results for OutletTree68 **
+    R_new = 21966.810122828556, R_old = 22963.055982195023
+    The change in resistance is -996.2458593664669
+** adaptation results for OutletTree69 **
+    R_new = 23319.947073419586, R_old = 24438.66411393155
+    The change in resistance is -1118.717040511965
+** adaptation results for OutletTree74 **
+    R_new = 17650.906025365737, R_old = 16859.198957560115
+    The change in resistance is 791.7070678056225
+** adaptation results for OutletTree75 **
+    R_new = 14489.953875463078, R_old = 13799.659156963871
+    The change in resistance is 690.2947184992063
+** adaptation results for OutletTree76 **
+    R_new = 16488.341793502215, R_old = 15660.988370003397
+    The change in resistance is 827.3534234988183
+** adaptation results for OutletTree77 **
+    R_new = 8665.605642548067, R_old = 8232.465133441496
+    The change in resistance is 433.1405091065717
+** adaptation results for OutletTree78 **
+    R_new = 2200.9691380772792, R_old = 2088.5825399778987
+    The change in resistance is 112.38659809938054
+** adaptation results for OutletTree82 **
+    R_new = 2200.8896531066935, R_old = 2088.3262582632797
+    The change in resistance is 112.56339484341379
+** adaptation results for OutletTree83 **
+    R_new = 15531.590069991376, R_old = 14828.82289574993
+    The change in resistance is 702.7671742414459
+** adaptation results for OutletTree84 **
+    R_new = 2200.6028482512197, R_old = 2088.276173703086
+    The change in resistance is 112.32667454813372
+** adaptation results for OutletTree85 **
+    R_new = 18636.107316908765, R_old = 17775.77014281984
+    The change in resistance is 860.3371740889233
+** adaptation results for OutletTree88 **
+    R_new = 16015.564111103455, R_old = 15291.624375165797
+    The change in resistance is 723.939735937658
+** adaptation results for OutletTree90 **
+    R_new = 2892.1043113026312, R_old = 2744.917679273259
+    The change in resistance is 147.18663202937205
+** adaptation results for OutletTree91 **
+    R_new = 20412.375154880658, R_old = 19499.00200050642
+    The change in resistance is 913.373154374236
+** adaptation results for OutletTree92 **
+    R_new = 20208.781582340755, R_old = 19302.107608695485
+    The change in resistance is 906.6739736452691
+** adaptation results for OutletTree94 **
+    R_new = 14569.974135054226, R_old = 13910.044280090386
+    The change in resistance is 659.9298549638406
+** adaptation results for OutletTree95 **
+    R_new = 14114.56182286535, R_old = 13474.381527606274
+    The change in resistance is 640.1802952590751
+** adaptation results for OutletTree98 **
+    R_new = 2201.5130766730786, R_old = 2088.9634195520466
+    The change in resistance is 112.54965712103194
+** adaptation results for OutletTree100 **
+    R_new = 2200.7511078032576, R_old = 2088.326192699529
+    The change in resistance is 112.42491510372838
+** adaptation results for OutletTree101 **
+    R_new = 21403.60428002229, R_old = 20446.194147830694
+    The change in resistance is 957.410132191595
+** adaptation results for OutletTree102 **
+    R_new = 21408.352113732166, R_old = 20352.481773351436
+    The change in resistance is 1055.8703403807303
+** adaptation results for OutletTree103 **
+    R_new = 2201.628470437635, R_old = 2089.0731153913994
+    The change in resistance is 112.55535504623549
+** adaptation results for OutletTree104 **
+    R_new = 2732.2882731423597, R_old = 2597.9741959649723
+    The change in resistance is 134.3140771773874
+** adaptation results for OutletTree106 **
+    R_new = 22392.848295136253, R_old = 21288.681179489795
+    The change in resistance is 1104.1671156464581
+** adaptation results for OutletTree107 **
+    R_new = 2892.2925352376983, R_old = 2744.7638254367043
+    The change in resistance is 147.52870980099397
+** adaptation results for OutletTree109 **
+    R_new = 14675.974615741783, R_old = 13977.085444086646
+    The change in resistance is 698.889171655137
+** adaptation results for OutletTree112 **
+    R_new = 27942.150170806795, R_old = 26567.64828107186
+    The change in resistance is 1374.5018897349364
+** adaptation results for OutletTree113 **
+    R_new = 25065.58152921222, R_old = 23900.686384233955
+    The change in resistance is 1164.8951449782653
+** adaptation results for OutletTree114 **
+    R_new = 28943.45039160267, R_old = 27478.841095748787
+    The change in resistance is 1464.609295853883
+** adaptation results for OutletTree116 **
+    R_new = 2200.743090869478, R_old = 2088.194911682778
+    The change in resistance is 112.5481791866996
+** adaptation results for OutletTree117 **
+    R_new = 2892.6320373901626, R_old = 2745.0895810386533
+    The change in resistance is 147.54245635150937
+** adaptation results for OutletTree118 **
+    R_new = 3805.4011744403288, R_old = 3612.1858911348345
+    The change in resistance is 193.21528330549427
+** adaptation results for OutletTree119 **
+    R_new = 23491.367613149476, R_old = 22333.547364686605
+    The change in resistance is 1157.820248462871
+** adaptation results for OutletTree121 **
+    R_new = 5834.80645754929, R_old = 5541.86023854795
+    The change in resistance is 292.94621900134007
+** adaptation results for OutletTree123 **
+    R_new = 1665.297724078568, R_old = 1580.3490035400353
+    The change in resistance is 84.94872053853283
+** adaptation results for OutletTree124 **
+    R_new = 1666.8637283021826, R_old = 1581.8836289310605
+    The change in resistance is 84.98009937112215
+** adaptation results for OutletTree125 **
+    R_new = 5016.888999629311, R_old = 4758.704740175064
+    The change in resistance is 258.1842594542468
+** adaptation results for OutletTree127 **
+    R_new = 940.9655685335267, R_old = 893.4592048490539
+    The change in resistance is 47.50636368447283
+** adaptation results for OutletTree128 **
+    R_new = 1254.803256197742, R_old = 1191.150917187731
+    The change in resistance is 63.65233901001102
+** adaptation results for OutletTree129 **
+    R_new = 1254.9365389711443, R_old = 1191.5561660774977
+    The change in resistance is 63.38037289364661
+** adaptation results for OutletTree132 **
+    R_new = 9148.15431803095, R_old = 8713.621426984584
+    The change in resistance is 434.5328910463668
+** adaptation results for OutletTree133 **
+    R_new = 540.7300231096427, R_old = 512.4090003804254
+    The change in resistance is 28.32102272921736
+** adaptation results for OutletTree135 **
+    R_new = 2200.925956276523, R_old = 2088.35345164738
+    The change in resistance is 112.57250462914271
+** adaptation results for OutletTree136 **
+    R_new = 2201.5632201867256, R_old = 2088.9592735217416
+    The change in resistance is 112.60394666498405
+** adaptation results for OutletTree139 **
+    R_new = 1667.1424273177474, R_old = 1582.0968585438463
+    The change in resistance is 85.0455687739011
+** adaptation results for OutletTree140 **
+    R_new = 19951.869358811316, R_old = 19056.283230628855
+    The change in resistance is 895.5861281824618
+** adaptation results for OutletTree141 **
+    R_new = 17558.01184735199, R_old = 16745.947029542072
+    The change in resistance is 812.0648178099182
+** adaptation results for OutletTree142 **
+    R_new = 705.7749728308096, R_old = 670.2104727763751
+    The change in resistance is 35.56450005443446
