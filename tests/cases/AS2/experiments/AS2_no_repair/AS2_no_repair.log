@@ -1,0 +1,365 @@
+beginning experiment AS2_no_repair!
+with the following configuration: 
+{'name': 'AS2_no_repair', 'model': 'AS2_prestent', 'adapt': 'ps', 'optimized': False, 'is_full_pa_tree': True, 'trees_exist': False, 'mesh_surfaces_path': '/home/ndorn/Documents/Stanford/PhD/Simvascular/threed_models/AS2_prestent/Meshes/1.6M_elements/mesh-surfaces', 'repair': [{'type': 'stenosis_coefficient', 'location': 'proximal', 'value': [0.0, 0.0]}]}
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: 24
+RPA pressures: 8
+LPA pressures: 11
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: 24.000001283051997
+RPA pressure: 7.999999631745728
+LPA pressure: 10.999999614329258
+RPA flow split: 0.38999998430793215
+     the number of vessels is 3
+
+     the number of vessels is 27
+
+     the number of vessels is 27
+
+     the number of vessels is 27
+
+     the number of vessels is 3
+
+     the number of vessels is 27
+
+     the number of vessels is 5
+
+     the number of vessels is 3
+
+     the number of vessels is 3
+
+     the number of vessels is 27
+
+     the number of vessels is 3
+
+     the number of vessels is 19
+
+     the number of vessels is 5
+
+     the number of vessels is 19
+
+     the number of vessels is 3
+
+     the number of vessels is 3
+
+     the number of vessels is 3
+
+     the number of vessels is 3
+
+     the number of vessels is 27
+
+     the number of vessels is 19
+
+     the number of vessels is 19
+
+     the number of vessels is 3
+
+     the number of vessels is 27
+
+     the number of vessels is 27
+
+     the number of vessels is 3
+
+     the number of vessels is 27
+
+     the number of vessels is 15
+
+     the number of vessels is 3
+
+     the number of vessels is 3
+
+     the number of vessels is 3
+
+     the number of vessels is 3
+
+     the number of vessels is 3
+
+     the number of vessels is 27
+
+     the number of vessels is 19
+
+     the number of vessels is 19
+
+     the number of vessels is 3
+
+     the number of vessels is 27
+
+     the number of vessels is 3
+
+     the number of vessels is 3
+
+     the number of vessels is 19
+
+     the number of vessels is 3
+
+     the number of vessels is 27
+
+     the number of vessels is 27
+
+     the number of vessels is 27
+
+     the number of vessels is 27
+
+     the number of vessels is 3
+
+     the number of vessels is 19
+
+     the number of vessels is 3
+
+     the number of vessels is 3
+
+     the number of vessels is 3
+
+     the number of vessels is 3
+
+     the number of vessels is 19
+
+     the number of vessels is 19
+
+     the number of vessels is 3
+
+     the number of vessels is 3
+
+     the number of vessels is 3
+
+     the number of vessels is 27
+
+     the number of vessels is 3
+
+     the number of vessels is 5
+
+     the number of vessels is 3
+
+     the number of vessels is 27
+
+     the number of vessels is 13
+
+     the number of vessels is 19
+
+     the number of vessels is 19
+
+     the number of vessels is 3
+
+     the number of vessels is 27
+
+     the number of vessels is 19
+
+     the number of vessels is 3
+
+     the number of vessels is 3
+
+** repairing stenoses in vessels ['lpa', 'rpa'] **
+adjusting stenosis coefficient in branch 1 with stenosis coefficient 0.0
+adjusting stenosis coefficient in branch 47 with stenosis coefficient 0.0
+** adapting trees based on Pries and Secomb model **
+** adaptation results for OutletTree4 **
+    R_new = 8868.876388764153, R_old = 8868.935516729765
+    The change in resistance is -0.0591279656127881
+** adaptation results for OutletTree8 **
+    R_new = 1521.3018289798788, R_old = 1521.3250012969033
+    The change in resistance is -0.02317231702454592
+** adaptation results for OutletTree9 **
+    R_new = 1519.1967067096953, R_old = 1519.2192511366288
+    The change in resistance is -0.022544426933563955
+** adaptation results for OutletTree12 **
+    R_new = 1520.4840197274648, R_old = 1520.5053606179406
+    The change in resistance is -0.021340890475812557
+** adaptation results for OutletTree13 **
+    R_new = 29676.55402685589, R_old = 29676.41725545197
+    The change in resistance is 0.13677140392246656
+** adaptation results for OutletTree14 **
+    R_new = 1521.1016607241818, R_old = 1521.1216570474066
+    The change in resistance is -0.019996323224859225
+** adaptation results for OutletTree15 **
+    R_new = 6603.348254107734, R_old = 6603.375519078296
+    The change in resistance is -0.027264970562100643
+** adaptation results for OutletTree18 **
+    R_new = 38199.86599934376, R_old = 38199.53356055862
+    The change in resistance is 0.3324387851389474
+** adaptation results for OutletTree19 **
+    R_new = 60013.82654226751, R_old = 60013.12172688097
+    The change in resistance is 0.704815386539849
+** adaptation results for OutletTree22 **
+    R_new = 1519.7735650126112, R_old = 1519.800287704474
+    The change in resistance is -0.026722691862687498
+** adaptation results for OutletTree25 **
+    R_new = 27436.946721169414, R_old = 27436.789464502668
+    The change in resistance is 0.15725666674552485
+** adaptation results for OutletTree26 **
+    R_new = 1851.2768572366913, R_old = 1851.319323353829
+    The change in resistance is -0.042466117137792025
+** adaptation results for OutletTree27 **
+    R_new = 6605.7281306676, R_old = 6605.76267806265
+    The change in resistance is -0.034547395049230545
+** adaptation results for OutletTree28 **
+    R_new = 1849.8461924513351, R_old = 1849.888980339326
+    The change in resistance is -0.04278788799092581
+** adaptation results for OutletTree31 **
+    R_new = 32505.773813754182, R_old = 32505.538591258548
+    The change in resistance is 0.23522249563393416
+** adaptation results for OutletTree32 **
+    R_new = 38606.53418426497, R_old = 38606.205233023546
+    The change in resistance is 0.32895124142669374
+** adaptation results for OutletTree33 **
+    R_new = 63611.86605217296, R_old = 63611.12161043721
+    The change in resistance is 0.7444417357546627
+** adaptation results for OutletTree35 **
+    R_new = 40550.3334195653, R_old = 40549.98135859518
+    The change in resistance is 0.3520609701226931
+** adaptation results for OutletTree37 **
+    R_new = 1520.992007048273, R_old = 1521.0152365858526
+    The change in resistance is -0.023229537579481985
+** adaptation results for OutletTree38 **
+    R_new = 1851.9559841755488, R_old = 1851.9895373096556
+    The change in resistance is -0.03355313410679628
+** adaptation results for OutletTree39 **
+    R_new = 1850.4089273030393, R_old = 1850.4497938978084
+    The change in resistance is -0.04086659476911336
+** adaptation results for OutletTree41 **
+    R_new = 20192.01875114806, R_old = 20191.967835580137
+    The change in resistance is 0.050915567924676
+** adaptation results for OutletTree42 **
+    R_new = 1520.1900555397726, R_old = 1520.2139287462173
+    The change in resistance is -0.02387320644470492
+** adaptation results for OutletTree43 **
+    R_new = 1520.082123931975, R_old = 1520.111007298437
+    The change in resistance is -0.028883366461968762
+** adaptation results for OutletTree44 **
+    R_new = 40073.025207902065, R_old = 40072.67263736761
+    The change in resistance is 0.3525705344582093
+** adaptation results for OutletTree45 **
+    R_new = 1520.6855084622503, R_old = 1520.7113834547283
+    The change in resistance is -0.025874992478065906
+** adaptation results for OutletTree46 **
+    R_new = 2062.627203548581, R_old = 2062.708267860027
+    The change in resistance is -0.08106431144597082
+** adaptation results for OutletTree51 **
+    R_new = 40458.10909198714, R_old = 40457.819904877346
+    The change in resistance is 0.28918710979633033
+** adaptation results for OutletTree53 **
+    R_new = 26892.253404265895, R_old = 26892.164511154413
+    The change in resistance is 0.08889311148232082
+** adaptation results for OutletTree55 **
+    R_new = 39581.85201546142, R_old = 39581.653485791394
+    The change in resistance is 0.19852967002952937
+** adaptation results for OutletTree56 **
+    R_new = 63582.08027523341, R_old = 63581.65162148552
+    The change in resistance is 0.4286537478910759
+** adaptation results for OutletTree57 **
+    R_new = 1514.9705770599012, R_old = 1514.985431209527
+    The change in resistance is -0.014854149625762147
+** adaptation results for OutletTree58 **
+    R_new = 43162.81531741682, R_old = 43162.58385296621
+    The change in resistance is 0.23146445061138365
+** adaptation results for OutletTree59 **
+    R_new = 1848.1451498416664, R_old = 1848.1704125948847
+    The change in resistance is -0.025262753218385114
+** adaptation results for OutletTree60 **
+    R_new = 1849.158347406089, R_old = 1849.1825993241564
+    The change in resistance is -0.024251918067420775
+** adaptation results for OutletTree64 **
+    R_new = 1507.9433147459645, R_old = 1507.9599378393034
+    The change in resistance is -0.016623093338921535
+** adaptation results for OutletTree67 **
+    R_new = 44437.54625746602, R_old = 44437.22302752496
+    The change in resistance is 0.3232299410592532
+** adaptation results for OutletTree69 **
+    R_new = 114227.94446021474, R_old = 114226.6050677775
+    The change in resistance is 1.3393924372358015
+** adaptation results for OutletTree70 **
+    R_new = 100850.04882175114, R_old = 100848.89305141909
+    The change in resistance is 1.1557703320577275
+** adaptation results for OutletTree71 **
+    R_new = 1848.5492128047833, R_old = 1848.582900127452
+    The change in resistance is -0.033687322668583874
+** adaptation results for OutletTree73 **
+    R_new = 68527.99677019911, R_old = 68527.37661434144
+    The change in resistance is 0.6201558576722164
+** adaptation results for OutletTree74 **
+    R_new = 1516.0312576715298, R_old = 1516.0523329597963
+    The change in resistance is -0.021075288266501957
+** adaptation results for OutletTree75 **
+    R_new = 1518.5970206170302, R_old = 1518.616677160844
+    The change in resistance is -0.019656543813653116
+** adaptation results for OutletTree76 **
+    R_new = 1507.1175264010294, R_old = 1507.1374541022292
+    The change in resistance is -0.019927701199776493
+** adaptation results for OutletTree77 **
+    R_new = 1517.8633061094833, R_old = 1517.8828033049647
+    The change in resistance is -0.01949719548133544
+** adaptation results for OutletTree78 **
+    R_new = 92659.95113614426, R_old = 92658.99005606247
+    The change in resistance is 0.9610800817899872
+** adaptation results for OutletTree79 **
+    R_new = 1848.2146150535154, R_old = 1848.2480767828174
+    The change in resistance is -0.033461729301961896
+** adaptation results for OutletTree81 **
+    R_new = 105875.88456523765, R_old = 105874.70549849333
+    The change in resistance is 1.1790667443128768
+** adaptation results for OutletTree82 **
+    R_new = 104920.53366914927, R_old = 104919.318607605
+    The change in resistance is 1.2150615442660637
+** adaptation results for OutletTree84 **
+    R_new = 75203.37470423814, R_old = 75202.60555802428
+    The change in resistance is 0.7691462138609495
+** adaptation results for OutletTree85 **
+    R_new = 115023.46487683145, R_old = 115022.09434125398
+    The change in resistance is 1.370535577472765
+** adaptation results for OutletTree86 **
+    R_new = 1849.4887409617372, R_old = 1849.5219883090367
+    The change in resistance is -0.03324734729949341
+** adaptation results for OutletTree87 **
+    R_new = 1849.506538599253, R_old = 1849.539665179475
+    The change in resistance is -0.03312658022196047
+** adaptation results for OutletTree89 **
+    R_new = 52463.914773247685, R_old = 52463.49073977795
+    The change in resistance is 0.424033469731512
+** adaptation results for OutletTree90 **
+    R_new = 71990.18985017395, R_old = 71989.50446848426
+    The change in resistance is 0.6853816896909848
+** adaptation results for OutletTree91 **
+    R_new = 103524.03636745806, R_old = 103522.9035216172
+    The change in resistance is 1.1328458408534061
+** adaptation results for OutletTree92 **
+    R_new = 1510.8760364114987, R_old = 1510.8912030820427
+    The change in resistance is -0.01516667054397658
+** adaptation results for OutletTree94 **
+    R_new = 74825.58117622123, R_old = 74824.84297812464
+    The change in resistance is 0.7381980965874391
+** adaptation results for OutletTree95 **
+    R_new = 6603.6437366860955, R_old = 6603.672247724771
+    The change in resistance is -0.02851103867578786
+** adaptation results for OutletTree96 **
+    R_new = 60507.88912700378, R_old = 60507.33106500927
+    The change in resistance is 0.5580619945103535
+** adaptation results for OutletTree99 **
+    R_new = 1518.0055906813918, R_old = 1518.0208968689142
+    The change in resistance is -0.015306187522355685
+** adaptation results for OutletTree100 **
+    R_new = 2144.7777814219653, R_old = 2144.8079078029514
+    The change in resistance is -0.030126380986075674
+** adaptation results for OutletTree101 **
+    R_new = 1834.239925048009, R_old = 1834.2617475838197
+    The change in resistance is -0.021822535810770205
+** adaptation results for OutletTree103 **
+    R_new = 1514.7546733995355, R_old = 1514.7644591497099
+    The change in resistance is -0.009785750174387431
+** adaptation results for OutletTree104 **
+    R_new = 1845.7706554216613, R_old = 1845.7855456114662
+    The change in resistance is -0.014890189804873444
+** adaptation results for OutletTree105 **
+    R_new = 136964.89011980259, R_old = 136963.38789931836
+    The change in resistance is 1.502220484224381
+** adaptation results for OutletTree106 **
+    R_new = 1844.4667181163377, R_old = 1844.5029931395914
+    The change in resistance is -0.036275023253665495
+** adaptation results for OutletTree107 **
+    R_new = 105057.43032502732, R_old = 105056.00049263077
+    The change in resistance is 1.4298323965485906
+** adaptation results for OutletTree108 **
+    R_new = 102400.48464553323, R_old = 102399.07775023929
+    The change in resistance is 1.4068952939414885
+pries and secomb adaptation completed for all trees. R_old = [8868.935516729765, 1521.3250012969033, 1519.2192511366288, 1520.5053606179406, 29676.41725545197, 1521.1216570474066, 6603.375519078296, 38199.53356055862, 60013.12172688097, 1519.800287704474, 27436.789464502668, 1851.319323353829, 6605.76267806265, 1849.888980339326, 32505.538591258548, 38606.205233023546, 63611.12161043721, 40549.98135859518, 1521.0152365858526, 1851.9895373096556, 1850.4497938978084, 20191.967835580137, 1520.2139287462173, 1520.111007298437, 40072.67263736761, 1520.7113834547283, 2062.708267860027, 40457.819904877346, 26892.164511154413, 39581.653485791394, 63581.65162148552, 1514.985431209527, 43162.58385296621, 1848.1704125948847, 1849.1825993241564, 1507.9599378393034, 44437.22302752496, 114226.6050677775, 100848.89305141909, 1848.582900127452, 68527.37661434144, 1516.0523329597963, 1518.616677160844, 1507.1374541022292, 1517.8828033049647, 92658.99005606247, 1848.2480767828174, 105874.70549849333, 104919.318607605, 75202.60555802428, 115022.09434125398, 1849.5219883090367, 1849.539665179475, 52463.49073977795, 71989.50446848426, 103522.9035216172, 1510.8912030820427, 74824.84297812464, 6603.672247724771, 60507.33106500927, 1518.0208968689142, 2144.8079078029514, 1834.2617475838197, 1514.7644591497099, 1845.7855456114662, 136963.38789931836, 1844.5029931395914, 105056.00049263077, 102399.07775023929] R_new = [8868.876388764153, 1521.3018289798788, 1519.1967067096953, 1520.4840197274648, 29676.55402685589, 1521.1016607241818, 6603.348254107734, 38199.86599934376, 60013.82654226751, 1519.7735650126112, 27436.946721169414, 1851.2768572366913, 6605.7281306676, 1849.8461924513351, 32505.773813754182, 38606.53418426497, 63611.86605217296, 40550.3334195653, 1520.992007048273, 1851.9559841755488, 1850.4089273030393, 20192.01875114806, 1520.1900555397726, 1520.082123931975, 40073.025207902065, 1520.6855084622503, 2062.627203548581, 40458.10909198714, 26892.253404265895, 39581.85201546142, 63582.08027523341, 1514.9705770599012, 43162.81531741682, 1848.1451498416664, 1849.158347406089, 1507.9433147459645, 44437.54625746602, 114227.94446021474, 100850.04882175114, 1848.5492128047833, 68527.99677019911, 1516.0312576715298, 1518.5970206170302, 1507.1175264010294, 1517.8633061094833, 92659.95113614426, 1848.2146150535154, 105875.88456523765, 104920.53366914927, 75203.37470423814, 115023.46487683145, 1849.4887409617372, 1849.506538599253, 52463.914773247685, 71990.18985017395, 103524.03636745806, 1510.8760364114987, 74825.58117622123, 6603.6437366860955, 60507.88912700378, 1518.0055906813918, 2144.7777814219653, 1834.239925048009, 1514.7546733995355, 1845.7706554216613, 136964.89011980259, 1844.4667181163377, 105057.43032502732, 102400.48464553323]

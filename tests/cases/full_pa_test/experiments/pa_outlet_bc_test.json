@@ -1,0 +1,16 @@
+{   "name": "cwss_adaptation_test",
+    "model": "AS1_SU0308_prestent",
+    "adapt": "cwss",
+    "optimized": false,
+    "is_full_pa_tree": true,
+    "trees_exist": false,
+    "mesh_surfaces_path": "/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/PPAS/svPPAS/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces",
+    "repair": [
+        {
+        "type": "stent",
+        "location": "proximal",
+        "value": [1.2, 1.2]
+        }
+    ]
+
+}
