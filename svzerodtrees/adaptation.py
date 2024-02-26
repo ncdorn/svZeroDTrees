@@ -138,3 +138,5 @@ def adapt_constant_wss_threed(config_handler: ConfigHandler, preop_q, postop_q, 
             if bc.type == 'RCR':
                 bc.Rp = 0.1 * R_new
                 bc.Rd = 0.9 * R_new
+
+            outlet_idx += 1

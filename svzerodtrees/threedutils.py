@@ -66,21 +66,21 @@ def get_coupled_surfaces(simulation_dir):
     '''
 
     # get a map of surface id's to vtp files
-    simulation_name = simulation_dir.split('/')[-1]
+    simulation_name = simulation_dir.split('/')[-2]
     surface_id_map = {}
-    with open(simulation_name + '.svpre', 'r') as ff:
+    with open(simulation_dir + simulation_name + '.svpre', 'r') as ff:
         for line in ff:
             line = line.strip()
             if line.startswith('set_surface_id'):
                 line_objs = line.split(' ')
-                vtp_file = line_objs[1]
+                vtp_file = simulation_dir + line_objs[1]
                 surface_id = line_objs[2]
                 surface_id_map[surface_id] = vtp_file
     
     # get a map of sruface id's to coupling blocks
     coupling_map = {}
     reading_coupling_blocks=False
-    with open('svZeroD_interface.dat', 'r') as ff:
+    with open(simulation_dir + 'svZeroD_interface.dat', 'r') as ff:
         for line in ff:
             line = line.strip()
             if not reading_coupling_blocks:

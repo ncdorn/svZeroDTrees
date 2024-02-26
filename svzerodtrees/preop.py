@@ -485,8 +485,10 @@ def construct_coupled_cwss_trees(config_handler, simulation_dir, n_procs=4, d_mi
         coupling_block.surface = coupled_surfs[coupling_block.name]
 
     for bc in config_handler.bcs.values():
-        diameter = (find_vtp_area(config_handler.coupling_blocks[bc.name].surface) / np.pi)**(1/2)
-        config_handler.trees.append(StructuredTreeOutlet.from_bc_config(bc, config_handler.simparams, diameter))
+        if config_handler.coupling_blocks[bc.name].location == 'inlet':
+            diameter = (find_vtp_area(config_handler.coupling_blocks[bc.name].surface) / np.pi)**(1/2)
+            config_handler.trees.append(StructuredTreeOutlet.from_bc_config(bc, config_handler.simparams, diameter))
+
 
     # function to run the tree diameter optimization
     def optimize_tree(tree):
@@ -494,13 +496,19 @@ def construct_coupled_cwss_trees(config_handler, simulation_dir, n_procs=4, d_mi
         tree.optimize_tree_diameter(d_min=d_min)
         return tree
 
+
     # run the tree 
     with Pool(n_procs) as p:
         config_handler.trees = p.map(optimize_tree, config_handler.trees)
     
+
     # update the resistance in the config according to the optimized tree resistance
-    for bc, tree in zip(list(config_handler.bcs.values())[1:], config_handler.trees):
-        bc.R = tree.root.R_eq
+    outlet_idx = 0 # linear search, i know. its bad. will fix later
+    for bc in config_handler.bcs.values():
+        # we assume that an inlet location indicates taht this is an outlet bc and threfore undergoes adaptation
+        if config_handler.coupling_blocks[bc.name].location == 'inlet':
+            bc.R = config_handler.trees[outlet_idx].root.R_eq
+            outlet_idx += 1
 
 
 class ClinicalTargets():

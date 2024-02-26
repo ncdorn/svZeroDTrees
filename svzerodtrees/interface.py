@@ -413,15 +413,13 @@ def optimize_stent_diameter(config_handler, result_handler, repair_config: dict,
     write_to_log(log_file, 'optimized stent diameters: ' + str(result.x))
 
 
-def run_threed_adaptation(preop_simulation_dir, postop_simulation_dir):
+def run_threed_adaptation(preop_simulation_dir, postop_simulation_dir, adapted_simulation_dir):
     '''
     compute the microvasular adaptation for a 3d coupled soluiton and output an adapted config handler
     '''
 
-    # cd into the preop simulation directory
-    os.chdir(preop_simulation_dir)
     # load the preop config handler
-    preop_config_handler = ConfigHandler.from_json('svzerod_3Dcoupling.json',is_pulmonary=False, is_threed_interface=True)
+    preop_config_handler = ConfigHandler.from_json(preop_simulation_dir + 'svzerod_3Dcoupling.json', is_pulmonary=False, is_threed_interface=True)
 
     preop.construct_coupled_cwss_trees(preop_config_handler, preop_simulation_dir, n_procs=12)
 
@@ -430,13 +428,22 @@ def run_threed_adaptation(preop_simulation_dir, postop_simulation_dir):
     period = 1
     n_steps = int(period / tstep_size)
 
-    # load in the preop and postop outlet flowrates from teh 3d simulation
-    preop_q = pd.read_csv('Q_svZeroD')
+    # load in the preop and postop outlet flowrates from the 3d simulation
+    preop_q = pd.read_csv( preop_simulation_dir + 'Q_svZeroD')
     preop_mean_q = preop_q.iloc[-n_steps:].mean(axis=0).values
-    postop_q = pd.read_csv('Q_svZeroD')
+
+    postop_q = pd.read_csv(postop_simulation_dir + 'Q_svZeroD')
     postop_mean_q = postop_q.iloc[-n_steps:].mean(axis=0).values
 
+    # adapt the bcs
     adaptation.adapt_constant_wss_threed(preop_config_handler, preop_mean_q, postop_mean_q)
+
+    # save the adapted config
+
+    print('adapted config being saved to ' + adapted_simulation_dir + 'svzerod_3Dcoupling.json')
+
+    preop_config_handler.to_json(adapted_simulation_dir + 'svzerod_3Dcoupling.json')
+
 
 
 
