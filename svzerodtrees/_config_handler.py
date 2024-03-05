@@ -71,7 +71,7 @@ class ConfigHandler():
         :param file_name: name of the file to write to
         '''
         with open(file_name, 'w') as ff:
-            json.dump(self.config, ff)
+            json.dump(self.config, ff, indent=4)
 
 
     def to_json_w_trees(self, file_name: str):
@@ -93,7 +93,7 @@ class ConfigHandler():
 
 
         with open(file_name, 'w') as ff:
-            json.dump(self.config, ff)
+            json.dump(self.config, ff, indent=4)
         
         self.clear_config_trees()
 
@@ -478,6 +478,52 @@ class ConfigHandler():
             return [self.vessel_map[id] for id in self.branch_map[branch].ids]
         if dtype == 'dict':
             return [self.vessel_map[id].to_dict() for id in self.branch_map[branch].ids]
+        
+    
+    def generate_threed_coupler(self, simdir):
+        '''
+        create a 3D-0D coupling blocks config from the boundary conditions and save it to a json
+
+        :param simdir: directory to save the json to
+
+        :return coupling_block_list: list of coupling block names
+        '''
+        threed_coupler = ConfigHandler(
+            {
+                "simulation_parameters": {
+                    "density": 1.06,
+                    "viscosity": 0.04,
+                    "coupled_simulation": True,
+                    "number_of_time_pts": 50,
+                    "output_all_cycles": True,
+                    "steady initial": False
+                },
+                "external_solver_coupling_blocks": [],
+                "boundary_conditions": [],
+                "vessels": [],
+                "junctions": []
+            },
+            is_pulmonary=False,
+            is_threed_interface=True
+        )
+
+        # copy over the bcs
+        threed_coupler.bcs = self.bcs
+
+        # create the coupling blocks
+        for bc in threed_coupler.bcs.values():
+            if bc.name == "INFLOW":
+                continue
+            else:
+                threed_coupler.coupling_blocks[bc.name] = CouplingBlocks.from_bc(bc)
+
+        print('writing svzerod_3Dcoupling.json...')
+        threed_coupler.to_json(simdir + '/svzerod_3Dcoupling.json')
+
+        coupling_block_list = [coupling_block.name for coupling_block in threed_coupler.coupling_blocks.values()]
+
+        return coupling_block_list
+
 
     @property
     def config(self):
@@ -915,6 +961,28 @@ class CouplingBlocks():
 
         :param config: config dict
         '''
+
+        return cls(config)
+    
+    @classmethod
+    def from_bc(cls, bc: BoundaryCondition, coupling_type='FLOW', location='inlet', periodic=False):
+        '''
+        create a coupling block from a boundary condition
+
+        :param bc: boundary condition to create the coupling block from
+        '''
+
+        config = {
+            'name': bc.name,
+            'type': coupling_type,
+            'location': location,
+            'connected_block': bc.name,
+            'periodic': periodic,
+            'values': {
+                        "t": [0.0, 1.0],
+                        "Q": [1.0, 1.0]
+                    }
+        }
 
         return cls(config)
         

@@ -492,7 +492,6 @@ def construct_coupled_cwss_trees(config_handler, simulation_dir, n_procs=4, d_mi
 
     # function to run the tree diameter optimization
     def optimize_tree(tree):
-        print('building ' + tree.name + ' for resistance ' + str(tree.params["bc_values"]["R"]) + '...')
         tree.optimize_tree_diameter(d_min=d_min)
         return tree
 
@@ -507,7 +506,11 @@ def construct_coupled_cwss_trees(config_handler, simulation_dir, n_procs=4, d_mi
     for bc in config_handler.bcs.values():
         # we assume that an inlet location indicates taht this is an outlet bc and threfore undergoes adaptation
         if config_handler.coupling_blocks[bc.name].location == 'inlet':
-            bc.R = config_handler.trees[outlet_idx].root.R_eq
+            if bc.type == 'RCR':
+                bc.Rp = config_handler.trees[outlet_idx].root.R_eq * 0.1
+                bc.Rd = config_handler.trees[outlet_idx].root.R_eq * 0.9
+            elif bc.type == 'RESISTANCE':
+                bc.R = config_handler.trees[outlet_idx].root.R_eq
             outlet_idx += 1
 
 

@@ -3,8 +3,9 @@ import sys
 import json
 import pickle
 from svzerodtrees import preop, operation, adaptation, postop
-from svzerodtrees.post_processing import plotting
+from svzerodtrees.post_processing import plotting, project_to_centerline
 from svzerodtrees.utils import *
+from svzerodtrees.threedutils import *
 from svzerodtrees._result_handler import ResultHandler
 from svzerodtrees._config_handler import ConfigHandler
 from svzerodtrees.post_processing.pa_plotter import PAanalyzer
@@ -31,7 +32,17 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
     is_full_pa = exp_config["is_full_pa_tree"]
     trees_exist = exp_config["trees_exist"]
     mesh_surfaces_path = exp_config["mesh_surfaces_path"]
-    repair_config = exp_config["repair"]
+    task = exp_config["task"]
+    task_params = exp_config[task]
+
+    if task == 'repair':
+        # compute 0D repair
+        repair_config = exp_config['repair']
+    if task == 'threed_adaptation':
+        # compute 3D adaptation
+        run_threed_adaptation(task_params['preop_dir'], task_params['postop_dir'], task_params['adapted_dir'])
+
+        sys.exit() # exit the program I guess
 
     # check if we are in an experiments directory, if not assume we are in it
 
@@ -155,6 +166,12 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
                                 adapt,
                                 n_procs=12,
                                 trees_exist=trees_exist)
+    elif repair_config[0]['type'] == 'estimate_bcs':
+        print("estimating bcs...")
+        cwd = os.getcwd()
+        config_handler.generate_threed_coupler(cwd)
+        print('estimated bcs written to ' + cwd + '/svzerod_3Dcoupling.json')
+        
     else:
         if adapt == 'ps': # use pries and secomb adaptation scheme
             
@@ -213,6 +230,17 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
 
         # plot the mpa pressure changes
         plotter.plot_mpa_pressure()
+
+        if not os.path.exists('cl_projection'):
+            os.system('mkdir cl_projection')
+        
+        for period in ['preop', 'postop', 'adapted', 'adaptation']:
+            project_to_centerline.map_0d_on_centerline('centerlines.vtp',
+                                                                        config_handler,
+                                                                        result_handler,
+                                                                        period,
+                                                                        'cl_projection')
+        
 
 
 def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, repair_config, log_file, n_procs=12, trees_exist=False):
@@ -296,10 +324,10 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
     else:
         # construct trees
         preop.construct_cwss_trees(config_handler,
-                                           result_handler,
-                                           n_procs=n_procs,
-                                           log_file=log_file,
-                                           d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
+                                    result_handler,
+                                    n_procs=n_procs,
+                                    log_file=log_file,
+                                    d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
 
         # save preop config to as pickle, with StructuredTreeOutlet objects
         write_to_log(log_file, 'saving preop config with cwss trees...')
@@ -412,4 +440,51 @@ def optimize_stent_diameter(config_handler, result_handler, repair_config: dict,
     write_to_log(log_file, 'optimized stent diameters: ' + str(result.x))
 
 
- 
+def run_threed_adaptation(preop_simulation_dir, postop_simulation_dir, adapted_simulation_dir):
+    '''
+    compute the microvasular adaptation for a 3d coupled soluiton and output an adapted config handler
+    '''
+
+    # check that the directories are unique so we dont end up screwing stuff up by accident
+    if preop_simulation_dir == postop_simulation_dir:
+        raise Exception('preop and postop simulation directories are the same')
+    if preop_simulation_dir == adapted_simulation_dir:
+        raise Exception('preop and adapted simulation directories are the same')
+    if postop_simulation_dir == adapted_simulation_dir:
+        raise Exception('postop and adapted simulation directories are the same')
+
+    preop_simname = os.path.basename(preop_simulation_dir)
+    # load the preop config handler
+    preop_config_handler = ConfigHandler.from_json(preop_simulation_dir + '/svzerod_3Dcoupling.json', is_pulmonary=False, is_threed_interface=True)
+
+    preop.construct_coupled_cwss_trees(preop_config_handler, preop_simulation_dir, n_procs=12)
+
+    # need to get the period and timestep size of the simulation to accurately compute the mean flow
+    n_steps = get_nsteps(preop_simulation_dir + '/solver.inp', preop_simulation_dir + '/' + preop_simname + '.svpre')
+
+    # load in the preop and postop outlet flowrates from the 3d simulation.
+    # the Q_svZeroD file needs to be in the top level of the simulation directory
+    preop_q = pd.read_csv(preop_simulation_dir + '/Q_svZeroD', sep='\s+')
+    preop_mean_q = preop_q.iloc[-n_steps:].mean(axis=0).values
+
+    postop_q = pd.read_csv(postop_simulation_dir + '/Q_svZeroD', sep='\s+')
+    postop_mean_q = postop_q.iloc[-n_steps:].mean(axis=0).values
+
+    # adapt the bcs
+    adaptation.adapt_constant_wss_threed(preop_config_handler, preop_mean_q, postop_mean_q)
+
+    # save the adapted config
+
+    print('adapted config being saved to ' + adapted_simulation_dir + '/svzerod_3Dcoupling.json')
+
+    preop_config_handler.to_json(adapted_simulation_dir + '/svzerod_3Dcoupling.json')
+
+    prepare_simulation_dir(postop_simulation_dir, adapted_simulation_dir)
+
+
+
+
+
+
+    
+

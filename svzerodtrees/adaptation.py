@@ -135,8 +135,10 @@ def adapt_constant_wss_threed(config_handler: ConfigHandler, preop_q, postop_q, 
             # add the updated resistance to the boundary condition
             if bc.type == 'RESISTANCE':
                 bc.R = R_new
-            if bc.type == 'RCR':
+            elif bc.type == 'RCR':
                 bc.Rp = 0.1 * R_new
                 bc.Rd = 0.9 * R_new
+            else:
+                raise ValueError('unknown boundary condition type')
 
             outlet_idx += 1

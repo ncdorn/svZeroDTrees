@@ -5,7 +5,7 @@ from scipy.interpolate import interp1d
 from collections import defaultdict
 from vtk.util.numpy_support import numpy_to_vtk
 from svzerodtrees.utils import *
-import svzerodplus
+import pysvzerod
 from svsuperestimator.reader._centerline_handler import CenterlineHandler
 
 
@@ -41,8 +41,6 @@ def get_branch_result(qoi, result_handler, config_handler):
     results = result_handler.format_result_for_cl_projection(timestep)
 
     pass
-
-
 
 
 
@@ -208,7 +206,8 @@ def map_0d_on_centerline(centerline, config_handler, result_handler, timestep, o
             out_array.SetName(f)
             cl_handler.data.GetPointData().AddArray(out_array)
 
-        target = os.path.join(output_folder, "initial_centerline_" + timestep + ".vtp")
+        target = os.path.join(output_folder, "centerline_result_" + timestep + ".vtp")
+        print('saving centerline result to ' + target)
         cl_handler.to_file(target)
 
     

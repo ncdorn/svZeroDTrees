@@ -57,9 +57,9 @@ def test_interface():
     '''
     test the interface
     '''
-    preop_dir = 'tests/cases/test_cylinder/preop/Simulations/steady/'
-    postop_dir = 'tests/cases/test_cylinder/postop/Simulations/steady/'
-    adapted_dir = 'tests/cases/test_cylinder/adapted/Simulations/steady/'
+    preop_dir = 'tests/cases/test_cylinder/preop/Simulations/steady'
+    postop_dir = 'tests/cases/test_cylinder/postop/Simulations/steady'
+    adapted_dir = 'tests/cases/test_cylinder/adapted/Simulations/steady'
     interface.run_threed_adaptation(preop_dir, postop_dir, adapted_dir)
 
 

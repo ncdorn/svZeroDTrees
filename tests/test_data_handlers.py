@@ -7,7 +7,7 @@ from svzerodtrees._result_handler import ResultHandler
 from svzerodtrees.operation import Stenosis, repair_stenosis
 from svzerodtrees.utils import run_svzerodplus
 from svzerodtrees.preop import PAConfig
-import svzerodplus
+import pysvzerod
 import pandas as pd
 from io import StringIO
 from deepdiff import DeepDiff
@@ -23,7 +23,7 @@ def test_pa_handling():
 
     config_handler.assemble_config()
 
-    output = svzerodplus.simulate(config_handler.assembled_config)
+    output = pysvzerod.simulate(config_handler.assembled_config)
     result = pd.read_csv(StringIO(output))
 
 
@@ -36,7 +36,7 @@ def test_config_handler():
     '''
     test config handler on a small model
     '''
-    config_handler = ConfigHandler.from_json('tests/cases/full_pa_test/preop_config.json')
+    config_handler = ConfigHandler.from_json('tests/cases/LPA_RPA_0d/LPA_RPA_0d.json')
 
     result = run_svzerodplus(config_handler.config)
 
@@ -47,8 +47,19 @@ def test_config_handler():
     result_comparison = DeepDiff(assembled_result, result)
 
     print('ran simulations')
+
+    print(config_handler.config)
     
     assert result_comparison == {}
+
+
+def test_coupling_block_generation():
+    '''
+    test the generation of coupling blocks from a config handler
+    '''
+    config_handler = ConfigHandler.from_json('tests/cases/LPA_RPA_0d/LPA_RPA_0d.json')
+
+    ConfigHandler.generate_threed_coupler(config_handler, 'tests/cases/LPA_RPA_0d')
 
 
 def test_config_handler_methods():
@@ -116,7 +127,7 @@ def test_pa_config():
 
 if __name__ == '__main__':
 
-    test_config_handler()
+    test_coupling_block_generation()
 
 
 

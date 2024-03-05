@@ -112,6 +112,8 @@ class TreeVessel:
     def R_eq(self):
         if self.left is not None and self.right is not None:
             self._update_R_eq()
+        else:
+            self._R_eq = self._R
         return self._R_eq
 
     def _update_R_eq(self):

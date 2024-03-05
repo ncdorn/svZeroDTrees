@@ -320,8 +320,14 @@ class StructuredTreeOutlet():
         # initial guess is oulet r
         d_guess = self.initialD / 2
 
+        # get the resistance if it is RCR or Resistance BC
+        if "Rp" in self.params["bc_values"].keys():
+            R0 = self.params["bc_values"]["Rp"] + self.params["bc_values"]["Rd"]
+        else:
+            R0 = self.params["bc_values"]["R"]
+
         # define the objective function to be minimized
-        def r_min_objective(diameter, d_min):
+        def r_min_objective(diameter, d_min, R0):
             '''
             objective function for optimization
 
@@ -337,7 +343,7 @@ class StructuredTreeOutlet():
             R = self.root.R_eq
 
             # calculate squared relative difference
-            loss = ((self.params["bc_values"]["R"] - R) / self.params["bc_values"]["R"]) ** 2
+            loss = ((R0 - R) / R0) ** 2
             return loss
 
         # define optimization bound (lower bound = r_min, which is the termination diameter)
@@ -346,7 +352,7 @@ class StructuredTreeOutlet():
         # perform Nelder-Mead optimization
         d_final = minimize(r_min_objective,
                            d_guess,
-                           args=(d_min),
+                           args=(d_min, R0),
                            options={"disp": True},
                            method='Nelder-Mead',
                            bounds=bounds)

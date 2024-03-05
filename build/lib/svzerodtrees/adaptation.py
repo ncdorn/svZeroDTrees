@@ -60,7 +60,6 @@ def adapt_pries_secomb(config_handler: ConfigHandler, result_handler: ResultHand
     write_to_log(log_file, 'pries and secomb adaptation completed for all trees. R_old = ' + str(R_old) + ' R_new = ' + str(R_adapt))
 
 
-
 def adapt_constant_wss(config_handler: ConfigHandler, result_handler: ResultHandler, log_file: str = None):
     '''
     adapt structured trees based on the constant wall shear stress assumption
@@ -99,6 +98,8 @@ def adapt_constant_wss(config_handler: ConfigHandler, result_handler: ResultHand
                 write_to_log(log_file, "    R_new = " + str(config_handler.trees[outlet_idx].root.R_eq) + ", R_old = " + str(R_old))
                 write_to_log(log_file, "    The change in resistance is " + str(config_handler.trees[outlet_idx].root.R_eq - R_old))
 
+                config_handler.bcs[vessel.bc["outlet"]].R = R_new
+
                 outlet_idx += 1
 
     # write the adapted resistances to the config resistance boundary conditions
@@ -111,3 +112,33 @@ def adapt_constant_wss(config_handler: ConfigHandler, result_handler: ResultHand
     # add adapted result to the result handler
     result_handler.add_unformatted_result(adapted_result, 'adapted')
 
+
+def adapt_constant_wss_threed(config_handler: ConfigHandler, preop_q, postop_q, log_file: str = None):
+    '''
+    adapt structured trees coupled to a 3d simulation based on the constant wall shear stress assumption
+    
+    :param config_handler: ConfigHandler instance
+    :param preop_q: a list of preoperative flowrates at the outlets
+    :param postop_q: a list of postoperative flowrates at the outlets
+    :param log_file: path to log file, for writing important messages for debugging purposes
+    '''
+
+    outlet_idx = 0 # linear search, i know. its bad. will fix later
+    for bc in config_handler.bcs.values():
+        # we assume that an inlet location indicates taht this is an outlet bc and threfore undergoes adaptation
+        if config_handler.coupling_blocks[bc.name].location == 'inlet':
+            # adapt the corresponding tree
+            R_old, R_new = config_handler.trees[outlet_idx].adapt_constant_wss(Q=preop_q[outlet_idx], Q_new=postop_q[outlet_idx])
+
+            print(R_old, R_new)
+            
+            # add the updated resistance to the boundary condition
+            if bc.type == 'RESISTANCE':
+                bc.R = R_new
+            elif bc.type == 'RCR':
+                bc.Rp = 0.1 * R_new
+                bc.Rd = 0.9 * R_new
+            else:
+                raise ValueError('unknown boundary condition type')
+
+            outlet_idx += 1
