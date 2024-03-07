@@ -97,7 +97,10 @@ def optimize_outlet_bcs(input_file,
         q_LPA = get_branch_result(zerod_result, branch=lpa_branch, data_name='flow_in', steady=steady)
 
         if steady: # take the mean pressure only
-            p_diff = abs(target_ps[2] - mpa_mean_p) ** 2
+            if type(target_ps) == int:
+                p_diff = abs(target_ps - mpa_mean_p) ** 2
+            else:
+                p_diff = abs(target_ps[2] - mpa_mean_p) ** 2
         else: # if unsteady, take sum of squares of mean, sys, dia pressure
             pred_p = np.array([
                 -mpa_sys_p,
@@ -174,7 +177,6 @@ def optimize_outlet_bcs(input_file,
     R_final = result.x # get the array of optimized resistances
     write_resistances(config_handler.config, R_final)
 
-    
 
     return config_handler, result_handler
 
@@ -337,7 +339,12 @@ def assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info):
         if bc.type == 'RESISTANCE':
             bc.R = R_list[bc_idx]
             bc.values['Pd'] = pa_config.clinical_targets.wedge_p * 1333.22 # convert wedge pressure from mmHg to dyn/cm2
-
+            bc_idx += 1
+    
+        elif bc.type == 'RCR':
+            # split the resistance
+            bc.Rp = R_list[bc_idx] * 0.1
+            bc.Rd = R_list[bc_idx] * 0.9
             bc_idx += 1
 
 
@@ -666,7 +673,7 @@ class PAConfig():
                 # "C": 1 / (config_handler.rpa.C_eq ** -1 - config_handler.rpa.C ** -1), # calculates way too large of a capacitance
                 "C": 0.0,
                 "L": config_handler.rpa.L_eq - config_handler.rpa.L, # L_RPA_distal
-                "R_poiseuille": config_handler.rpa.R_eq - config_handler.rpa.zero_d_element_values.get("R_poiseuille"), # R_RPA_distal
+                "R_poiseuille": config_handler.rpa.R_eq - config_handler.rpa.R, # R_RPA_distal
                 "stenosis_coefficient": 0.0
             }
         })
@@ -683,7 +690,7 @@ class PAConfig():
                 # "C": 1 / (config_handler.lpa.C_eq ** -1 - config_handler.lpa.C ** -1), # calculates way too large of a capacitance
                 "C": 0.0,
                 "L": config_handler.lpa.L_eq - config_handler.lpa.L, # L_LPA_distal
-                "R_poiseuille": config_handler.lpa.R_eq - config_handler.lpa.zero_d_element_values.get("R_poiseuille"), # R_LPA_distal
+                "R_poiseuille": config_handler.lpa.R_eq - config_handler.lpa.R, # R_LPA_distal
                 "stenosis_coefficient": 0.0
             }
         })
@@ -851,7 +858,7 @@ class PAConfig():
         optimize the resistances in the pa config
         '''
 
-        self.to_json('pa_config_pre_opt.json')
+        # self.to_json('pa_config_pre_opt.json')
         # define optimization bounds [0, inf)
         bounds = Bounds(lb=0, ub=math.inf)
 

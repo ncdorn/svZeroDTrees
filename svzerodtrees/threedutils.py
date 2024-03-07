@@ -1,7 +1,11 @@
 import vtk
 import glob
+import json
+import math
 import pandas as pd
 import os
+import svzerodtrees
+from svzerodtrees._config_handler import ConfigHandler
 
 def find_vtp_area(infile):
     # with open(infile):
@@ -17,6 +21,15 @@ def find_vtp_area(infile):
 
 # Sort cap VTP files into inflow / RPA branches / LPA branches. Obtain their names & cap areas.
 def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_branch_tag='LPA'):
+    '''
+    Sort cap VTP files into inflow / RPA branches / LPA branches. Obtain their names & cap areas.
+    
+    :param mesh_surfaces_path: path to the mesh surfaces directory
+    :param inflow_tag: tag for the inflow surface
+    :param rpa_branch_tag: tag for the RPA branch surface
+    :param lpa_branch_tag: tag for the LPA branch surface
+    
+    :return: rpa_info, lpa_info, inflow_info'''
     
     if (mesh_surfaces_path[-1] != '/'):
         mesh_surfaces_path += '/'
@@ -58,6 +71,7 @@ def compute_flow():
     awaiting advice from Martin on how to do this'''
     
     pass
+
 
 def get_coupled_surfaces(simulation_dir):
     '''
@@ -136,6 +150,7 @@ def get_nsteps(solver_input_file, svpre_file):
 
     return n_timesteps
 
+
 def prepare_simulation_dir(postop_dir, adapted_dir):
     '''
     prepare the adapted simulation directory with the properly edited simulation files
@@ -162,7 +177,8 @@ def prepare_simulation_dir(postop_dir, adapted_dir):
 
     write_svsolver_runscript(os.path.basename(adapted_dir))
 
-def write_svsolver_runscript(model_name, job_name='svFlowSolver', hours=6, nodes=2, procs_per_node=24):
+
+def write_svsolver_runscript(svpre_name, job_name='svFlowSolver', hours=6, nodes=2, procs_per_node=24):
     '''
     write a bash script to submit a job on sherlock'''
 
@@ -201,5 +217,165 @@ def write_svsolver_runscript(model_name, job_name='svFlowSolver', hours=6, nodes
         ff.write('ml qt/5.9.1 \n')
         ff.write('ml gcc/12.1.0 \n')
         ff.write('ml cmake \n\n')
-        ff.write('/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre ' + model_name + '.svpre \n')
+        ff.write('/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre ' + svpre_name + '.svpre \n')
         ff.write('srun /home/users/ndorn/svSolver/svSolver-build/svSolver-build/mysolver \n')
+
+
+def write_svpre_file(mesh_complete, simname, period):
+    '''
+    write the svpre file for the simulation
+    
+    :param mesh_complete: path to the mesh-complete directory
+    :param simname: name of the simulation or path to simdir'''
+
+    mesh_vtu = glob.glob(os.path.join(mesh_complete, '*.mesh.vtu'))[0]
+    walls_combined = os.path.join(mesh_complete, 'walls_combined.vtp')
+    mesh_exterior = glob.glob(os.path.join(mesh_complete, '*.exterior.vtp'))[0]
+    inflow_vtp = glob.glob(os.path.join(mesh_complete, 'mesh-surfaces/inflow.vtp'))[0]
+
+    filelist_raw = glob.glob(os.path.join(mesh_complete, 'mesh-surfaces/*.vtp'))
+
+    filelist = [file for file in filelist_raw if 'wall' not in file]
+    filelist.sort()
+
+    common_path = os.path.commonpath(filelist + [mesh_vtu] + [walls_combined] + [mesh_exterior] + [inflow_vtp])
+    print(common_path)
+
+    filelist = [path.replace(common_path, 'mesh-complete') for path in filelist]
+    mesh_vtu = mesh_vtu.replace(common_path, 'mesh-complete')
+    walls_combined = walls_combined.replace(common_path, 'mesh-complete')
+    mesh_exterior = mesh_exterior.replace(common_path, 'mesh-complete')
+    inflow_vtp = inflow_vtp.replace(common_path, 'mesh-complete')
+
+    with open(simname + '.svpre', 'w') as svpre:
+        svpre.write('mesh_and_adjncy_vtu ' + mesh_vtu + '\n')
+        # assign the surface ids
+        outlet_idxs = []
+        for i, file in enumerate([mesh_exterior] + filelist):
+            svpre.write('set_surface_id_vtp ' + file + ' ' + str(i + 1) + '\n')
+            if file != inflow_vtp and file != mesh_exterior:
+                outlet_idxs.append(str(i + 1))
+            elif file == inflow_vtp:
+                inlet_idx = str(i + 1)
+        
+        svpre.write('fluid_density 1.06\n')
+        svpre.write('fluid_viscosity 0.04\n')
+        svpre.write('initial_pressure 0\n')
+        svpre.write('initial_velocity 0.0001 0.0001 0.0001\n')
+        svpre.write('prescribed_velocities_vtp ' + inflow_vtp + '\n')
+
+        svpre.write('bct_analytical_shape parabolic\n')
+        svpre.write('bct_period ' + str(period) + '\n')
+        svpre.write('bct_point_number 201\n')
+        svpre.write('bct_fourier_mode_number 10\n')
+        svpre.write('bct_create ' + inflow_vtp + ' inflow.flow\n')
+        svpre.write('bct_write_dat bct.dat\n')
+        svpre.write('bct_write_vtp bct.vtp\n')
+        # remove inflow and list the pressure vtps for the outlet caps
+        filelist.remove(inflow_vtp)
+        for cap in filelist:
+            svpre.write('pressure_vtp ' + cap + ' 0\n')
+        svpre.write('noslip_vtp ' + walls_combined + '\n')
+        svpre.write('write_geombc geombc.dat.1\n')
+        svpre.write('write_restart restart.0.1\n')
+
+    return inlet_idx, outlet_idxs
+
+
+def write_svzerod_interface(zerod_coupler, outlet_idxs, interface_path='/home/users/ndorn/svZeroDSolver/Release/src/interface/libsvzero_interface.so'):
+    '''
+    write the svZeroD_interface.dat file for the simulation'''
+
+    threed_coupler = ConfigHandler.from_json(zerod_coupler, is_pulmonary=False)
+
+    # get a map of bc names to outlet idxs
+    outlet_blocks = [block.name for block in list(threed_coupler.coupling_blocks.values())]
+
+    bc_to_outlet = zip(outlet_blocks, outlet_idxs)
+
+    with open('svZeroD_interface.dat', 'w') as ff:
+        ff.write('interface library path: \n')
+        ff.write(interface_path + '\n\n')
+
+        ff.write('svZeroD input file: \n')
+        ff.write(os.path.abspath(zerod_coupler + '\n\n'))
+        
+        ff.write('svZeroD external coupling block names to surface IDs (where surface IDs are from *.svpre file): \n')
+        for bc, idx in bc_to_outlet:
+            ff.write(bc + ' ' + idx + '\n')
+        ff.write('\n')
+        ff.write('Initialize external coupling block flows: \n')
+        ff.write('0\n\n')
+
+        ff.write('External coupling block initial flows (one number is provided, it is applied to all coupling blocks: \n')
+        ff.write('0.0\n\n')
+
+        ff.write('Initialize external coupling block pressures: \n')
+        ff.write('1\n\n')
+
+        ff.write('External coupling block initial pressures (one number is provided, it is applied to all coupling blocks): \n')
+        ff.write('60.0\n\n')
+
+
+def write_solver_inp(outlet_idxs, period, n_cycles, dt=.0009):
+
+    # Determine the number of time steps
+    num_timesteps = int(math.ceil(period * n_cycles / dt))
+    steps_btw_restarts = int(round(period / dt / 50))
+
+    with open('solver.inp','w') as solver_inp:
+        solver_inp.write('Density: 1.06\n')
+        solver_inp.write('Viscosity: 0.04\n\n')
+
+        solver_inp.write('Number of Timesteps: ' + str(num_timesteps) + '\n')
+        solver_inp.write('Time Step Size: ' + str(dt) + '\n\n')
+
+        solver_inp.write('Number of Timesteps between Restarts: ' + str(steps_btw_restarts) + '\n')
+        solver_inp.write('Number of Force Surfaces: 1\n')
+        solver_inp.write('Surface ID\'s for Force Calculation: 1\n')
+        solver_inp.write('Force Calculation Method: Velocity Based\n')
+        solver_inp.write('Print Average Solution: True\n')
+        solver_inp.write('Print Error Indicators: False\n\n')
+
+        solver_inp.write('Time Varying Boundary Conditions From File: True\n\n')
+
+        solver_inp.write('Step Construction: 0 1 0 1 0 1 0 1 0 1\n\n')
+
+        solver_inp.write('Number of Neumann Surfaces: ' + str(len(outlet_idxs)) + '\n')
+        # List of RCR surfaces starts at ID no. 3 (bc 1 = mesh exterior, 2 = inflow) [Ingrid] but we generalize this just in case [Nick]
+        rcr_list = 'List of Neumann Surfaces:\t'
+        for idx in outlet_idxs:
+            rcr_list += str(idx) + '\t'
+        solver_inp.write(rcr_list + '\n')
+        solver_inp.write('Use svZeroD for Boundary Conditions: True\n')
+        solver_inp.write('Number of Timesteps for svZeroD Initialization: 0\n\n')
+
+        solver_inp.write('Pressure Coupling: Implicit\n')
+        solver_inp.write('Number of Coupled Surfaces: ' + str(len(outlet_idxs)) + '\n\n')
+
+        solver_inp.write('Backflow Stabilization Coefficient: 0.2\n')
+        solver_inp.write('Residual Control: True\n')
+        solver_inp.write('Residual Criteria: 0.001\n')
+        solver_inp.write('Minimum Required Iterations: 3\n')
+        solver_inp.write('svLS Type: NS\n')
+        solver_inp.write('Number of Krylov Vectors per GMRES Sweep: 100\n')
+        solver_inp.write('Number of Solves per Left-hand-side Formation: 1\n')
+        solver_inp.write('Tolerance on Momentum Equations: 0.05\n')
+        solver_inp.write('Tolerance on Continuity Equations: 0.05\n')
+        solver_inp.write('Tolerance on svLS NS Solver: 0.05\n')
+        solver_inp.write('Maximum Number of Iterations for svLS NS Solver: 10\n')
+        solver_inp.write('Maximum Number of Iterations for svLS Momentum Loop: 15\n')
+        solver_inp.write('Maximum Number of Iterations for svLS Continuity Loop: 400\n')
+        solver_inp.write('Time Integration Rule: Second Order\n')
+        solver_inp.write('Time Integration Rho Infinity: 0.5\n')
+        solver_inp.write('Flow Advection Form: Convective\n')
+        solver_inp.write('Quadrature Rule on Interior: 2\n')
+        solver_inp.write('Quadrature Rule on Boundary: 3\n')
+    return (dt, num_timesteps, steps_btw_restarts)
+
+
+def write_numstart():
+    with open('numstart.dat', 'w') as numstart:
+        numstart.write('0')
+
+

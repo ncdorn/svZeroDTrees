@@ -1,8 +1,8 @@
-from svzerodtrees.utils import *
-from svzerodtrees._result_handler import ResultHandler
-from svzerodtrees.threedutils import get_coupled_surfaces
 import json
 import pickle
+import os
+from svzerodtrees.utils import *
+from svzerodtrees._result_handler import ResultHandler
 
 
 
@@ -198,7 +198,7 @@ class ConfigHandler():
                 bc.C = vals[idx * 3 + 1]
                 bc.Rd = vals[idx * 3 + 2]
         else:
-            for idx, bc in enumerate(self.bcs.values()):
+            for idx, bc in enumerate(list(self.bcs.values())[1:]):
                 bc.R = vals[idx]
 
 
@@ -398,7 +398,7 @@ class ConfigHandler():
             self.coupling_blocks = {}
             for coupling_block in self._config["external_solver_coupling_blocks"]:
                 # create a mapping from connected block name to coupling block
-                self.coupling_blocks[coupling_block['connected_block']] = CouplingBlocks.from_config(coupling_block)
+                self.coupling_blocks[coupling_block['connected_block']] = CouplingBlock.from_config(coupling_block)
 
         self.assemble_config()
 
@@ -496,7 +496,7 @@ class ConfigHandler():
                     "coupled_simulation": True,
                     "number_of_time_pts": 50,
                     "output_all_cycles": True,
-                    "steady initial": False
+                    "steady_initial": False
                 },
                 "external_solver_coupling_blocks": [],
                 "boundary_conditions": [],
@@ -509,16 +509,15 @@ class ConfigHandler():
 
         # copy over the bcs
         threed_coupler.bcs = self.bcs
+        del threed_coupler.bcs["INFLOW"]
 
         # create the coupling blocks
         for bc in threed_coupler.bcs.values():
-            if bc.name == "INFLOW":
-                continue
-            else:
-                threed_coupler.coupling_blocks[bc.name] = CouplingBlocks.from_bc(bc)
+            block_name = bc.name.replace('_','')
+            threed_coupler.coupling_blocks[block_name] = CouplingBlock.from_bc(bc)
 
         print('writing svzerod_3Dcoupling.json...')
-        threed_coupler.to_json(simdir + '/svzerod_3Dcoupling.json')
+        threed_coupler.to_json(os.path.join(simdir, 'svzerod_3Dcoupling.json'))
 
         coupling_block_list = [coupling_block.name for coupling_block in threed_coupler.coupling_blocks.values()]
 
@@ -906,7 +905,7 @@ class SimParams():
         if 'output_all_cycles' in config.keys():
             self.output_all_cycles = config["output_all_cycles"]
         if 'steady_initial' in config.keys():
-            self.steady_initial = config["steady initial"]
+            self.steady_initial = config["steady_initial"]
         if 'density' in config.keys():
             self.density = config['density']
         if 'model_name' in config.keys():
@@ -941,7 +940,7 @@ class SimParams():
         return self.__dict__
     
 
-class CouplingBlocks():
+class CouplingBlock():
     '''class to handle coupling blocks for 3d-0d coupling'''
 
     def __init__(self, config: dict):
@@ -971,9 +970,8 @@ class CouplingBlocks():
 
         :param bc: boundary condition to create the coupling block from
         '''
-
         config = {
-            'name': bc.name,
+            'name': bc.name.replace('_', ''),
             'type': coupling_type,
             'location': location,
             'connected_block': bc.name,
