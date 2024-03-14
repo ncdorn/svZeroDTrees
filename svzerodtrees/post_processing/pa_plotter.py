@@ -259,7 +259,7 @@ class PAanalyzer:
 
         outlet_flows = []
         for vessel in outlet_vessels:
-            outlet_flows.append(self.result[str(vessel)]["q_out"]["final"])
+            outlet_flows.append(self.result[str(vessel)]["q_out"]['adapted'])
 
         plot_config = {
             'flow_adaptation':
@@ -281,8 +281,8 @@ class PAanalyzer:
         plot the difference in flowrate, pressure and wss between the LPA and RPA
         '''
 
-        fig = plt.figure()
-        ax = fig.subplots(1, 3)
+        fig = plt.figure(figsize=(10, 4))
+        ax = fig.subplots(1, 4)
 
         # plot the changes in q, p, wss in subfigures
         # self.plot_changes_subfig([self.lpa.branch, self.rpa.branch],
@@ -296,16 +296,25 @@ class PAanalyzer:
         print([self.lpa.branch, self.rpa.branch])
 
         self.plot_changes_subfig([self.lpa.branch, self.rpa.branch],
-                                 'p_out',
-                                 title='outlet pressure',
+                                 'p_in',
+                                 title='pressure in',
                                  ylabel='p (mmHg)',
                                  ax=ax[1])
+
+        self.plot_changes_subfig([self.lpa.branch, self.rpa.branch],
+                                 'p_out',
+                                 title='pressure out',
+                                 ylabel='p (mmHg)',
+                                 ax=ax[2])
+        
+        # set pressure ylims equal to each other
+        ax[2].set_ylim(ax[1].get_ylim())
         
         self.plot_changes_subfig([self.lpa.branch, self.rpa.branch],
                                  'wss',
                                  title='wall shear stress',
                                  ylabel='wss (dynes/cm2)',
-                                 ax=ax[2])
+                                 ax=ax[3])
 
         plt.suptitle('Hemodynamic changes in LPA and RPA')
         plt.tight_layout()
@@ -319,12 +328,12 @@ class PAanalyzer:
         :param ax: pyplot axis
         '''
         
-        timesteps = ['preop', 'postop', 'final']
+        timesteps = ['preop', 'postop', 'adapted']
 
         # get flow splits
         preop_q = self.get_result([self.lpa.branch, self.rpa.branch], 'q_out', 'preop', type='np')
         postop_q = self.get_result([self.lpa.branch, self.rpa.branch], 'q_out', 'postop', type='np')
-        final_q = self.get_result([self.lpa.branch, self.rpa.branch], 'q_out', 'final', type='np')
+        final_q = self.get_result([self.lpa.branch, self.rpa.branch], 'q_out', 'adapted', type='np')
 
         preop_split = preop_q / sum(preop_q)
         postop_split = postop_q / sum(postop_q)
@@ -338,17 +347,17 @@ class PAanalyzer:
 
         # plot the stacked bar graph
         bottom = np.zeros(len(timesteps))
+        colors = {'lpa': 'tomato', 'rpa': 'cornflowerblue'}
         for vessel, values in q.items():
-            ax.bar(timesteps, values, label=vessel, bottom=bottom)
+            ax.bar(timesteps, values, label=vessel, bottom=bottom, color=colors[vessel])
             for value in values:
                 ax.text(timesteps[values.index(value)], value / 2 + bottom[values.index(value)], str(int(percent[vessel][values.index(value)])) + '%', ha='center', va='center')
             bottom += values
 
-
-
+        ax.set_ylim([0, 1.2 * (final_q[0] + final_q[1])])
         ax.set_title('flow split')
-        ax.set_ylabel('flowrate (cm3/s)')
-        ax.legend()
+        ax.set_ylabel('mean flow (cm3/s)')
+        ax.legend(ncols=2)
 
 
     def plot_changes_subfig(self, branches, qoi, title, ylabel, xlabel=None, ax=None):
@@ -366,7 +375,7 @@ class PAanalyzer:
 
         '''
 
-        timesteps = ['preop', 'postop', 'final']
+        timesteps = ['preop', 'postop', 'adapted']
 
         bar_width = 1 / (len(branches) + 1)
 
@@ -376,22 +385,26 @@ class PAanalyzer:
         shift = 0
 
         # Plotting the grouped bar chart
+        colors = ['tomato', 'cornflowerblue']
+        color = 0
         for branch, qois in self.result.items():
             if int(branch) in branches:
                 values = [qois[qoi][timestep] for timestep in timesteps]
                 offset = bar_width * shift
-                ax.bar(x + offset, values, bar_width, label=branch)
+                ax.bar(x + offset, values, bar_width, label=branch, color=colors[color])
                 shift += 1
+                color += 1
         
         # set x and y axis ranges
-        ax.set_ylim((0, 1.3 * max([self.result[str(branch)][qoi]['final'] for branch in branches])))
+        max_y_val = max([self.result[str(branch)][qoi][timestep] for branch in branches for timestep in timesteps])
+        ax.set_ylim((0, 1.2 * max_y_val))
 
         # Set labels, title, and legend
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
         ax.set_title(title)
         ax.set_xticks([0, 1, 2], timesteps)
-        ax.legend(['lpa', 'rpa'])
+        ax.legend(['lpa', 'rpa'], ncols=2)
 
 
     def plot_mpa_pressure(self):
@@ -400,7 +413,7 @@ class PAanalyzer:
         '''
 
         # initialize timesteps
-        timesteps = ['preop', 'postop', 'final']
+        timesteps = ['preop', 'postop', 'adapted']
 
         # get the inlet pressure
         p_in = [self.result[str(self.mpa.branch)]['p_in'][timestep] for timestep in timesteps]
@@ -460,7 +473,7 @@ class PAanalyzer:
             vessels[vessels.index('rpa')] = self.rpa.branch
 
         postop = self.get_result(vessels, qoi, 'postop', type='np')
-        adapted = self.get_result(vessels, qoi, 'final', type='np')
+        adapted = self.get_result(vessels, qoi, 'adapted', type='np')
 
         percent_adapt = np.subtract(adapted, postop) / postop * 100
 
@@ -833,7 +846,7 @@ class PAanalyzer:
         if type not in ['np', 'list']:
             raise ValueError('type not recognized')
         
-        if time not in ['preop', 'postop', 'final']:
+        if time not in ['preop', 'postop', 'adapted']:
             raise ValueError('time not recognized')
         
         values = []
@@ -846,7 +859,7 @@ class PAanalyzer:
             return values
 
 
-    def get_qoi(self, qoi: str, vessels, branches=None, timestep='final'):
+    def get_qoi(self, qoi: str, vessels, branches=None, timestep='adapted'):
         ''' get a list of qois depending on a string input name
         
         :param qoi: string describing the quantity of interest

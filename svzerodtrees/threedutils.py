@@ -178,7 +178,7 @@ def prepare_simulation_dir(postop_dir, adapted_dir):
     write_svsolver_runscript(os.path.basename(adapted_dir))
 
 
-def write_svsolver_runscript(svpre_name, job_name='svFlowSolver', hours=6, nodes=2, procs_per_node=24):
+def write_svsolver_runscript(svpre_name, job_name='svFlowSolver', hours=6, nodes=4, procs_per_node=24):
     '''
     write a bash script to submit a job on sherlock'''
 
@@ -379,3 +379,49 @@ def write_numstart():
         numstart.write('0')
 
 
+def compute_flow_split(Q_svZeroD, svpre_file, n_steps=1000):
+    '''
+    compute the flow at the outlet surface of a mesh
+    
+    :param Q_svZeroD: path to the svZeroD flow file
+    :param svpre_file: path to the svpre file'''
+
+    # get the indices of the LPA and RPA outlets
+    lpa_idxs = []
+    rpa_idxs = []
+    with open(svpre_file, 'r') as ff:
+        for line in ff:
+            line.strip()
+            if line.startswith('set_surface_id_vtp'):
+                line_objs = line.split(' ')
+                if 'lpa' in line_objs[1].lower():
+                    lpa_idxs.append(line_objs[2].strip('\n'))
+                elif 'rpa' in line_objs[1].lower():
+                    rpa_idxs.append(line_objs[2].strip('\n'))
+
+    q = pd.read_csv(Q_svZeroD, sep='\s+')
+
+    q_lpa = 0
+    q_rpa = 0
+
+    for idx, q in q.items():
+        if idx in lpa_idxs:
+            q_lpa += q[-n_steps:].mean()
+        elif idx in rpa_idxs:
+            q_rpa += q[-n_steps:].mean()
+
+    lpa_split = round(q_lpa / (q_lpa + q_rpa), 3)
+    rpa_split = round(q_rpa / (q_lpa + q_rpa), 3)
+
+    print('flow split LPA/RPA: ' + str(round(q_lpa / (q_lpa + q_rpa), 3) * 100) + '% /' + str(round(q_rpa / (q_lpa + q_rpa), 3) * 100) + '%')
+
+    return lpa_split, rpa_split
+
+
+if __name__ == '__main__':
+    Q_svZeroD = '/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/SimVascular/threed_models/AS2/preop/Q_svZeroD'
+    svpre_file = '/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/SimVascular/threed_models/AS2/preop/preop.svpre'
+
+    compute_flow_split(Q_svZeroD, svpre_file)
+
+    

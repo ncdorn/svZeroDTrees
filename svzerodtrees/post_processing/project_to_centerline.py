@@ -44,7 +44,7 @@ def get_branch_result(qoi, result_handler, config_handler):
 
 
 
-def map_0d_on_centerline(centerline, config_handler, result_handler, timestep, output_folder):
+def map_0d_on_centerline(centerline, config_handler, result_handler, timestep, output_folder, repair_location):
         """Map 0D result on centerline.
 
         TODO: This functions has been mainly copied from SimVascular, and has now been adopted from svsuperestimator. A cleanup
@@ -86,6 +86,9 @@ def map_0d_on_centerline(centerline, config_handler, result_handler, timestep, o
         results = result_handler.format_result_for_cl_projection(timestep)
         results["time"] = config_handler.get_time_series()
 
+        # if repair location is proximal, change to list format
+        
+
         # add vessel properties to results (path distance and vessel resistance)
         for vessel in config_handler.config["vessels"]:
             br, seg = vessel["vessel_name"].split("_")
@@ -103,6 +106,10 @@ def map_0d_on_centerline(centerline, config_handler, result_handler, timestep, o
 
             results["WU m2"][br] = [[calc_WU_m2(vessel, config_handler.config["simulation_parameters"]["viscosity"])] * config_handler.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"]] * 2
 
+            # repair = 1 if the vessel has been repaired, 0 otherwise
+            repaired = 1 if br in repair_location else 0
+            
+            results["repair"][br] = [[repaired] * config_handler.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"]] * 2
 
             results["distance"][br][1] += vessel["vessel_length"]
 
@@ -113,7 +120,7 @@ def map_0d_on_centerline(centerline, config_handler, result_handler, timestep, o
         arrays = rec_dd()
 
         # loop all result fields
-        for f in ["flow", "pressure", "resistance", "WU m2"]:
+        for f in ["flow", "pressure", "resistance", "WU m2", "wss", "repair"]:
             if f not in results:
                 continue
 

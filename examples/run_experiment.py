@@ -5,5 +5,5 @@ import os
 example script for running an svZeroDTrees experiment from a json config file
 '''
 if __name__ == '__main__':
-    os.chdir('models/LPA_RPA_0d_steady/experiments')
-    run_from_file('LPA_RPA_ps_adapt_9.8.23.json', vis_trees=True)
+    os.chdir('/Users/ndorn/ndorn@stanford.edu - Google Drive/My Drive/Stanford/PhD/Simvascular/zerod_models/AS2_prestent/experiments')
+    run_from_file('AS2_stent.json')

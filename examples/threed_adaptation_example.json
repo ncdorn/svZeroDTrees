@@ -6,11 +6,10 @@
     "trees_exist": false,
     "mesh_surfaces_path": "/home/ndorn/Documents/Stanford/PhD/Simvascular/threed_models/AS2_prestent/Meshes/1.6M_elements/mesh-surfaces",
     "task": "threed_adaptation",
-    "threed_adaptation": [
+    "threed_adaptation":
         {
         "preop_dir": "~/Documents/Stanford/PhD/Marsden_Lab/SimVascular/threed_models/LPA_RPA/steady/preop",
         "postop_dir": "~/Documents/Stanford/PhD/Marsden_Lab/SimVascular/threed_models/LPA_RPA/steady/postop",
         "adapted_dir": "~/Documents/Stanford/PhD/Marsden_Lab/SimVascular/threed_models/LPA_RPA/steady/adapted"
         }
-    ]
 }

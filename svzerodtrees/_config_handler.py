@@ -139,7 +139,7 @@ class ConfigHandler():
         run the simulation
 
         :param result_handler: result handler instance to add the result to
-        :param label: label for the result e.g. preop, postop, final
+        :param label: label for the result e.g. preop, postop, adapted
         '''
 
         # assemble the config

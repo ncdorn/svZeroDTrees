@@ -97,17 +97,17 @@ class ResultHandler:
         # get summary results for all other vessels
         for vessel_config in self.vessels['vessels']:
             id = get_branch_id(vessel_config)[0]
-            if id not in [0, self.lpa_branch, self.rpa_branch]:
-                self.clean_results[id] = self.format_branch_result(id)
+            # if id not in [0, self.lpa_branch, self.rpa_branch]:
+            self.clean_results[id] = self.format_branch_result(id)
 
     
     def format_branch_result(self, branch: int):
         '''
-        get a dict containing the preop, postop and final q, p, wss for a specified branch
+        get a dict containing the preop, postop and adapted q, p, wss for a specified branch
 
         :param branch: branch id
 
-        :return branch_summary: dict with preop, postop and final outlet q, p, wss
+        :return branch_summary: dict with preop, postop and adapted outlet q, p, wss
         '''
         
         # initialize branch summary dict
@@ -117,31 +117,31 @@ class ResultHandler:
         preop_q = get_branch_result(self.results['preop'], 'flow_in', branch, steady=True)
         postop_q = get_branch_result(self.results['postop'], 'flow_in', branch, steady=True)
         final_q = get_branch_result(self.results['adapted'], 'flow_in', branch, steady=True)
-        branch_result['q_in'] = {'preop': preop_q, 'postop': postop_q, 'final': final_q}
+        branch_result['q_in'] = {'preop': preop_q, 'postop': postop_q, 'adapted': final_q}
 
         # get the outlet flowrates preop, postop, and post adaptation
         preop_q = get_branch_result(self.results['preop'], 'flow_out', branch, steady=True)
         postop_q = get_branch_result(self.results['postop'], 'flow_out', branch, steady=True)
         final_q = get_branch_result(self.results['adapted'], 'flow_out', branch, steady=True)
-        branch_result['q_out'] = {'preop': preop_q, 'postop': postop_q, 'final': final_q}
+        branch_result['q_out'] = {'preop': preop_q, 'postop': postop_q, 'adapted': final_q}
 
         # get the inlet pressures preop, postop and post adaptation, in mmHg
         preop_p = get_branch_result(self.results['preop'], 'pressure_in', branch, steady=True) / 1333.22
         postop_p = get_branch_result(self.results['postop'], 'pressure_in', branch, steady=True) / 1333.22
         final_p = get_branch_result(self.results['adapted'], 'pressure_in', branch, steady=True) / 1333.22
-        branch_result['p_in'] = {'preop': preop_p, 'postop': postop_p, 'final': final_p}
+        branch_result['p_in'] = {'preop': preop_p, 'postop': postop_p, 'adapted': final_p}
 
         # get the outlet pressures preop, postop and post adaptation, in mm Hg
         preop_p = get_branch_result(self.results['preop'], 'pressure_out', branch, steady=True) / 1333.22
         postop_p = get_branch_result(self.results['postop'], 'pressure_out', branch, steady=True) / 1333.22
         final_p = get_branch_result(self.results['adapted'], 'pressure_out', branch, steady=True) / 1333.22
-        branch_result['p_out'] = {'preop': preop_p, 'postop': postop_p, 'final': final_p}
+        branch_result['p_out'] = {'preop': preop_p, 'postop': postop_p, 'adapted': final_p}
 
         # get the wall shear stress at the outlet
         preop_wss = get_wss(self.vessels, self.viscosity, self.results['preop'], branch, steady=True)
         postop_wss = get_wss(self.vessels, self.viscosity, self.results['postop'], branch, steady=True)
         final_wss = get_wss(self.vessels, self.viscosity, self.results['adapted'], branch, steady=True)
-        branch_result['wss'] = {'preop': preop_wss, 'postop': postop_wss, 'final': final_wss}
+        branch_result['wss'] = {'preop': preop_wss, 'postop': postop_wss, 'adapted': final_wss}
 
 
         return branch_result
@@ -188,7 +188,7 @@ class ResultHandler:
         
         '''
 
-        cl_mappable_result = {"flow": {}, "pressure": {}, "distance": {},"time": {}, "resistance": {}, "WU m2": {}}
+        cl_mappable_result = {"flow": {}, "pressure": {}, "wss": {}, "distance": {},"time": {}, "resistance": {}, "WU m2": {}, "repair": {}}
 
         branches = list(self.clean_results.keys())
         for branch in branches:
@@ -204,29 +204,47 @@ class ResultHandler:
         fields.sort() # should be ['flow_in', 'flow_out', 'pressure_in', 'pressure_out']
 
         if timestep == 'adaptation':
-            for field in ['flow', 'pressure']:
+            for field in ['flow', 'pressure', 'wss']:
+                if field == 'wss':
+                    cl_mappable_result[field] = {
+                        branch: [[(self.clean_results[branch]['wss']['postop'] - 
+                                    self.clean_results[branch]['wss']['adapted']) / 
+                                    self.clean_results[branch]['wss']['postop']] * 10,
+                                [(self.clean_results[branch]['wss']['postop'] - # need 2 entries for the oulet and inlet
+                                    self.clean_results[branch]['wss']['adapted']) / 
+                                    self.clean_results[branch]['wss']['postop']] * 10]
+                                for branch in branches}
+                else:
                     cl_mappable_result[field] = {
                         branch: [(self.results['postop'][field + "_in"][branch] - 
-                                 self.results['adapted'][field + "_in"][branch]) / 
-                                 self.results['postop'][field + "_in"][branch], 
+                                    self.results['adapted'][field + "_in"][branch]) / 
+                                    self.results['postop'][field + "_in"][branch], 
                                 (self.results['postop'][field + "_out"][branch] - 
-                                 self.results['adapted'][field + "_out"][branch]) / 
-                                 self.results['postop'][field + "_out"][branch], ]
-                        for branch in branches}
+                                    self.results['adapted'][field + "_out"][branch]) / 
+                                    self.results['postop'][field + "_out"][branch], ]
+                                for branch in branches}
         else:
-            for field in ['flow', 'pressure']:
+            for field in ['flow', 'pressure', 'wss']:
+                if field == 'wss':
+                    # language is different in the clean result vs the general result, need to fix this
+
+                    # the clean_result currently computes one value for wss, when there could be a time-varying quantity
+                    # we will leave it as constant for now
+                    cl_mappable_result[field] = {
+                        branch: [[self.clean_results[branch]['wss'][timestep]] * 10] * 2 for branch in branches}
+                else:
                     cl_mappable_result[field] = {
                         branch: [self.results[timestep][field + "_in"][branch], 
                                 self.results[timestep][field + "_out"][branch]]
                         for branch in branches}
-                    # now, change the branch id for mpa, lpa, rpa
-                    for branch in cl_mappable_result[field].keys():
-                        if branch == 'mpa':
-                            cl_mappable_result[field][0] = cl_mappable_result[field].pop(branch)
-                        elif branch == 'lpa':
-                            cl_mappable_result[field][self.lpa_branch] = cl_mappable_result[field].pop(branch)
-                        elif branch == 'rpa':
-                            cl_mappable_result[field][self.rpa_branch] = cl_mappable_result[field].pop(branch)
+                # now, change the branch id for mpa, lpa, rpa
+                for branch in cl_mappable_result[field].keys():
+                    if branch == 'mpa':
+                        cl_mappable_result[field][0] = cl_mappable_result[field].pop(branch)
+                    elif branch == 'lpa':
+                        cl_mappable_result[field][self.lpa_branch] = cl_mappable_result[field].pop(branch)
+                    elif branch == 'rpa':
+                        cl_mappable_result[field][self.rpa_branch] = cl_mappable_result[field].pop(branch)
         
         # construct the distance dict
 

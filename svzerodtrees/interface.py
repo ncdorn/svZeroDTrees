@@ -231,15 +231,20 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
         # plot the mpa pressure changes
         plotter.plot_mpa_pressure()
 
-        if not os.path.exists('cl_projection'):
-            os.system('mkdir cl_projection')
+        if not os.path.exists(expdir_path + 'cl_projection'):
+            os.system('mkdir ' + expdir_path + 'cl_projection')
         
         for period in ['preop', 'postop', 'adapted', 'adaptation']:
+            if repair_config[0]["location"] == 'proximal':
+                repair_location = ['lpa', 'rpa']
+            else:
+                repair_location = repair_config[0]["location"]
             project_to_centerline.map_0d_on_centerline('centerlines.vtp',
                                                         config_handler,
                                                         result_handler,
                                                         period,
-                                                        expdir_path + 'cl_projection')
+                                                        expdir_path + 'cl_projection',
+                                                        repair_location)
         
 
 

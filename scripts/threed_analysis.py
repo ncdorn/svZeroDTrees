@@ -48,7 +48,7 @@ def simdir_from_mesh(mesh_complete, inflow_file, threed_dir, zerod_dir):
     # write the svzerod interface file
     write_svzerod_interface('svzerod_3Dcoupling.json', outlet_idxs)
     # write the solver.inp
-    write_solver_inp(outlet_idxs, period, 2)
+    write_solver_inp(outlet_idxs, period, 1)
     # write the numstart file
     write_numstart()
     # write svsolver runscript
@@ -64,11 +64,11 @@ def simdir_from_mesh(mesh_complete, inflow_file, threed_dir, zerod_dir):
 
 if __name__ == '__main__':
     preop_mesh = '/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/SimVascular/threed_models/AS2_prestent/Meshes/1.6M_elements'
-    postop_mesh = '/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/SimVascular/threed_models/AS2_stent/Meshes/5mm-stent_prox_1.7M_elements'
+    postop_mesh = '/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/SimVascular/threed_models/AS2_stent/Meshes/5mm-stent_extv_1.7M_elements'
 
-    os.chdir('/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/SimVascular/threed_models/AS2')
+    os.chdir('/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/SimVascular/threed_models/AS2_ext_stent')
 
-    simdir_from_mesh(preop_mesh, 'inflow.flow', 'preop', 'zerod')
+    # simdir_from_mesh(preop_mesh, 'inflow.flow', 'preop', 'zerod')
     simdir_from_mesh(postop_mesh, 'inflow.flow', 'postop', 'zerod')
 
 

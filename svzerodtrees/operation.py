@@ -61,12 +61,12 @@ class Stenosis:
         self.viscosity = viscosity
 
     @classmethod
-    def create(cls, config_handler: ConfigHandler, branch: int or str, repair_type, repair_value, log_file=None):
+    def create(cls, config_handler: ConfigHandler, branch, repair_type, repair_value, log_file=None):
         '''
         create a stenosis from a config handler
 
         :param config_handler: the config handler
-        :param branch: the branch id
+        :param branch: the branch id (int or str)
         :param repair: the repair dict with type and value
         '''
 
@@ -110,7 +110,7 @@ class Stenosis:
 
         for vessel in self.vessels:
             # set stenosis coefficient to zero
-            R_old = vessel.zero_d_element_values['R_poiseuille']
+            R_old = vessel.R
             vessel.stenosis_coefficient = 0.0
             vessel.R = (8 * self.viscosity * vessel.length) / (np.pi * (self.repair_value / 2) ** 4)
             R_change = R_old - vessel.R

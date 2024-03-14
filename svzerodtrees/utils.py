@@ -96,18 +96,20 @@ def get_wss(vessels, viscosity, result_array, branch, steady=False):
     
     d = get_branch_d(vessels, viscosity, branch)
 
+    r = d / 2
+
     q_out = get_branch_result(result_array, 'flow_out', branch, steady)
     if steady:
-        wss = q_out * 4 * viscosity / (np.pi * d)
+        wss = q_out * 4 * viscosity / (np.pi * r ** 3)
     else:
-        wss = [q * 4 * viscosity / (np.pi * d) for q in q_out]
+        wss = [q * 4 * viscosity / (np.pi * r ** 3) for q in q_out]
 
     return wss
 
 def get_branch_d(config, viscosity, branch):
     '''
     this is the worst method ever made, I'm sorry to anyone that is reading this. Will update soon.
-    get the diameter of a branch
+    get the diameter of a branch in units of cm
 
     :param config: svzerodplus config dict
     :param branch: branch id
