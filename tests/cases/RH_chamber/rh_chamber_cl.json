@@ -1,0 +1,207 @@
+{
+    "description": {
+        "description of model" : "Closed loop system designed to eventually be used with a pulmonary model. all units are in mmHg/mL/s"
+    },
+	"boundary_conditions": [],
+    "junctions": [
+        {
+            "inlet_blocks": [
+                "pulmonary_veins"
+            ],
+            "junction_name": "pulmonary_LA",
+            "junction_type": "NORMAL_JUNCTION",
+            "outlet_blocks": [
+                "left_atrium"
+            ]
+        },
+        {
+            "inlet_blocks": [
+                "systemic_veins"
+            ],
+            "junction_name": "system_RA",
+            "junction_type": "NORMAL_JUNCTION",
+            "outlet_blocks": [
+                "right_atrium"
+            ]
+        },
+        {
+            "inlet_vessels": [
+                0
+            ],
+            "junction_name": "pulmonary",
+            "junction_type": "NORMAL_JUNCTION",
+            "outlet_vessels": [
+                1
+            ]
+        },
+        {
+            "inlet_vessels": [
+                2
+            ],
+            "junction_name": "pulmonary",
+            "junction_type": "NORMAL_JUNCTION",
+            "outlet_vessels": [
+                3
+            ]
+        }
+    ],
+    "simulation_parameters": {
+        "density": 1.06,
+        "model_name": "RH_chamber_cl",
+        "number_of_cardiac_cycles": 2,
+        "number_of_time_pts_per_cardiac_cycle": 100,
+        "viscosity": 0.04
+    },
+    "valves": [
+        {
+            "type": "ValveTanh",
+            "name": "tricuspid",
+            "params": {
+                "Rmax": 75000.0,
+                "Rmin": 0.0075,
+                "Steepness": 100.0,
+                "upstream_block": "right_atrium",
+                "downstream_block": "right_ventricle"
+            }
+        },
+        {
+            "type": "ValveTanh",
+            "name": "pulmonary",
+            "params": {
+                "Rmax": 75000.0,
+                "Rmin": 0.0075,
+                "Steepness": 100.0,
+                "upstream_block": "right_ventricle",
+                "downstream_block": "pulmonary_arteries"
+            }
+        },
+        {
+            "type": "ValveTanh",
+            "name": "mitral",
+            "params": {
+                "Rmax": 75000.0,
+                "Rmin": 0.0075,
+                "Steepness": 100.0,
+                "upstream_block": "left_atrium",
+                "downstream_block": "left_ventricle"
+            }
+        },
+        {
+            "type": "ValveTanh",
+            "name": "aortic",
+            "params": {
+                "Rmax": 75000.0,
+                "Rmin": 0.0075,
+                "Steepness": 100.0,
+                "upstream_block": "left_ventricle",
+                "downstream_block": "systemic_arteries"
+            }
+        }
+    ],
+    "chambers": [
+        {
+            "type": "ChamberElastanceInductor",
+            "name": "right_atrium",
+            "values": {
+                "Emax": 0.06,
+                "Emin": 0.07,
+                "Vrd": 100.0,
+                "Vrs": 4.0,
+                "t_active": 0.064,
+                "t_twitch": 0.56,
+                "Impedance": 0.000351787
+            }
+        },
+        {
+            "type": "ChamberElastanceInductor",
+            "name": "right_ventricle",
+            "values": {
+                "Emax": 0.55,
+                "Emin": 0.05,
+                "Vrd": 100.0,
+                "Vrs": 10.0,
+                "t_active": 0.272,
+                "t_twitch": 0.0,
+                "Impedance": 0.000351787
+            }
+        },
+        {
+            "type": "ChamberElastanceInductor",
+            "name": "left_atrium",
+            "values": {
+                "Emax": 0.07,
+                "Emin": 0.09,
+                "Vrd": 100.0,
+                "Vrs": 4.0,
+                "t_active": 0.2,
+                "t_twitch": 0.3,
+                "Impedance": 0.000351787
+            }
+        },
+        {
+            "type": "ChamberElastanceInductor",
+            "name": "left_ventricle",
+            "values": {
+                "Emax": 1.057,
+                "Emin": 0.091,
+                "Vrd": 150.0,
+                "Vrs": 50.0,
+                "t_active": 0.2,
+                "t_twitch": 0.3,
+                "Impedance": 0.000351787
+            }
+        }
+    ],
+    "vessels": [
+        {
+            "vessel_id": 0,
+            "vessel_length": 10.0,
+            "vessel_name": "pulmonary_arteries",
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "C": 10.0,
+                "R_poiseuille": 0.1625,
+                "L": 0.0005
+            }
+        },
+        {
+            "vessel_id": 1,
+            "vessel_length": 10.0,
+            "vessel_name": "pulmonary_veins",
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "C": 16.0,
+                "R_poiseuille": 0.1625,
+                "L": 0.0005
+            }
+        },
+        {
+            "vessel_id": 2,
+            "vessel_length": 10.0,
+            "vessel_name": "systemic_arteries",
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "C": 1.2,
+                "R_poiseuille": 0.8,
+                "L": 0.005
+            }
+        },
+        {
+            "vessel_id": 3,
+            "vessel_length": 10.0,
+            "vessel_name": "systemic_veins",
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "C": 60.0,
+                "R_poiseuille": 0.26,
+                "L": 0.0005
+            }
+        }
+        ],
+    "initial_condition": {
+            "Vc:right_ventricle": 96.07,
+            "Vc:left_ventricle": 96.07,
+            "Vc:right_atrium": 38.53,
+            "Vc:left_atrium": 38.53
+        }
+}

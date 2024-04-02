@@ -44,6 +44,21 @@ def test_unsteady_optimization():
     print('unsteady test completed')
 
 
+def test_rh_chamber():
+    '''
+    test the rh_chamber model'''
+
+    input_file = 'tests/cases/rh_chamber/rh_chamber_cl.json'
+
+    with open(input_file, 'r') as f:
+        config = json.load(f)
+
+
+    result = pysvzerod.simulate(config)
+
+    print(result)
+
+
 if __name__ == "__main__":
 
-    test_unsteady_optimization()
+    test_rh_chamber()

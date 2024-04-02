@@ -1,0 +1,91 @@
+{
+	"boundary_conditions": [
+	{
+		"bc_name": "RA_pressure",
+		"bc_type": "PRESSURE",
+		"bc_values": {
+			"P": [
+				7.0,
+				7.0
+			],
+			"t": [
+				0.0,
+				1.0
+			]
+		}
+	},
+	{
+		"bc_name": "PA_outlet",
+		"bc_type": "RESISTANCE",
+		"bc_values": {
+			"Pd": 5.0,
+			"R": 100.0
+		}
+	}
+	],
+	"junctions": [],
+	"simulation_parameters": {
+		"density": 1.06,
+		"model_name": "RH_chamber",
+		"number_of_cardiac_cycles": 2,
+		"number_of_time_pts_per_cardiac_cycle": 100,
+		"viscosity": 0.04
+	},
+	"valves": [
+		{
+			"type": "ValveTanh",
+			"name": "valve0",
+			"params": {
+				"Rmax": 100000.0,
+				"Rmin": 100.0,
+				"Steepness": 100.0,
+				"upstream_block": "RA_pressure",
+				"downstream_block": "ventricle"
+			}
+		},
+		{
+			"type": "ValveTanh",
+			"name": "valve1",
+			"params": {
+				"Rmax": 100000.0,
+				"Rmin": 100.0,
+				"Steepness": 100.0,
+				"upstream_block": "ventricle",
+				"downstream_block": "vessel"
+			}
+		}
+	],
+	"chambers": [
+		{
+			"type": "ChamberElastanceInductor",
+			"name": "ventricle",
+			"values": {
+				"Emax": 1.057,
+				"Emin": 0.091,
+				"Vrd": 150.0,
+				"Vrs": 50.0,
+				"t_active": 0.2,
+				"t_twitch": 0.3,
+				"Impedance": 0.000351787
+			}
+		}
+	],
+	"vessels": [
+		{
+			"boundary_conditions": {
+				"outlet": "PA_outlet"
+			},
+			"vessel_id": 0,
+			"vessel_length": 10.0,
+			"vessel_name": "vessel",
+			"zero_d_element_type": "BloodVessel",
+			"zero_d_element_values": {
+				"C": 0.0001,
+				"R_poiseuille": 100.0
+			}
+		}
+	],
+	"initial_condition": {
+		"Vc:ventricle": 96.07
+	}
+}
