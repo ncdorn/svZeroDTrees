@@ -38,17 +38,25 @@ There are currently two microvascular adaptation schemes:
 
 [] robustify tree and data visualization methods
 
-## Overview
-   ### Functions
+## Overview of modules
+   ### Modules
    `interface.py`: highest level commands for building trees and computing adaptation
+   
    `preop.py`: build trees
+   
    `operation.py`: perform repairs in zerod
+   
    `adaptation.py`: compute adaptation of trees
+   
    ### Classes
    `ConfigHandler`: data handler for the 0D solver json config, with additional classes for each 0d element type
+   
    `ResultHandler`: data handler for the simulation result data
+   
    `StructuredTreeBC`: class for handling structured trees
+   
    `TreeVessel`: class for handling vessels of the structured tree
+   
 
 ## json config
 the json config file requires the following keys
