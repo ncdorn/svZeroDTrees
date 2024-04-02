@@ -70,7 +70,7 @@ the json config file requires the following keys
 * task: task to be run, either `repair`, `optimize_stent`, `threed_adaptation`
 
 ## Running a config file
-The highest level command is `run_from_file(exp_config_file)` examples of the json config file are provided below:
+The highest level command is `run_from_file(config.json)` examples of `config.json` are provided below:
 
 ### construct trees only
 ```json
