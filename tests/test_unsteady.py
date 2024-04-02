@@ -48,7 +48,7 @@ def test_rh_chamber():
     '''
     test the rh_chamber model'''
 
-    input_file = 'tests/cases/rh_chamber/rh_chamber_cl.json'
+    input_file = 'tests/cases/rh_chamber/rh_chamber.json'
 
     with open(input_file, 'r') as f:
         config = json.load(f)
@@ -56,7 +56,12 @@ def test_rh_chamber():
 
     result = pysvzerod.simulate(config)
 
-    print(result)
+    plot_result(result, 'pressure_in', 'tests/cases/rh_chamber/pressure_in.png')
+    plot_result(result, 'flow_in', 'tests/cases/rh_chamber/flow_in.png')
+
+
+def rh_chamber_param_sweep():
+    pass
 
 
 if __name__ == "__main__":

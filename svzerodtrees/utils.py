@@ -31,6 +31,24 @@ def get_pressure(result_array, branch, convert_to_mmHg=False):
 
     return pressures, systolic_p, diastolic_p, mean_p
 
+def plot_result(result_df, quantity, filepath):
+    '''
+    plot the result from a result dataframe
+
+    :param result_df: result dataframe
+    :param quantity: quantity to plot
+    :param filepath: path to save the plot
+    '''
+
+    plt.clf()
+    plt.plot(result_df['time'], result_df[quantity])
+    plt.xlabel('time')
+    plt.ylabel(quantity)
+    plt.title(quantity)
+    plt.pause(0.001)
+    plt.savefig(filepath)
+
+
 def plot_pressure(result_array, branch, save=False, fig_dir=None):
     '''
     plot the pressure time series for a given branch

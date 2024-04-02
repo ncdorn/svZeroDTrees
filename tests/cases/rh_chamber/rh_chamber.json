@@ -10,7 +10,7 @@
 			],
 			"t": [
 				0.0,
-				1.0
+				0.75
 			]
 		}
 	},
@@ -18,8 +18,8 @@
 		"bc_name": "PA_outlet",
 		"bc_type": "RESISTANCE",
 		"bc_values": {
-			"Pd": 5.0,
-			"R": 100.0
+			"Pd": 6.0,
+			"R": 0.0
 		}
 	}
 	],
@@ -34,10 +34,10 @@
 	"valves": [
 		{
 			"type": "ValveTanh",
-			"name": "valve0",
+			"name": "tricuspid_valve",
 			"params": {
-				"Rmax": 100000.0,
-				"Rmin": 100.0,
+				"Rmax": 75000,
+				"Rmin": 0.02,
 				"Steepness": 100.0,
 				"upstream_block": "RA_pressure",
 				"downstream_block": "ventricle"
@@ -45,10 +45,10 @@
 		},
 		{
 			"type": "ValveTanh",
-			"name": "valve1",
+			"name": "pulmonary_valve",
 			"params": {
-				"Rmax": 100000.0,
-				"Rmin": 100.0,
+				"Rmax": 75000,
+				"Rmin": 0.02,
 				"Steepness": 100.0,
 				"upstream_block": "ventricle",
 				"downstream_block": "vessel"
@@ -60,13 +60,13 @@
 			"type": "ChamberElastanceInductor",
 			"name": "ventricle",
 			"values": {
-				"Emax": 1.057,
-				"Emin": 0.091,
-				"Vrd": 150.0,
-				"Vrs": 50.0,
-				"t_active": 0.2,
-				"t_twitch": 0.3,
-				"Impedance": 0.000351787
+				"Emax": 0.55,
+				"Emin": 0.05,
+				"Vrd": 120.0,
+				"Vrs": 10.0,
+				"t_active": 0.001,
+				"t_twitch": 0.272,
+				"Impedance": 0.0003
 			}
 		}
 	],
@@ -80,12 +80,13 @@
 			"vessel_name": "vessel",
 			"zero_d_element_type": "BloodVessel",
 			"zero_d_element_values": {
-				"C": 0.0001,
-				"R_poiseuille": 100.0
+				"C": 10.0,
+				"R_poiseuille": 0.1625,
+				"L": 0.0005
 			}
 		}
 	],
 	"initial_condition": {
-		"Vc:ventricle": 96.07
+		"Vc:ventricle": 10.0
 	}
 }
