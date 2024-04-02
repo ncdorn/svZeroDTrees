@@ -11,7 +11,7 @@ from svzerodtrees._config_handler import ConfigHandler
 from svzerodtrees.post_processing.pa_plotter import PAanalyzer
 from scipy.optimize import minimize
 
-def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=True):
+def run_from_file(exp_config_file: str, vis_trees=True):
     '''
     run the structured tree optimization pipeline from an experiment config file
 
@@ -38,11 +38,40 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
     if task == 'repair':
         # compute 0D repair
         repair_config = exp_config['repair']
-    if task == 'threed_adaptation':
+    elif task == 'threed_adaptation':
         # compute 3D adaptation
         run_threed_adaptation(task_params['preop_dir'], task_params['postop_dir'], task_params['adapted_dir'])
 
-        sys.exit() # exit the program I guess
+        sys.exit() # exit the program
+    elif task == 'construct_trees':
+        if task_params['tree_type'] == 'cwss':
+            # construct trees
+            preop.construct_cwss_trees(config_handler,
+                                        result_handler,
+                                        n_procs=24,
+                                        log_file=log_file,
+                                        d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
+
+            # save preop config to as pickle, with StructuredTreeOutlet objects
+            write_to_log(log_file, 'saving preop config with cwss trees...')
+
+            config_handler.to_file_w_trees('config_w_cwss_trees.in')
+        elif task_params['tree_type'] == 'ps':
+            # construct trees
+            preop.construct_pries_trees(config_handler,
+                                        result_handler,
+                                        n_procs=24,
+                                        log_file=log_file,
+                                        d_min=.01)
+
+            write_to_log(log_file, 'saving preop config with ps trees...')
+
+            config_handler.to_file_w_trees('config_w_ps_trees.in')
+        else:
+            raise Exception('invalid tree type specified')
+    else:
+        raise Exception('invalid task specified')
+
 
     # check if we are in an experiments directory, if not assume we are in it
 
@@ -246,7 +275,6 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
                                                         expdir_path + 'cl_projection',
                                                         repair_location)
         
-
 
 def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, repair_config, log_file, n_procs=12, trees_exist=False):
     '''
