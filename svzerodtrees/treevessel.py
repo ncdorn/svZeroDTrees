@@ -36,7 +36,7 @@ class TreeVessel:
 
 
     @classmethod
-    def create_vessel(cls, id, gen, diameter, eta):
+    def create_vessel(cls, id, gen, diameter, eta, H_d=0.45):
         '''
         class method to create a TreeVessel instance
 
@@ -49,7 +49,7 @@ class TreeVessel:
         '''
 
         # Viscosity is always governed by fahraeus lindqvist effect
-        viscosity = cls.fl_visc(cls, diameter)
+        viscosity = cls.fl_visc(cls, diameter, H_d=H_d)
         
         # initialize the 0D parameters of the treee
         R, C, L, l = cls.calc_zero_d_values(cls, diameter, viscosity)
