@@ -36,7 +36,7 @@ There are currently two microvascular adaptation schemes:
 
 [] robustify documentation
 
-[] robustify tree and data visualization methods
+[] add clinical targets to json file
 
 ## Modules
 `interface.py`: highest level commands for building trees and computing adaptation
@@ -46,6 +46,8 @@ There are currently two microvascular adaptation schemes:
 `operation.py`: perform repairs in zerod
 
 `adaptation.py`: compute adaptation of trees
+
+`post_processing`: methods for post processing data, most are called automatically through the interface
    
 ## Classes
 `ConfigHandler`: data handler for the 0D solver json config, with additional classes for each 0d element type
