@@ -12,7 +12,7 @@ def repair_stenosis(config_handler: ConfigHandler, result_handler: ResultHandler
     # proximal stenosis repair case
     if repair_config['location'] == 'proximal': 
         # repair only the LPA and RPA (should be the outlets of the first junction in the config file)
-        repair_branches = ['lpa', 'rpa']
+        repair_branches = [config_handler.lpa.branch, config_handler.rpa.branch]
 
         # if an improper number of repair degrees are specified
         if len(repair_config['value']) != 2: 
@@ -35,11 +35,23 @@ def repair_stenosis(config_handler: ConfigHandler, result_handler: ResultHandler
     elif type(repair_config['location']) is list: 
         repair_branches = repair_config['location']
 
+    stenoses = [] # list of stenosis objects
+
     for branch, value in zip(repair_branches, repair_config['value']):
+
+        # create the stenosis object and repair it
         branch_stenosis = Stenosis.create(config_handler, branch, repair_config['type'], value, log_file=log_file)
         branch_stenosis.repair()
+        # create the list of stenosis objects for analysis later
+        stenoses.append(branch_stenosis)
     
+    # compute the postop simulation result
     config_handler.simulate(result_handler, 'postop')
+
+    # return the list of stenoses for analysis (e.g. optimization)
+    return stenoses
+
+
 
 
 class Stenosis:
@@ -55,6 +67,7 @@ class Stenosis:
         self.branch = branch
         self.ids = [vessel.id for vessel in vessels]
         self.repair_type = repair_type
+        self.diameters = [vessel.diameter for vessel in vessels] # original diameters
         self.repair_value = repair_value
         self.log_file = log_file
         self.vessels = vessels
@@ -110,10 +123,14 @@ class Stenosis:
 
         for vessel in self.vessels:
             # set stenosis coefficient to zero
-            R_old = vessel.R
+            # R_old = vessel.R
+            # vessel.stenosis_coefficient = 0.0
+            # vessel.R = (8 * self.viscosity * vessel.length) / (np.pi * (self.repair_value / 2) ** 4)
+            # R_change = R_old - vessel.R
             vessel.stenosis_coefficient = 0.0
-            vessel.R = (8 * self.viscosity * vessel.length) / (np.pi * (self.repair_value / 2) ** 4)
-            R_change = R_old - vessel.R
+            vessel.diameter = self.repair_value
+
+
     
 
     def resistance_repair(self):

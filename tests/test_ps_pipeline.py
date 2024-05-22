@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from svzerodtrees.utils import *
 from scipy.optimize import minimize
 from svzerodtrees.adaptation import *
+from svzerodtrees.optimization import StentOptimization
 from svzerodtrees import operation, preop, interface
 from svzerodtrees._config_handler import ConfigHandler
 from svzerodtrees._result_handler import ResultHandler
@@ -112,14 +113,7 @@ def test_repair_stenosis():
     with open('tests/cases/LPA_RPA_0d_steady/result_handler.out', 'rb') as ff:
         result_handler = pickle.load(ff)
 
-    # proximal repair case
-    operation.repair_stenosis_coefficient(preop_config_handler, result_handler, repair_dict['proximal'])
-
-    # extensive repair case
-    operation.repair_stenosis_coefficient(preop_config_handler, result_handler, repair_dict['extensive'])
-
-    # custom repair case
-    operation.repair_stenosis_coefficient(preop_config_handler, result_handler, repair_dict['custom'])
+    operation.repair_stenosis(preop_config_handler, result_handler, repair_dict['custom'])
 
 
 def test_no_repair():
@@ -163,7 +157,7 @@ def test_cwss_adaptation():
     with open('tests/cases/repair.json') as ff:
         repair_dict = json.load(ff)
     
-    repair_config = repair_dict['proximal']
+    repair_config = repair_dict['custom']
 
     preop.construct_cwss_trees(config_handler, result_handler, n_procs=12, d_min=0.03)
 
@@ -245,13 +239,24 @@ def test_stent_optimization():
         "type": "optimize stent",
         "location": "proximal",
         "value": [0.5, 0.5],
-        "objective": "flow split"
+        "objective": "flow split",
     }
 
     os.chdir('tests/cases/LPA_RPA_0d_steady')
 
-    interface.optimize_stent_diameter(config_handler, result_handler, repair_config, adapt='cwss', trees_exist=False)
+    stent_optimization = StentOptimization(config_handler,
+                                               result_handler,
+                                               repair_config,
+                                               adapt='cwss',
+                                               log_file=None,
+                                               n_procs=12,
+                                               trees_exist=False)
+        
+    stent_optimization.minimize_nm()
 
+    print('stent optimization run')
+
+    print(result_handler.flow_split)
 
 
 def test_run_from_file():
@@ -312,4 +317,4 @@ def test_simple_config():
 
 if __name__ == '__main__':
 
-    test_run_from_file()
+    test_stent_optimization()

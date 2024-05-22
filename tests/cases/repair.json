@@ -12,9 +12,9 @@
     },
 
     "custom": {
-        "type": "stenosis_coefficient",
-        "location": [1, 2, 3],
-        "degree": [0.7, 0.8, 0.9]
+        "type": "stent",
+        "location": [0, 1, 2],
+        "value": [0.7, 0.8, 0.9]
     },
     "no repair": {
         "type": "stenosis_coefficient",

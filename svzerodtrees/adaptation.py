@@ -72,7 +72,7 @@ def adapt_constant_wss(config_handler: ConfigHandler, result_handler: ResultHand
 
     :return: config dict post-adaptation, flow result post-adaptation, list of StructuredTreeOutlet instances
     '''
-    print('adapting the vessels...')
+
     # get the preop and postop outlet flowrates
     preop_q = get_outlet_data(config_handler.config, result_handler.results['preop'], 'flow_out', steady=True)
     postop_q = get_outlet_data(config_handler.config, result_handler.results['postop'], 'flow_out', steady=True)
@@ -107,10 +107,7 @@ def adapt_constant_wss(config_handler: ConfigHandler, result_handler: ResultHand
     write_resistances(config_handler.config, R_adapt)
     # config_handler.to_json('experiments/AS1_no_repair/adapted_config_no_trees.json')
 
-    adapted_result = run_svzerodplus(config_handler.config)
-
-    # add adapted result to the result handler
-    result_handler.add_unformatted_result(adapted_result, 'adapted')
+    config_handler.simulate(result_handler, 'adapted')
 
 
 def adapt_constant_wss_threed(config_handler: ConfigHandler, preop_q, postop_q, log_file: str = None):

@@ -1,0 +1,313 @@
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 6, 24]
+RPA pressures: [11, 6, 8]
+LPA pressures: [18, 10, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+Optimizing preop outlet resistance...
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 6, 24]
+RPA pressures: [11, 6, 8]
+LPA pressures: [18, 10, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 6, 24]
+RPA pressures: [11, 6, 8]
+LPA pressures: [18, 10, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 6, 24]
+RPA pressures: [11, 6, 8]
+LPA pressures: [18, 10, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 24]
+RPA pressures: [11, 8]
+LPA pressures: [18, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 24]
+RPA pressures: [11, 8]
+LPA pressures: [18, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 24]
+RPA pressures: [11, 8]
+LPA pressures: [18, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [42.8660443239955, 13.493468070695835]
+RPA pressure: [42.49257967061342, 13.432169296295022]
+LPA pressure: [42.59373200836985, 13.470872516831594]
+RPA flow split: 0.4322692081831024
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 24]
+RPA pressures: [11, 8]
+LPA pressures: [18, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 24]
+RPA pressures: [11, 8]
+LPA pressures: [18, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 24]
+RPA pressures: [11, 8]
+LPA pressures: [18, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [98.26626203874707, 29.06390819838516]
+RPA pressure: [11.718902610486348, 2.0555139788705943]
+LPA pressure: [29.007558263842224, 5.907309036552443]
+RPA flow split: 0.5951404366596533
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 24]
+RPA pressures: [11, 8]
+LPA pressures: [18, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [98.26626203874707, 29.06390819838516]
+RPA pressure: [11.718902610486348, 2.0555139788705943]
+LPA pressure: [29.007558263842224, 5.907309036552443]
+RPA flow split: 0.5951404366596533
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 24]
+RPA pressures: [11, 8]
+LPA pressures: [18, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [98.26626203874707, 29.06390819838516]
+RPA pressure: [11.718902610486348, 2.0555139788705943]
+LPA pressure: [29.007558263842224, 5.907309036552443]
+RPA flow split: 0.5951404366596533
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 24]
+RPA pressures: [11, 8]
+LPA pressures: [18, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [98.26626203874707, 29.06390819838516]
+RPA pressure: [11.718902610486348, 2.0555139788705943]
+LPA pressure: [29.007558263842224, 5.907309036552443]
+RPA flow split: 0.5951404366596533
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 24]
+RPA pressures: [11, 8]
+LPA pressures: [18, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [98.26626203874707, 29.06390819838516]
+RPA pressure: [11.718902610486348, 2.0555139788705943]
+LPA pressure: [29.007558263842224, 5.907309036552443]
+RPA flow split: 0.5951404366596533
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 24]
+RPA pressures: [11, 8]
+LPA pressures: [18, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [98.26626203874707, 29.06390819838516]
+RPA pressure: [11.718902610486348, 2.0555139788705943]
+LPA pressure: [29.007558263842224, 5.907309036552443]
+RPA flow split: 0.5951404366596533
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 24]
+RPA pressures: [11, 8]
+LPA pressures: [18, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [98.26626203874707, 29.06390819838516]
+RPA pressure: [11.718902610486348, 2.0555139788705943]
+LPA pressure: [29.007558263842224, 5.907309036552443]
+RPA flow split: 0.5951404366596533
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 24]
+RPA pressures: [11, 8]
+LPA pressures: [18, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [98.26626203874707, 29.06390819838516]
+RPA pressure: [11.718902610486348, 2.0555139788705943]
+LPA pressure: [29.007558263842224, 5.907309036552443]
+RPA flow split: 0.5951404366596533
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 24]
+RPA pressures: [11, 8]
+LPA pressures: [18, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [98.26626203874707, 29.06390819838516]
+RPA pressure: [11.718902610486348, 2.0555139788705943]
+LPA pressure: [29.007558263842224, 5.907309036552443]
+RPA flow split: 0.5951404366596533
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 24]
+RPA pressures: [11, 8]
+LPA pressures: [18, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [98.26626203874707, 29.06390819838516]
+RPA pressure: [11.718902610486348, 2.0555139788705943]
+LPA pressure: [29.007558263842224, 5.907309036552443]
+RPA flow split: 0.5951404366596533
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 6, 24]
+RPA pressures: [11, 6, 8]
+LPA pressures: [18, 10, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 6, 24]
+RPA pressures: [11, 6, 8]
+LPA pressures: [18, 10, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [67.9583224980893, 4.933928784566941, 30.52732758618815]
+RPA pressure: [14.49238910947551, -1.3732352454710972, 3.285455919143755]
+LPA pressure: [44.10859757487083, 8.033448970873783, 29.59192959297594]
+RPA flow split: 0.05317100882124106
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 6, 24]
+RPA pressures: [11, 6, 8]
+LPA pressures: [18, 10, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [98.9165221174324, 2.719902548612506, 30.195501045614495]
+RPA pressure: [24.944006493460215, -4.4780518680164825, 6.328444676486985]
+LPA pressure: [34.23352941939396, -5.081087318437214, 7.169938496465198]
+RPA flow split: 0.48550715437484393
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 6, 24]
+RPA pressures: [11, 6, 8]
+LPA pressures: [18, 10, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 6, 24]
+RPA pressures: [11, 6, 8]
+LPA pressures: [18, 10, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 6, 24]
+RPA pressures: [11, 6, 8]
+LPA pressures: [18, 10, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [88.7124299317722, 6.107297726961267, 29.47658373002269]
+RPA pressure: [29.661283980478384, 1.3187771485708035, 9.650312170240973]
+LPA pressure: [37.754102435137405, 0.020847994832320537, 10.340856467460753]
+RPA flow split: 0.4786709283300037
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 6, 24]
+RPA pressures: [11, 6, 8]
+LPA pressures: [18, 10, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 6, 24]
+RPA pressures: [11, 6, 8]
+LPA pressures: [18, 10, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [43.06176368276581, 5.504624919555358, 16.364995742791308]
+RPA pressure: [42.37119532779049, 5.736242828422069, 16.347157821026983]
+LPA pressure: [42.41819126283227, 5.76218151850565, 16.344628896197676]
+RPA flow split: 0.23811350348236945
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 6, 24]
+RPA pressures: [11, 6, 8]
+LPA pressures: [18, 10, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [59.46581166667654, -4.682742313452726, 12.494236108681607]
+RPA pressure: [57.80498564834137, -4.366633386882774, 12.441241640774026]
+LPA pressure: [58.11765613637251, -4.390137767058204, 12.463350549514722]
+RPA flow split: 0.48731933619606577
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 6, 24]
+RPA pressures: [11, 6, 8]
+LPA pressures: [18, 10, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [60.09632257575255, -4.1353825031022815, 12.945851927525755]
+RPA pressure: [58.36272535410475, -3.931895403742952, 12.845774487000632]
+LPA pressure: [58.767989128387114, -3.9567763626464383, 12.918379280370168]
+RPA flow split: 0.43069204556650303
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 6, 24]
+RPA pressures: [11, 6, 8]
+LPA pressures: [18, 10, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [59.50281941835658, 0.38351839698702944, 17.687339600924204]
+RPA pressure: [23.572275798438923, 2.2952424385576214e-05, 6.832314233831912]
+LPA pressure: [57.610655205748614, 1.0318695211072393, 17.60499976817856]
+RPA flow split: 0.006194467986781854
+*** clinical targets ****
+Q: 17.875357500000003
+MPA pressures: [100, 6, 24]
+RPA pressures: [11, 6, 8]
+LPA pressures: [18, 10, 11]
+wedge pressure: 6
+RPA flow split: 0.39
+*** optimized values ****
+MPA pressure: [59.50281941835658, 0.38351839698702944, 17.687339600924204]
+RPA pressure: [23.572275798438923, 2.2952424385576214e-05, 6.832314233831912]
+LPA pressure: [57.610655205748614, 1.0318695211072393, 17.60499976817856]
+RPA flow split: 0.006194467986781854

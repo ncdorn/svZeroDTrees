@@ -5,12 +5,13 @@
     "is_full_pa_tree": false,
     "trees_exist": false,
     "mesh_surfaces_path": "/home/ndorn/Documents/Stanford/PhD/PPAS/svPPAS/models/AS1_SU0308_prestent/Meshes/1.8M_elements_v3/mesh-surfaces",
+    "task": "repair",
     "repair": [
         {
-        "type": "optimize stent",
-        "location": "proximal",
-        "value": [0.5, 0.5],
-        "objective": "flow split"
+            "type": "optimize stent",
+            "location": "proximal",
+            "value": [0.5, 0.5],
+            "objective": "flow split"
         }
     ]
 }

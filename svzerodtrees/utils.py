@@ -31,20 +31,30 @@ def get_pressure(result_array, branch, convert_to_mmHg=False):
 
     return pressures, systolic_p, diastolic_p, mean_p
 
-def plot_result(result_df, quantity, filepath):
+def plot_result(result_df, quantity, name, filepath, plot_mean=False):
     '''
     plot the result from a result dataframe
 
     :param result_df: result dataframe
     :param quantity: quantity to plot
+    :param name: name of the vessel
     :param filepath: path to save the plot
     '''
-
+    # get the data
+    t = []
+    data = []
+    for i, row in result_df.iterrows():
+        if row['name'] == name:
+            t.append(row.time)
+            data.append(row[quantity])
     plt.clf()
-    plt.plot(result_df['time'], result_df[quantity])
+    plt.plot(t, data)
+    if plot_mean:
+        plt.axhline(y=np.mean(data), color='r', linestyle='--', label='mean')
     plt.xlabel('time')
     plt.ylabel(quantity)
-    plt.title(quantity)
+    plt.title(name + ' ' + quantity + ' time series')
+    plt.legend()
     plt.pause(0.001)
     plt.savefig(filepath)
 
@@ -71,6 +81,29 @@ def plot_pressure(result_array, branch, save=False, fig_dir=None):
     else:
         plt.show()
 
+
+def inflow_from_file(config, inflow_file):
+    '''
+    update the inflow boundary condition in a config dict from a csv file
+
+    :param config: svzerodplus config dict
+    :param inflow_file: path to txt file with inflow data
+    '''
+    time = []
+    flow = []
+    with open(inflow_file, 'r') as ff:
+        for line in ff:
+            line = line.split(' ')
+            time.append(float(line[0]))
+            flow.append(float(line[1]))
+
+    for bc_config in config["boundary_conditions"]:
+        if bc_config["bc_name"] == "INFLOW":
+            bc_config["bc_values"]["Q"] = flow
+            bc_config["bc_values"]["t"] = time
+
+    return config
+    
 
 def get_outlet_data(config: dict, result_array, data_name: str, steady=True):
     '''
@@ -100,9 +133,9 @@ def get_outlet_data(config: dict, result_array, data_name: str, steady=True):
     return data_out
 
 
-def get_wss(vessels, viscosity, result_array, branch, steady=False):
+def get_wss(config, viscosity, result_array, branch, steady=False):
     '''
-    get the wss of a branch
+    get the wss of a branch in 
 
     :param vessel: vessel config dict
     :param result_array: svzerodplus result array from result handler
@@ -112,19 +145,22 @@ def get_wss(vessels, viscosity, result_array, branch, steady=False):
     :return wss: wss array for the branch
     '''
     
-    d = get_branch_d(vessels, viscosity, branch)
+    d = get_branch_d(config, branch, viscosity)
 
-    r = d / 2
+    r = d / 2 # UNITS: cm
 
     q_out = get_branch_result(result_array, 'flow_out', branch, steady)
+
+
     if steady:
         wss = q_out * 4 * viscosity / (np.pi * r ** 3)
+
     else:
         wss = [q * 4 * viscosity / (np.pi * r ** 3) for q in q_out]
 
     return wss
 
-def get_branch_d(config, viscosity, branch):
+def get_branch_d(vessels, branch, viscosity=0.04):
     '''
     this is the worst method ever made, I'm sorry to anyone that is reading this. Will update soon.
     get the diameter of a branch in units of cm
@@ -136,12 +172,11 @@ def get_branch_d(config, viscosity, branch):
     '''
     R = 0
     l = 0
-    for vessel_config in config["vessels"]:
+    for vessel_config in vessels:
         if get_branch_id(vessel_config)[0] == branch:
             # get total resistance of branch if it is split into multiple segments
             R += vessel_config["zero_d_element_values"].get("R_poiseuille")
             l += vessel_config["vessel_length"]
-            break
 
     d = ((128 * viscosity * l) / (np.pi * R)) ** (1 / 4)
 
@@ -933,3 +968,24 @@ def nlmin2cm3s(nlmin):
     '''
 
     return nlmin * 1.667e-8
+
+
+def plot_loss_fcn():
+    '''
+    plot the exponential loss function for optimization
+    '''
+
+    x = np.linspace(0, 105, 1000)
+
+    targ = 100
+
+    y = 10 ** (x - targ)
+
+    plt.plot(x, y)
+    plt.xlabel('Value')
+    plt.ylabel('Loss')
+    plt.title('Exponential Loss Function')
+    plt.show()
+
+if __name__ == '__main__':
+    plot_loss_fcn()

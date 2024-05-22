@@ -21,6 +21,7 @@ class ConfigHandler():
         self.vessel_map = {}
         self.junctions = {}
         self.bcs = {}
+
         self.simparams = None
 
         self.is_pulmonary = is_pulmonary
@@ -148,8 +149,13 @@ class ConfigHandler():
         # run the simulation
         result = run_svzerodplus(self.config)
 
+        result["time"] = self.get_time_series()
+
+        # add the vessels to the result handler
+        result_handler.vessels[label] = self.config['vessels']
         # add the result to the result handler
         result_handler.add_unformatted_result(result, label)
+        
 
 
     def assemble_config(self):
@@ -167,6 +173,14 @@ class ConfigHandler():
 
         # add the simulation parameters
         self._config['simulation_parameters'] = self.simparams.to_dict()
+
+        # add the valves
+        if hasattr(self, 'valves'):
+            self._config['valves'] = [valve.to_dict() for valve in self.valves.values()]
+
+        # add the chambers
+        if hasattr(self, 'chambers'):
+            self._config['chambers'] = [chamber.to_dict() for chamber in self.chambers.values()]
 
         # add the vessels
         self._config['vessels'] = [vessel.to_dict() for vessel in self.vessel_map.values()]
@@ -254,9 +268,6 @@ class ConfigHandler():
         '''
         get the time series from the config
         '''
-
-        t_min = min(self.config["boundary_conditions"][0]["bc_values"]["t"])
-        t_max = max(self.config["boundary_conditions"][0]["bc_values"]["t"])
 
         return np.linspace(min(self.config["boundary_conditions"][0]["bc_values"]["t"]), 
                            max(self.config["boundary_conditions"][0]["bc_values"]["t"]), 
@@ -367,6 +378,16 @@ class ConfigHandler():
                 child_vessel = self.vessel_map[junction.outlet_branches[0]]
                 child_vessel.parent = parent_vessel
                 parent_vessel.children.append(child_vessel)
+
+        if 'chambers' in self._config.keys():
+            self.chambers = {}
+            for chamber in self._config['chambers']:  
+                self.chambers[chamber['name']] = Chamber.from_config(chamber)
+
+        if 'valves' in self._config.keys():
+            self.valves = {}
+            for valve in self._config['valves']:
+                self.valves[valve['name']] = Valve.from_config(valve)
 
         # find the root vessel
         if self._config['vessels'] != []:
@@ -569,7 +590,7 @@ class Vessel():
         self._C_eq = self._C
         self._L_eq = self._L
         # get diameter with viscosity 0.04
-        self.diameter = ((128 * 0.04 * self.length) / (np.pi * self._R)) ** (1 / 4)
+        self._diameter = ((128 * 0.04 * self.length) / (np.pi * self._R)) ** (1 / 4)
     
     @classmethod
     def from_config(cls, config):
@@ -632,6 +653,8 @@ class Vessel():
         # add the segment number
         self.segs.append(get_branch_id(config)[1])
 
+        self._update_diameter()
+
         # add bc
         if 'boundary_conditions' in config:
             self.bc = config['boundary_conditions']
@@ -644,11 +667,14 @@ class Vessel():
     @R.setter
     def R(self, new_R):
         self._R = new_R
+        self._update_diameter()
 
     @property
     def R_eq(self):
         if len(self.children) != 0:
             self._update_R_eq()
+        else:
+            self._R_eq = self._R
         return self._R_eq
 
     def _update_R_eq(self):
@@ -686,7 +712,7 @@ class Vessel():
         return self._L_eq
 
     def _update_L_eq(self):
-        self._L_eq = self._L + (1 / sum([1 / child.R_eq for child in self.children]))
+        self._L_eq = self._L + (1 / sum([1 / child.L_eq for child in self.children]))
 
     @property
     def stenosis_coefficient(self):
@@ -705,6 +731,18 @@ class Vessel():
         for child in new_children:
             child.parent = self
         self._children = new_children
+
+    @property
+    def diameter(self):
+        return self._diameter
+    
+    @diameter.setter
+    def diameter(self, new_diameter):
+        self._diameter = new_diameter
+        self.R = 8 * 0.04 * self.length / (np.pi * (self._diameter / 2) ** 4)
+
+    def _update_diameter(self):
+        self._diameter = ((128 * 0.04 * self.length) / (np.pi * self.R)) ** (1 / 4)
 
 
 class Junction():
@@ -825,16 +863,40 @@ class BoundaryCondition():
         self.type = 'RESISTANCE'
 
         self._R = self.values['R']
+
+    def change_to_RCR(self):
+        '''
+        change the boundary condition to RCR
+        '''
+        self.values = {'Rp': 0.1 * self.values['R'],
+                       'Rd': 0.9 * self.values['R'],
+                       'C': 1e-5,
+                       'Pd': self.values['Pd']}
+        
+        self.type = 'RCR'
+
+        self._Rp = self.values['Rp']
+        self._Rd = self.values['Rd']
+        self._C = self.values['C']
     
     # a setter so we can change the resistances in the BC easier
     @property
     def R(self):
-        return self._R
+        if self.type == 'RESISTANCE':
+            return self._R
+        elif self.type == 'RCR':
+            return self._Rp + self._Rd
 
     @R.setter
     def R(self, new_R):
-        self._R = new_R
-        self.values['R'] = new_R
+        if self.type == 'RESISTANCE':
+            self._R = new_R
+            self.values['R'] = new_R
+        if self.type == 'RCR':
+            self._Rp = 0.1 * new_R
+            self._Rd = 0.9 * new_R
+            self.values['Rp'] = self._Rp
+            self.values['Rd'] = self._Rd
     
     @property
     def Rp(self):
@@ -992,3 +1054,54 @@ class CouplingBlock():
 
         return self.__dict__
     
+
+class Chamber():
+    '''class to handle chamber blocks'''
+
+    def __init__(self, config: dict):
+        self.name = config['name']
+        self.type = config['type']
+        self.values = config['values']
+    
+    @classmethod
+    def from_config(cls, config):
+        '''
+        create a chamber from a config dict
+
+        :param config: config dict
+        '''
+
+        return cls(config)
+    
+    def to_dict(self):
+        '''
+        convert the chamber to a dict for zerod solver use
+        '''
+
+        return self.__dict__
+    
+
+class Valve:
+    '''class to handle valve blocks'''
+
+    def __init__(self, config: dict):
+        self.name = config['name']
+        self.type = config['type']
+        self.params = config['params']
+    
+    @classmethod
+    def from_config(cls, config):
+        '''
+        create a valve from a config dict
+
+        :param config: config dict
+        '''
+
+        return cls(config)
+    
+    def to_dict(self):
+        '''
+        convert the valve to a dict for zerod solver use
+        '''
+
+        return self.__dict__

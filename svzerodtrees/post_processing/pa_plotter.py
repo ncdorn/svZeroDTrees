@@ -704,7 +704,7 @@ class PAanalyzer:
             else: 
                 self.vessel_map[branch] = self.combine_vessels(self.vessel_map[branch], self.Vessel(vessel_config))
             
-            self.vessel_map[branch].d = get_branch_d(self.config, self.config["simulation_parameters"]["viscosity"], branch)
+            self.vessel_map[branch].d = get_branch_d(self.config['vessels'], branch)
             # map vessel id to branch
         
         # loop through junctions and add children to parent vessels
