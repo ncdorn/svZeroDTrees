@@ -64,14 +64,6 @@ def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_
     return rpa_info, lpa_info, inflow_info
 
 
-def compute_flow():
-    '''
-    compute the flow at the outlet surface of a mesh
-    
-    awaiting advice from Martin on how to do this'''
-    
-    pass
-
 
 def get_coupled_surfaces(simulation_dir):
     '''
@@ -151,7 +143,7 @@ def get_nsteps(solver_input_file, svpre_file):
     return n_timesteps
 
 
-def prepare_simulation_dir(postop_dir, adapted_dir):
+def prepare_adapted_simdir(postop_dir, adapted_dir):
     '''
     prepare the adapted simulation directory with the properly edited simulation files
     '''
@@ -178,11 +170,58 @@ def prepare_simulation_dir(postop_dir, adapted_dir):
     write_svsolver_runscript(os.path.basename(adapted_dir))
 
 
-def write_svsolver_runscript(svpre_name, job_name='svFlowSolver', hours=6, nodes=4, procs_per_node=24):
+def setup_simdir_from_mesh(sim_dir, zerod_config, inflow_file):
+    '''
+    setup a simulation directory solely from a mesh-complete.
+    :param sim_dir: path to the simulation directory where the mesh complete is located
+    '''
+    # get the period of the inflow file
+    period = get_inflow_period(inflow_file)
+
+    mesh_complete = os.path.join(sim_dir, 'mesh-complete')
+    
+    # write svzerod_3dcoupling file
+    zerod_config_handler = ConfigHandler.from_json(zerod_config)
+    zerod_config_handler.generate_threed_coupler(sim_dir)
+
+
+    # write svpre file
+    inlet_idx, outlet_idxs = write_svpre_file(sim_dir, mesh_complete, period)
+
+    # write svzerod interface file
+    write_svzerod_interface(sim_dir, outlet_idxs) # PATH TO ZEROD COUPLER NEEDS TO BE CHANGED IF ON SHERLOCK
+
+    # write solver input file
+    write_solver_inp(sim_dir, outlet_idxs, period, 2)
+
+    # write numstart file
+    write_numstart(sim_dir)
+
+    # write run script
+    write_svsolver_runscript(sim_dir)
+
+    # move inflow file to simulation directory
+    os.system('cp ' + inflow_file + ' ' + sim_dir)
+
+
+
+def get_inflow_period(inflow_file):
+    '''
+    get the period of the inflow waveform
+    '''
+    df = pd.read_csv(inflow_file, sep='\s+', header=None, names=['time', 'flow'])
+    period = df['time'].max()
+
+    return period
+
+
+def write_svsolver_runscript(sim_dir, job_name='svFlowSolver', hours=6, nodes=4, procs_per_node=24):
     '''
     write a bash script to submit a job on sherlock'''
 
-    with open('run_solver.sh', 'w') as ff:
+    print('writing svsolver runscript...')
+
+    with open(os.path.join(sim_dir, 'run_solver.sh'), 'w') as ff:
         ff.write('#!/bin/bash \n\n')
         ff.write('#name of your job \n')
         ff.write('#SBATCH --job-name=' + job_name + '\n')
@@ -217,16 +256,19 @@ def write_svsolver_runscript(svpre_name, job_name='svFlowSolver', hours=6, nodes
         ff.write('ml qt/5.9.1 \n')
         ff.write('ml gcc/12.1.0 \n')
         ff.write('ml cmake \n\n')
-        ff.write('/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre ' + svpre_name + '.svpre \n')
+        ff.write('/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre ' + os.path.dirname(sim_dir) + '.svpre \n')
         ff.write('srun /home/users/ndorn/svSolver/svSolver-build/svSolver-build/mysolver \n')
 
 
-def write_svpre_file(mesh_complete, simname, period):
+def write_svpre_file(sim_dir, mesh_complete, period=1.0):
     '''
     write the svpre file for the simulation
     
+    :param sim_dir: path to the simulation directory
     :param mesh_complete: path to the mesh-complete directory
-    :param simname: name of the simulation or path to simdir'''
+    :param period: period of the flow waveform in seconds'''
+
+    print(f'writing {os.path.basename(os.path.abspath(sim_dir))}.svpre...')
 
     mesh_vtu = glob.glob(os.path.join(mesh_complete, '*.mesh.vtu'))[0]
     walls_combined = os.path.join(mesh_complete, 'walls_combined.vtp')
@@ -247,7 +289,7 @@ def write_svpre_file(mesh_complete, simname, period):
     mesh_exterior = mesh_exterior.replace(common_path, 'mesh-complete')
     inflow_vtp = inflow_vtp.replace(common_path, 'mesh-complete')
 
-    with open(simname + '.svpre', 'w') as svpre:
+    with open(os.path.join(sim_dir, os.path.basename(os.path.abspath(sim_dir)) + '.svpre'), 'w') as svpre:
         svpre.write('mesh_and_adjncy_vtu ' + mesh_vtu + '\n')
         # assign the surface ids
         outlet_idxs = []
@@ -282,18 +324,25 @@ def write_svpre_file(mesh_complete, simname, period):
     return inlet_idx, outlet_idxs
 
 
-def write_svzerod_interface(zerod_coupler, outlet_idxs, interface_path='/home/users/ndorn/svZeroDSolver/Release/src/interface/libsvzero_interface.so'):
+def write_svzerod_interface(sim_dir, outlet_idxs, interface_path='/home/users/ndorn/svZeroDSolver/Release/src/interface/libsvzero_interface.so'):
     '''
-    write the svZeroD_interface.dat file for the simulation'''
+    write the svZeroD_interface.dat file for the simulation
+    
+    :param sim_dir: path to the simulation directory
+    :param zerod_coupler: path to the 3D-0D coupling file'''
 
-    threed_coupler = ConfigHandler.from_json(zerod_coupler, is_pulmonary=False)
+    print('writing svZeroD interface file...')
+
+    zerod_coupler = os.path.join(sim_dir, 'svzerod_3Dcoupling.json')
+
+    threed_coupler = ConfigHandler.from_json(zerod_coupler, is_pulmonary=False, is_threed_interface=True)
 
     # get a map of bc names to outlet idxs
     outlet_blocks = [block.name for block in list(threed_coupler.coupling_blocks.values())]
 
     bc_to_outlet = zip(outlet_blocks, outlet_idxs)
 
-    with open('svZeroD_interface.dat', 'w') as ff:
+    with open(os.path.join(sim_dir, 'svZeroD_interface.dat'), 'w') as ff:
         ff.write('interface library path: \n')
         ff.write(interface_path + '\n\n')
 
@@ -317,13 +366,17 @@ def write_svzerod_interface(zerod_coupler, outlet_idxs, interface_path='/home/us
         ff.write('60.0\n\n')
 
 
-def write_solver_inp(outlet_idxs, period, n_cycles, dt=.0009):
+def write_solver_inp(sim_dir, outlet_idxs, period, n_cycles, dt=.001):
+    '''
+    write the solver.inp file for the simulation'''
+
+    print('writing solver.inp...')
 
     # Determine the number of time steps
     num_timesteps = int(math.ceil(period * n_cycles / dt))
     steps_btw_restarts = int(round(period / dt / 50))
 
-    with open('solver.inp','w') as solver_inp:
+    with open(os.path.join(sim_dir, 'solver.inp'),'w') as solver_inp:
         solver_inp.write('Density: 1.06\n')
         solver_inp.write('Viscosity: 0.04\n\n')
 
@@ -374,8 +427,10 @@ def write_solver_inp(outlet_idxs, period, n_cycles, dt=.0009):
     return (dt, num_timesteps, steps_btw_restarts)
 
 
-def write_numstart():
-    with open('numstart.dat', 'w') as numstart:
+def write_numstart(sim_dir):
+
+    print('writing numstart.dat...')
+    with open(os.path.join(sim_dir, 'numstart.dat'), 'w') as numstart:
         numstart.write('0')
 
 
@@ -425,6 +480,7 @@ def compute_flow_split(Q_svZeroD, svpre_file, n_steps=1000):
 
     return lpa_split, rpa_split
 
+
 def generate_flowsplit_results():
 
     preop_split = compute_flow_split('preop/Q_svZeroD', 'preop/preop.svpre')
@@ -439,9 +495,10 @@ def generate_flowsplit_results():
 
 
 if __name__ == '__main__':
-    Q_svZeroD = '/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/SimVascular/threed_models/AS2/preop/Q_svZeroD'
-    svpre_file = '/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/SimVascular/threed_models/AS2/preop/preop.svpre'
+    # setup a simulation dir from mesh
+    os.chdir('../threed_models/AS2_opt_fs')
 
-    compute_flow_split(Q_svZeroD, svpre_file)
+    setup_simdir_from_mesh('preop', 'zerod/AS2_prestent.json', 'inflow.flow')
+
 
     

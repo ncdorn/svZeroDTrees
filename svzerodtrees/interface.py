@@ -402,6 +402,12 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
 def run_threed_adaptation(preop_simulation_dir, postop_simulation_dir, adapted_simulation_dir):
     '''
     compute the microvasular adaptation for a 3d coupled soluiton and output an adapted config handler
+
+    required in each simulation directory:
+    - solver.inp
+    - .svpre file
+    - svzerod_3Dcoupling.json
+    - svZeroD_interface.dat
     '''
 
     # check that the directories are unique so we dont end up screwing stuff up by accident
@@ -442,8 +448,46 @@ def run_threed_adaptation(preop_simulation_dir, postop_simulation_dir, adapted_s
 
 
 
+def run_threed_from_msh(preop_simulation_dir, postop_simulation_dir, adapted_simulation_dir):
+    '''
+    run threed adaptation from preop and postop mesh files only
+    '''
 
+    # check that the directories are unique so we dont end up screwing stuff up by accident
+    if preop_simulation_dir == postop_simulation_dir:
+        raise Exception('preop and postop simulation directories are the same')
+    if preop_simulation_dir == adapted_simulation_dir:
+        raise Exception('preop and adapted simulation directories are the same')
+    if postop_simulation_dir == adapted_simulation_dir:
+        raise Exception('postop and adapted simulation directories are the same')
 
+    # naming generally follows name or directory
+    preop_simname = os.path.basename(preop_simulation_dir)
+    # load the preop config handler
+    preop_config_handler = ConfigHandler.from_json(preop_simulation_dir + '/svzerod_3Dcoupling.json', is_pulmonary=False, is_threed_interface=True)
 
+    preop.construct_coupled_cwss_trees(preop_config_handler, preop_simulation_dir, n_procs=12)
+
+    # need to get the period and timestep size of the simulation to accurately compute the mean flow
+    n_steps = get_nsteps(preop_simulation_dir + '/solver.inp', preop_simulation_dir + '/' + preop_simname + '.svpre')
+
+    # load in the preop and postop outlet flowrates from the 3d simulation.
+    # the Q_svZeroD file needs to be in the top level of the simulation directory
+    preop_q = pd.read_csv(preop_simulation_dir + '/Q_svZeroD', sep='\s+')
+    preop_mean_q = preop_q.iloc[-n_steps:].mean(axis=0).values
+
+    postop_q = pd.read_csv(postop_simulation_dir + '/Q_svZeroD', sep='\s+')
+    postop_mean_q = postop_q.iloc[-n_steps:].mean(axis=0).values
+
+    # adapt the bcs
+    adaptation.adapt_constant_wss_threed(preop_config_handler, preop_mean_q, postop_mean_q)
+
+    # save the adapted config
+
+    print('adapted config being saved to ' + adapted_simulation_dir + '/svzerod_3Dcoupling.json')
+
+    preop_config_handler.to_json(adapted_simulation_dir + '/svzerod_3Dcoupling.json')
+
+    prepare_simulation_dir(postop_simulation_dir, adapted_simulation_dir)
     
 

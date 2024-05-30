@@ -14,13 +14,13 @@ class ConfigHandler():
     def __init__(self, config: dict, is_pulmonary=True, is_threed_interface=False, closed_loop=False):
         self._config = config
 
-        self.trees = []
+        self.trees = [] # list of StructuredTreeOutlet instances
 
         # initialize config maps
-        self.branch_map = {}
-        self.vessel_map = {}
-        self.junctions = {}
-        self.bcs = {}
+        self.branch_map = {} # {branch id: Vessel instance}
+        self.vessel_map = {} # {vessel id: Vessel instance}
+        self.junctions = {} # {junction name: Junction instance}
+        self.bcs = {} # {bc name: BoundaryCondition instance}
 
         self.simparams = None
 
@@ -530,7 +530,7 @@ class ConfigHandler():
 
         # copy over the bcs
         threed_coupler.bcs = self.bcs
-        del threed_coupler.bcs["INFLOW"]
+        del threed_coupler.bcs["INFLOW"] # TODO: make it such that the inflow is a boundary condition for the 3D model
 
         # create the coupling blocks
         for bc in threed_coupler.bcs.values():
