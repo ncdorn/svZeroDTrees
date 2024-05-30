@@ -88,6 +88,7 @@ The highest level command is `run_from_file(config.json)` examples of `config.js
         }
 }
 ```
+see more information [here](examples/construct_tree/README.md) and example code [here](examples/construct_tree/)
 
 ### 0d stent repair
 ```json
