@@ -1,0 +1,13 @@
+{   "name": "construct_trees_example",
+"model": "simple_config",
+"adapt": "cwss",
+"optimized": false,
+"is_full_pa_tree": false,
+"trees_exist": false,
+"mesh_surfaces_path": "",
+"task": "construct_trees",
+"construct_trees": {
+    "tree_type": "cwss"
+    }
+}
+

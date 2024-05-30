@@ -45,6 +45,9 @@ def run_from_file(exp_config_file: str, vis_trees=True):
 
         sys.exit() # exit the program
     elif task == 'construct_trees':
+        log_file = expname + '.log'
+        config_handler = ConfigHandler.from_json(modelname + '.json', is_pulmonary=is_full_pa)
+        result_handler = ResultHandler.from_config_handler(config_handler)
         if task_params['tree_type'] == 'cwss':
             # construct trees
             preop.construct_cwss_trees(config_handler,
@@ -70,6 +73,8 @@ def run_from_file(exp_config_file: str, vis_trees=True):
             config_handler.to_file_w_trees('config_w_ps_trees.in')
         else:
             raise Exception('invalid tree type specified')
+        
+        sys.exit() # exit the program
     else:
         raise Exception('invalid task specified')
 
