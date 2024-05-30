@@ -80,9 +80,12 @@ class StentOptimization:
 
         # create a lower bound for the optimization that is the original vessel diameter
         
-
-        stent = Bounds(lb=[self.preop_config_handler.branch_map[branch].diameter for branch in self.branches],
-                          ub=[2.2 for branch in self.branches])
+        if len(self.branches) == len(self.repair_config['value']):
+            stent = Bounds(lb=[self.preop_config_handler.branch_map[branch].diameter for branch in self.branches],
+                            ub=[2.2 for branch in self.branches])
+        else:
+            stent = Bounds(lb=[0.2] * len(self.repair_config['value']),
+                            ub=[2.2] * len(self.repair_config['value']))
         
         result = minimize(self.simple_objective, self.repair_config["value"], args=(self.branches),bounds=stent, method='Nelder-Mead')
 

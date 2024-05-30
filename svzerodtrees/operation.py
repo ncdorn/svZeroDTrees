@@ -35,6 +35,17 @@ def repair_stenosis(config_handler: ConfigHandler, result_handler: ResultHandler
     elif type(repair_config['location']) is list: 
         repair_branches = repair_config['location']
 
+    # if the number of repair degrees does not match the number of vessels
+    if len(repair_branches) != len(repair_config['value']):
+        # reduce the dimensionality of the optimization, by evenly assigning values to multiple branches
+        n_branches = int(len(repair_branches) / len(repair_config['value']))
+        repair_vals = repair_config['value']
+        repair_config['value'] = []
+        for value in repair_vals:
+            repair_config['value'] += [value] * n_branches
+        write_to_log(log_file, f"number of repair degrees does not match the number of vessels, distributing values {repair_config['value']}")
+
+
     stenoses = [] # list of stenosis objects
 
     for branch, value in zip(repair_branches, repair_config['value']):

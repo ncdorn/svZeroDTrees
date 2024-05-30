@@ -11,7 +11,7 @@ class ConfigHandler():
     class to handle configs with and without trees
     '''
 
-    def __init__(self, config: dict, is_pulmonary=True, is_threed_interface=False):
+    def __init__(self, config: dict, is_pulmonary=True, is_threed_interface=False, closed_loop=False):
         self._config = config
 
         self.trees = []
@@ -31,8 +31,8 @@ class ConfigHandler():
         self.map_vessels_to_branches()
         self.build_config_map()
 
-        # compute equivalent resistance
-        # self.compute_R_eq()
+        if closed_loop:
+            print('this is a closed loop simulation!')
 
     #### I/O METHODS ####
     @classmethod

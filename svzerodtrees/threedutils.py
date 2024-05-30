@@ -379,14 +379,9 @@ def write_numstart():
         numstart.write('0')
 
 
-def compute_flow_split(Q_svZeroD, svpre_file, n_steps=1000):
+def get_lpa_rpa_idxs(svpre_file):
     '''
-    compute the flow at the outlet surface of a mesh
-    
-    :param Q_svZeroD: path to the svZeroD flow file
-    :param svpre_file: path to the svpre file'''
-
-    # get the indices of the LPA and RPA outlets
+    get the lpa and rpa indexes from the svpre file'''
     lpa_idxs = []
     rpa_idxs = []
     with open(svpre_file, 'r') as ff:
@@ -398,6 +393,19 @@ def compute_flow_split(Q_svZeroD, svpre_file, n_steps=1000):
                     lpa_idxs.append(line_objs[2].strip('\n'))
                 elif 'rpa' in line_objs[1].lower():
                     rpa_idxs.append(line_objs[2].strip('\n'))
+
+    return lpa_idxs, rpa_idxs
+
+
+def compute_flow_split(Q_svZeroD, svpre_file, n_steps=1000):
+    '''
+    compute the flow at the outlet surface of a mesh
+    
+    :param Q_svZeroD: path to the svZeroD flow file
+    :param svpre_file: path to the svpre file'''
+
+    # get the indices of the LPA and RPA outlets
+    lpa_idxs, rpa_idxs = get_lpa_rpa_idxs(svpre_file)
 
     q = pd.read_csv(Q_svZeroD, sep='\s+')
 
@@ -416,6 +424,18 @@ def compute_flow_split(Q_svZeroD, svpre_file, n_steps=1000):
     print('flow split LPA/RPA: ' + str(round(q_lpa / (q_lpa + q_rpa), 3) * 100) + '% /' + str(round(q_rpa / (q_lpa + q_rpa), 3) * 100) + '%')
 
     return lpa_split, rpa_split
+
+def generate_flowsplit_results():
+
+    preop_split = compute_flow_split('preop/Q_svZeroD', 'preop/preop.svpre')
+    postop_split = compute_flow_split('postop/Q_svZeroD', 'postop/postop.svpre')
+    adapted_split = compute_flow_split('adapted/Q_svZeroD', 'adapted/adapted.svpre')
+
+    with open('flow_split_results.txt', 'w') as f:
+        f.write('flow splits as LPA/RPA\n\n')
+        f.write('preop flow split: ' + str(preop_split[0]) + '/' + str(preop_split[1]) + '\n')
+        f.write('postop flow split: ' + str(postop_split[0]) + '/' + str(postop_split[1]) + '\n')
+        f.write('adapted flow split: ' + str(adapted_split[0]) + '/' + str(adapted_split[1]) + '\n')
 
 
 if __name__ == '__main__':
