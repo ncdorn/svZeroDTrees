@@ -532,8 +532,8 @@ def run_threed_from_msh(preop_simulation_dir,
     time.sleep(300)
     while not preop_complete and not postop_complete:
         time.sleep(150)
-        timestep = 0
-        with open(os.path.join(preop_simulation_dir, '*-procs_case/histor.dat'), 'r') as histor_dat:
+        # we will assume that we are using 48 processors for the simulations
+        with open(os.path.join(preop_simulation_dir, '48-procs_case/histor.dat'), 'r') as histor_dat:
             lines = histor_dat.readlines()
             if num_timesteps == int(lines[-1].split()[0]):
                 # wait to finish up last timestep
@@ -541,7 +541,7 @@ def run_threed_from_msh(preop_simulation_dir,
                 preop_complete = True
                 print('preop simulation complete!')
         
-        with open(os.path.join(postop_simulation_dir, '*-procs_case/histor.dat'), 'r') as histor_dat:
+        with open(os.path.join(postop_simulation_dir, '48-procs_case/histor.dat'), 'r') as histor_dat:
             lines = histor_dat.readlines()
             if num_timesteps == int(lines[-1].split()[0]):
                 # wait to finish up last timestep

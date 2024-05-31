@@ -200,7 +200,8 @@ def setup_simdir_from_mesh(sim_dir, zerod_config, write_shell_script=False):
     write_numstart(sim_dir)
 
     # write run script
-    write_svsolver_runscript(sim_dir)
+    nodes = 4
+    write_svsolver_runscript(sim_dir), 
 
     # move inflow file to simulation directory
     # os.system('cp ' + inflow_file + ' ' + sim_dir)
@@ -218,7 +219,7 @@ def get_inflow_period(inflow_file):
     return period
 
 
-def write_svsolver_runscript(sim_dir, job_name='svFlowSolver', hours=6, nodes=4, procs_per_node=24):
+def write_svsolver_runscript(sim_dir, job_name='svFlowSolver', hours=6, nodes=2, procs_per_node=24):
     '''
     write a bash script to submit a job on sherlock'''
 
