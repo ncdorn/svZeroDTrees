@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import time
 import pickle
 from svzerodtrees import preop, operation, adaptation
 from svzerodtrees.optimization import StentOptimization
@@ -41,9 +42,49 @@ def run_from_file(exp_config_file: str, vis_trees=True):
         repair_config = exp_config['repair']
     elif task == 'threed_adaptation':
         # compute 3D adaptation
-        run_threed_adaptation(task_params['preop_dir'], task_params['postop_dir'], task_params['adapted_dir'])
+        # run_threed_adaptation(task_params['preop_dir'], task_params['postop_dir'], task_params['adapted_dir'])
+        if optimized:
+            run_threed_from_msh(
+                task_params['preop_dir'],
+                task_params['postop_dir'],
+                task_params['adapted_dir'],
+                task_params['zerod_config'],
+                task_params['svpre_path'],
+                task_params['svsolver_path'],
+                task_params['svpost_path']
+            )
+        else:
+            # optimize the zerod model and then run the 3d simulations
+            if is_full_pa:
+                config_handler, result_handler, pa_config = preop.optimize_pa_bcs(
+                    task_params['zerod_config'],
+                    os.path.join(task_params['preop_dir'], 'mesh-complete', 'mesh-surfaces'),
+                    os.path.join(os.path.dirname(task_params['zero_config']), 'clinical_targets.csv')
+                )
+
+            else:
+                config_handler, result_handler = preop.optimize_outlet_bcs(
+                    task_params['zerod_config'],
+                    os.path.join(os.path.dirname(task_params['zero_config']), 'clinical_targets.csv')
+                )
+
+            # save optimized config and result
+            preop_config_path = os.path.join(os.path.dirname(task_params['zero_config']), 'preop_config.json')
+            config_handler.to_json(preop_config_path)
+
+            run_threed_from_msh(
+                task_params['preop_dir'],
+                task_params['postop_dir'],
+                task_params['adapted_dir'],
+                preop_config_path,
+                task_params['svpre_path'],
+                task_params['svsolver_path'],
+                task_params['svpost_path']
+            )
 
         sys.exit() # exit the program
+
+
     elif task == 'construct_trees':
         log_file = expname + '.log'
         config_handler = ConfigHandler.from_json(modelname + '.json', is_pulmonary=is_full_pa)
@@ -162,8 +203,7 @@ def run_from_file(exp_config_file: str, vis_trees=True):
             config_handler, result_handler = preop.optimize_outlet_bcs(
                 input_file,
                 clinical_targets,
-                log_file,
-                show_optimization=False
+                log_file
             )
 
         # save optimized config and result
@@ -444,11 +484,16 @@ def run_threed_adaptation(preop_simulation_dir, postop_simulation_dir, adapted_s
 
     preop_config_handler.to_json(adapted_simulation_dir + '/svzerod_3Dcoupling.json')
 
-    prepare_simulation_dir(postop_simulation_dir, adapted_simulation_dir)
+    prepare_adapted_simdir(postop_simulation_dir, adapted_simulation_dir)
 
 
-
-def run_threed_from_msh(preop_simulation_dir, postop_simulation_dir, adapted_simulation_dir):
+def run_threed_from_msh(preop_simulation_dir, 
+                        postop_simulation_dir, 
+                        adapted_simulation_dir, 
+                        zerod_config,
+                        svpre_path=None,
+                        svsolver_path=None,
+                        svpost_path=None):
     '''
     run threed adaptation from preop and postop mesh files only
     '''
@@ -461,23 +506,60 @@ def run_threed_from_msh(preop_simulation_dir, postop_simulation_dir, adapted_sim
     if postop_simulation_dir == adapted_simulation_dir:
         raise Exception('postop and adapted simulation directories are the same')
 
-    # naming generally follows name or directory
-    preop_simname = os.path.basename(preop_simulation_dir)
-    # load the preop config handler
-    preop_config_handler = ConfigHandler.from_json(preop_simulation_dir + '/svzerod_3Dcoupling.json', is_pulmonary=False, is_threed_interface=True)
+    # save which directory we are in
+    wd = os.getcwd()
+    # setup preop dir
+    num_timesteps = setup_simdir_from_mesh(preop_simulation_dir, zerod_config)
+    # run preop simulation
+    os.chdir(preop_simulation_dir)
+    print('submitting preop simulation job...')
+    os.system('sbatch run_solver.sh')
+    os.chdir(wd)
 
-    preop.construct_coupled_cwss_trees(preop_config_handler, preop_simulation_dir, n_procs=12)
+    # setup postop dir, num timesteps assumed to be same
+    setup_simdir_from_mesh(postop_simulation_dir, zerod_config)
+    # run postop simulation
+    os.chdir(postop_simulation_dir)
+    print('submitting postop simulation job...')
+    os.system('sbatch run_solver.sh')
+    os.chdir(wd)
 
-    # need to get the period and timestep size of the simulation to accurately compute the mean flow
-    n_steps = get_nsteps(preop_simulation_dir + '/solver.inp', preop_simulation_dir + '/' + preop_simname + '.svpre')
+    # check if the simulations have run
+    preop_complete = False
+    postop_complete = False
+
+    time.sleep(300)
+    while not preop_complete and not postop_complete:
+        time.sleep(150)
+        timestep = 0
+        with open(os.path.join(preop_simulation_dir, '*-procs_case/histor.dat'), 'r') as histor_dat:
+            lines = histor_dat.readlines()
+            if num_timesteps == int(lines[-1].split()[0]):
+                # wait to finish up last timestep
+                time.sleep(120)
+                preop_complete = True
+                print('preop simulation complete!')
+        
+        with open(os.path.join(postop_simulation_dir, '*-procs_case/histor.dat'), 'r') as histor_dat:
+            lines = histor_dat.readlines()
+            if num_timesteps == int(lines[-1].split()[0]):
+                # wait to finish up last timestep
+                time.sleep(120)
+                postop_complete = True
+                print('postop simulation complete!')
 
     # load in the preop and postop outlet flowrates from the 3d simulation.
     # the Q_svZeroD file needs to be in the top level of the simulation directory
     preop_q = pd.read_csv(preop_simulation_dir + '/Q_svZeroD', sep='\s+')
-    preop_mean_q = preop_q.iloc[-n_steps:].mean(axis=0).values
+    preop_mean_q = preop_q.iloc[-num_timesteps / 2:].mean(axis=0).values
 
     postop_q = pd.read_csv(postop_simulation_dir + '/Q_svZeroD', sep='\s+')
-    postop_mean_q = postop_q.iloc[-n_steps:].mean(axis=0).values
+    postop_mean_q = postop_q.iloc[-num_timesteps / 2:].mean(axis=0).values
+
+    # initialize preop config handler
+    preop_config_handler = ConfigHandler.from_json(zerod_config)
+
+    print('computing boundary condition adaptation...')
 
     # adapt the bcs
     adaptation.adapt_constant_wss_threed(preop_config_handler, preop_mean_q, postop_mean_q)
@@ -488,6 +570,14 @@ def run_threed_from_msh(preop_simulation_dir, postop_simulation_dir, adapted_sim
 
     preop_config_handler.to_json(adapted_simulation_dir + '/svzerod_3Dcoupling.json')
 
-    prepare_simulation_dir(postop_simulation_dir, adapted_simulation_dir)
+    prepare_adapted_simdir(postop_simulation_dir, adapted_simulation_dir)
+
+    # run simulation
+    os.chdir(adapted_simulation_dir)
+    print('submitting adapted simulation job...')
+    os.system('sbatch run_solver.sh')
+    os.chdir(wd)
+
+    print('all simulations complete!')
     
 

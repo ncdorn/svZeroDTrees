@@ -501,7 +501,7 @@ class ConfigHandler():
             return [self.vessel_map[id].to_dict() for id in self.branch_map[branch].ids]
         
     
-    def generate_threed_coupler(self, simdir):
+    def generate_threed_coupler(self, simdir, inflow_from_0d=False):
         '''
         create a 3D-0D coupling blocks config from the boundary conditions and save it to a json
 
@@ -530,12 +530,20 @@ class ConfigHandler():
 
         # copy over the bcs
         threed_coupler.bcs = self.bcs
-        del threed_coupler.bcs["INFLOW"] # TODO: make it such that the inflow is a boundary condition for the 3D model
+        if not inflow_from_0d:
+            del threed_coupler.bcs["INFLOW"] 
 
         # create the coupling blocks
         for bc in threed_coupler.bcs.values():
-            block_name = bc.name.replace('_','')
-            threed_coupler.coupling_blocks[block_name] = CouplingBlock.from_bc(bc)
+            if bc.name == 'INFLOW':
+                # inflow bc, need to change name and location
+                threed_coupler.coupling_blocks['INFLOW_mpa'] = CouplingBlock.from_bc(bc, location='outlet')
+                # names between coupling blocks and bc blocks cannot match!!
+                threed_coupler.coupling_blocks['INFLOW_mpa'].name = 'INFLOW_mpa'
+            else:
+                # outlet bc
+                block_name = bc.name.replace('_','')
+                threed_coupler.coupling_blocks[block_name] = CouplingBlock.from_bc(bc)
 
         print('writing svzerod_3Dcoupling.json...')
         threed_coupler.to_json(os.path.join(simdir, 'svzerod_3Dcoupling.json'))
@@ -544,6 +552,18 @@ class ConfigHandler():
 
         return coupling_block_list
 
+
+    def generate_inflow_file(self, simdir):
+        '''
+        generate and inflow.flow file from the inflow bc of the zerod model'''
+
+        print('writing inflow.flow...')
+
+        with open(os.path.join(simdir, 'inflow.flow'), 'w') as ff:
+            for t, q in zip(self.bcs["INFLOW"].values['t'], self.bcs["INFLOW"].values['Q']):
+                ff.write(f'{t} {q}\n')
+
+        return max(self.bcs["INFLOW"].values['t'])
 
     @property
     def config(self):

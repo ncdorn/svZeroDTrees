@@ -170,20 +170,22 @@ def prepare_adapted_simdir(postop_dir, adapted_dir):
     write_svsolver_runscript(os.path.basename(adapted_dir))
 
 
-def setup_simdir_from_mesh(sim_dir, zerod_config, inflow_file):
+def setup_simdir_from_mesh(sim_dir, zerod_config, write_shell_script=False):
     '''
     setup a simulation directory solely from a mesh-complete.
     :param sim_dir: path to the simulation directory where the mesh complete is located
     '''
     # get the period of the inflow file
-    period = get_inflow_period(inflow_file)
+    # period = get_inflow_period(inflow_file)
+
 
     mesh_complete = os.path.join(sim_dir, 'mesh-complete')
     
     # write svzerod_3dcoupling file
     zerod_config_handler = ConfigHandler.from_json(zerod_config)
+    period = zerod_config_handler.generate_inflow_file(sim_dir)
     zerod_config_handler.generate_threed_coupler(sim_dir)
-
+    
 
     # write svpre file
     inlet_idx, outlet_idxs = write_svpre_file(sim_dir, mesh_complete, period)
@@ -192,7 +194,7 @@ def setup_simdir_from_mesh(sim_dir, zerod_config, inflow_file):
     write_svzerod_interface(sim_dir, outlet_idxs) # PATH TO ZEROD COUPLER NEEDS TO BE CHANGED IF ON SHERLOCK
 
     # write solver input file
-    write_solver_inp(sim_dir, outlet_idxs, period, 2)
+    dt, num_timesteps, timesteps_btwn_restart = write_solver_inp(sim_dir, outlet_idxs, period, 2)
 
     # write numstart file
     write_numstart(sim_dir)
@@ -201,8 +203,9 @@ def setup_simdir_from_mesh(sim_dir, zerod_config, inflow_file):
     write_svsolver_runscript(sim_dir)
 
     # move inflow file to simulation directory
-    os.system('cp ' + inflow_file + ' ' + sim_dir)
+    # os.system('cp ' + inflow_file + ' ' + sim_dir)
 
+    return num_timesteps
 
 
 def get_inflow_period(inflow_file):
@@ -258,6 +261,9 @@ def write_svsolver_runscript(sim_dir, job_name='svFlowSolver', hours=6, nodes=4,
         ff.write('ml cmake \n\n')
         ff.write('/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre ' + os.path.dirname(sim_dir) + '.svpre \n')
         ff.write('srun /home/users/ndorn/svSolver/svSolver-build/svSolver-build/mysolver \n')
+        ff.write(f'cd {nodes * procs_per_node}-procs_case \n')
+        ff.write(f'postsolver -start 1500 -stop 2000 -incr 50 -sol -vtkcombo -vtu post.vtu \n')
+        ff.write('mv post.vtu .. \n')
 
 
 def write_svpre_file(sim_dir, mesh_complete, period=1.0):
@@ -305,7 +311,6 @@ def write_svpre_file(sim_dir, mesh_complete, period=1.0):
         svpre.write('initial_pressure 0\n')
         svpre.write('initial_velocity 0.0001 0.0001 0.0001\n')
         svpre.write('prescribed_velocities_vtp ' + inflow_vtp + '\n')
-
         svpre.write('bct_analytical_shape parabolic\n')
         svpre.write('bct_period ' + str(period) + '\n')
         svpre.write('bct_point_number 201\n')
@@ -424,7 +429,7 @@ def write_solver_inp(sim_dir, outlet_idxs, period, n_cycles, dt=.001):
         solver_inp.write('Flow Advection Form: Convective\n')
         solver_inp.write('Quadrature Rule on Interior: 2\n')
         solver_inp.write('Quadrature Rule on Boundary: 3\n')
-    return (dt, num_timesteps, steps_btw_restarts)
+    return dt, num_timesteps, steps_btw_restarts
 
 
 def write_numstart(sim_dir):
@@ -498,7 +503,7 @@ if __name__ == '__main__':
     # setup a simulation dir from mesh
     os.chdir('../threed_models/AS2_opt_fs')
 
-    setup_simdir_from_mesh('preop', 'zerod/AS2_prestent.json', 'inflow.flow')
+    setup_simdir_from_mesh('preop', 'zerod/AS2_prestent.json')
 
 
     

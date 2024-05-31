@@ -23,7 +23,7 @@ def optimize_outlet_bcs(input_file,
                         make_steady=False,
                         steady=True,
                         change_to_R=False,
-                        show_optimization=True):
+                        show_optimization=False):
     '''
     optimize the outlet boundary conditions of a 0D model by conjugate gradient method
 
