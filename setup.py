@@ -12,6 +12,7 @@ setup(
         'matplotlib >= 3.5.0',
         'networkx',
         'svsuperestimator',
+        'multiprocess',
         'pysvzerod',
         'pyyaml'
     ]

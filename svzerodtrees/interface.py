@@ -55,11 +55,12 @@ def run_from_file(exp_config_file: str, vis_trees=True):
             )
         else:
             # optimize the zerod model and then run the 3d simulations
+            print('optimizing zerod model to find BCs')
             if is_full_pa:
                 config_handler, result_handler, pa_config = preop.optimize_pa_bcs(
                     task_params['zerod_config'],
                     os.path.join(task_params['preop_dir'], 'mesh-complete', 'mesh-surfaces'),
-                    os.path.join(os.path.dirname(task_params['zero_config']), 'clinical_targets.csv')
+                    os.path.join(os.path.dirname(task_params['zerod_config']), 'clinical_targets.csv')
                 )
 
             else:
