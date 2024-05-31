@@ -560,7 +560,7 @@ class ConfigHandler():
         print('writing inflow.flow...')
 
         with open(os.path.join(simdir, 'inflow.flow'), 'w') as ff:
-            for t, q in zip(self.bcs["INFLOW"].values['t'], self.bcs["INFLOW"].values['Q']):
+            for t, q in zip(self.bcs["INFLOW"].values['t'], [q * -1 for q in self.bcs["INFLOW"].values['Q']]):
                 ff.write(f'{t} {q}\n')
 
         return max(self.bcs["INFLOW"].values['t'])

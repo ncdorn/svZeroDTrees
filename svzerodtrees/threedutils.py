@@ -194,14 +194,14 @@ def setup_simdir_from_mesh(sim_dir, zerod_config, write_shell_script=False):
     write_svzerod_interface(sim_dir, outlet_idxs) # PATH TO ZEROD COUPLER NEEDS TO BE CHANGED IF ON SHERLOCK
 
     # write solver input file
-    dt, num_timesteps, timesteps_btwn_restart = write_solver_inp(sim_dir, outlet_idxs, period, 2)
+    dt, num_timesteps, steps_btwn_restart = write_solver_inp(sim_dir, outlet_idxs, period, n_cycles=2)
 
     # write numstart file
     write_numstart(sim_dir)
 
     # write run script
     nodes = 4
-    write_svsolver_runscript(sim_dir), 
+    write_svsolver_runscript(sim_dir, steps_btwn_restart), 
 
     # move inflow file to simulation directory
     # os.system('cp ' + inflow_file + ' ' + sim_dir)
@@ -219,7 +219,7 @@ def get_inflow_period(inflow_file):
     return period
 
 
-def write_svsolver_runscript(sim_dir, job_name='svFlowSolver', hours=6, nodes=2, procs_per_node=24):
+def write_svsolver_runscript(sim_dir, steps_btwn_restarts, job_name='svFlowSolver', hours=6, nodes=2, procs_per_node=24):
     '''
     write a bash script to submit a job on sherlock'''
 
@@ -263,7 +263,7 @@ def write_svsolver_runscript(sim_dir, job_name='svFlowSolver', hours=6, nodes=2,
         ff.write('/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre ' + os.path.basename(sim_dir) + '.svpre \n')
         ff.write('srun /home/users/ndorn/svSolver/svSolver-build/svSolver-build/mysolver \n')
         ff.write(f'cd {nodes * procs_per_node}-procs_case \n')
-        ff.write(f'postsolver -start 1500 -stop 2000 -incr 50 -sol -vtkcombo -vtu post.vtu \n')
+        ff.write(f'postsolver -start 1500 -stop 2000 -incr {steps_btwn_restarts} -sol -vtkcombo -vtu post.vtu \n')
         ff.write('mv post.vtu .. \n')
 
 
