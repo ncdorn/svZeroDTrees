@@ -259,7 +259,7 @@ def write_svsolver_runscript(sim_dir, job_name='svFlowSolver', hours=6, nodes=4,
         ff.write('ml qt/5.9.1 \n')
         ff.write('ml gcc/12.1.0 \n')
         ff.write('ml cmake \n\n')
-        ff.write('/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre ' + os.path.dirname(sim_dir) + '.svpre \n')
+        ff.write('/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre ' + os.path.basename(sim_dir) + '.svpre \n')
         ff.write('srun /home/users/ndorn/svSolver/svSolver-build/svSolver-build/mysolver \n')
         ff.write(f'cd {nodes * procs_per_node}-procs_case \n')
         ff.write(f'postsolver -start 1500 -stop 2000 -incr 50 -sol -vtkcombo -vtu post.vtu \n')

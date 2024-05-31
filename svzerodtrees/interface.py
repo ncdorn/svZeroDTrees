@@ -66,11 +66,11 @@ def run_from_file(exp_config_file: str, vis_trees=True):
             else:
                 config_handler, result_handler = preop.optimize_outlet_bcs(
                     task_params['zerod_config'],
-                    os.path.join(os.path.dirname(task_params['zero_config']), 'clinical_targets.csv')
+                    os.path.join(os.path.dirname(task_params['zerod_config']), 'clinical_targets.csv')
                 )
 
             # save optimized config and result
-            preop_config_path = os.path.join(os.path.dirname(task_params['zero_config']), 'preop_config.json')
+            preop_config_path = os.path.join(os.path.dirname(task_params['zerod_config']), 'preop_config.json')
             config_handler.to_json(preop_config_path)
 
             run_threed_from_msh(

@@ -1,13 +1,14 @@
 README.md
 setup.py
 svzerodtrees/__init__.py
+svzerodtrees/_closedloop_handler.py
 svzerodtrees/_config_handler.py
 svzerodtrees/_result_handler.py
 svzerodtrees/_simulation_handler.py
 svzerodtrees/adaptation.py
 svzerodtrees/interface.py
 svzerodtrees/operation.py
-svzerodtrees/postop.py
+svzerodtrees/optimization.py
 svzerodtrees/preop.py
 svzerodtrees/run_experiment.py
 svzerodtrees/structuredtreebc.py

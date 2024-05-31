@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import json
 import math
+from scipy.integrate import trapz
 from multiprocess import Pool
 from svzerodtrees.utils import *
 from svzerodtrees.threedutils import *
@@ -22,7 +23,7 @@ def optimize_outlet_bcs(input_file,
                         make_steady=False,
                         steady=True,
                         change_to_R=False,
-                        show_optimization=True):
+                        show_optimization=False):
     '''
     optimize the outlet boundary conditions of a 0D model by conjugate gradient method
 
@@ -97,7 +98,10 @@ def optimize_outlet_bcs(input_file,
         q_LPA = get_branch_result(zerod_result, branch=lpa_branch, data_name='flow_in', steady=steady)
 
         if steady: # take the mean pressure only
-            p_diff = abs(target_ps[2] - mpa_mean_p) ** 2
+            if type(target_ps) == int:
+                p_diff = abs(target_ps - mpa_mean_p) ** 2
+            else:
+                p_diff = abs(target_ps[2] - mpa_mean_p) ** 2
         else: # if unsteady, take sum of squares of mean, sys, dia pressure
             pred_p = np.array([
                 -mpa_sys_p,
@@ -174,7 +178,6 @@ def optimize_outlet_bcs(input_file,
     R_final = result.x # get the array of optimized resistances
     write_resistances(config_handler.config, R_final)
 
-    
 
     return config_handler, result_handler
 
@@ -210,13 +213,20 @@ def optimize_pa_bcs(input_file,
     result_handler = ResultHandler.from_config(config_handler.config)
 
     # set the inflow in case it is wrong
-    config_handler.set_inflow(clinical_targets.q)
+    if steady:
+        if np.mean(config_handler.bcs['INFLOW'].Q) != clinical_targets.q:
+            config_handler.set_inflow(clinical_targets.q)
 
     # if steady, change boundary conditions to R
     if steady:
         for bc in config_handler.bcs.values():
             if bc.type == 'RCR':
                 bc.change_to_R()
+
+    if not steady:
+        if config_handler.bcs['INFLOW'].t[-1] != clinical_targets.t:
+            scale  = clinical_targets.t / config_handler.bcs['INFLOW'].t[-1]
+            config_handler.bcs['INFLOW'].t = [t * scale for t in config_handler.bcs['INFLOW'].t]
 
     pa_config = PAConfig.from_config_handler(config_handler, clinical_targets)
 
@@ -227,7 +237,7 @@ def optimize_pa_bcs(input_file,
         print('beginning pa_config optimization iteration ' + str(i) + ' of ' + str(iterations) + '...')
 
         # distribute amongst all resistance conditions in the config
-        pa_config.optimize()
+        pa_config.optimize(steady=steady)
 
         write_to_log(log_file, "*** optimized values ****")
         write_to_log(log_file, "MPA pressure: " + str(pa_config.P_mpa))
@@ -238,7 +248,7 @@ def optimize_pa_bcs(input_file,
         # get outlet areas
         rpa_info, lpa_info, inflow_info = vtp_info(mesh_surfaces_path)
 
-        assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info)
+        assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info, steady=steady)
 
         # run the simulation
         result = run_svzerodplus(config_handler.config)
@@ -287,7 +297,7 @@ def optimize_pa_bcs(input_file,
     return config_handler, result_handler, pa_config
 
 
-def assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info):
+def assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info, steady=True):
     '''
     assign resistances proportional to outlet area to the RPA and LPA outlet bcs.
     this assumes that the rpa and lpa cap info has not changed info since export from simvascular.
@@ -302,6 +312,10 @@ def assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info):
 
     def Ri(Ai, A, R):
         return R * (A / Ai)
+    
+    if not steady:
+        def Ci(Ai, A, C):
+            return C * (Ai / A)
 
     # get RPA and LPA total area
     a_RPA = sum(rpa_info.values())
@@ -309,18 +323,28 @@ def assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info):
 
     # initialize list of resistances
     all_R = {}
+    if not steady: 
+        all_C = {}
+
+    # TODO: NEED TO ADD CAPACITANCE DISTRIBUTION BELOW
 
     for name, val in lpa_info.items():
         all_R[name] = Ri(val, a_LPA, pa_config.bcs["LPA_BC"].R)
+        if not steady:
+            all_C[name] = Ci(val, a_LPA, pa_config.bcs["LPA_BC"].C)
 
     for name, val in rpa_info.items():
         all_R[name] = Ri(val, a_RPA, pa_config.bcs["RPA_BC"].R)
+        if not steady: 
+            all_C[name] = Ci(val, a_RPA, pa_config.bcs["RPA_BC"].C)
 
     # write the resistances to the config
     bc_idx = 0
 
     # get all resistance values
     R_list = list(all_R.values())
+    if not steady: 
+        C_list = list(all_C.values())
 
     # change the proximal LPA and RPA branch resistances
     config_handler.change_branch_resistance(config_handler.lpa.branch, pa_config.lpa_prox.R)
@@ -337,7 +361,13 @@ def assign_pa_bcs(config_handler, pa_config, rpa_info, lpa_info):
         if bc.type == 'RESISTANCE':
             bc.R = R_list[bc_idx]
             bc.values['Pd'] = pa_config.clinical_targets.wedge_p * 1333.22 # convert wedge pressure from mmHg to dyn/cm2
-
+            bc_idx += 1
+    
+        elif bc.type == 'RCR':
+            # split the resistance
+            bc.Rp = R_list[bc_idx] * 0.1
+            bc.C = C_list[bc_idx]
+            bc.Rd = R_list[bc_idx] * 0.9
             bc_idx += 1
 
 
@@ -519,11 +549,12 @@ class ClinicalTargets():
     class to handle clinical target values
     '''
 
-    def __init__(self, mpa_p, lpa_p, rpa_p, q, rpa_split, wedge_p, steady):
+    def __init__(self, mpa_p, lpa_p, rpa_p, q, rpa_split, wedge_p, t, steady):
         '''
         initialize the clinical targets object
         '''
         
+        self.t = t
         self.mpa_p = mpa_p
         self.lpa_p = lpa_p
         self.rpa_p = rpa_p
@@ -544,6 +575,10 @@ class ClinicalTargets():
         cardiac_index = float(get_value_from_csv(clinical_targets, 'cardiac index'))
         q = bsa * cardiac_index * 16.667 # cardiac output in L/min. convert to cm3/s
 
+        # get the cycle duration
+        bpm = float(get_value_from_csv(clinical_targets, 'heart rate'))
+        t = 60 / bpm
+
         # get the mpa pressures
         mpa_pressures = get_value_from_csv(clinical_targets, 'mpa pressures') # mmHg
         mpa_sys_p, mpa_dia_p = mpa_pressures.split("/")
@@ -563,7 +598,6 @@ class ClinicalTargets():
         rpa_sys_p, rpa_dia_p = rpa_pressures.split("/")
         rpa_sys_p = int(rpa_sys_p)
         rpa_dia_p = int(rpa_dia_p)
-
         rpa_mean_p = int(get_value_from_csv(clinical_targets, 'rpa mean pressure'))
 
         # if steady, just take the mean
@@ -572,7 +606,7 @@ class ClinicalTargets():
             lpa_p = lpa_mean_p
             rpa_p = rpa_mean_p
         else:
-            mpa_p = [mpa_sys_p, mpa_dia_p, mpa_mean_p]
+            mpa_p = [mpa_sys_p, mpa_dia_p, mpa_mean_p] # just systolic and mean
             lpa_p = [lpa_sys_p, lpa_dia_p, lpa_mean_p]
             rpa_p = [rpa_sys_p, rpa_dia_p, rpa_mean_p]
 
@@ -582,7 +616,7 @@ class ClinicalTargets():
         # get RPA flow split
         rpa_split = float(get_value_from_csv(clinical_targets, 'pa flow split')[0:2]) / 100
 
-        return cls(mpa_p, lpa_p, rpa_p, q, rpa_split, wedge_p, steady=steady)
+        return cls(mpa_p, lpa_p, rpa_p, q, rpa_split, wedge_p, t, steady=steady)
 
         
     def log_clinical_targets(self, log_file):
@@ -610,7 +644,8 @@ class PAConfig():
                  rpa_dist: Vessel, 
                  inflow: BoundaryCondition, 
                  wedge_p: float,
-                 clinical_targets: ClinicalTargets):
+                 clinical_targets: ClinicalTargets,
+                 steady: bool):
         '''
         initialize the PAConfig object
         
@@ -636,6 +671,8 @@ class PAConfig():
 
         self.clinical_targets = clinical_targets
 
+        self.steady = steady
+
         self._config = {}
         self.junctions = {}
         self.vessel_map = {}
@@ -647,7 +684,7 @@ class PAConfig():
 
 
     @classmethod
-    def from_config_handler(cls, config_handler, clinical_targets: ClinicalTargets):
+    def from_config_handler(cls, config_handler, clinical_targets: ClinicalTargets, steady: bool=True):
         '''
         initialize from a general config handler
         '''
@@ -666,7 +703,7 @@ class PAConfig():
                 # "C": 1 / (config_handler.rpa.C_eq ** -1 - config_handler.rpa.C ** -1), # calculates way too large of a capacitance
                 "C": 0.0,
                 "L": config_handler.rpa.L_eq - config_handler.rpa.L, # L_RPA_distal
-                "R_poiseuille": config_handler.rpa.R_eq - config_handler.rpa.zero_d_element_values.get("R_poiseuille"), # R_RPA_distal
+                "R_poiseuille": config_handler.rpa.R_eq - config_handler.rpa.R, # R_RPA_distal
                 "stenosis_coefficient": 0.0
             }
         })
@@ -683,7 +720,7 @@ class PAConfig():
                 # "C": 1 / (config_handler.lpa.C_eq ** -1 - config_handler.lpa.C ** -1), # calculates way too large of a capacitance
                 "C": 0.0,
                 "L": config_handler.lpa.L_eq - config_handler.lpa.L, # L_LPA_distal
-                "R_poiseuille": config_handler.lpa.R_eq - config_handler.lpa.zero_d_element_values.get("R_poiseuille"), # R_LPA_distal
+                "R_poiseuille": config_handler.lpa.R_eq - config_handler.lpa.R, # R_LPA_distal
                 "stenosis_coefficient": 0.0
             }
         })
@@ -696,7 +733,8 @@ class PAConfig():
                    rpa_dist, 
                    config_handler.bcs["INFLOW"], 
                    config_handler.bcs[list(config_handler.bcs.keys())[1]].values["Pd"],
-                   clinical_targets)
+                   clinical_targets,
+                   steady)
 
 
     def to_json(self, output_file):
@@ -721,27 +759,58 @@ class PAConfig():
         '''
 
         # initialize the inflow
-        self.bcs = {
-            "INFLOW": inflow,
+        if inflow.Q[1] - inflow.Q[0] == 0:
+            print('steady inflow, optimizing resistance BCs')
+            # assume steady
+            self.bcs = {
+                "INFLOW": inflow,
 
-            "RPA_BC": BoundaryCondition.from_config({
-                "bc_name": "RPA_BC",
-                "bc_type": "RESISTANCE",
-                "bc_values": {
-                    "R": 1000.0,
-                    "Pd": wedge_p
-                }
-            }),
+                "RPA_BC": BoundaryCondition.from_config({
+                    "bc_name": "RPA_BC",
+                    "bc_type": "RESISTANCE",
+                    "bc_values": {
+                        "R": 1000.0,
+                        "Pd": wedge_p
+                    }
+                }),
 
-            "LPA_BC": BoundaryCondition.from_config({
-                "bc_name": "LPA_BC",
-                "bc_type": "RESISTANCE",
-                "bc_values": {
-                    "R": 1000.0,
-                    "Pd": wedge_p
-                }
-            })
-        }
+                "LPA_BC": BoundaryCondition.from_config({
+                    "bc_name": "LPA_BC",
+                    "bc_type": "RESISTANCE",
+                    "bc_values": {
+                        "R": 1000.0,
+                        "Pd": wedge_p
+                    }
+                })
+            }
+        else:
+            print('unsteady inflow, optimizing RCR BCs')
+            # unsteady, need RCR boundary conditions
+            self.bcs = {
+                "INFLOW": inflow,
+
+                "RPA_BC": BoundaryCondition.from_config({
+                    "bc_name": "RPA_BC",
+                    "bc_type": "RCR",
+                    "bc_values": {
+                        "Rp": 100.0,
+                        "C": 1e-4,
+                        "Rd": 900.0,
+                        "Pd": wedge_p
+                    }
+                }),
+
+                "LPA_BC": BoundaryCondition.from_config({
+                    "bc_name": "LPA_BC",
+                    "bc_type": "RCR",
+                    "bc_values": {
+                        "Rp": 100.0,
+                        "C": 1e-4,
+                        "Rd": 900.0,
+                        "Pd": wedge_p
+                    }
+                })
+            }
 
 
     def initialize_config_maps(self):
@@ -841,23 +910,134 @@ class PAConfig():
         return loss
     
 
-    def compute_unsteady_loss(self, fun='SSE'):
+    def compute_unsteady_loss(self, R_guess, fun='L2'):
+        '''
+        compute unsteady loss by adjusting the resistances in the proximal lpa and rpa'''
 
-        pass
+        blocks_to_optimize = [self.lpa_prox, self.rpa_prox, self.bcs['LPA_BC'], self.bcs['RPA_BC']]
+
+        self.lpa_prox.R, self.lpa_prox.C, self.rpa_prox.R, self.rpa_prox.C, self.bcs['LPA_BC'].R, self.bcs['LPA_BC'].C, self.bcs['RPA_BC'].R, self.bcs['RPA_BC'].C = R_guess
+        
+        # run the simulation
+        self.result = self.simulate()
+
+        self.result['time'] = np.linspace(min(self.config["boundary_conditions"][0]["bc_values"]["t"]), 
+                                          max(self.config["boundary_conditions"][0]["bc_values"]["t"]), 
+                                          self.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"])
+
+        # get the pressures
+        # rpa flow, for flow split optimization
+        self.Q_rpa = get_branch_result(self.result, 'flow_in', 3, steady=True)
+
+        self.Q_rpa = trapz(get_branch_result(self.result, 'flow_in', 3, steady=False), self.result['time'])
+
+        # mpa pressure
+        P_mpa = [p / 1333.2 for p in get_branch_result(self.result, 'pressure_in', 0, steady=False)]
+        self.P_mpa = [np.max(P_mpa), np.min(P_mpa), np.mean(P_mpa)] # just systolic and mean pressures
+
+        # rpa pressure
+        P_rpa = [p / 1333.2 for p in get_branch_result(self.result, 'pressure_out', 1, steady=False)]
+        self.P_rpa = [np.max(P_rpa), np.min(P_rpa), np.mean(P_rpa)]
+
+        # lpa pressure
+        P_lpa = [p / 1333.2 for p in get_branch_result(self.result, 'pressure_out', 3, steady=False)]
+        self.P_lpa = [np.max(P_lpa), np.min(P_lpa), np.mean(P_lpa)]
+
+        p_neg_loss = 0
+
+        for p in self.P_mpa + self.P_rpa + self.P_lpa:
+            if p < 0:
+                p_neg_loss += 10000
+
+        if fun == 'L2':
+            loss = np.sum(np.subtract(self.P_mpa, self.clinical_targets.mpa_p) ** 2) + \
+                np.sum(np.subtract(self.P_rpa, self.clinical_targets.rpa_p) ** 2) + \
+                np.sum(np.subtract(self.P_lpa, self.clinical_targets.lpa_p) ** 2) + \
+                100 * np.sum(np.subtract(self.Q_rpa, self.clinical_targets.q_rpa) ** 2) + \
+                np.sum(np.array([1 / block.R for block in [self.lpa_prox, self.rpa_prox]]) ** 2) + p_neg_loss
+        print('R_guess: ' + str(R_guess)) 
+        print('loss: ' + str(loss))
+
+        return loss
 
 
-    def optimize(self):
+    def compute_unsteady_loss_nonlin(self, R_guess, fun='L2'):
+        '''
+        compute unsteady loss by adjusting the stenosis coefficient of the proximal lpa and rpa'''
+
+        self.lpa_prox.stenosis_coefficient, self.lpa_prox.C, self.rpa_prox.stenosis_coefficient, self.rpa_prox.C, self.bcs['LPA_BC'].R, self.bcs['LPA_BC'].C, self.bcs['RPA_BC'].R, self.bcs['RPA_BC'].C = R_guess
+        
+        # run the simulation
+        self.result = self.simulate()
+
+        self.result['time'] = np.linspace(min(self.config["boundary_conditions"][0]["bc_values"]["t"]), 
+                                          max(self.config["boundary_conditions"][0]["bc_values"]["t"]), 
+                                          self.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"])
+
+        # get the pressures
+        # rpa flow, for flow split optimization
+        self.Q_rpa = get_branch_result(self.result, 'flow_in', 3, steady=True)
+
+        self.Q_rpa = trapz(get_branch_result(self.result, 'flow_in', 3, steady=False), self.result['time'])
+
+        # mpa pressure
+        P_mpa = [p / 1333.2 for p in get_branch_result(self.result, 'pressure_in', 0, steady=False)]
+        self.P_mpa = [np.max(P_mpa), np.min(P_mpa), np.mean(P_mpa)] # just systolic and mean pressures
+
+        # rpa pressure
+        P_rpa = [p / 1333.2 for p in get_branch_result(self.result, 'pressure_out', 1, steady=False)]
+        self.P_rpa = [np.max(P_rpa), np.min(P_rpa), np.mean(P_rpa)]
+
+        # lpa pressure
+        P_lpa = [p / 1333.2 for p in get_branch_result(self.result, 'pressure_out', 3, steady=False)]
+        self.P_lpa = [np.max(P_lpa), np.min(P_lpa), np.mean(P_lpa)]
+
+        p_neg_loss = 0
+
+        for p in self.P_mpa + self.P_rpa + self.P_lpa:
+            if p < 0:
+                p_neg_loss += 10000
+
+        if fun == 'L2':
+            loss = np.sum(np.subtract(self.P_mpa, self.clinical_targets.mpa_p) ** 2) + \
+                np.sum(np.subtract(self.P_rpa, self.clinical_targets.rpa_p) ** 2) + \
+                np.sum(np.subtract(self.P_lpa, self.clinical_targets.lpa_p) ** 2) + \
+                100 * np.sum(np.subtract(self.Q_rpa, self.clinical_targets.q_rpa) ** 2) + \
+                np.sum(np.array([1 / block.R for block in [self.lpa_prox, self.rpa_prox]]) ** 2) + p_neg_loss
+        print('R_guess: ' + str(R_guess)) 
+        print('loss: ' + str(loss))
+
+        return loss
+
+
+    def optimize(self, steady=True, nonlin=False):
         '''
         optimize the resistances in the pa config
         '''
 
-        self.to_json('pa_config_pre_opt.json')
+        # self.to_json('pa_config_pre_opt.json')
         # define optimization bounds [0, inf)
         bounds = Bounds(lb=0, ub=math.inf)
 
-        result = minimize(self.compute_steady_loss, 
-                          [obj.R for obj in [self.lpa_prox, self.rpa_prox, self.bcs['LPA_BC'], self.bcs['RPA_BC']]], 
-                          method="Nelder-Mead", bounds=bounds)
+        if steady:
+            result = minimize(self.compute_steady_loss, 
+                                [obj.R for obj in [self.lpa_prox, self.rpa_prox, self.bcs['LPA_BC'], self.bcs['RPA_BC']]], 
+                                method="Nelder-Mead", bounds=bounds)
+        else:
+            if nonlin:
+                initial_guess = [self.lpa_prox.stenosis_coefficient, self.lpa_prox.C, self.rpa_prox.stenosis_coefficient, self.rpa_prox.C, 
+                                 self.bcs['LPA_BC'].R, self.bcs['LPA_BC'].C, 
+                                 self.bcs['RPA_BC'].R, self.bcs['RPA_BC'].C]
+                result = minimize(self.compute_unsteady_loss_nonlin, 
+                                initial_guess, 
+                                method="Nelder-Mead", bounds=bounds)
+            else:
+                initial_guess = [self.lpa_prox.R, self.lpa_prox.C, self.rpa_prox.R, self.rpa_prox.C, 
+                                self.bcs['LPA_BC'].R, self.bcs['LPA_BC'].C, 
+                                self.bcs['RPA_BC'].R, self.bcs['RPA_BC'].C]
+                result = minimize(self.compute_unsteady_loss, 
+                                    initial_guess, 
+                                    method="Nelder-Mead", bounds=bounds)
 
         print([self.Q_rpa / self.clinical_targets.q, self.P_mpa, self.P_lpa, self.P_rpa])
 

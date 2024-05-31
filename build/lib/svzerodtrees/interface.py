@@ -1,8 +1,10 @@
 import os
 import sys
 import json
+import time
 import pickle
-from svzerodtrees import preop, operation, adaptation, postop
+from svzerodtrees import preop, operation, adaptation
+from svzerodtrees.optimization import StentOptimization
 from svzerodtrees.post_processing import plotting, project_to_centerline
 from svzerodtrees.utils import *
 from svzerodtrees.threedutils import *
@@ -11,7 +13,7 @@ from svzerodtrees._config_handler import ConfigHandler
 from svzerodtrees.post_processing.pa_plotter import PAanalyzer
 from scipy.optimize import minimize
 
-def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=True):
+def run_from_file(exp_config_file: str, vis_trees=True):
     '''
     run the structured tree optimization pipeline from an experiment config file
 
@@ -38,11 +40,86 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
     if task == 'repair':
         # compute 0D repair
         repair_config = exp_config['repair']
-    if task == 'threed_adaptation':
+    elif task == 'threed_adaptation':
         # compute 3D adaptation
-        run_threed_adaptation(task_params['preop_dir'], task_params['postop_dir'], task_params['adapted_dir'])
+        # run_threed_adaptation(task_params['preop_dir'], task_params['postop_dir'], task_params['adapted_dir'])
+        if optimized:
+            run_threed_from_msh(
+                task_params['preop_dir'],
+                task_params['postop_dir'],
+                task_params['adapted_dir'],
+                task_params['zerod_config'],
+                task_params['svpre_path'],
+                task_params['svsolver_path'],
+                task_params['svpost_path']
+            )
+        else:
+            # optimize the zerod model and then run the 3d simulations
+            print('optimizing zerod model to find BCs')
+            if is_full_pa:
+                config_handler, result_handler, pa_config = preop.optimize_pa_bcs(
+                    task_params['zerod_config'],
+                    os.path.join(task_params['preop_dir'], 'mesh-complete', 'mesh-surfaces'),
+                    os.path.join(os.path.dirname(task_params['zerod_config']), 'clinical_targets.csv')
+                )
 
-        sys.exit() # exit the program I guess
+            else:
+                config_handler, result_handler = preop.optimize_outlet_bcs(
+                    task_params['zerod_config'],
+                    os.path.join(os.path.dirname(task_params['zero_config']), 'clinical_targets.csv')
+                )
+
+            # save optimized config and result
+            preop_config_path = os.path.join(os.path.dirname(task_params['zero_config']), 'preop_config.json')
+            config_handler.to_json(preop_config_path)
+
+            run_threed_from_msh(
+                task_params['preop_dir'],
+                task_params['postop_dir'],
+                task_params['adapted_dir'],
+                preop_config_path,
+                task_params['svpre_path'],
+                task_params['svsolver_path'],
+                task_params['svpost_path']
+            )
+
+        sys.exit() # exit the program
+
+
+    elif task == 'construct_trees':
+        log_file = expname + '.log'
+        config_handler = ConfigHandler.from_json(modelname + '.json', is_pulmonary=is_full_pa)
+        result_handler = ResultHandler.from_config_handler(config_handler)
+        if task_params['tree_type'] == 'cwss':
+            # construct trees
+            preop.construct_cwss_trees(config_handler,
+                                        result_handler,
+                                        n_procs=24,
+                                        log_file=log_file,
+                                        d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
+
+            # save preop config to as pickle, with StructuredTreeOutlet objects
+            write_to_log(log_file, 'saving preop config with cwss trees...')
+
+            config_handler.to_file_w_trees('config_w_cwss_trees.in')
+        elif task_params['tree_type'] == 'ps':
+            # construct trees
+            preop.construct_pries_trees(config_handler,
+                                        result_handler,
+                                        n_procs=24,
+                                        log_file=log_file,
+                                        d_min=.01)
+
+            write_to_log(log_file, 'saving preop config with ps trees...')
+
+            config_handler.to_file_w_trees('config_w_ps_trees.in')
+        else:
+            raise Exception('invalid tree type specified')
+        
+        sys.exit() # exit the program
+    else:
+        raise Exception('invalid task specified')
+
 
     # check if we are in an experiments directory, if not assume we are in it
 
@@ -127,8 +204,7 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
             config_handler, result_handler = preop.optimize_outlet_bcs(
                 input_file,
                 clinical_targets,
-                log_file,
-                show_optimization=False
+                log_file
             )
 
         # save optimized config and result
@@ -160,12 +236,25 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
 
     if repair_config[0]['type'] == 'optimize stent':
         print("optimizing stent diameter...")
-        optimize_stent_diameter(config_handler,
-                                result_handler,
-                                repair_config[0],
-                                adapt,
-                                n_procs=12,
-                                trees_exist=trees_exist)
+        # optimize_stent_diameter(config_handler,
+        #                         result_handler,
+        #                         repair_config[0],
+        #                         adapt,
+        #                         log_file,
+        #                         n_procs=12,
+        #                         trees_exist=trees_exist)
+
+        stent_optimization = StentOptimization(config_handler,
+                                               result_handler,
+                                               repair_config[0],
+                                               adapt,
+                                               log_file,
+                                               n_procs=12,
+                                               trees_exist=trees_exist)
+        
+        stent_optimization.minimize_nm()
+
+
     elif repair_config[0]['type'] == 'estimate_bcs':
         print("estimating bcs...")
         cwd = os.getcwd()
@@ -177,7 +266,7 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
             
             run_pries_secomb_adaptation(config_handler, 
                                         result_handler, 
-                                        repair_config, 
+                                        repair_config[0], 
                                         log_file,
                                         n_procs=12,
                                         trees_exist=trees_exist)
@@ -186,7 +275,7 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
             
             run_cwss_adaptation(config_handler, 
                                 result_handler, 
-                                repair_config, 
+                                repair_config[0], 
                                 log_file,
                                 n_procs=12,
                                 trees_exist=trees_exist)
@@ -231,17 +320,21 @@ def run_from_file(exp_config_file: str, optimized: bool=False, vis_trees: bool=T
         # plot the mpa pressure changes
         plotter.plot_mpa_pressure()
 
-        if not os.path.exists('cl_projection'):
-            os.system('mkdir cl_projection')
+        if not os.path.exists(expdir_path + 'cl_projection'):
+            os.system('mkdir ' + expdir_path + 'cl_projection')
         
         for period in ['preop', 'postop', 'adapted', 'adaptation']:
+            if repair_config[0]["location"] == 'proximal':
+                repair_location = [result_handler.lpa_branch, result_handler.rpa_branch]
+            else:
+                repair_location = repair_config[0]["location"]
             project_to_centerline.map_0d_on_centerline('centerlines.vtp',
-                                                                        config_handler,
-                                                                        result_handler,
-                                                                        period,
-                                                                        'cl_projection')
+                                                        config_handler,
+                                                        result_handler,
+                                                        period,
+                                                        expdir_path + 'cl_projection',
+                                                        repair_location)
         
-
 
 def run_pries_secomb_adaptation(config_handler: ConfigHandler, result_handler, repair_config, log_file, n_procs=12, trees_exist=False):
     '''
@@ -337,9 +430,9 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
     
     # perform repair. this needs to be updated to accomodate a list of repairs > length 1
     operation.repair_stenosis(config_handler, 
-                                          result_handler,
-                                          repair_config[0], 
-                                          log_file)
+                                result_handler,
+                                repair_config, 
+                                log_file)
 
     # adapt trees
     adaptation.adapt_constant_wss(config_handler,
@@ -347,102 +440,15 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
                                   log_file)
     
 
-def optimize_stent_diameter(config_handler, result_handler, repair_config: dict, adapt='ps' or 'cwss', log_file=None, n_procs=12, trees_exist=True):
-    '''
-    optimize stent diameter based on some objective function containing flow splits or pressures
-    
-    :param config_handler: ConfigHandler instance
-    :param result_handler: ResultHandler instance
-    :param repair_config: repair config dict containing 
-                        "type"="optimize stent", 
-                        "location"="proximal" or some list of locations, 
-                        "objective"="flow split" or "mpa pressure" or "all"
-    :param adaptation: adaptation scheme to use, either 'ps' or 'cwss'
-    :param n_procs: number of processors to use for tree construction
-    '''
-
-    if trees_exist:
-        # compute preop result
-        preop_result = run_svzerodplus(config_handler.config)
-        # add the preop result to the result handler
-        result_handler.add_unformatted_result(preop_result, 'preop')
-
-    else:
-        # construct trees
-        if adapt == 'ps':
-            # pries and secomb adaptationq
-            preop.construct_pries_trees(config_handler,
-                                        result_handler,
-                                        n_procs=n_procs,
-                                        log_file=log_file,
-                                        d_min=.01)
-            
-        elif adapt == 'cwss':
-            # constant
-            preop.construct_cwss_trees(config_handler,
-                                            result_handler,
-                                            n_procs=n_procs,
-                                            log_file=log_file,
-                                            d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
-
-        # save preop config to as pickle, with StructuredTreeOutlet objects
-        write_to_log(log_file, 'saving preop config with' + adapt + 'trees...')
-
-        # pickle the config handler with the trees
-        config_handler.to_file_w_trees('config_w_' + adapt + '_trees.in')
-
-    
-
-    def objective_function(diameters, result_handler, repair_config, adapt):
-        '''
-        objective function to minimize based on input stent diameters
-        '''
-
-        repair_config['type'] = 'stent'
-        repair_config['value'] = diameters
-
-        with open('config_w_' + adapt + '_trees.in', 'rb') as ff:
-            config_handler = pickle.load(ff)
-
-        # perform repair. this needs to be updated to accomodate a list of repairs > length 1
-        operation.repair_stenosis(config_handler, 
-                                            result_handler,
-                                            repair_config, 
-                                            log_file)
-
-        # adapt trees
-        if adapt == 'cwss':
-            adaptation.adapt_constant_wss(config_handler,
-                                        result_handler,
-                                        log_file)
-        elif adapt == 'ps':
-            adaptation.adapt_pries_secomb(config_handler,
-                                        result_handler,
-                                        log_file)
-
-        rpa_split = get_branch_result(result_handler.results['adapted'], 'flow_in', config_handler.rpa.branch, steady=True) / get_branch_result(result_handler.results['adapted'], 'flow_in', config_handler.mpa.branch, steady=True)
-
-        mpa_pressure = get_branch_result(result_handler.results['adapted'], 'pressure_in', config_handler.mpa.branch, steady=True)
-
-        if repair_config['objective'] == 'flow split':
-            return (rpa_split - 0.5) ** 2
-        elif repair_config['objective'] == 'mpa pressure':
-            return (mpa_pressure - 20) ** 2
-        elif repair_config['objective'] == 'all':
-            return ((rpa_split - 0.5) * 100) ** 2 + mpa_pressure
-        else:
-            raise Exception('invalid objective function specified')
-    
-    result = minimize(objective_function, repair_config["value"], args=(result_handler, repair_config, adapt), method='Nelder-Mead')
-
-    print('optimized stent diameters: ' + str(result.x))
-    # write this to the log file as well
-    write_to_log(log_file, 'optimized stent diameters: ' + str(result.x))
-
-
 def run_threed_adaptation(preop_simulation_dir, postop_simulation_dir, adapted_simulation_dir):
     '''
     compute the microvasular adaptation for a 3d coupled soluiton and output an adapted config handler
+
+    required in each simulation directory:
+    - solver.inp
+    - .svpre file
+    - svzerod_3Dcoupling.json
+    - svZeroD_interface.dat
     '''
 
     # check that the directories are unique so we dont end up screwing stuff up by accident
@@ -479,12 +485,100 @@ def run_threed_adaptation(preop_simulation_dir, postop_simulation_dir, adapted_s
 
     preop_config_handler.to_json(adapted_simulation_dir + '/svzerod_3Dcoupling.json')
 
-    prepare_simulation_dir(postop_simulation_dir, adapted_simulation_dir)
+    prepare_adapted_simdir(postop_simulation_dir, adapted_simulation_dir)
 
 
+def run_threed_from_msh(preop_simulation_dir, 
+                        postop_simulation_dir, 
+                        adapted_simulation_dir, 
+                        zerod_config,
+                        svpre_path=None,
+                        svsolver_path=None,
+                        svpost_path=None):
+    '''
+    run threed adaptation from preop and postop mesh files only
+    '''
 
+    # check that the directories are unique so we dont end up screwing stuff up by accident
+    if preop_simulation_dir == postop_simulation_dir:
+        raise Exception('preop and postop simulation directories are the same')
+    if preop_simulation_dir == adapted_simulation_dir:
+        raise Exception('preop and adapted simulation directories are the same')
+    if postop_simulation_dir == adapted_simulation_dir:
+        raise Exception('postop and adapted simulation directories are the same')
 
+    # save which directory we are in
+    wd = os.getcwd()
+    # setup preop dir
+    num_timesteps = setup_simdir_from_mesh(preop_simulation_dir, zerod_config)
+    # run preop simulation
+    os.chdir(preop_simulation_dir)
+    print('submitting preop simulation job...')
+    os.system('sbatch run_solver.sh')
+    os.chdir(wd)
 
+    # setup postop dir, num timesteps assumed to be same
+    setup_simdir_from_mesh(postop_simulation_dir, zerod_config)
+    # run postop simulation
+    os.chdir(postop_simulation_dir)
+    print('submitting postop simulation job...')
+    os.system('sbatch run_solver.sh')
+    os.chdir(wd)
 
+    # check if the simulations have run
+    preop_complete = False
+    postop_complete = False
+
+    time.sleep(300)
+    while not preop_complete and not postop_complete:
+        time.sleep(150)
+        timestep = 0
+        with open(os.path.join(preop_simulation_dir, '*-procs_case/histor.dat'), 'r') as histor_dat:
+            lines = histor_dat.readlines()
+            if num_timesteps == int(lines[-1].split()[0]):
+                # wait to finish up last timestep
+                time.sleep(120)
+                preop_complete = True
+                print('preop simulation complete!')
+        
+        with open(os.path.join(postop_simulation_dir, '*-procs_case/histor.dat'), 'r') as histor_dat:
+            lines = histor_dat.readlines()
+            if num_timesteps == int(lines[-1].split()[0]):
+                # wait to finish up last timestep
+                time.sleep(120)
+                postop_complete = True
+                print('postop simulation complete!')
+
+    # load in the preop and postop outlet flowrates from the 3d simulation.
+    # the Q_svZeroD file needs to be in the top level of the simulation directory
+    preop_q = pd.read_csv(preop_simulation_dir + '/Q_svZeroD', sep='\s+')
+    preop_mean_q = preop_q.iloc[-num_timesteps / 2:].mean(axis=0).values
+
+    postop_q = pd.read_csv(postop_simulation_dir + '/Q_svZeroD', sep='\s+')
+    postop_mean_q = postop_q.iloc[-num_timesteps / 2:].mean(axis=0).values
+
+    # initialize preop config handler
+    preop_config_handler = ConfigHandler.from_json(zerod_config)
+
+    print('computing boundary condition adaptation...')
+
+    # adapt the bcs
+    adaptation.adapt_constant_wss_threed(preop_config_handler, preop_mean_q, postop_mean_q)
+
+    # save the adapted config
+
+    print('adapted config being saved to ' + adapted_simulation_dir + '/svzerod_3Dcoupling.json')
+
+    preop_config_handler.to_json(adapted_simulation_dir + '/svzerod_3Dcoupling.json')
+
+    prepare_adapted_simdir(postop_simulation_dir, adapted_simulation_dir)
+
+    # run simulation
+    os.chdir(adapted_simulation_dir)
+    print('submitting adapted simulation job...')
+    os.system('sbatch run_solver.sh')
+    os.chdir(wd)
+
+    print('all simulations complete!')
     
 
