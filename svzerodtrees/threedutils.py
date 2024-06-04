@@ -269,7 +269,7 @@ def write_svsolver_runscript(sim_dir, steps_btwn_restarts,
         ff.write(f'srun {svsolver_path} \n')
         ff.write(f'cd {nodes * procs_per_node}-procs_case \n')
         ff.write(f'{svpost_path} -start 1500 -stop 2000 -incr {steps_btwn_restarts} -sol -vtkcombo -vtu post.vtu \n')
-        ff.write('mv post.vtu .. \n')
+        ff.write('mv post.vtu *_svZeroD .. \n')
 
 
 def write_svpre_file(sim_dir, mesh_complete, period=1.0):

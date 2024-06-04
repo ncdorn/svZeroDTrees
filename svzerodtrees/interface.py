@@ -48,7 +48,7 @@ def run_from_file(exp_config_file: str, vis_trees=True):
                 task_params['preop_dir'],
                 task_params['postop_dir'],
                 task_params['adapted_dir'],
-                task_params['zerod_config'],
+                os.path.join(os.path.dirname(task_params['zerod_config']), 'preop_config.json'),
                 task_params['svpre_path'],
                 task_params['svsolver_path'],
                 task_params['svpost_path']
