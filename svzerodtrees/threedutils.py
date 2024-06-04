@@ -264,7 +264,7 @@ def write_svsolver_runscript(sim_dir, steps_btwn_restarts, job_name='svFlowSolve
         ff.write('srun /home/users/ndorn/svSolver/svSolver-build/svSolver-build/mysolver \n')
         ff.write(f'cd {nodes * procs_per_node}-procs_case \n')
         ff.write(f'postsolver -start 1500 -stop 2000 -incr {steps_btwn_restarts} -sol -vtkcombo -vtu post.vtu \n')
-        ff.write('mv post.vtu .. \n')
+        ff.write('mv post.vtu *_svZeroD .. \n')
 
 
 def write_svpre_file(sim_dir, mesh_complete, period=1.0):
