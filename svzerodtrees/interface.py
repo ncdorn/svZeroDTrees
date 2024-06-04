@@ -492,9 +492,9 @@ def run_threed_from_msh(preop_simulation_dir,
                         postop_simulation_dir, 
                         adapted_simulation_dir, 
                         zerod_config,
-                        svpre_path=None,
-                        svsolver_path=None,
-                        svpost_path=None):
+                        svpre_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre',
+                        svsolver_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mysolver',
+                        svpost_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypost'):
     '''
     run threed adaptation from preop and postop mesh files only
     '''
@@ -509,29 +509,51 @@ def run_threed_from_msh(preop_simulation_dir,
 
     # save which directory we are in
     wd = os.getcwd()
-    # setup preop dir
-    num_timesteps = setup_simdir_from_mesh(preop_simulation_dir, zerod_config)
-    # run preop simulation
-    os.chdir(preop_simulation_dir)
-    print('submitting preop simulation job...')
-    os.system('sbatch run_solver.sh')
-    os.chdir(wd)
 
-    # setup postop dir, num timesteps assumed to be same
-    setup_simdir_from_mesh(postop_simulation_dir, zerod_config)
-    # run postop simulation
-    os.chdir(postop_simulation_dir)
-    print('submitting postop simulation job...')
-    os.system('sbatch run_solver.sh')
-    os.chdir(wd)
-
-    # check if the simulations have run
+     # check if the simulations have run
     preop_complete = False
     postop_complete = False
 
-    time.sleep(300)
+    # setup preop dir
+    num_timesteps = setup_simdir_from_mesh(preop_simulation_dir, zerod_config, svpre_path, svsolver_path, svpost_path)
+    # check if the simulation has been run
+    if not os.path.exists(preop_simulation_dir + '/48-procs_case/histor.dat'):
+        # run preop simulation
+        os.chdir(preop_simulation_dir)
+        print('submitting preop simulation job...')
+        os.system('sbatch run_solver.sh')
+        os.chdir(wd)
+    else:
+        with open(os.path.join(preop_simulation_dir, '48-procs_case/histor.dat'), 'r') as histor_dat:
+            lines = histor_dat.readlines()
+            if num_timesteps == int(lines[-1].split()[0]):
+                print('preop simulation has been run!')
+                preop_complete = True
+            else:
+                raise Exception('preop simulation has not been run to completion')
+            
+
+    # setup postop dir, num timesteps assumed to be same
+    num_timesteps = setup_simdir_from_mesh(postop_simulation_dir, zerod_config, svpre_path, svsolver_path, svpost_path)
+    # check if the simulation has been run
+    if not os.path.exists(preop_simulation_dir + '/48-procs_case/histor.dat'):
+        # run postop simulation
+        os.chdir(postop_simulation_dir)
+        print('submitting postop simulation job...')
+        os.system('sbatch run_solver.sh')
+        os.chdir(wd)
+    else:
+        with open(os.path.join(preop_simulation_dir, '48-procs_case/histor.dat'), 'r') as histor_dat:
+            lines = histor_dat.readlines()
+            if num_timesteps == int(lines[-1].split()[0]):
+                print('postop simulation has been run!')
+                postop_complete = True
+            else:
+                raise Exception('postop simulation has not been run to completion')
+
+
     while not preop_complete and not postop_complete:
-        time.sleep(150)
+        time.sleep(300)
         # we will assume that we are using 48 processors for the simulations
         with open(os.path.join(preop_simulation_dir, '48-procs_case/histor.dat'), 'r') as histor_dat:
             lines = histor_dat.readlines()
@@ -579,6 +601,10 @@ def run_threed_from_msh(preop_simulation_dir,
     os.system('sbatch run_solver.sh')
     os.chdir(wd)
 
-    print('all simulations complete!')
+    print('all simulations complete! moving on to post processing...')
+
+    # post processing
+    generate_flowsplit_results(preop_simulation_dir, postop_simulation_dir, adapted_simulation_dir)
+
     
 

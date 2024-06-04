@@ -64,7 +64,6 @@ def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_
     return rpa_info, lpa_info, inflow_info
 
 
-
 def get_coupled_surfaces(simulation_dir):
     '''
     get a map of coupled surfaces to vtp file to find areas and diameters for tree initialization and coupling
@@ -170,7 +169,10 @@ def prepare_adapted_simdir(postop_dir, adapted_dir):
     write_svsolver_runscript(os.path.basename(adapted_dir))
 
 
-def setup_simdir_from_mesh(sim_dir, zerod_config, write_shell_script=False):
+def setup_simdir_from_mesh(sim_dir, zerod_config, 
+                           svpre_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre',
+                           svsolver_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mysolver',
+                           svpost_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypost'):
     '''
     setup a simulation directory solely from a mesh-complete.
     :param sim_dir: path to the simulation directory where the mesh complete is located
@@ -200,8 +202,7 @@ def setup_simdir_from_mesh(sim_dir, zerod_config, write_shell_script=False):
     write_numstart(sim_dir)
 
     # write run script
-    nodes = 4
-    write_svsolver_runscript(sim_dir, steps_btwn_restart), 
+    write_svsolver_runscript(sim_dir, steps_btwn_restart, svpre_path, svsolver_path, svpost_path)
 
     # move inflow file to simulation directory
     # os.system('cp ' + inflow_file + ' ' + sim_dir)
@@ -219,7 +220,11 @@ def get_inflow_period(inflow_file):
     return period
 
 
-def write_svsolver_runscript(sim_dir, steps_btwn_restarts, job_name='svFlowSolver', hours=6, nodes=2, procs_per_node=24):
+def write_svsolver_runscript(sim_dir, steps_btwn_restarts, 
+                             svpre_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre',
+                             svsolver_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mysolver',
+                             svpost_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypost', 
+                             hours=6, nodes=2, procs_per_node=24):
     '''
     write a bash script to submit a job on sherlock'''
 
@@ -228,12 +233,12 @@ def write_svsolver_runscript(sim_dir, steps_btwn_restarts, job_name='svFlowSolve
     with open(os.path.join(sim_dir, 'run_solver.sh'), 'w') as ff:
         ff.write('#!/bin/bash \n\n')
         ff.write('#name of your job \n')
-        ff.write('#SBATCH --job-name=' + job_name + '\n')
+        ff.write('#SBATCH --job-name=svFlowSolver\n')
         ff.write('#SBATCH --partition=amarsden \n\n')
         ff.write('# Specify the name of the output file. The %j specifies the job ID \n')
-        ff.write('#SBATCH --output=' + job_name + '.o%j \n\n')
+        ff.write('#SBATCH --output=svFlowSolver.o%j \n\n')
         ff.write('# Specify the name of the error file. The %j specifies the job ID \n')
-        ff.write('#SBATCH --error=' + job_name + '.e%j \n\n')
+        ff.write('#SBATCH --error=svFlowSolver.e%j \n\n')
         ff.write('# The walltime you require for your job \n')
         ff.write('#SBATCH --time=' + str(hours) + ':00:00 \n\n')
         ff.write('# Job priority. Leave as normal for now \n')
@@ -260,10 +265,10 @@ def write_svsolver_runscript(sim_dir, steps_btwn_restarts, job_name='svFlowSolve
         ff.write('ml qt/5.9.1 \n')
         ff.write('ml gcc/12.1.0 \n')
         ff.write('ml cmake \n\n')
-        ff.write('/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre ' + os.path.basename(sim_dir) + '.svpre \n')
-        ff.write('srun /home/users/ndorn/svSolver/svSolver-build/svSolver-build/mysolver \n')
+        ff.write(f'{svpre_path} {os.path.basename(sim_dir)}.svpre \n')
+        ff.write(f'srun {svsolver_path} \n')
         ff.write(f'cd {nodes * procs_per_node}-procs_case \n')
-        ff.write(f'postsolver -start 1500 -stop 2000 -incr {steps_btwn_restarts} -sol -vtkcombo -vtu post.vtu \n')
+        ff.write(f'{svpost_path} -start 1500 -stop 2000 -incr {steps_btwn_restarts} -sol -vtkcombo -vtu post.vtu \n')
         ff.write('mv post.vtu .. \n')
 
 
@@ -487,13 +492,13 @@ def compute_flow_split(Q_svZeroD, svpre_file, n_steps=1000):
     return lpa_split, rpa_split
 
 
-def generate_flowsplit_results():
+def generate_flowsplit_results(preop_simdir, postop_simdir, adapted_simdir):
 
-    preop_split = compute_flow_split('preop/Q_svZeroD', 'preop/preop.svpre')
-    postop_split = compute_flow_split('postop/Q_svZeroD', 'postop/postop.svpre')
-    adapted_split = compute_flow_split('adapted/Q_svZeroD', 'adapted/adapted.svpre')
+    preop_split = compute_flow_split(os.path.join(preop_simdir, 'Q_svZeroD'), os.path.join(preop_simdir, 'preop.svpre'))
+    postop_split = compute_flow_split(os.path.join(postop_simdir, 'Q_svZeroD'), os.path.join(postop_simdir, 'postop.svpre'))
+    adapted_split = compute_flow_split(os.path.join(adapted_simdir, 'Q_svZeroD'), os.path.join(adapted_simdir, 'adapted.svpre'))
 
-    with open('flow_split_results.txt', 'w') as f:
+    with open(os.path.join(os.path.dirname(preop_simdir), 'flow_split_results.txt'), 'w') as f:
         f.write('flow splits as LPA/RPA\n\n')
         f.write('preop flow split: ' + str(preop_split[0]) + '/' + str(preop_split[1]) + '\n')
         f.write('postop flow split: ' + str(postop_split[0]) + '/' + str(postop_split[1]) + '\n')
