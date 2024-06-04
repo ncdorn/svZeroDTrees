@@ -574,13 +574,16 @@ def run_threed_from_msh(preop_simulation_dir,
     # load in the preop and postop outlet flowrates from the 3d simulation.
     # the Q_svZeroD file needs to be in the top level of the simulation directory
     preop_q = pd.read_csv(preop_simulation_dir + '/Q_svZeroD', sep='\s+')
-    preop_mean_q = preop_q.iloc[-num_timesteps / 2:].mean(axis=0).values
+    preop_mean_q = preop_q.iloc[int(-num_timesteps / 2):].mean(axis=0).values
 
     postop_q = pd.read_csv(postop_simulation_dir + '/Q_svZeroD', sep='\s+')
-    postop_mean_q = postop_q.iloc[-num_timesteps / 2:].mean(axis=0).values
+    postop_mean_q = postop_q.iloc[int(-num_timesteps / 2):].mean(axis=0).values
 
     # initialize preop config handler
-    preop_config_handler = ConfigHandler.from_json(zerod_config)
+    preop_config_handler = ConfigHandler.from_json(os.path.join(preop_simulation_dir, 'svzerod_3Dcoupling.json'), is_pulmonary=False, is_threed_interface=True)
+
+    # build the trees
+    preop.construct_coupled_cwss_trees(preop_config_handler, preop_simulation_dir, n_procs=12)
 
     print('computing boundary condition adaptation...')
 
@@ -595,8 +598,7 @@ def run_threed_from_msh(preop_simulation_dir,
 
     prepare_adapted_simdir(postop_simulation_dir, adapted_simulation_dir)
 
-    # run simulation
-    os.chdir(adapted_simulation_dir)
+    # run simulation, we are already in adapted sim dir
     print('submitting adapted simulation job...')
     os.system('sbatch run_solver.sh')
     os.chdir(wd)
