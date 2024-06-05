@@ -57,10 +57,11 @@ def test_interface():
     '''
     test the interface
     '''
-    preop_dir = 'tests/cases/test_cylinder/preop/Simulations/steady'
-    postop_dir = 'tests/cases/test_cylinder/postop/Simulations/steady'
-    adapted_dir = 'tests/cases/test_cylinder/adapted/Simulations/steady'
-    interface.run_threed_adaptation(preop_dir, postop_dir, adapted_dir)
+    preop_dir = '../threed_models/AS2_opt_fs/preop'
+    postop_dir = '../threed_models/AS2_opt_fs/postop'
+    adapted_dir = '../threed_models/AS2_opt_fs/adapted'
+    zerod_config = '../threed_models/AS2_opt_fs/zerod/preop_config.json'
+    interface.run_threed_from_msh(preop_dir, postop_dir, adapted_dir, zerod_config)
 
 
 if __name__ == '__main__':

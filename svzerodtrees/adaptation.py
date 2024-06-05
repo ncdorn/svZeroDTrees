@@ -3,6 +3,7 @@ import copy
 from svzerodtrees.structuredtreebc import StructuredTreeOutlet
 from svzerodtrees._result_handler import ResultHandler
 from svzerodtrees._config_handler import ConfigHandler
+import numpy as np
 
 
 def adapt_pries_secomb(config_handler: ConfigHandler, result_handler: ResultHandler, log_file: str = None, tol: float = .01):
@@ -127,7 +128,11 @@ def adapt_constant_wss_threed(config_handler: ConfigHandler, preop_q, postop_q, 
             # adapt the corresponding tree
             R_old, R_new = config_handler.trees[outlet_idx].adapt_constant_wss(Q=preop_q[outlet_idx], Q_new=postop_q[outlet_idx])
 
+            if np.isnan(R_new) or np.isnan(R_old):
+                raise ValueError('nan resistance encountered')
+            
             print(R_old, R_new)
+
             
             # add the updated resistance to the boundary condition
             if bc.type == 'RESISTANCE':

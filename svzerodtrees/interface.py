@@ -553,23 +553,29 @@ def run_threed_from_msh(preop_simulation_dir,
 
 
     while not preop_complete and not postop_complete:
-        time.sleep(300)
+        time.sleep(180)
         # we will assume that we are using 48 processors for the simulations
-        with open(os.path.join(preop_simulation_dir, '48-procs_case/histor.dat'), 'r') as histor_dat:
-            lines = histor_dat.readlines()
-            if num_timesteps == int(lines[-1].split()[0]):
-                # wait to finish up last timestep
-                time.sleep(120)
-                preop_complete = True
-                print('preop simulation complete!')
+        if os.path.exists(preop_simulation_dir + '/48-procs_case/'):
+            with open(os.path.join(preop_simulation_dir, '48-procs_case/histor.dat'), 'r') as histor_dat:
+                lines = histor_dat.readlines()
+                if num_timesteps == int(lines[-1].split()[0]):
+                    # wait to finish up last timestep
+                    time.sleep(120)
+                    preop_complete = True
+                    print('preop simulation complete!')
+        else:
+            continue
         
-        with open(os.path.join(postop_simulation_dir, '48-procs_case/histor.dat'), 'r') as histor_dat:
-            lines = histor_dat.readlines()
-            if num_timesteps == int(lines[-1].split()[0]):
-                # wait to finish up last timestep
-                time.sleep(120)
-                postop_complete = True
-                print('postop simulation complete!')
+        if os.path.exists(postop_simulation_dir + '/48-procs_case/'):
+            with open(os.path.join(postop_simulation_dir, '48-procs_case/histor.dat'), 'r') as histor_dat:
+                lines = histor_dat.readlines()
+                if num_timesteps == int(lines[-1].split()[0]):
+                    # wait to finish up last timestep
+                    time.sleep(120)
+                    postop_complete = True
+                    print('postop simulation complete!')
+        else:
+            continue
 
     # load in the preop and postop outlet flowrates from the 3d simulation.
     # the Q_svZeroD file needs to be in the top level of the simulation directory
@@ -602,6 +608,22 @@ def run_threed_from_msh(preop_simulation_dir,
     print('submitting adapted simulation job...')
     os.system('sbatch run_solver.sh')
     os.chdir(wd)
+
+    # check if adapted simulation is complete
+    adapted_complete = False
+    while not adapted_complete:
+        time.sleep(180)
+        # we will assume that we are using 48 processors for the simulations
+        if os.path.exists(adapted_simulation_dir + '/48-procs_case/'):
+            with open(os.path.join(adapted_simulation_dir, '48-procs_case/histor.dat'), 'r') as histor_dat:
+                lines = histor_dat.readlines()
+                if num_timesteps == int(lines[-1].split()[0]):
+                    # wait to finish up last timestep
+                    time.sleep(120)
+                    adapted_complete = True
+                    print('adapted simulation complete!')
+        else:
+            continue
 
     print('all simulations complete! moving on to post processing...')
 

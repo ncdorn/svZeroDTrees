@@ -506,10 +506,10 @@ def generate_flowsplit_results(preop_simdir, postop_simdir, adapted_simdir):
 
 
 if __name__ == '__main__':
-    # setup a simulation dir from mesh
-    os.chdir('../threed_models/AS2_opt_fs')
-
-    setup_simdir_from_mesh('preop', 'zerod/AS2_prestent.json')
+    
+    preop_simulation_dir = '../threed_models/AS2_opt_fs/preop'
+    postop_dir = '../threed_models/AS2_opt_fs/postop'
+    adapted_dir = '../threed_models/AS2_opt_fs/adapted'
 
 
     
