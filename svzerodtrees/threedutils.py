@@ -183,6 +183,10 @@ def setup_simdir_from_mesh(sim_dir, zerod_config,
 
     mesh_complete = os.path.join(sim_dir, 'mesh-complete')
     
+    # check that the mesh surfaces are alright
+        # check mesh surface names and amke sure they are good to go
+    rename_msh_surfs(os.path.join(mesh_complete, 'mesh-surfaces'))
+ 
     # write svzerod_3dcoupling file
     zerod_config_handler = ConfigHandler.from_json(zerod_config)
     period = zerod_config_handler.generate_inflow_file(sim_dir)
@@ -540,8 +544,7 @@ def rename_msh_surfs(msh_surf_dir):
             dup_files.append(file)
         
     if len(dup_files) > 0:
-        raise Exception(f'duplicate mesh surfaces detected in this directory! these will need to be cleaned up. \n ...
-                        list of potential duplicate surfaces: {dup_files}')
+        raise Exception(f'duplicate mesh surfaces detected in this directory! these will need to be cleaned up. \n List of potential duplicate surfaces: {dup_files}')
 
 
 

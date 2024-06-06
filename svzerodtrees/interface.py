@@ -510,10 +510,6 @@ def run_threed_from_msh(preop_simulation_dir,
     # save which directory we are in
     wd = os.getcwd()
 
-    # check mesh surface names and amke sure they are good to go
-    rename_msh_surfs(preop_simulation_dir)
-    rename_msh_surfs(postop_simulation_dir)
-
      # check if the simulations have run
     preop_complete = False
     postop_complete = False
@@ -554,8 +550,9 @@ def run_threed_from_msh(preop_simulation_dir,
                 postop_complete = True
             else:
                 raise Exception('postop simulation has not been run to completion')
-
-    time.sleep(300)
+    if not preop_complete and not postop_complete:
+    # wait for simulation to run
+        time.sleep(300)
 
     while not preop_complete and not postop_complete:
         time.sleep(180)
