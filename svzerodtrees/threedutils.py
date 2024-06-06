@@ -166,7 +166,7 @@ def prepare_adapted_simdir(postop_dir, adapted_dir):
     with open('svZeroD_interface.dat', 'w') as ff:
         ff.writelines(lines)
 
-    write_svsolver_runscript(os.get_cwd(), 20)
+    write_svsolver_runscript(os.getcwd(), 20)
 
 
 def setup_simdir_from_mesh(sim_dir, zerod_config, 
@@ -518,9 +518,7 @@ def rename_msh_surfs(msh_surf_dir):
 
     # make the mpa inlet the inflow.vtp if that does not exist
     filelist = [file for file in filelist_raw if 'wall' not in file.lower()]
-
-    print(filelist)
-    
+ 
     if 'inflow.vtp' not in filelist:
         for file in filelist:
             if 'mpa' in file.lower() and 'wall' not in file.lower():
