@@ -497,6 +497,15 @@ def run_threed_from_msh(preop_simulation_dir,
                         svpost_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypost'):
     '''
     run threed adaptation from preop and postop mesh files only
+
+    :param preop_simulation_dir: path to the preop simulation directory
+    :param postop_simulation_dir: path to the postop simulation directory
+    :param adapted_simulation_dir: path to the adapted simulation directory
+    :param zerod_config: path to the zerod config file of the 3d model
+    :param svpre_path: path to the svpre executable
+    :param svsolver_path: path to the svsolver executable
+    :param svpost_path: path to the svpost executable
+     default for svsolver paths is nick's paths on sherlock
     '''
 
     # check that the directories are unique so we dont end up screwing stuff up by accident
@@ -550,6 +559,8 @@ def run_threed_from_msh(preop_simulation_dir,
                 postop_complete = True
             else:
                 raise Exception('postop simulation has not been run to completion')
+
+
     if not preop_complete and not postop_complete:
     # wait for simulation to run
         time.sleep(300)
@@ -565,7 +576,10 @@ def run_threed_from_msh(preop_simulation_dir,
                     time.sleep(120)
                     preop_complete = True
                     print('preop simulation complete!')
+                else:
+                    continue
         else:
+            # simulation not launched yet
             continue
         
         if os.path.exists(postop_simulation_dir + '/48-procs_case/'):
@@ -576,7 +590,10 @@ def run_threed_from_msh(preop_simulation_dir,
                     time.sleep(120)
                     postop_complete = True
                     print('postop simulation complete!')
+                else:
+                    continue
         else:
+            # simulation has not launched yet
             continue
 
     # load in the preop and postop outlet flowrates from the 3d simulation.

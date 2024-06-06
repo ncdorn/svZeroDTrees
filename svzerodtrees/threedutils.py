@@ -166,7 +166,7 @@ def prepare_adapted_simdir(postop_dir, adapted_dir):
     with open('svZeroD_interface.dat', 'w') as ff:
         ff.writelines(lines)
 
-    write_svsolver_runscript('.', 20)
+    write_svsolver_runscript(os.get_cwd(), 20)
 
 
 def setup_simdir_from_mesh(sim_dir, zerod_config, 
