@@ -540,8 +540,8 @@ def rename_msh_surfs(msh_surf_dir):
             dup_files.append(file)
         
     if len(dup_files) > 0:
-        print('it looks like there are duplicate files in this directory! these will need to be cleaned up.')
-        print(f'duplicate files: {dup_files}')
+        raise Exception(f'duplicate mesh surfaces detected in this directory! these will need to be cleaned up. \n ...
+                        list of potential duplicate surfaces: {dup_files}')
 
 
 

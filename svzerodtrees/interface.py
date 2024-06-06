@@ -510,6 +510,10 @@ def run_threed_from_msh(preop_simulation_dir,
     # save which directory we are in
     wd = os.getcwd()
 
+    # check mesh surface names and amke sure they are good to go
+    rename_msh_surfs(preop_simulation_dir)
+    rename_msh_surfs(postop_simulation_dir)
+
      # check if the simulations have run
     preop_complete = False
     postop_complete = False
@@ -551,6 +555,7 @@ def run_threed_from_msh(preop_simulation_dir,
             else:
                 raise Exception('postop simulation has not been run to completion')
 
+    time.sleep(300)
 
     while not preop_complete and not postop_complete:
         time.sleep(180)
@@ -608,6 +613,8 @@ def run_threed_from_msh(preop_simulation_dir,
     print('submitting adapted simulation job...')
     os.system('sbatch run_solver.sh')
     os.chdir(wd)
+
+    time.sleep(300)
 
     # check if adapted simulation is complete
     adapted_complete = False
