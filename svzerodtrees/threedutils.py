@@ -505,11 +505,51 @@ def generate_flowsplit_results(preop_simdir, postop_simdir, adapted_simdir):
         f.write('adapted flow split: ' + str(adapted_split[0]) + '/' + str(adapted_split[1]) + '\n')
 
 
+def rename_msh_surfs(msh_surf_dir):
+    '''
+    rename the mesh surfaces to have a consistent naming convention
+    '''
+    filelist_raw = glob.glob(msh_surf_dir + '/*')
+    # remove potential duplicate and triplicate faces
+
+    # make the mpa inlet the inflow.vtp if that does not exist
+    filelist = [file for file in filelist_raw if 'wall' not in file.lower()]
+
+    print(filelist)
+    
+    if 'inflow.vtp' not in filelist:
+        for file in filelist:
+            if 'mpa' in file.lower() and 'wall' not in file.lower():
+                user = input(f'inflow vtp found! would you like to replace {file} with inflow.vtp? (y/n)')
+                if user == 'y':
+                    os.system('mv ' + file + ' ' + msh_surf_dir + '/inflow.vtp')
+        
+    
+    # # make sure LPA and RPA are named correctly, and not named for the stent
+    if 'RPA.vtp' not in filelist:
+        for file in filelist:
+            if 'RPA' in file and os.path.basename(file)[4] != '0':
+                user = input(f'RPA vtp found! would you like to replace {file} with RPA.vtp? (y/n)')
+                if user == 'y':
+                    os.system('mv ' + file + ' ' + msh_surf_dir + '/RPA.vtp')
+
+    dup_files = []
+    for file in filelist:
+        if os.path.basename(file)[3] == '_' and os.path.basename(file)[-6] != '0':
+            # this is a file which may have a duplicate
+            dup_files.append(file)
+        
+    if len(dup_files) > 0:
+        print('it looks like there are duplicate files in this directory! these will need to be cleaned up.')
+        print(f'duplicate files: {dup_files}')
+
+
+
 if __name__ == '__main__':
     # setup a simulation dir from mesh
-    os.chdir('../threed_models/AS2_opt_fs')
+    os.chdir('../threed_models/AS2_opt_fs/postop')
 
-    setup_simdir_from_mesh('preop', 'zerod/AS2_prestent.json')
+    rename_msh_surfs('mesh-complete-rpa023/mesh-surfaces')
 
 
     
