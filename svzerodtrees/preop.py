@@ -393,7 +393,7 @@ def construct_cwss_trees(config_handler, result_handler, n_procs=4, log_file=Non
     # function to run the tree diameter optimization
     def optimize_tree(tree):
         print('building ' + tree.name + ' for resistance ' + str(tree.params["bc_values"]["R"]) + '...')
-        tree.optimize_tree_diameter(log_file, d_min=d_min)
+        tree.optimize_tree_diameter(log_file=log_file, d_min=d_min)
         return tree
 
     # run the tree 
