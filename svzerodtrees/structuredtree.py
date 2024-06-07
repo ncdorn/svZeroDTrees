@@ -5,41 +5,62 @@ from svzerodtrees.treevessel import TreeVessel
 from svzerodtrees.utils import *
 from svzerodtrees._config_handler import ConfigHandler, Vessel, BoundaryCondition, SimParams
 import math
+import json
+import pickle
 
-class StructuredTreeOutlet():
+class StructuredTree():
     """
     Structured tree which represents microvascular adaptation at the outlets of a 0D Windkessel model.
     utilizes the TreeVessel class which is recursive by nature to handle recursive tasks
     """
-    def __init__(self, params: dict = None, name: str = None, tree_config: dict = None, simparams: SimParams = None, root: TreeVessel = None):
+    def __init__(self, params: dict = None, 
+                 diameter: float = 0.5, # default value that should be optimized later
+                 R: float = None,
+                 C: float = None,
+                 P_in: list = None,
+                 Q_in: list = None,
+                 Pd: float = 0.0,
+                 viscosity: float = 0.04,
+                 name: str = None, tree_config: dict = None, simparams: SimParams = None, root: TreeVessel = None):
         """
-        Create a new StructuredTreeOutlet instance
+        Create a new StructuredTree instance
         
-        :param params: dict of 0D Windkessel parameters for the StructuredTreeOutlet class. 
-            contains lenght, R, C, L, stenosis coeff, viscosity, inlet pressure and flow, bc values
-        :param name: name of the StructuredTreeOutlet instance, e.g. OutletTree3
-        :param tree_config: optional tree config dict, used to create a StructuredTreeOutlet instance from a pre-existing tree which has
+        :param params: dict of 0D Windkessel parameters for the StructuredTree class. 
+            contains length, R, C, L, stenosis coeff, viscosity, inlet pressure and flow, bc values
+        :param name: name of the StructuredTree instance, e.g. OutletTree3
+        :param tree_config: optional tree config dict, used to create a StructuredTree instance from a pre-existing tree which has
             been saved in the model 0D config dict
         :param simparams: simulation parameters from the 0D model config file
-        :param root: TreeVessel instance, required if the StructuredTreeOutlet instance is built from a pre-existing tree
+        :param root: TreeVessel instance, required if the StructuredTree instance is built from a pre-existing tree
 
         :return: None
         """
         # parameter attributes
-        self.params = params
+        self.params = params # TODO: remove this attribute such that all parameters are indiividual class attributes since these are fixed
+        self.diameter = diameter
+
+        # windkessel parameters 
+        self._R = R
+        self.C = C
+
+        # simulation parameters
+        self.viscosity = viscosity
         self.simparams = simparams
-        # initial diameter (in cm) of the vessel from which the tree starts
-        self.initialD = self.params["diameter"]
+
+        # flow and pressure attributes
+        self.P_in = P_in
+        self.Q_in = Q_in
+        self.Pd = Pd
 
         # set up empty block dict if not generated from pre-existing tree
         if tree_config is None:
             self.name = name
             self.block_dict = {'name': name, 
-                               'origin_d': self.initialD, 
-                               'P_in': self.params["P_in"],
-                               'Q_in': self.params["Q_in"],
+                               'initial_d': diameter, 
+                               'P_in': P_in,
+                               'Q_in': Q_in,
                                'boundary_conditions': [],
-                               'simulation_parameters': simparams.to_dict(),
+                               'simulation_parameters': simparams.to_dict() if simparams is not None else None,
                                'vessels': [], 
                                'junctions': [], 
                                'adaptations': 0}
@@ -53,7 +74,7 @@ class StructuredTreeOutlet():
             if root is None:
                 # if no TreeVessel instance is provided to create the new tree
                 raise Exception('No root TreeVessel instance provided!')
-            # add the root instance to the StructuredTreeOutlet
+            # add the root instance to the StructuredTree
             self.root = root
 
 
@@ -65,20 +86,20 @@ class StructuredTreeOutlet():
                            tree_exists=False, 
                            root: TreeVessel = None, 
                            P_outlet: list=[0.0], 
-                           Q_outlet: list=[0.0]) -> "StructuredTreeOutlet":
+                           Q_outlet: list=[0.0]) -> "StructuredTree":
         """
         Class method to creat an instance from the config dictionary of an outlet vessel
 
         :param config: config file of outlet vessel
         :param simparams: config file of simulation parameters to get viscosity
         :param bc_config: config file of the outlet boundary condition
-        :param tree_exists: True if the StructuredTreeOutlet is being created from a pre-existing tree (applicable in the adaptation 
+        :param tree_exists: True if the StructuredTree is being created from a pre-existing tree (applicable in the adaptation 
             and postop steps of the simulation pipeline)
         :param root: TreeVessel instance, required if tree_exists = True
-        :param P_outlet: pressure at the outlet of the 0D model, which is the inlet of this StructuredTreeOutlet instance
-        :param Q_outlet: flow at the outlet of the 0D model, which is the inlet of this StructuredTreeOutlet instance
+        :param P_outlet: pressure at the outlet of the 0D model, which is the inlet of this StructuredTree instance
+        :param Q_outlet: flow at the outlet of the 0D model, which is the inlet of this StructuredTree instance
 
-        :return: StructuredTreeOutlet instance
+        :return: StructuredTree instance
         """
         # if steady state, make the Q_outlet and P_outlet into a list of length two for svzerodplus config BC compatibility
         if type(Q_outlet) is not list:
@@ -97,12 +118,38 @@ class StructuredTreeOutlet():
             bc_values = bc.values
         )
 
+        # convert bc_values to class parameters
+        if "Rp" in bc.values.keys():
+            R_bc = bc.values["Rp"] + bc.values["Rd"]
+            C_bc = bc.values["C"]
+        else:
+            R_bc = bc.values["R"]
+            C_bc = None
+        
+
         if tree_exists:
             print("tree exists")
-            # probably need to change to a tree config parameter
-            return cls(params=params, config = vessel, simparams=simparams, root=root)
+            # not sure if this works, probably need to change to a tree config parameter
+            return cls(params=params, 
+                       diameter = vessel.diameter,
+                       R = R_bc,
+                       C = C_bc,
+                       P_in = P_outlet,
+                       Q_in = Q_outlet, 
+                       Pd = bc.values["Pd"],
+                       viscosity = simparams.viscosity, 
+                       config = vessel, simparams=simparams, root=root)
+        
         else:
-            return cls(params=params, name="OutletTree" + str(vessel.branch), simparams=simparams)
+            # this works
+            return cls(params=params, 
+                       diameter = vessel.diameter,
+                       R = R_bc,
+                       C = C_bc,
+                       P_in = P_outlet,
+                       Q_in = Q_outlet, 
+                       Pd = bc.values["Pd"],
+                       viscosity = simparams.viscosity, name="OutletTree" + str(vessel.branch), simparams=simparams)
 
 
     @classmethod
@@ -111,7 +158,7 @@ class StructuredTreeOutlet():
                        simparams: SimParams,
                        diameter: float,
                        P_outlet: list=[0.0], 
-                       Q_outlet: list=[0.0]) -> "StructuredTreeOutlet":
+                       Q_outlet: list=[0.0]) -> "StructuredTree":
         '''
         Class method to create an instance from the config dictionary of an outlet boundary condition
         '''
@@ -132,7 +179,36 @@ class StructuredTreeOutlet():
             bc_values = bc.values
         )
         
-        return cls(params=params, name="OutletTree" + str(bc.name), simparams=simparams)
+        return cls(params=params, 
+                   diameter = diameter,
+                   viscosity=simparams.viscosity,
+                   P_in = P_outlet,
+                   Q_in = Q_outlet,
+                   name="OutletTree" + str(bc.name), simparams=simparams)
+
+# **** I/O METHODS ****
+
+    def to_json(self, filename):
+        '''
+        write the structured tree to a json file
+
+        :param filename: name of the json file
+        '''
+        with open(filename, 'w') as f:
+            json.dump(self.block_dict, f, indent=4)
+
+
+    def to_pickle(self, filename):
+        '''
+        write the structured tree to a pickle file
+
+        :param filename: name of the pickle file
+        '''
+        with open(filename, 'wb') as f:
+            pickle.dump(self, f)
+
+
+# **** END OF I/O METHODS ****
 
 
     def reset_tree(self, keep_root=False):
@@ -202,7 +278,7 @@ class StructuredTreeOutlet():
         vessel_id = 0
         junc_id = 0
         # initialize the root vessel of the tree
-        self.root = TreeVessel.create_vessel(0, 0, initial_d, self.params["eta"])
+        self.root = TreeVessel.create_vessel(0, 0, initial_d, self.viscosity)
         self.root.name = self.name
         # add inflow boundary condition
         self.root.info["boundary_conditions"] = {"inlet": "INFLOW"}
@@ -231,7 +307,7 @@ class StructuredTreeOutlet():
                 left_dia = alpha * current_vessel.d
                 # assume pressure is conserved at the junction. 
                 # Could later replace this with a function to account for pressure loss
-                current_vessel.left = TreeVessel.create_vessel(vessel_id, next_gen, left_dia, self.params["eta"])
+                current_vessel.left = TreeVessel.create_vessel(vessel_id, next_gen, left_dia, self.viscosity)
                 if left_dia < d_min or vessel_id > 10**6:
                     current_vessel.left.collapsed = True
                 queue.append(current_vessel.left)
@@ -241,7 +317,7 @@ class StructuredTreeOutlet():
                 # create right vessel
                 vessel_id += 1
                 right_dia = beta * current_vessel.d
-                current_vessel.right = TreeVessel.create_vessel(vessel_id, next_gen, right_dia, self.params["eta"])
+                current_vessel.right = TreeVessel.create_vessel(vessel_id, next_gen, right_dia, self.viscosity)
                 if right_dia < d_min or vessel_id > 10^6:
                     current_vessel.right.collapsed = True
                 queue.append(current_vessel.right)
@@ -305,11 +381,11 @@ class StructuredTreeOutlet():
         return R_old, R_new
 
 
-    def optimize_tree_diameter(self, log_file=None, d_min=0.0049, pries_secomb=False):
+    def optimize_tree_diameter(self, resistance=None, log_file=None, d_min=0.0049, pries_secomb=False):
         """ 
         Use Nelder-Mead to optimize the diameter and number of vessels with respect to the desired resistance
         
-        :param Resistance: resistance value to optimize against
+        :param resistance: resistance value to optimize against
         :param log_file: optional path to log file
         :param d_min: minimum diameter of the vessels
         :param pries_secomb: True if the pries and secomb model is used to adapt the vessels, so pries and secomb integration
@@ -318,13 +394,16 @@ class StructuredTreeOutlet():
         
         # write_to_log(log_file, "Optimizing tree diameter for resistance " + str(self.params["bc_values"]["R"]) + " with d_min = " + str(d_min) + "...")
         # initial guess is oulet r
-        d_guess = self.initialD / 2
+        d_guess = self.diameter / 2
 
         # get the resistance if it is RCR or Resistance BC
-        if "Rp" in self.params["bc_values"].keys():
-            R0 = self.params["bc_values"]["Rp"] + self.params["bc_values"]["Rd"]
+        if resistance is None:
+            if "Rp" in self.params["bc_values"].keys():
+                R0 = self.params["bc_values"]["Rp"] + self.params["bc_values"]["Rd"]
+            else:
+                R0 = self.params["bc_values"]["R"]
         else:
-            R0 = self.params["bc_values"]["R"]
+            R0 = resistance
 
         # define the objective function to be minimized
         def r_min_objective(diameter, d_min, R0):
@@ -454,14 +533,14 @@ class StructuredTreeOutlet():
         create the inflow and distal pressure BCs. This function will prepare a block_dict to be run by svzerodplus
         '''
         self.block_dict["boundary_conditions"] = [] # erase the previous boundary conditions
-        timesteps = len(self.params["Q_in"]) # identify the number of timesteps in the flow boundary condition
+        timesteps = len(self.Q_in) # identify the number of timesteps in the flow boundary condition
 
         self.block_dict["boundary_conditions"].append(
             {
                     "bc_name": "INFLOW",
                     "bc_type": "FLOW",
                     "bc_values": {
-                        "Q": self.params["Q_in"],
+                        "Q": self.Q_in,
                         "t": np.linspace(0.0, 1.0, num=timesteps).tolist()
                     }
                 },
@@ -475,7 +554,7 @@ class StructuredTreeOutlet():
                         "bc_name": "P_d" + str(vessel_config["vessel_id"]),
                         "bc_type": "PRESSURE",
                         "bc_values": {
-                            "P": [self.params["bc_values"].get("Pd"),] * 2,
+                            "P": [self.Pd,] * 2,
                             "t": [0.0, 1.0]
                             }
                         }
@@ -488,14 +567,16 @@ class StructuredTreeOutlet():
         '''
         return len(self.block_dict["vessels"])
     
-
+    @property
     def R(self):
         '''
         :return: the equivalent resistance of the tree
 
         tree.root.R_eq may work better in most cases since that is a value rather than a method
         '''
-        return self.root.R_eq
+        if self.root is not None:
+            self._R = self.root.R_eq
+        return self._R
     
 
     def adapt_pries_secomb(self):
@@ -520,13 +601,67 @@ class StructuredTreeOutlet():
 
 
         return self.root.R_eq
+
+
+    def simulate(self, 
+                 Q_in: list = [1.0, 1.0],
+                 Pd: float = 1.0,
+                 density = 1.06,
+                 number_of_cardiac_cycles=1,
+                 number_of_time_pts_per_cardiac_cycle = 10,
+                 viscosity = 0.04):
+        '''
+        simulate the structured tree
+
+        :param Q_in: flow at the inlet of the tree
+        :param P_d: pressure at the distal outlets of the tree
+        ** simulation parameters: **
+        :param density: density of the blood [g/cm3]
+        :param number_of_cardiac_cycles: number of cardiac cycles to simulate
+        :param number_of_time_pts_per_cardiac_cycle: number of time points per cardiac cycle
+        :param viscosity: viscosity of the blood [g/cm/s]
+        '''
+
+        if self.simparams is None:
+            self.simparams = SimParams({
+                "density": density,
+                "model_name": self.name,
+                "number_of_cardiac_cycles": number_of_cardiac_cycles,
+                "number_of_time_pts_per_cardiac_cycle": number_of_time_pts_per_cardiac_cycle,
+                "viscosity": viscosity
+            })
+            self.block_dict["simulation_parameters"] = self.simparams.to_dict()
+
+        if self.Q_in is None:
+            self.Q_in = Q_in
+
+        if self.Pd is None:
+            self.Pd = Pd
+        
+        # create solver config from StructuredTree and get tree flow result
+        self.create_bcs()
+
+        result = run_svzerodplus(self.block_dict)
+
+        # assign flow result to TreeVessel instances to allow for visualization, adaptation, etc.
+
+        assign_flow_to_root(result, self.root)
+
+        return result
     
+
+    def visualize(self):
+        '''
+        TO BE IMPLEMENTED
+        '''
+        pass
+
 
 class PriesnSecomb():
     '''
     class to perform Pries and Secomb integration on a structured tree
     '''
-    def __init__(self, tree: StructuredTreeOutlet,
+    def __init__(self, tree: StructuredTree,
                  k_p = 0.68,
                  k_m = .70,
                  k_c = 2.45,
@@ -539,7 +674,7 @@ class PriesnSecomb():
                  tol = .01, 
                  time_avg_q=True):
         '''
-        :param tree: StructuredTreeOutlet instance
+        :param tree: StructuredTree instance
         :param ps_params: pries and secomb empirical parameters. in the form [k_p, k_m, k_c, k_s, L (cm), S_0, tau_ref, Q_ref]
             units:
                 k_p, k_m, k_c, k_s [=] dimensionless
@@ -583,7 +718,7 @@ class PriesnSecomb():
         # begin euler integration
         while not converged:
             
-            # create solver config from StructuredTreeOutlet and get tree flow result
+            # create solver config from StructuredTree and get tree flow result
             self.tree.create_bcs()
             tree_result = run_svzerodplus(self.tree.block_dict)
 
@@ -670,7 +805,7 @@ class PriesnSecomb():
         self.tau_ref = ps_params[6]
         self.Q_ref = ps_params[7]
 
-        # create solver config from StructuredTreeOutlet and get tree flow result
+        # create solver config from StructuredTree and get tree flow result
         self.tree.create_bcs()
         tree_result = run_svzerodplus(self.tree.block_dict)
 

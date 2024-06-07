@@ -932,11 +932,11 @@ def find_lpa_rpa_branches(config):
 
 def rebuild_trees(config: dict):
         '''
-        build a list of StructuredTreeOutlet instances from a config_w_trees
+        build a list of StructuredTree instances from a config_w_trees
 
         :param config_w_trees: config dict with trees
         
-        :return trees: list of StructuredTreeOutlet instances
+        :return trees: list of StructuredTree instances
         '''
 
         trees = []

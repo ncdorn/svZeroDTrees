@@ -4,7 +4,7 @@ import os
 import numpy as np
 sys.path.append('/home/ndorn/Documents/Stanford/PhD/Simvascular/svZeroDPlus/structured_trees/src')
 # print(sys.path)
-from svzerodtrees.structuredtreebc import StructuredTreeOutlet
+from svzerodtrees.structuredtree import StructuredTree
 from pathlib import Path
 from svzerodtrees.post_processing.stree_visualization import *
 import matplotlib.pyplot as plt

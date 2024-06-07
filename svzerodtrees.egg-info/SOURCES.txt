@@ -11,7 +11,7 @@ svzerodtrees/operation.py
 svzerodtrees/optimization.py
 svzerodtrees/preop.py
 svzerodtrees/run_experiment.py
-svzerodtrees/structuredtreebc.py
+svzerodtrees/structuredtree.py
 svzerodtrees/threedutils.py
 svzerodtrees/treevessel.py
 svzerodtrees/utils.py

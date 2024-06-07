@@ -14,7 +14,7 @@ class ConfigHandler():
     def __init__(self, config: dict, is_pulmonary=True, is_threed_interface=False, closed_loop=False):
         self._config = config
 
-        self.trees = [] # list of StructuredTreeOutlet instances
+        self.trees = [] # list of StructuredTree instances
 
         # initialize config maps
         self.branch_map = {} # {branch id: Vessel instance}
@@ -218,7 +218,7 @@ class ConfigHandler():
 
     def convert_struct_trees_to_dict(self):
         '''
-        convert the StructuredTreeOutlet instances into dict instances
+        convert the StructuredTree instances into dict instances
         '''
 
         pass
@@ -239,7 +239,7 @@ class ConfigHandler():
 
     def update_stree_hemodynamics(self, current_result):
         '''
-        update the hemodynamics of the StructuredTreeOutlet instances
+        update the hemodynamics of the StructuredTree instances
         '''
 
         # get the outlet flowrate

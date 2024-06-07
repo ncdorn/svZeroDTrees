@@ -59,7 +59,19 @@ There are currently two microvascular adaptation schemes:
 `TreeVessel`: class for handling vessels of the structured tree
    
 
-## json config
+## building a simple tree
+A simple tree with resistance 100.0 can be built with the following methods. steady through the tree is computed easily as well
+
+```python
+tree = StructuredTree(name='simple tree')
+tree.optimize_tree_diameter(resistance=100.0)
+
+# compute pressure and flow in the tree with inlet flow 10.0 cm3/s and distal pressure 100.0 dyn/cm2
+tree_result = tree.simulate(Q_in = [10.0, 10.0], Pd=100.0)
+
+```
+
+## json config for bc adaptation
 the json config file requires the following keys
 * name: name of the experiment
 * model: name of svZeroDSolver model config to build trees

@@ -1,6 +1,6 @@
 from svzerodtrees.utils import *
 import copy
-from svzerodtrees.structuredtreebc import StructuredTreeOutlet
+from svzerodtrees.structuredtree import StructuredTreeOutlet
 from svzerodtrees._result_handler import ResultHandler
 from svzerodtrees._config_handler import ConfigHandler
 

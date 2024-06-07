@@ -4,7 +4,7 @@ import os
 import numpy as np
 import time
 sys.path.append('/home/ndorn/Documents/Stanford/PhD/Simvascular/svZeroDPlus/structured_trees/src')
-from svzerodtrees.structuredtreebc import StructuredTreeOutlet
+from svzerodtrees.structuredtree import StructuredTree
 from pathlib import Path
 from svzerodtrees.post_processing.stree_visualization import *
 import matplotlib.pyplot as plt
@@ -31,7 +31,7 @@ def build_tree(config, result):
             if "outlet" in vessel_config["boundary_conditions"]:
                 for bc_config in config["boundary_conditions"]:
                     if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
-                        outlet_stree = StructuredTreeOutlet.from_outlet_vessel(vessel_config, simparams, bc_config, Q_outlet=[np.mean(q_outs[outlet_idx])])
+                        outlet_stree = StructuredTree.from_outlet_vessel(vessel_config, simparams, bc_config, Q_outlet=[np.mean(q_outs[outlet_idx])])
                         R = bc_config["bc_values"]["R"]
                 # outlet_stree.optimize_tree_radius(R)
                 outlet_stree.build_tree()
@@ -260,7 +260,7 @@ def test_stent_optimization():
 
 
 def test_run_from_file():
-    expfile = 'AS2_stent_opt.json'
+    expfile = 'AS2_stent.json'
     os.chdir('tests/cases/AS2/experiments')
 
     interface.run_from_file(expfile, vis_trees=True)
@@ -317,4 +317,4 @@ def test_simple_config():
 
 if __name__ == '__main__':
 
-    test_stent_optimization()
+    test_run_from_file()

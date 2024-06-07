@@ -11,7 +11,7 @@ from svzerodtrees.threedutils import *
 from svzerodtrees.post_processing.plotting import *
 from svzerodtrees.post_processing.stree_visualization import *
 from scipy.optimize import minimize, Bounds
-from svzerodtrees.structuredtreebc import StructuredTreeOutlet
+from svzerodtrees.structuredtree import StructuredTree
 from svzerodtrees.adaptation import *
 from svzerodtrees._result_handler import ResultHandler
 from svzerodtrees._config_handler import ConfigHandler, Vessel, BoundaryCondition, Junction, SimParams
@@ -382,7 +382,7 @@ def construct_cwss_trees(config_handler, result_handler, n_procs=4, log_file=Non
                 # get the bc object
                 bc = config_handler.bcs[vessel.bc["outlet"]]
                 # create outlet tree
-                outlet_tree = StructuredTreeOutlet.from_outlet_vessel(vessel, 
+                outlet_tree = StructuredTree.from_outlet_vessel(vessel, 
                                                                       config_handler.simparams,
                                                                       bc)
                 
@@ -397,7 +397,7 @@ def construct_cwss_trees(config_handler, result_handler, n_procs=4, log_file=Non
         return tree
 
     # run the tree 
-    with Pool(n_procs) as p:
+    with Pool(n_procs) as p: # THIS IS BUGGING
         config_handler.trees = p.map(optimize_tree, config_handler.trees)
     
     # update the resistance in the config according to the optimized tree resistance
@@ -407,7 +407,7 @@ def construct_cwss_trees(config_handler, result_handler, n_procs=4, log_file=Non
 
     preop_result = run_svzerodplus(config_handler.config)
 
-    # leaving vessel radius fixed, update the hemodynamics of the StructuredTreeOutlet instances based on the preop result
+    # leaving vessel radius fixed, update the hemodynamics of the StructuredTree instances based on the preop result
     # config_handler.update_stree_hemodynamics(preop_result)
 
     result_handler.add_unformatted_result(preop_result, 'preop')
@@ -448,7 +448,7 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_proc
                 # get the bc object
                 bc = config_handler.bcs[vessel.bc["outlet"]]
                 # create outlet tree
-                outlet_tree = StructuredTreeOutlet.from_outlet_vessel(vessel, 
+                outlet_tree = StructuredTree.from_outlet_vessel(vessel, 
                                                                       config_handler.simparams,
                                                                       bc,
                                                                       P_outlet=p_outs[outlet_idx],
@@ -483,7 +483,7 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_proc
     # compute the preop result
     preop_result = run_svzerodplus(config_handler.config)
 
-    # leaving vessel radius fixed, update the hemodynamics of the StructuredTreeOutlet instances based on the preop result
+    # leaving vessel radius fixed, update the hemodynamics of the StructuredTree instances based on the preop result
     config_handler.update_stree_hemodynamics(preop_result)
 
     if n_procs is None:
@@ -517,7 +517,7 @@ def construct_coupled_cwss_trees(config_handler, simulation_dir, n_procs=4, d_mi
     for bc in config_handler.bcs.values():
         if config_handler.coupling_blocks[bc.name].location == 'inlet':
             diameter = (find_vtp_area(config_handler.coupling_blocks[bc.name].surface) / np.pi)**(1/2)
-            config_handler.trees.append(StructuredTreeOutlet.from_bc_config(bc, config_handler.simparams, diameter))
+            config_handler.trees.append(StructuredTree.from_bc_config(bc, config_handler.simparams, diameter))
 
 
     # function to run the tree diameter optimization

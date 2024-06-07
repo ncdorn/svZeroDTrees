@@ -98,7 +98,7 @@ def run_from_file(exp_config_file: str, vis_trees=True):
                                         log_file=log_file,
                                         d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
 
-            # save preop config to as pickle, with StructuredTreeOutlet objects
+            # save preop config to as pickle, with StructuredTree objects
             write_to_log(log_file, 'saving preop config with cwss trees...')
 
             config_handler.to_file_w_trees('config_w_cwss_trees.in')
@@ -422,7 +422,7 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
                                     log_file=log_file,
                                     d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
 
-        # save preop config to as pickle, with StructuredTreeOutlet objects
+        # save preop config to as pickle, with StructuredTree objects
         write_to_log(log_file, 'saving preop config with cwss trees...')
 
         config_handler.to_file_w_trees('config_w_cwss_trees.in')

@@ -47,7 +47,7 @@ class StentOptimization:
                                                 log_file=log_file,
                                                 d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
 
-            # save preop config to as pickle, with StructuredTreeOutlet objects
+            # save preop config to as pickle, with StructuredTree objects
             write_to_log(log_file, 'saving preop config with' + adapt + 'trees...')
 
             # pickle the config handler with the trees
@@ -309,7 +309,7 @@ def optimize_stent_diameter(config_handler, result_handler, repair_config: dict,
                                             log_file=log_file,
                                             d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
 
-        # save preop config to as pickle, with StructuredTreeOutlet objects
+        # save preop config to as pickle, with StructuredTree objects
         write_to_log(log_file, 'saving preop config with' + adapt + 'trees...')
 
         # pickle the config handler with the trees

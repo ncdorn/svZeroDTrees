@@ -233,7 +233,7 @@ class PAanalyzer:
         '''
         plot the wss in the distal vessels of the tree, below a certain diameter threshold
 
-        :param trees: list of StructuredTreeOutlet instances
+        :param trees: list of StructuredTree instances
         :param max_d: maximum diameter threshold for plotting distal wss
         '''
 
