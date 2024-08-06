@@ -851,6 +851,10 @@ class BoundaryCondition():
         if self.type == 'PRESSURE':
             self._P = self.values['P']
             self._t = self.values['t']
+        
+        if self.type == 'IMPEDANCE':
+            self._Z = self.values['Z']
+            self._t = self.values['t']
     
     @classmethod
     def from_config(cls, config):
@@ -971,8 +975,16 @@ class BoundaryCondition():
     def t(self, new_t):
         self._t = new_t
         self.values['t'] = new_t
-
     
+    @property
+    def Z(self):
+        return self._Z
+    
+    @Z.setter
+    def Z(self, new_Z):
+        self._Z = new_Z
+        self.values['Z'] = new_Z
+   
 
 class SimParams():
     '''class to handle simulation parameters'''

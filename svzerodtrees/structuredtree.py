@@ -4,7 +4,9 @@ from scipy.optimize import minimize, Bounds, LinearConstraint
 from svzerodtrees.treevessel import TreeVessel
 from svzerodtrees.utils import *
 from svzerodtrees._config_handler import ConfigHandler, Vessel, BoundaryCondition, SimParams
+from multiprocessing import Pool
 import math
+import scipy
 import json
 import pickle
 
@@ -19,8 +21,8 @@ class StructuredTree():
                  C: float = None,
                  P_in: list = None,
                  Q_in: list = None,
+                 time: list = None,
                  Pd: float = 0.0,
-                 viscosity: float = 0.04,
                  name: str = None, tree_config: dict = None, simparams: SimParams = None, root: TreeVessel = None):
         """
         Create a new StructuredTree instance
@@ -44,13 +46,22 @@ class StructuredTree():
         self.C = C
 
         # simulation parameters
-        self.viscosity = viscosity
+        self.viscosity = 0.049
+        self.density = 1.055
         self.simparams = simparams
 
         # flow and pressure attributes
         self.P_in = P_in
         self.Q_in = Q_in
+        self.time = time
         self.Pd = Pd
+
+        ### non-diensional parameters ###
+        self.q = 10.0 # characteristic flow rate, cm3/s
+        self.Lr = 1.0 # characteristic length scale, cm
+        self.g = 981.0 # acceleration due to gravity
+
+
 
         # set up empty block dict if not generated from pre-existing tree
         if tree_config is None:
@@ -86,7 +97,8 @@ class StructuredTree():
                            tree_exists=False, 
                            root: TreeVessel = None, 
                            P_outlet: list=[0.0], 
-                           Q_outlet: list=[0.0]) -> "StructuredTree":
+                           Q_outlet: list=[0.0],
+                           time: list=[0.0]) -> "StructuredTree":
         """
         Class method to creat an instance from the config dictionary of an outlet vessel
 
@@ -103,10 +115,14 @@ class StructuredTree():
         """
         # if steady state, make the Q_outlet and P_outlet into a list of length two for svzerodplus config BC compatibility
         if type(Q_outlet) is not list:
+            # steady flow
             Q_outlet = [Q_outlet,] * 2
+            time = [0.0, 1.0]
         
         if type(P_outlet) is not list:
+            # steady pressure
             P_outlet = [P_outlet,] * 2
+            time = [0.0, 1.0]
         
 
         params = dict(
@@ -148,8 +164,9 @@ class StructuredTree():
                        C = C_bc,
                        P_in = P_outlet,
                        Q_in = Q_outlet, 
+                       time=time,
                        Pd = bc.values["Pd"],
-                       viscosity = simparams.viscosity, name="OutletTree" + str(vessel.branch), simparams=simparams)
+                       name="OutletTree" + str(vessel.branch), simparams=simparams)
 
 
     @classmethod
@@ -158,17 +175,22 @@ class StructuredTree():
                        simparams: SimParams,
                        diameter: float,
                        P_outlet: list=[0.0], 
-                       Q_outlet: list=[0.0]) -> "StructuredTree":
+                       Q_outlet: list=[0.0],
+                       time: list=[0.0]) -> "StructuredTree":
         '''
         Class method to create an instance from the config dictionary of an outlet boundary condition
         '''
 
         # if steady state, make the Q_outlet and P_outlet into a list of length two for svzerodplus config BC compatibility
         if type(Q_outlet) is not list:
+            # steady flow
             Q_outlet = [Q_outlet,] * 2
-
+            time = [0.0, 1.0]
+        
         if type(P_outlet) is not list:
+            # steady pressure
             P_outlet = [P_outlet,] * 2
+            time = [0.0, 1.0]
 
         params = dict(
             # need vessel length to determine vessel diameter
@@ -183,7 +205,8 @@ class StructuredTree():
                    diameter = diameter,
                    viscosity=simparams.viscosity,
                    P_in = P_outlet,
-                   Q_in = Q_outlet,
+                   Q_in = Q_outlet, 
+                   time=time,
                    name="OutletTree" + str(bc.name), simparams=simparams)
 
 # **** I/O METHODS ****
@@ -232,7 +255,7 @@ class StructuredTree():
         for example in the case of adapting the diameter of the vessels
         '''
         self.reset_tree(keep_root=True)
-        self.block_dict["vessels"].append(self.root.info)
+        self.block_dict["vessels"].append(self.root.params)
         queue = [self.root]
 
         while len(queue) > 0:
@@ -241,13 +264,13 @@ class StructuredTree():
             # create the block dict for the left vessel
             if not current_vessel.collapsed:
                 queue.append(current_vessel.left)
-                self.block_dict["vessels"].append(current_vessel.left.info)
+                self.block_dict["vessels"].append(current_vessel.left.params)
                 # create the block dict for the right vessel
                 queue.append(current_vessel.right)
-                self.block_dict["vessels"].append(current_vessel.right.info)
+                self.block_dict["vessels"].append(current_vessel.right.params)
 
 
-    def build_tree(self, initial_d=None, d_min=0.0049, optimizing=False, alpha=0.9, beta=0.6):
+    def build_tree(self, initial_d=None, d_min=0.0049, optimizing=False, asym=0.4048, xi=2.7, alpha=None, beta=None):
         '''
         recursively build the structured tree
 
@@ -255,6 +278,8 @@ class StructuredTree():
         :param d_min: diameter at which the vessel is considered "collapsed" and the tree terminates [cm]. default is 100 um
         :param optimizing: True if the tree is being built as part of an optimization scheme, so the block_dict will be
             reset for each optimization iteration
+        :param asym: asymmetry ratio, used in the place of alpha and beta
+        :param xi: junction scaling coefficient
         :param alpha: left vessel scaling factor (see Olufsen et al. 2012)
         :param beta: right vessel scaling factor
         '''
@@ -270,19 +295,23 @@ class StructuredTree():
 
         if initial_d <= 0:
             raise Exception("initial_d is invalid, " + str(initial_d))
-        if beta ==0:
-            raise Exception("beta is zero")
+        
+        if alpha is None and beta is None:
+            alpha = (1 + asym**(xi/2))**(-1/xi)
+            beta = asym**(1/2) * alpha
+            print(f"alpha: {alpha}, beta: {beta}")
+
         # add r_min into the block dict
-        self.block_dict["D_min"] = d_min
+        self.d_min = d_min
         # initialize counting values
         vessel_id = 0
         junc_id = 0
         # initialize the root vessel of the tree
-        self.root = TreeVessel.create_vessel(0, 0, initial_d, self.viscosity)
+        self.root = TreeVessel.create_vessel(0, 0, initial_d, density=1.055)
         self.root.name = self.name
         # add inflow boundary condition
-        self.root.info["boundary_conditions"] = {"inlet": "INFLOW"}
-        self.block_dict["vessels"].append(self.root.info)
+        self.root.params["boundary_conditions"] = {"inlet": "INFLOW"}
+        self.block_dict["vessels"].append(self.root.params)
         queue = [self.root]
 
         while len(queue) > 0:
@@ -307,25 +336,27 @@ class StructuredTree():
                 left_dia = alpha * current_vessel.d
                 # assume pressure is conserved at the junction. 
                 # Could later replace this with a function to account for pressure loss
-                current_vessel.left = TreeVessel.create_vessel(vessel_id, next_gen, left_dia, self.viscosity)
-                if left_dia < d_min or vessel_id > 10**6:
+                current_vessel.left = TreeVessel.create_vessel(vessel_id, next_gen, left_dia, density=1.055)
+                if left_dia < d_min:
                     current_vessel.left.collapsed = True
-                queue.append(current_vessel.left)
-                self.block_dict["vessels"].append(current_vessel.left.info)
+                else:
+                    queue.append(current_vessel.left)
+                self.block_dict["vessels"].append(current_vessel.left.params)
                 
 
                 # create right vessel
                 vessel_id += 1
                 right_dia = beta * current_vessel.d
-                current_vessel.right = TreeVessel.create_vessel(vessel_id, next_gen, right_dia, self.viscosity)
-                if right_dia < d_min or vessel_id > 10^6:
+                current_vessel.right = TreeVessel.create_vessel(vessel_id, next_gen, right_dia, density=1.055)
+                if right_dia < d_min:
                     current_vessel.right.collapsed = True
-                queue.append(current_vessel.right)
-                self.block_dict["vessels"].append(current_vessel.right.info)
+                else:
+                    queue.append(current_vessel.right)
+                self.block_dict["vessels"].append(current_vessel.right.params)
                 
 
                 # add a junction
-                junction_info = {"junction_name": "J" + str(junc_id),
+                junction_config = {"junction_name": "J" + str(junc_id),
                                  "junction_type": "NORMAL_JUNCTION",
                                  "inlet_vessels": [current_vessel.id],
                                  "outlet_vessels": [current_vessel.left.id, current_vessel.right.id]
@@ -334,8 +365,128 @@ class StructuredTree():
                                 #                      "R_poiseuille": [0, 0, 0], 
                                 #                      "stenosis_coefficient": [0, 0, 0]},
                                  }
-                self.block_dict["junctions"].append(junction_info)
+                self.block_dict["junctions"].append(junction_config)
                 junc_id += 1
+
+
+    def compute_olufsen_impedance_OLD(self):
+        '''
+        compute the impedance of the structured tree accordin to Olufsen et al. (2000)
+        '''
+
+        # inflow to tree must be periodic!!
+        # if sum(np.gradient(self.Q_in)) == 0.0:
+        #     raise ValueError("Tree inflow must be periodic to compute the impedance")
+        
+        tsteps = self.simparams.number_of_time_pts_per_cardiac_cycle
+
+        if tsteps % 2 != 0:
+            inflow = pd.DataFrame(np.zeros((tsteps + 1, 2)), columns=['q', 't'])
+            inflow.q, inflow.t = scipy.signal.resample(self.Q_in, tsteps + 1, self.time)
+            tsteps = tsteps + 1
+        else:
+            pass
+
+        period = max(self.time)
+
+        df = 1 / period
+
+        # omega = [i * df * 2 * np.pi for i in range(-int(tsteps / 2), int(tsteps / 2) + 1)] # angular frequency vector
+
+        omega = [i * df * 2 * np.pi for i in range(tsteps)]
+
+        # we need to remove the zero frequency, because we will insert that later at the first index
+        zero_idx = omega.index(0.0)
+        omega.remove(0.0)
+
+        # initialize the impedance
+        Z_om = np.zeros(len(omega), dtype=complex)
+        # loop through POSITIVE frequencies and calculate impedance
+        
+        ## PARALLELIZED ##
+        # with Pool(24) as p:       
+        #     Z_om = p.map(self.root.z0, omega)
+
+        ## UNPARALLELIZED ##
+        for k in range(0, int(tsteps/2)):
+            if k % 100 == 0:
+                print(f'computing root impedance for timestep {k} of {tsteps/2}')
+            # compute impedance at the root vessel
+            Z_om[k] = self.root.z0(omega[k])
+            
+        # apply self-adjoint property of the impedance
+        Z_om_half = Z_om[:int(tsteps/2)]
+        # negative frequencies
+        # Z_om[int(tsteps/2):] = np.conjugate(np.flipud(Z_om_half))
+
+        Z_om = np.insert(Z_om, 0, self.root.z0(0.0))
+        
+
+        # Z_om should now be Z(0, omega) for all omega
+        # now we can calculate the pressure and flow at the structured tree root
+
+        # add back in 0.0 to omega
+        omega.insert(zero_idx, 0.0)
+
+        return Z_om, omega
+
+
+    def compute_olufsen_impedance(self):
+        '''
+        compute the impedance of the structured tree accordin to Olufsen et al. (2000)
+        '''
+
+        # inflow to tree must be periodic!!
+        # if sum(np.gradient(self.Q_in)) == 0.0:
+        #     raise ValueError("Tree inflow must be periodic to compute the impedance")
+        
+        tsteps = self.simparams.number_of_time_pts_per_cardiac_cycle
+
+
+        period = max(self.time) * self.q / self.Lr**3
+
+        df = 1 / period
+
+        omega = [i * df * 2 * np.pi for i in range(-tsteps//2, tsteps//2)] # angular frequency vector
+
+
+        # we need to remove the zero frequency, because we will insert that later at the first index
+
+
+        # initialize the impedance
+        Z_om = np.zeros(len(omega), dtype=complex)
+        # loop through POSITIVE frequencies and calculate impedance
+        
+        ## PARALLELIZED ##
+        # with Pool(24) as p:       
+        #     Z_om = p.map(self.root.z0, omega)
+
+        ## UNPARALLELIZED ##
+        for k in range(0, tsteps//2+1):
+            if (k) % 100 == 0:
+                print(f'computing root impedance for timestep {k} of {tsteps//2}')
+            # compute impedance at the root vessel
+            # we cannot have a negative number here so we take positive frequency and then conjugate
+            Z_om[k] = np.conjugate(self.root.z0_olufsen(abs(omega[k])))
+            
+        # apply self-adjoint property of the impedance
+        Z_om_half = Z_om[:tsteps//2]
+        # add negative frequencies
+        Z_om[tsteps//2+1:] = np.conjugate(np.flipud(Z_om_half[:-1]))
+
+        # Z_om = np.insert(Z_om, 0, self.root.z0(0.0))
+        
+
+        # Z_om should now be Z(0, omega) for all omega
+        # now we can calculate the pressure and flow at the structured tree root
+
+        # add back in 0.0 to omega
+        # omega.insert(zero_idx, 0.0)
+
+        # dimensionalize omega
+        omega = [w * self.q / self.Lr**3 for w in omega]
+
+        return Z_om, omega 
 
 
     def adapt_constant_wss(self, Q, Q_new):
@@ -555,7 +706,7 @@ class StructuredTree():
                         "bc_type": "PRESSURE",
                         "bc_values": {
                             "P": [self.Pd,] * 2,
-                            "t": [0.0, 1.0]
+                            "t": np.linspace(0.0, 1.0, num=timesteps).tolist()
                             }
                         }
                     )
@@ -566,7 +717,7 @@ class StructuredTree():
             count the number vessels in the tree
         '''
         return len(self.block_dict["vessels"])
-    
+
     @property
     def R(self):
         '''

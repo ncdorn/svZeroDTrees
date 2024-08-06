@@ -17,6 +17,7 @@ from svzerodtrees._config_handler import ConfigHandler
 from svzerodtrees._result_handler import ResultHandler
 import pickle
 from deepdiff import DeepDiff
+import pysvzerod
 
 
 def build_tree(config, result):

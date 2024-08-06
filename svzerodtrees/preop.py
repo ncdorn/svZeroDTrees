@@ -175,7 +175,7 @@ def optimize_outlet_bcs(input_file,
     # write to log file for debugging
     write_to_log(log_file, "Outlet resistances optimized! " + str(result.x))
 
-    R_final = result.x # get the array of optimized resistances
+    R_final = result.x # get the array of optimized resistances 
     write_resistances(config_handler.config, R_final)
 
 
@@ -397,7 +397,7 @@ def construct_cwss_trees(config_handler, result_handler, n_procs=4, log_file=Non
         return tree
 
     # run the tree 
-    with Pool(n_procs) as p: # THIS IS BUGGING
+    with Pool(n_procs) as p:
         config_handler.trees = p.map(optimize_tree, config_handler.trees)
     
     # update the resistance in the config according to the optimized tree resistance
@@ -440,6 +440,7 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_proc
     # get the outlet flowrate
     q_outs = get_outlet_data(config_handler.config, pretree_result, "flow_out", steady=True)
     p_outs = get_outlet_data(config_handler.config, pretree_result, "pressure_out", steady=True)
+    tsteps = get_outlet_data(config_handler.config, pretree_result, "time", steady=True)
     outlet_idx = 0 # need this when iterating through outlets 
     # get the outlet vessel
     for vessel in config_handler.vessel_map.values():

@@ -1,8 +1,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from svzerodtrees.utils import *
+import pandas as pd
 import pickle
 import json
+import os
 
 
 class PAanalyzer:
@@ -478,6 +480,8 @@ class PAanalyzer:
         percent_adapt = np.subtract(adapted, postop) / postop * 100
 
         percent_adapt = percent_adapt[abs(percent_adapt) >= threshold]
+
+        print(percent_adapt)
         
         return percent_adapt
 
@@ -599,38 +603,43 @@ class PAanalyzer:
         plt.savefig(str(self.fig_dir + '/') + filename)
 
 
-    def plot_flow_adaptation(self, vessels, filename='flow_adaptation.png', threshold=100.0):
+    def plot_flow_adaptation(self, vessel_ids, filename='flow_adaptation.png', threshold=0.0):
         '''
         plot a bar chart of the flow adaptation in the large vessels
 
-        :param vessels: list of vessels
+        :param vessels: list of vessel ids
         :param filename: filename to save figure
         :param threshold: threshold for flow adaptation
         '''
-        if vessels == 'all':
-            vessels = list(self.result.keys())
-        if vessels == 'outlets':
+        if vessel_ids == 'all':
+            vessel_ids = list(self.result.keys())
+        if vessel_ids == 'outlets':
             outlet_vessels, outlet_d = find_outlets(self.config)
-            vessels = [str(vessel) for vessel in outlet_vessels]
+            vessel_ids = [str(vessel) for vessel in outlet_vessels]
 
-        percents_adapt = self.get_qoi_adaptation(vessels, 'q_out', threshold=threshold)
+        if vessel_ids == [self.lpa.branch, self.rpa.branch]:
+            vessel_ids = ['lpa', 'rpa']
+        
+        vessels = [self.vessel_map[int(vessel)] for vessel in vessel_ids]
 
-        if vessels == [self.lpa.branch, self.rpa.branch]:
-            vessels = ['lpa', 'rpa']
+        percents_adapt = self.get_qoi_adaptation(vessel_ids, 'q_out', threshold=threshold)
         
-        plot_config = {
-            'flow_adaptation':
-            {
-                'type': 'bar',
-                'data': [vessels, percents_adapt],
-                'labels': {
-                    'x': 'vessel',
-                    'y': '% flow adaptation'
-                }
-            }
-        }
-        
-        self.make_figure(plot_config, '% flow adaptation in vessels', filename, sharex=False, sharey=False)
+        rpa_qoi, lpa_qoi = self.sort_into_rpa_lpa(vessels, percents_adapt)
+
+        print(f'lpa: {self.lpa.branch} / rpa: {self.rpa.branch}')
+
+        lpa_qoi = pd.Series(lpa_qoi)
+        rpa_qoi = pd.Series(rpa_qoi)
+
+        plt.figure()
+        plt.bar(lpa_qoi.index, lpa_qoi, label='LPA', color='tomato')
+        plt.bar(rpa_qoi.index, rpa_qoi, label='RPA', color='cornflowerblue')
+        plt.ylabel(f'% change in flow')
+        plt.xticks([])
+        plt.legend()
+        plt.title('Outlet adaptation')
+        plt.savefig(os.path.join(self.fig_dir, filename))
+
 
 
     def scatter_qoi_adaptation_distance(self, branches, qoi: str, filename= 'adaptation_scatter.png', threshold=0.0):

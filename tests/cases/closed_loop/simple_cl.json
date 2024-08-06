@@ -1,0 +1,84 @@
+{
+    "boundary_conditions": [],
+    "junctions": [
+        {
+            "inlet_vessels": [
+                0
+            ],
+            "junction_name": "J0",
+            "junction_type": "NORMAL_JUNCTION",
+            "outlet_vessels": [
+                1
+            ]
+        },
+        {
+            "inlet_vessels": [
+                1
+            ],
+            "junction_name": "J1",
+            "junction_type": "NORMAL_JUNCTION",
+            "outlet_vessels": [
+                2
+            ]
+        },
+        {
+            "inlet_blocks": [
+                "vessel_2"
+            ],
+            "junction_name": "J2",
+            "junction_type": "NORMAL_JUNCTION",
+            "outlet_blocks": [
+                "vessel_0"
+            ]
+        }
+    ],
+    "simulation_parameters": {
+        "number_of_cardiac_cycles": 10,
+        "number_of_time_pts_per_cardiac_cycle": 1000,
+        "steady_initial": false
+    },
+    "valves": [
+        
+    ],
+    "chambers": [
+        
+    ],
+    "vessels": [
+        {
+            "vessel_id": 0,
+            "vessel_length": 10.0,
+            "vessel_name": "vessel_0",
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "C": 10.0,
+                "R_poiseuille": 0.1625,
+                "L": 0.0005
+            }
+        },
+        {
+            "vessel_id": 1,
+            "vessel_length": 10.0,
+            "vessel_name": "vessel_1",
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "C": 16.0,
+                "R_poiseuille": 0.1625,
+                "L": 0.0005
+            }
+        },
+        {
+            "vessel_id": 2,
+            "vessel_length": 10.0,
+            "vessel_name": "vessel_2",
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "C": 1.2,
+                "R_poiseuille": 0.8,
+                "L": 0.005
+            }
+        }
+        ],
+    "initial_condition": {
+            "pressure_all": 20.0
+        }
+}

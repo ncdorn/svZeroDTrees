@@ -272,7 +272,7 @@ def write_svsolver_runscript(sim_dir, steps_btwn_restarts,
         ff.write(f'{svpre_path} {os.path.basename(sim_dir)}.svpre \n')
         ff.write(f'srun {svsolver_path} \n')
         ff.write(f'cd {nodes * procs_per_node}-procs_case \n')
-        ff.write(f'{svpost_path} -start 1500 -stop 2000 -incr {steps_btwn_restarts} -sol -vtkcombo -vtu post.vtu \n')
+        ff.write(f'{svpost_path} -start 1500 -stop 2000 -incr {steps_btwn_restarts} -sol -wss -vtkcombo -vtu post.vtu \n')
         ff.write('mv post.vtu *_svZeroD .. \n')
 
 

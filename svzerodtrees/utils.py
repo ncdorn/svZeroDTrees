@@ -31,7 +31,7 @@ def get_pressure(result_array, branch, convert_to_mmHg=False):
 
     return pressures, systolic_p, diastolic_p, mean_p
 
-def plot_result(result_df, quantity, name, filepath, plot_mean=False):
+def plot_result(result_df, quantity, name, filepath=None, plot_mean=False):
     '''
     plot the result from a result dataframe
 
@@ -56,7 +56,10 @@ def plot_result(result_df, quantity, name, filepath, plot_mean=False):
     plt.title(name + ' ' + quantity + ' time series')
     plt.legend()
     plt.pause(0.001)
-    plt.savefig(filepath)
+    if filepath is None:
+        plt.show()
+    else:
+        plt.savefig(filepath)
 
 
 def plot_pressure(result_array, branch, save=False, fig_dir=None):
@@ -446,6 +449,7 @@ def run_svzerodplus(config: dict, dtype='ndarray'):
     result = pysvzerod.simulate(config)
 
     output = {
+        "time": result["time"],
         "pressure_in": {},
         "pressure_out": {},
         "flow_in": {},
