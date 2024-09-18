@@ -48,7 +48,7 @@ def run_from_file(exp_config_file: str, vis_trees=True):
                 task_params['preop_dir'],
                 task_params['postop_dir'],
                 task_params['adapted_dir'],
-                task_params['zerod_config'],
+                os.path.join(os.path.dirname(task_params['zerod_config']), 'preop_config.json'),
                 task_params['svpre_path'],
                 task_params['svsolver_path'],
                 task_params['svpost_path']
@@ -66,11 +66,11 @@ def run_from_file(exp_config_file: str, vis_trees=True):
             else:
                 config_handler, result_handler = preop.optimize_outlet_bcs(
                     task_params['zerod_config'],
-                    os.path.join(os.path.dirname(task_params['zero_config']), 'clinical_targets.csv')
+                    os.path.join(os.path.dirname(task_params['zerod_config']), 'clinical_targets.csv')
                 )
 
             # save optimized config and result
-            preop_config_path = os.path.join(os.path.dirname(task_params['zero_config']), 'preop_config.json')
+            preop_config_path = os.path.join(os.path.dirname(task_params['zerod_config']), 'preop_config.json')
             config_handler.to_json(preop_config_path)
 
             run_threed_from_msh(
@@ -98,7 +98,7 @@ def run_from_file(exp_config_file: str, vis_trees=True):
                                         log_file=log_file,
                                         d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
 
-            # save preop config to as pickle, with StructuredTreeOutlet objects
+            # save preop config to as pickle, with StructuredTree objects
             write_to_log(log_file, 'saving preop config with cwss trees...')
 
             config_handler.to_file_w_trees('config_w_cwss_trees.in')
@@ -422,7 +422,7 @@ def run_cwss_adaptation(config_handler: ConfigHandler, result_handler: ResultHan
                                     log_file=log_file,
                                     d_min=.0049) # THIS NEEDS TO BE .0049 FOR REAL SIMULATIONS
 
-        # save preop config to as pickle, with StructuredTreeOutlet objects
+        # save preop config to as pickle, with StructuredTree objects
         write_to_log(log_file, 'saving preop config with cwss trees...')
 
         config_handler.to_file_w_trees('config_w_cwss_trees.in')
@@ -492,11 +492,20 @@ def run_threed_from_msh(preop_simulation_dir,
                         postop_simulation_dir, 
                         adapted_simulation_dir, 
                         zerod_config,
-                        svpre_path=None,
-                        svsolver_path=None,
-                        svpost_path=None):
+                        svpre_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre',
+                        svsolver_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mysolver',
+                        svpost_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypost'):
     '''
     run threed adaptation from preop and postop mesh files only
+
+    :param preop_simulation_dir: path to the preop simulation directory
+    :param postop_simulation_dir: path to the postop simulation directory
+    :param adapted_simulation_dir: path to the adapted simulation directory
+    :param zerod_config: path to the zerod config file of the 3d model
+    :param svpre_path: path to the svpre executable
+    :param svsolver_path: path to the svsolver executable
+    :param svpost_path: path to the svpost executable
+     default for svsolver paths is nick's paths on sherlock
     '''
 
     # check that the directories are unique so we dont end up screwing stuff up by accident
@@ -509,56 +518,97 @@ def run_threed_from_msh(preop_simulation_dir,
 
     # save which directory we are in
     wd = os.getcwd()
-    # setup preop dir
-    num_timesteps = setup_simdir_from_mesh(preop_simulation_dir, zerod_config)
-    # run preop simulation
-    os.chdir(preop_simulation_dir)
-    print('submitting preop simulation job...')
-    os.system('sbatch run_solver.sh')
-    os.chdir(wd)
 
-    # setup postop dir, num timesteps assumed to be same
-    setup_simdir_from_mesh(postop_simulation_dir, zerod_config)
-    # run postop simulation
-    os.chdir(postop_simulation_dir)
-    print('submitting postop simulation job...')
-    os.system('sbatch run_solver.sh')
-    os.chdir(wd)
-
-    # check if the simulations have run
+     # check if the simulations have run
     preop_complete = False
     postop_complete = False
 
-    time.sleep(300)
-    while not preop_complete and not postop_complete:
-        time.sleep(150)
-        timestep = 0
-        with open(os.path.join(preop_simulation_dir, '*-procs_case/histor.dat'), 'r') as histor_dat:
+    # setup preop dir
+    num_timesteps = setup_simdir_from_mesh(preop_simulation_dir, zerod_config, svpre_path, svsolver_path, svpost_path)
+    # check if the simulation has been run
+    if not os.path.exists(preop_simulation_dir + '/48-procs_case/histor.dat'):
+        # run preop simulation
+        os.chdir(preop_simulation_dir)
+        print('submitting preop simulation job...')
+        os.system('sbatch run_solver.sh')
+        os.chdir(wd)
+    else:
+        with open(os.path.join(preop_simulation_dir, '48-procs_case/histor.dat'), 'r') as histor_dat:
             lines = histor_dat.readlines()
             if num_timesteps == int(lines[-1].split()[0]):
-                # wait to finish up last timestep
-                time.sleep(120)
+                print('preop simulation has been run!')
                 preop_complete = True
-                print('preop simulation complete!')
-        
-        with open(os.path.join(postop_simulation_dir, '*-procs_case/histor.dat'), 'r') as histor_dat:
+            else:
+                raise Exception('preop simulation has not been run to completion')
+            
+
+    # setup postop dir, num timesteps assumed to be same
+    num_timesteps = setup_simdir_from_mesh(postop_simulation_dir, zerod_config, svpre_path, svsolver_path, svpost_path)
+    # check if the simulation has been run
+    if not os.path.exists(preop_simulation_dir + '/48-procs_case/histor.dat'):
+        # run postop simulation
+        os.chdir(postop_simulation_dir)
+        print('submitting postop simulation job...')
+        os.system('sbatch run_solver.sh')
+        os.chdir(wd)
+    else:
+        with open(os.path.join(preop_simulation_dir, '48-procs_case/histor.dat'), 'r') as histor_dat:
             lines = histor_dat.readlines()
             if num_timesteps == int(lines[-1].split()[0]):
-                # wait to finish up last timestep
-                time.sleep(120)
+                print('postop simulation has been run!')
                 postop_complete = True
-                print('postop simulation complete!')
+            else:
+                raise Exception('postop simulation has not been run to completion')
+
+
+    if not preop_complete and not postop_complete:
+    # wait for simulation to run
+        time.sleep(300)
+
+    while not preop_complete and not postop_complete:
+        time.sleep(180)
+        # we will assume that we are using 48 processors for the simulations
+        if os.path.exists(preop_simulation_dir + '/48-procs_case/'):
+            with open(os.path.join(preop_simulation_dir, '48-procs_case/histor.dat'), 'r') as histor_dat:
+                lines = histor_dat.readlines()
+                if num_timesteps == int(lines[-1].split()[0]):
+                    # wait to finish up last timestep
+                    time.sleep(120)
+                    preop_complete = True
+                    print('preop simulation complete!')
+                else:
+                    continue
+        else:
+            # simulation not launched yet
+            continue
+        
+        if os.path.exists(postop_simulation_dir + '/48-procs_case/'):
+            with open(os.path.join(postop_simulation_dir, '48-procs_case/histor.dat'), 'r') as histor_dat:
+                lines = histor_dat.readlines()
+                if num_timesteps == int(lines[-1].split()[0]):
+                    # wait to finish up last timestep
+                    time.sleep(120)
+                    postop_complete = True
+                    print('postop simulation complete!')
+                else:
+                    continue
+        else:
+            # simulation has not launched yet
+            continue
 
     # load in the preop and postop outlet flowrates from the 3d simulation.
     # the Q_svZeroD file needs to be in the top level of the simulation directory
     preop_q = pd.read_csv(preop_simulation_dir + '/Q_svZeroD', sep='\s+')
-    preop_mean_q = preop_q.iloc[-num_timesteps / 2:].mean(axis=0).values
+    preop_mean_q = preop_q.iloc[int(-num_timesteps / 2):].mean(axis=0).values
 
     postop_q = pd.read_csv(postop_simulation_dir + '/Q_svZeroD', sep='\s+')
-    postop_mean_q = postop_q.iloc[-num_timesteps / 2:].mean(axis=0).values
+    postop_mean_q = postop_q.iloc[int(-num_timesteps / 2):].mean(axis=0).values
 
     # initialize preop config handler
-    preop_config_handler = ConfigHandler.from_json(zerod_config)
+    preop_config_handler = ConfigHandler.from_json(os.path.join(preop_simulation_dir, 'svzerod_3Dcoupling.json'), is_pulmonary=False, is_threed_interface=True)
+
+    # build the trees
+    preop.construct_coupled_cwss_trees(preop_config_handler, preop_simulation_dir, n_procs=12)
 
     print('computing boundary condition adaptation...')
 
@@ -573,12 +623,33 @@ def run_threed_from_msh(preop_simulation_dir,
 
     prepare_adapted_simdir(postop_simulation_dir, adapted_simulation_dir)
 
-    # run simulation
-    os.chdir(adapted_simulation_dir)
+    # run simulation, we are already in adapted sim dir
     print('submitting adapted simulation job...')
     os.system('sbatch run_solver.sh')
     os.chdir(wd)
 
-    print('all simulations complete!')
+    time.sleep(300)
+
+    # check if adapted simulation is complete
+    adapted_complete = False
+    while not adapted_complete:
+        time.sleep(180)
+        # we will assume that we are using 48 processors for the simulations
+        if os.path.exists(adapted_simulation_dir + '/48-procs_case/'):
+            with open(os.path.join(adapted_simulation_dir, '48-procs_case/histor.dat'), 'r') as histor_dat:
+                lines = histor_dat.readlines()
+                if num_timesteps == int(lines[-1].split()[0]):
+                    # wait to finish up last timestep
+                    time.sleep(120)
+                    adapted_complete = True
+                    print('adapted simulation complete!')
+        else:
+            continue
+
+    print('all simulations complete! moving on to post processing...')
+
+    # post processing
+    generate_flowsplit_results(preop_simulation_dir, postop_simulation_dir, adapted_simulation_dir)
+
     
 

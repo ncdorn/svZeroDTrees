@@ -20,7 +20,7 @@ def find_vtp_area(infile):
     return masser.GetSurfaceArea()
 
 # Sort cap VTP files into inflow / RPA branches / LPA branches. Obtain their names & cap areas.
-def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_branch_tag='LPA'):
+def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_branch_tag='LPA', pulmonary=True):
     '''
     Sort cap VTP files into inflow / RPA branches / LPA branches. Obtain their names & cap areas.
     
@@ -44,24 +44,41 @@ def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_
         if (trial[-4 : ] == ".vtp"):
           filelist.append(trial)
 
-    # Sort caps into inflow / RPA branches / LPA branches. Store their names & cap areas.
-    rpa_info = {}
-    lpa_info = {}
+    # store inflow area
     inflow_info = {}
 
-    for vtp_file in filelist:
-        tail_name = vtp_file[len(mesh_surfaces_path) - 1 : ]
-        if (tail_name[ : len(rpa_branch_tag)] == rpa_branch_tag):
-            rpa_info[vtp_file] = find_vtp_area(vtp_file)
 
-        elif (tail_name[ : len(lpa_branch_tag)] == lpa_branch_tag):
-            lpa_info[vtp_file] = find_vtp_area(vtp_file)
+    # if pulmonary, sort caps into inflow / RPA branches / LPA branches. Store their names & cap areas.
+    if pulmonary:
+        rpa_info = {}
+        lpa_info = {}
 
-        elif (tail_name[ : len(inflow_tag)] == inflow_tag):
-            inflow_info[vtp_file] = find_vtp_area(vtp_file)
+        for vtp_file in filelist:
+            tail_name = vtp_file[len(mesh_surfaces_path) - 1 : ]
+            if (tail_name[ : len(rpa_branch_tag)] == rpa_branch_tag):
+                rpa_info[vtp_file] = find_vtp_area(vtp_file)
+
+            elif (tail_name[ : len(lpa_branch_tag)] == lpa_branch_tag):
+                lpa_info[vtp_file] = find_vtp_area(vtp_file)
+
+            elif (tail_name[ : len(inflow_tag)] == inflow_tag):
+                inflow_info[vtp_file] = find_vtp_area(vtp_file)
+        
+
+        return rpa_info, lpa_info, inflow_info
     
+    else: # return cap info
+        cap_info = {}
 
-    return rpa_info, lpa_info, inflow_info
+        for vtp_file in filelist:
+            basename = os.path.basename(vtp_file)
+            if inflow_tag in basename:
+                continue
+            elif 'wall' not in basename:
+                cap_info[basename] = find_vtp_area(vtp_file)
+        
+        return cap_info
+
 
 
 
@@ -167,10 +184,13 @@ def prepare_adapted_simdir(postop_dir, adapted_dir):
     with open('svZeroD_interface.dat', 'w') as ff:
         ff.writelines(lines)
 
-    write_svsolver_runscript(os.path.basename(adapted_dir))
+    write_svsolver_runscript(os.getcwd(), 20)
 
 
-def setup_simdir_from_mesh(sim_dir, zerod_config, write_shell_script=False):
+def setup_simdir_from_mesh(sim_dir, zerod_config, 
+                           svpre_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre',
+                           svsolver_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mysolver',
+                           svpost_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypost'):
     '''
     setup a simulation directory solely from a mesh-complete.
     :param sim_dir: path to the simulation directory where the mesh complete is located
@@ -178,14 +198,16 @@ def setup_simdir_from_mesh(sim_dir, zerod_config, write_shell_script=False):
     # get the period of the inflow file
     # period = get_inflow_period(inflow_file)
 
-
     mesh_complete = os.path.join(sim_dir, 'mesh-complete')
     
+    # check that the mesh surfaces are alright
+        # check mesh surface names and amke sure they are good to go
+    rename_msh_surfs(os.path.join(mesh_complete, 'mesh-surfaces'))
+
     # write svzerod_3dcoupling file
     zerod_config_handler = ConfigHandler.from_json(zerod_config)
     period = zerod_config_handler.generate_inflow_file(sim_dir)
-    zerod_config_handler.generate_threed_coupler(sim_dir)
-    
+    zerod_config_handler.generate_threed_coupler(sim_dir, inflow_from_0d=True)
 
     # write svpre file
     inlet_idx, outlet_idxs = write_svpre_file(sim_dir, mesh_complete, period)
@@ -194,13 +216,13 @@ def setup_simdir_from_mesh(sim_dir, zerod_config, write_shell_script=False):
     write_svzerod_interface(sim_dir, outlet_idxs) # PATH TO ZEROD COUPLER NEEDS TO BE CHANGED IF ON SHERLOCK
 
     # write solver input file
-    dt, num_timesteps, timesteps_btwn_restart = write_solver_inp(sim_dir, outlet_idxs, period, 2)
+    dt, num_timesteps, steps_btwn_restart = write_solver_inp(sim_dir, outlet_idxs, period, n_cycles=2)
 
     # write numstart file
     write_numstart(sim_dir)
 
     # write run script
-    write_svsolver_runscript(sim_dir)
+    write_svsolver_runscript(sim_dir, steps_btwn_restart, svpre_path, svsolver_path, svpost_path)
 
     # move inflow file to simulation directory
     # os.system('cp ' + inflow_file + ' ' + sim_dir)
@@ -218,7 +240,11 @@ def get_inflow_period(inflow_file):
     return period
 
 
-def write_svsolver_runscript(sim_dir, job_name='svFlowSolver', hours=6, nodes=4, procs_per_node=24):
+def write_svsolver_runscript(sim_dir, steps_btwn_restarts, 
+                             svpre_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre',
+                             svsolver_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mysolver',
+                             svpost_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypost', 
+                             hours=6, nodes=2, procs_per_node=24):
     '''
     write a bash script to submit a job on sherlock'''
 
@@ -227,12 +253,12 @@ def write_svsolver_runscript(sim_dir, job_name='svFlowSolver', hours=6, nodes=4,
     with open(os.path.join(sim_dir, 'run_solver.sh'), 'w') as ff:
         ff.write('#!/bin/bash \n\n')
         ff.write('#name of your job \n')
-        ff.write('#SBATCH --job-name=' + job_name + '\n')
+        ff.write('#SBATCH --job-name=svFlowSolver\n')
         ff.write('#SBATCH --partition=amarsden \n\n')
         ff.write('# Specify the name of the output file. The %j specifies the job ID \n')
-        ff.write('#SBATCH --output=' + job_name + '.o%j \n\n')
+        ff.write('#SBATCH --output=svFlowSolver.o%j \n\n')
         ff.write('# Specify the name of the error file. The %j specifies the job ID \n')
-        ff.write('#SBATCH --error=' + job_name + '.e%j \n\n')
+        ff.write('#SBATCH --error=svFlowSolver.e%j \n\n')
         ff.write('# The walltime you require for your job \n')
         ff.write('#SBATCH --time=' + str(hours) + ':00:00 \n\n')
         ff.write('# Job priority. Leave as normal for now \n')
@@ -259,11 +285,11 @@ def write_svsolver_runscript(sim_dir, job_name='svFlowSolver', hours=6, nodes=4,
         ff.write('ml qt/5.9.1 \n')
         ff.write('ml gcc/12.1.0 \n')
         ff.write('ml cmake \n\n')
-        ff.write('/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre ' + os.path.dirname(sim_dir) + '.svpre \n')
-        ff.write('srun /home/users/ndorn/svSolver/svSolver-build/svSolver-build/mysolver \n')
+        ff.write(f'{svpre_path} {os.path.basename(sim_dir)}.svpre \n')
+        ff.write(f'srun {svsolver_path} \n')
         ff.write(f'cd {nodes * procs_per_node}-procs_case \n')
-        ff.write(f'postsolver -start 1500 -stop 2000 -incr 50 -sol -vtkcombo -vtu post.vtu \n')
-        ff.write('mv post.vtu .. \n')
+        ff.write(f'{svpost_path} -start 1500 -stop 2000 -incr {steps_btwn_restarts} -sol -wss -vtkcombo -vtu post.vtu \n')
+        ff.write('mv post.vtu *_svZeroD .. \n')
 
 
 def write_svpre_file(sim_dir, mesh_complete, period=1.0):
@@ -310,16 +336,16 @@ def write_svpre_file(sim_dir, mesh_complete, period=1.0):
         svpre.write('fluid_viscosity 0.04\n')
         svpre.write('initial_pressure 0\n')
         svpre.write('initial_velocity 0.0001 0.0001 0.0001\n')
-        svpre.write('prescribed_velocities_vtp ' + inflow_vtp + '\n')
-        svpre.write('bct_analytical_shape parabolic\n')
-        svpre.write('bct_period ' + str(period) + '\n')
-        svpre.write('bct_point_number 201\n')
-        svpre.write('bct_fourier_mode_number 10\n')
-        svpre.write('bct_create ' + inflow_vtp + ' inflow.flow\n')
-        svpre.write('bct_write_dat bct.dat\n')
-        svpre.write('bct_write_vtp bct.vtp\n')
-        # remove inflow and list the pressure vtps for the outlet caps
-        filelist.remove(inflow_vtp)
+        # svpre.write('prescribed_velocities_vtp ' + inflow_vtp + '\n')
+        # svpre.write('bct_analytical_shape parabolic\n')
+        # svpre.write('bct_period ' + str(period) + '\n')
+        # svpre.write('bct_point_number 201\n')
+        # svpre.write('bct_fourier_mode_number 10\n')
+        # svpre.write('bct_create ' + inflow_vtp + ' inflow.flow\n')
+        # svpre.write('bct_write_dat bct.dat\n')
+        # svpre.write('bct_write_vtp bct.vtp\n')
+        # # remove inflow and list the pressure vtps for the outlet caps
+        # filelist.remove(inflow_vtp)
         for cap in filelist:
             svpre.write('pressure_vtp ' + cap + ' 0\n')
         svpre.write('noslip_vtp ' + walls_combined + '\n')
@@ -356,12 +382,12 @@ def write_svzerod_interface(sim_dir, outlet_idxs, interface_path='/home/users/nd
         
         ff.write('svZeroD external coupling block names to surface IDs (where surface IDs are from *.svpre file): \n')
         for bc, idx in bc_to_outlet:
-            ff.write(bc + ' ' + idx + '\n')
+            ff.write(f'{bc} {idx}\n')
         ff.write('\n')
         ff.write('Initialize external coupling block flows: \n')
         ff.write('0\n\n')
 
-        ff.write('External coupling block initial flows (one number is provided, it is applied to all coupling blocks: \n')
+        ff.write('External coupling block initial flows (one number is provided, it is applied to all coupling blocks): \n')
         ff.write('0.0\n\n')
 
         ff.write('Initialize external coupling block pressures: \n')
@@ -395,13 +421,13 @@ def write_solver_inp(sim_dir, outlet_idxs, period, n_cycles, dt=.001):
         solver_inp.write('Print Average Solution: True\n')
         solver_inp.write('Print Error Indicators: False\n\n')
 
-        solver_inp.write('Time Varying Boundary Conditions From File: True\n\n')
+        solver_inp.write('Time Varying Boundary Conditions From File: False\n\n')
 
         solver_inp.write('Step Construction: 0 1 0 1 0 1 0 1 0 1\n\n')
 
         solver_inp.write('Number of Neumann Surfaces: ' + str(len(outlet_idxs)) + '\n')
         # List of RCR surfaces starts at ID no. 3 (bc 1 = mesh exterior, 2 = inflow) [Ingrid] but we generalize this just in case [Nick]
-        rcr_list = 'List of Neumann Surfaces:\t'
+        rcr_list = 'List of Neumann Surfaces:\t' # TODO: need to update this to accept the inflow and adjust this file to not take BCT
         for idx in outlet_idxs:
             rcr_list += str(idx) + '\t'
         solver_inp.write(rcr_list + '\n')
@@ -486,24 +512,61 @@ def compute_flow_split(Q_svZeroD, svpre_file, n_steps=1000):
     return lpa_split, rpa_split
 
 
-def generate_flowsplit_results():
+def generate_flowsplit_results(preop_simdir, postop_simdir, adapted_simdir):
 
-    preop_split = compute_flow_split('preop/Q_svZeroD', 'preop/preop.svpre')
-    postop_split = compute_flow_split('postop/Q_svZeroD', 'postop/postop.svpre')
-    adapted_split = compute_flow_split('adapted/Q_svZeroD', 'adapted/adapted.svpre')
+    preop_split = compute_flow_split(os.path.join(preop_simdir, 'Q_svZeroD'), os.path.join(preop_simdir, 'preop.svpre'))
+    postop_split = compute_flow_split(os.path.join(postop_simdir, 'Q_svZeroD'), os.path.join(postop_simdir, 'postop.svpre'))
+    adapted_split = compute_flow_split(os.path.join(adapted_simdir, 'Q_svZeroD'), os.path.join(adapted_simdir, 'adapted.svpre'))
 
-    with open('flow_split_results.txt', 'w') as f:
+    with open(os.path.join(os.path.dirname(preop_simdir), 'flow_split_results.txt'), 'w') as f:
         f.write('flow splits as LPA/RPA\n\n')
         f.write('preop flow split: ' + str(preop_split[0]) + '/' + str(preop_split[1]) + '\n')
         f.write('postop flow split: ' + str(postop_split[0]) + '/' + str(postop_split[1]) + '\n')
         f.write('adapted flow split: ' + str(adapted_split[0]) + '/' + str(adapted_split[1]) + '\n')
 
 
+def rename_msh_surfs(msh_surf_dir):
+    '''
+    rename the mesh surfaces to have a consistent naming convention
+    '''
+    filelist_raw = glob.glob(msh_surf_dir + '/*')
+    # remove potential duplicate and triplicate faces
+
+    # make the mpa inlet the inflow.vtp if that does not exist
+    filelist = [file for file in filelist_raw if 'wall' not in file.lower()]
+ 
+    if 'inflow.vtp' not in filelist:
+        for file in filelist:
+            if 'mpa' in file.lower() and 'wall' not in file.lower():
+                user = input(f'inflow vtp found! would you like to replace {file} with inflow.vtp? (y/n)')
+                if user == 'y':
+                    os.system('mv ' + file + ' ' + msh_surf_dir + '/inflow.vtp')
+        
+    
+    # # make sure LPA and RPA are named correctly, and not named for the stent
+    if 'RPA.vtp' not in filelist:
+        for file in filelist:
+            if 'RPA' in file and os.path.basename(file)[4] != '0':
+                user = input(f'RPA vtp found! would you like to replace {file} with RPA.vtp? (y/n)')
+                if user == 'y':
+                    os.system('mv ' + file + ' ' + msh_surf_dir + '/RPA.vtp')
+
+    dup_files = []
+    for file in filelist:
+        if os.path.basename(file)[3] == '_' and os.path.basename(file)[-6] != '0':
+            # this is a file which may have a duplicate
+            dup_files.append(file)
+        
+    if len(dup_files) > 0:
+        raise Exception(f'duplicate mesh surfaces detected in this directory! these will need to be cleaned up. \n List of potential duplicate surfaces: {dup_files}')
+
+
+
 if __name__ == '__main__':
     # setup a simulation dir from mesh
-    os.chdir('../threed_models/AS2_opt_fs')
+    os.chdir('../threed_models/AS2_opt_fs/postop')
 
-    setup_simdir_from_mesh('preop', 'zerod/AS2_prestent.json')
+    rename_msh_surfs('mesh-complete-rpa023/mesh-surfaces')
 
 
     

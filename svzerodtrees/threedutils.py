@@ -20,7 +20,7 @@ def find_vtp_area(infile):
     return masser.GetSurfaceArea()
 
 # Sort cap VTP files into inflow / RPA branches / LPA branches. Obtain their names & cap areas.
-def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_branch_tag='LPA'):
+def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_branch_tag='LPA', pulmonary=True):
     '''
     Sort cap VTP files into inflow / RPA branches / LPA branches. Obtain their names & cap areas.
     
@@ -44,24 +44,42 @@ def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_
         if (trial[-4 : ] == ".vtp"):
           filelist.append(trial)
 
-    # Sort caps into inflow / RPA branches / LPA branches. Store their names & cap areas.
-    rpa_info = {}
-    lpa_info = {}
+    # store inflow area
     inflow_info = {}
 
-    for vtp_file in filelist:
-        tail_name = vtp_file[len(mesh_surfaces_path) - 1 : ]
-        if (tail_name[ : len(rpa_branch_tag)] == rpa_branch_tag):
-            rpa_info[vtp_file] = find_vtp_area(vtp_file)
 
-        elif (tail_name[ : len(lpa_branch_tag)] == lpa_branch_tag):
-            lpa_info[vtp_file] = find_vtp_area(vtp_file)
+    # if pulmonary, sort caps into inflow / RPA branches / LPA branches. Store their names & cap areas.
+    if pulmonary:
+        rpa_info = {}
+        lpa_info = {}
 
-        elif (tail_name[ : len(inflow_tag)] == inflow_tag):
-            inflow_info[vtp_file] = find_vtp_area(vtp_file)
+        for vtp_file in filelist:
+            tail_name = vtp_file[len(mesh_surfaces_path) - 1 : ]
+            if (tail_name[ : len(rpa_branch_tag)] == rpa_branch_tag):
+                rpa_info[vtp_file] = find_vtp_area(vtp_file)
+
+            elif (tail_name[ : len(lpa_branch_tag)] == lpa_branch_tag):
+                lpa_info[vtp_file] = find_vtp_area(vtp_file)
+
+            elif (tail_name[ : len(inflow_tag)] == inflow_tag):
+                inflow_info[vtp_file] = find_vtp_area(vtp_file)
+        
+
+        return rpa_info, lpa_info, inflow_info
     
+    else: # return cap info
+        cap_info = {}
 
-    return rpa_info, lpa_info, inflow_info
+        for vtp_file in filelist:
+            basename = os.path.basename(vtp_file)
+            if inflow_tag in basename:
+                continue
+            elif 'wall' not in basename:
+                cap_info[basename] = find_vtp_area(vtp_file)
+        
+        return cap_info
+
+
 
 
 def get_coupled_surfaces(simulation_dir):
@@ -180,18 +198,16 @@ def setup_simdir_from_mesh(sim_dir, zerod_config,
     # get the period of the inflow file
     # period = get_inflow_period(inflow_file)
 
-
     mesh_complete = os.path.join(sim_dir, 'mesh-complete')
     
     # check that the mesh surfaces are alright
         # check mesh surface names and amke sure they are good to go
     rename_msh_surfs(os.path.join(mesh_complete, 'mesh-surfaces'))
- 
+
     # write svzerod_3dcoupling file
     zerod_config_handler = ConfigHandler.from_json(zerod_config)
     period = zerod_config_handler.generate_inflow_file(sim_dir)
-    zerod_config_handler.generate_threed_coupler(sim_dir)
-    
+    zerod_config_handler.generate_threed_coupler(sim_dir, inflow_from_0d=True)
 
     # write svpre file
     inlet_idx, outlet_idxs = write_svpre_file(sim_dir, mesh_complete, period)
@@ -320,16 +336,16 @@ def write_svpre_file(sim_dir, mesh_complete, period=1.0):
         svpre.write('fluid_viscosity 0.04\n')
         svpre.write('initial_pressure 0\n')
         svpre.write('initial_velocity 0.0001 0.0001 0.0001\n')
-        svpre.write('prescribed_velocities_vtp ' + inflow_vtp + '\n')
-        svpre.write('bct_analytical_shape parabolic\n')
-        svpre.write('bct_period ' + str(period) + '\n')
-        svpre.write('bct_point_number 201\n')
-        svpre.write('bct_fourier_mode_number 10\n')
-        svpre.write('bct_create ' + inflow_vtp + ' inflow.flow\n')
-        svpre.write('bct_write_dat bct.dat\n')
-        svpre.write('bct_write_vtp bct.vtp\n')
-        # remove inflow and list the pressure vtps for the outlet caps
-        filelist.remove(inflow_vtp)
+        # svpre.write('prescribed_velocities_vtp ' + inflow_vtp + '\n')
+        # svpre.write('bct_analytical_shape parabolic\n')
+        # svpre.write('bct_period ' + str(period) + '\n')
+        # svpre.write('bct_point_number 201\n')
+        # svpre.write('bct_fourier_mode_number 10\n')
+        # svpre.write('bct_create ' + inflow_vtp + ' inflow.flow\n')
+        # svpre.write('bct_write_dat bct.dat\n')
+        # svpre.write('bct_write_vtp bct.vtp\n')
+        # # remove inflow and list the pressure vtps for the outlet caps
+        # filelist.remove(inflow_vtp)
         for cap in filelist:
             svpre.write('pressure_vtp ' + cap + ' 0\n')
         svpre.write('noslip_vtp ' + walls_combined + '\n')
@@ -366,12 +382,12 @@ def write_svzerod_interface(sim_dir, outlet_idxs, interface_path='/home/users/nd
         
         ff.write('svZeroD external coupling block names to surface IDs (where surface IDs are from *.svpre file): \n')
         for bc, idx in bc_to_outlet:
-            ff.write(bc + ' ' + idx + '\n')
+            ff.write(f'{bc} {idx}\n')
         ff.write('\n')
         ff.write('Initialize external coupling block flows: \n')
         ff.write('0\n\n')
 
-        ff.write('External coupling block initial flows (one number is provided, it is applied to all coupling blocks: \n')
+        ff.write('External coupling block initial flows (one number is provided, it is applied to all coupling blocks): \n')
         ff.write('0.0\n\n')
 
         ff.write('Initialize external coupling block pressures: \n')
@@ -405,13 +421,13 @@ def write_solver_inp(sim_dir, outlet_idxs, period, n_cycles, dt=.001):
         solver_inp.write('Print Average Solution: True\n')
         solver_inp.write('Print Error Indicators: False\n\n')
 
-        solver_inp.write('Time Varying Boundary Conditions From File: True\n\n')
+        solver_inp.write('Time Varying Boundary Conditions From File: False\n\n')
 
         solver_inp.write('Step Construction: 0 1 0 1 0 1 0 1 0 1\n\n')
 
         solver_inp.write('Number of Neumann Surfaces: ' + str(len(outlet_idxs)) + '\n')
         # List of RCR surfaces starts at ID no. 3 (bc 1 = mesh exterior, 2 = inflow) [Ingrid] but we generalize this just in case [Nick]
-        rcr_list = 'List of Neumann Surfaces:\t'
+        rcr_list = 'List of Neumann Surfaces:\t' # TODO: need to update this to accept the inflow and adjust this file to not take BCT
         for idx in outlet_idxs:
             rcr_list += str(idx) + '\t'
         solver_inp.write(rcr_list + '\n')

@@ -365,6 +365,9 @@ class TreeVessel:
         '''
         calculate the characteristic impedance of the vessel
         this function is based on Olufsen's Fortran code.
+
+        :param omega: frequency
+        :param trmrst: terminal resistance
         '''
 
         g = 981.0 # m/s^2

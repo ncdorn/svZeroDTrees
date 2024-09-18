@@ -61,17 +61,51 @@ def plot_bc_adaptation(svpre_file, filepath='outlet_adaptation.png', n_steps=100
     plt.legend()
     plt.title('Outlet adaptation')
     plt.savefig(filepath)
+    
+
+def plot_data(sim_dir, coupling_block, block_name):
+    '''
+    plot the data from svZerod_data file
+    
+    :field: field to plot, flow or pressure
+    :block_name: name of the sv0d block to plot'''
+
+    # name of pd column is of the form field:coupling:block_name
+
+    pres_col = f'pressure:{coupling_block}:{block_name}'
+    flow_col = f'flow:{coupling_block}:{block_name}'
+
+    # load the data
+    data = pd.read_csv(os.path.join(sim_dir, 'svZeroD_data'), sep='\s+')
+    data.rename({'6': 'time'}, axis=1, inplace=True)
+
+    data[pres_col] = data[pres_col] / 1333.2 # convert pressure to mmHg
+
+    fig, axs = plt.subplots(2, 1)
+
+    axs[0].plot(data['time'], data[pres_col])
+    axs[0].set_xlabel('time')
+    axs[0].set_ylabel('pressure (mmHg)')
+
+    axs[1].plot(data['time'], data[flow_col])
+    axs[1].set_xlabel('time')
+    axs[1].set_ylabel('flow (cm3/s)')
+    
+    plt.suptitle(f'{block_name}')
+
+    plt.tight_layout()
+    plt.show()
+
+
+
 
 
 
 if __name__ == '__main__':
 
-    os.chdir('../threed_models/AS2')
-    svpre_file = 'preop/preop.svpre'
+    sim_dir = '../threed_models/pipe_pres_sv0D'
 
-    plot_bc_adaptation(svpre_file)
-
-
+    plot_data(sim_dir, 'INFLOW', 'branch0_seg0')
 
 
 

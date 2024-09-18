@@ -1,6 +1,7 @@
 from svzerodtrees.utils import *
 import pickle
 import json
+from scipy.integrate import trapz
 
 class ResultHandler:
     '''
@@ -11,11 +12,11 @@ class ResultHandler:
 
         self.lpa_branch = lpa_branch
         self.rpa_branch = rpa_branch
-        # vessel list in a dict to be compatible with utils
-        self.vessels = {'vessels': vessels}
+        # dict to store preop, postop, adapted vessels
+        self.vessels = {'preop': vessels}
         self.viscosity = viscosity # for wss calculations
-        self.results = {}
-        self.clean_results = {}
+        self.results = {} # of the form [timestep][field][branch_id]
+        self.clean_results = {} # of the form [branch_id][field][timestep]
     
     @classmethod
     def from_config(cls, config):
@@ -57,27 +58,19 @@ class ResultHandler:
             lpa_branch, rpa_branch = None, None
 
         # get vessel info and vessel ids (vessel info necessary for wss calculations)
+        # may need to delete this
         vessels = []
         for vessel_config in config_handler.config['vessels']:
             # add to the vessel list
             vessels.append(vessel_config)
 
+        
+
         # get the viscosity
         viscosity = config_handler.config['simulation_parameters']['viscosity']
 
-        return ResultHandler(vessels, lpa_branch, rpa_branch, viscosity)
+        return ResultHandler(config_handler.config['vessels'], lpa_branch, rpa_branch, viscosity)
 
-    def get_branches(self, config):
-
-        if self.rpa_branch is None and self.lpa_branch is None:
-            self.lpa_branch, self.rpa_branch = find_lpa_rpa_branches(config)
-
-        for vessel_config in config['vessels']:
-            id = get_branch_id(vessel_config)[0]
-            if id not in [0, self.lpa_branch, self.rpa_branch]:
-                if id not in self.vessels:
-                    self.vessels.append(id)
-    
 
     def format_results(self, is_pulmonary=True):
         '''
@@ -94,20 +87,26 @@ class ResultHandler:
             # get summary results for the LPA
             self.clean_results['lpa'] = self.format_branch_result(self.lpa_branch)
 
+            # create a flow split attribute
+            self.flow_split = {
+                'rpa': self.clean_results['rpa']['q_out']['adapted'] / (self.clean_results['rpa']['q_out']['adapted'] + self.clean_results['lpa']['q_out']['adapted']),
+                'lpa': self.clean_results['lpa']['q_out']['adapted'] / (self.clean_results['rpa']['q_out']['adapted'] + self.clean_results['lpa']['q_out']['adapted'])
+            }
+
         # get summary results for all other vessels
-        for vessel_config in self.vessels['vessels']:
+        for vessel_config in self.vessels['preop']:
             id = get_branch_id(vessel_config)[0]
-            if id not in [0, self.lpa_branch, self.rpa_branch]:
-                self.clean_results[id] = self.format_branch_result(id)
+            # if id not in [0, self.lpa_branch, self.rpa_branch]:
+            self.clean_results[id] = self.format_branch_result(id)
 
     
     def format_branch_result(self, branch: int):
         '''
-        get a dict containing the preop, postop and final q, p, wss for a specified branch
+        get a dict containing the preop, postop and adapted q, p, wss for a specified branch
 
         :param branch: branch id
 
-        :return branch_summary: dict with preop, postop and final outlet q, p, wss
+        :return branch_summary: dict with preop, postop and adapted outlet q, p, wss
         '''
         
         # initialize branch summary dict
@@ -117,32 +116,33 @@ class ResultHandler:
         preop_q = get_branch_result(self.results['preop'], 'flow_in', branch, steady=True)
         postop_q = get_branch_result(self.results['postop'], 'flow_in', branch, steady=True)
         final_q = get_branch_result(self.results['adapted'], 'flow_in', branch, steady=True)
-        branch_result['q_in'] = {'preop': preop_q, 'postop': postop_q, 'final': final_q}
+        branch_result['q_in'] = {'preop': preop_q, 'postop': postop_q, 'adapted': final_q}
 
         # get the outlet flowrates preop, postop, and post adaptation
         preop_q = get_branch_result(self.results['preop'], 'flow_out', branch, steady=True)
         postop_q = get_branch_result(self.results['postop'], 'flow_out', branch, steady=True)
         final_q = get_branch_result(self.results['adapted'], 'flow_out', branch, steady=True)
-        branch_result['q_out'] = {'preop': preop_q, 'postop': postop_q, 'final': final_q}
+        branch_result['q_out'] = {'preop': preop_q, 'postop': postop_q, 'adapted': final_q}
 
         # get the inlet pressures preop, postop and post adaptation, in mmHg
         preop_p = get_branch_result(self.results['preop'], 'pressure_in', branch, steady=True) / 1333.22
         postop_p = get_branch_result(self.results['postop'], 'pressure_in', branch, steady=True) / 1333.22
         final_p = get_branch_result(self.results['adapted'], 'pressure_in', branch, steady=True) / 1333.22
-        branch_result['p_in'] = {'preop': preop_p, 'postop': postop_p, 'final': final_p}
+        branch_result['p_in'] = {'preop': preop_p, 'postop': postop_p, 'adapted': final_p}
 
         # get the outlet pressures preop, postop and post adaptation, in mm Hg
         preop_p = get_branch_result(self.results['preop'], 'pressure_out', branch, steady=True) / 1333.22
         postop_p = get_branch_result(self.results['postop'], 'pressure_out', branch, steady=True) / 1333.22
         final_p = get_branch_result(self.results['adapted'], 'pressure_out', branch, steady=True) / 1333.22
-        branch_result['p_out'] = {'preop': preop_p, 'postop': postop_p, 'final': final_p}
+        branch_result['p_out'] = {'preop': preop_p, 'postop': postop_p, 'adapted': final_p}
 
         # get the wall shear stress at the outlet
-        preop_wss = get_wss(self.vessels, self.viscosity, self.results['preop'], branch, steady=True)
-        postop_wss = get_wss(self.vessels, self.viscosity, self.results['postop'], branch, steady=True)
-        final_wss = get_wss(self.vessels, self.viscosity, self.results['adapted'], branch, steady=True)
-        branch_result['wss'] = {'preop': preop_wss, 'postop': postop_wss, 'final': final_wss}
+        preop_wss = get_wss(self.vessels['preop'], self.viscosity, self.results['preop'], branch, steady=True)
+        postop_wss = get_wss(self.vessels['postop'], self.viscosity, self.results['postop'], branch, steady=True)
+        final_wss = get_wss(self.vessels['adapted'], self.viscosity, self.results['adapted'], branch, steady=True)
+        branch_result['wss'] = {'preop': preop_wss, 'postop': postop_wss, 'adapted': final_wss}
 
+        
 
         return branch_result
 
@@ -188,7 +188,7 @@ class ResultHandler:
         
         '''
 
-        cl_mappable_result = {"flow": {}, "pressure": {}, "distance": {},"time": {}, "resistance": {}, "WU m2": {}}
+        cl_mappable_result = {"flow": {}, "pressure": {}, "wss": {}, "distance": {},"time": {}, "resistance": {}, "WU m2": {}, "repair": {}, "diameter": {}}
 
         branches = list(self.clean_results.keys())
         for branch in branches:
@@ -204,29 +204,47 @@ class ResultHandler:
         fields.sort() # should be ['flow_in', 'flow_out', 'pressure_in', 'pressure_out']
 
         if timestep == 'adaptation':
-            for field in ['flow', 'pressure']:
+            for field in ['flow', 'pressure', 'wss']:
+                if field == 'wss':
+                    cl_mappable_result[field] = {
+                        branch: [[(self.clean_results[branch]['wss']['postop'] - 
+                                    self.clean_results[branch]['wss']['adapted']) / 
+                                    self.clean_results[branch]['wss']['postop']] * 10,
+                                [(self.clean_results[branch]['wss']['postop'] - # need 2 entries for the oulet and inlet
+                                    self.clean_results[branch]['wss']['adapted']) / 
+                                    self.clean_results[branch]['wss']['postop']] * 10]
+                                for branch in branches}
+                else:
                     cl_mappable_result[field] = {
                         branch: [(self.results['postop'][field + "_in"][branch] - 
-                                 self.results['adapted'][field + "_in"][branch]) / 
-                                 self.results['postop'][field + "_in"][branch], 
+                                    self.results['adapted'][field + "_in"][branch]) / 
+                                    self.results['postop'][field + "_in"][branch], 
                                 (self.results['postop'][field + "_out"][branch] - 
-                                 self.results['adapted'][field + "_out"][branch]) / 
-                                 self.results['postop'][field + "_out"][branch], ]
-                        for branch in branches}
+                                    self.results['adapted'][field + "_out"][branch]) / 
+                                    self.results['postop'][field + "_out"][branch], ]
+                                for branch in branches}
         else:
-            for field in ['flow', 'pressure']:
+            for field in ['flow', 'pressure', 'wss']:
+                if field == 'wss':
+                    # language is different in the clean result vs the general result, need to fix this
+
+                    # the clean_result currently computes one value for wss, when there could be a time-varying quantity
+                    # we will leave it as constant for now
+                    cl_mappable_result[field] = {
+                        branch: [[self.clean_results[branch]['wss'][timestep]] * 10] * 2 for branch in branches}
+                else:
                     cl_mappable_result[field] = {
                         branch: [self.results[timestep][field + "_in"][branch], 
                                 self.results[timestep][field + "_out"][branch]]
                         for branch in branches}
-                    # now, change the branch id for mpa, lpa, rpa
-                    for branch in cl_mappable_result[field].keys():
-                        if branch == 'mpa':
-                            cl_mappable_result[field][0] = cl_mappable_result[field].pop(branch)
-                        elif branch == 'lpa':
-                            cl_mappable_result[field][self.lpa_branch] = cl_mappable_result[field].pop(branch)
-                        elif branch == 'rpa':
-                            cl_mappable_result[field][self.rpa_branch] = cl_mappable_result[field].pop(branch)
+                # now, change the branch id for mpa, lpa, rpa
+                for branch in cl_mappable_result[field].keys():
+                    if branch == 'mpa':
+                        cl_mappable_result[field][0] = cl_mappable_result[field].pop(branch)
+                    elif branch == 'lpa':
+                        cl_mappable_result[field][self.lpa_branch] = cl_mappable_result[field].pop(branch)
+                    elif branch == 'rpa':
+                        cl_mappable_result[field][self.rpa_branch] = cl_mappable_result[field].pop(branch)
         
         # construct the distance dict
 
@@ -243,3 +261,52 @@ class ResultHandler:
                 self.results[timestep][field] = {key: value.tolist() for key, value in self.results[timestep][field].items()}
 
 
+    def get_cardiac_output(self, branch: int, timestep: str='preop'):
+        '''
+        get the cardiac output for the preop, postop and adapted simulations
+
+        :param branch: the branch id of the mpa
+        :param timestep: preop, postop, adapted
+        '''
+
+        # get the flow in the mpa
+        q_in = self.results[timestep]['flow_in'][branch]
+        
+        t = self.results[timestep]['time']
+
+        cardiac_output = trapz(q_in, t)
+
+        return cardiac_output
+    
+
+    def plot(self, timestep, field, branches, filepath=None, show_mean=False):
+        '''
+        plot a field for a specified branch and timestep
+
+        :param timestep: the timestep to plot
+        :param field: the field to plot
+        :param branches: list of branch ids to plot
+        :param save_path: the path to save the plot
+        :param show_mean: whether to show the mean value on the plot
+        '''
+        data = []
+        for branch in branches:
+            data.append(self.results[timestep][field][branch])
+
+        plt.clf()
+        for datum in data:
+            if np.log10(np.array(datum).mean()) >= 3:
+                datum = np.array(datum) / 1333.22
+            plt.plot(self.results[timestep]['time'], datum)
+            if show_mean:
+                plt.axhline(y=np.mean(datum), linestyle='--', label='mean')
+
+        plt.xlabel('time')
+        plt.ylabel(field)
+        plt.title(f"branch {branches} {field} {timestep}")
+        plt.legend(branches)
+        plt.pause(0.001)
+        if filepath == None:
+            plt.show()
+        else:
+            plt.savefig(filepath)

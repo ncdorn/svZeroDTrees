@@ -6,6 +6,7 @@ svzerodtrees/_config_handler.py
 svzerodtrees/_result_handler.py
 svzerodtrees/_simulation_handler.py
 svzerodtrees/adaptation.py
+svzerodtrees/inflow.py
 svzerodtrees/interface.py
 svzerodtrees/operation.py
 svzerodtrees/optimization.py

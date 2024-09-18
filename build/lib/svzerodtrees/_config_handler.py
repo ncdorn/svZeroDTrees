@@ -3,6 +3,7 @@ import pickle
 import os
 from svzerodtrees.utils import *
 from svzerodtrees._result_handler import ResultHandler
+import pysvzerod
 
 
 
@@ -14,7 +15,7 @@ class ConfigHandler():
     def __init__(self, config: dict, is_pulmonary=True, is_threed_interface=False, closed_loop=False):
         self._config = config
 
-        self.trees = [] # list of StructuredTreeOutlet instances
+        self.trees = {} # list of StructuredTree instances
 
         # initialize config maps
         self.branch_map = {} # {branch id: Vessel instance}
@@ -88,7 +89,7 @@ class ConfigHandler():
                 if "outlet" in vessel_config["boundary_conditions"]:
                     for bc_config in self.config["boundary_conditions"]:
                         if vessel_config["boundary_conditions"]["outlet"] in bc_config["bc_name"]:
-                            vessel_config["tree"] = self.trees[outlet_idx].block_dict
+                            vessel_config["tree"] = list(self.trees.values())[outlet_idx].block_dict
 
                     outlet_idx += 1
 
@@ -135,7 +136,7 @@ class ConfigHandler():
     
     #### END OF I/O METHODS ####
             
-    def simulate(self, result_handler: ResultHandler, label: str):
+    def simulate(self, result_handler: ResultHandler = None, label: str=None):
         '''
         run the simulation
 
@@ -151,10 +152,16 @@ class ConfigHandler():
 
         result["time"] = self.get_time_series()
 
-        # add the vessels to the result handler
-        result_handler.vessels[label] = self.config['vessels']
-        # add the result to the result handler
-        result_handler.add_unformatted_result(result, label)
+        if result_handler is not None:
+            # add the vessels to the result handler
+            result_handler.vessels[label] = self.config['vessels']
+            # add the result to the result handler
+            result_handler.add_unformatted_result(result, label)
+
+        else:
+            result_df = pysvzerod.simulate(self.config)
+            
+            return result_df
         
 
 
@@ -218,7 +225,7 @@ class ConfigHandler():
 
     def convert_struct_trees_to_dict(self):
         '''
-        convert the StructuredTreeOutlet instances into dict instances
+        convert the StructuredTree instances into dict instances
         '''
 
         pass
@@ -239,7 +246,7 @@ class ConfigHandler():
 
     def update_stree_hemodynamics(self, current_result):
         '''
-        update the hemodynamics of the StructuredTreeOutlet instances
+        update the hemodynamics of the StructuredTree instances
         '''
 
         # get the outlet flowrate
@@ -253,7 +260,7 @@ class ConfigHandler():
                     for bc_config in self.config["boundary_conditions"]:
                         if vessel_config["boundary_conditions"]["outlet"] == bc_config["bc_name"]:
                             # update the outlet flowrate and pressure for the tree at that outlet
-                            self.trees[outlet_idx].add_hemodynamics_from_outlet([q_outs[outlet_idx]], [p_outs[outlet_idx]])
+                            list(self.trees.values())[outlet_idx].add_hemodynamics_from_outlet([q_outs[outlet_idx]], [p_outs[outlet_idx]])
 
                             # re-integrate pries and secomb --- this is not necesary at the moment because I think it will send us into an
                             # endless loop of re-integration
@@ -530,19 +537,55 @@ class ConfigHandler():
 
         # copy over the bcs
         threed_coupler.bcs = self.bcs
-        if not inflow_from_0d:
+        if inflow_from_0d:
+            # need to add a vessel between the inflwo bc and coupling block to allow effective coupling
+            threed_coupler.vessel_map[0] = Vessel.from_config(
+                {
+                   "boundary_conditions": {
+                        "inlet": "INFLOW"
+                    },
+                    "vessel_id": 0,
+                    "vessel_length": 10.0,
+                    "vessel_name": "branch0_seg0",
+                    "zero_d_element_type": "BloodVessel",
+                    "zero_d_element_values": {
+                        "C": 0.0000001,
+                        "L": 0.0,
+                        "R_poiseuille": 0.0000001,
+                        "stenosis_coefficient": 0.0
+                    }
+                }
+            )
+
+            threed_coupler.coupling_blocks["INFLOW"] = CouplingBlock(
+                {
+                    "name": "INFLOW",
+                    "type": "FLOW",
+                    "location": "outlet",
+                    "connected_block": "branch0_seg0",
+                    "periodic": False,
+                    "values": {
+                            "t": [
+                                0,
+                                max(self.bcs["INFLOW"].values['t'])
+                            ],
+                            "Q": [
+                                1.0,
+                                1.0
+                            ]
+                    }
+                }
+            )
+
+
+        else:
             del threed_coupler.bcs["INFLOW"] 
+        
 
         # create the coupling blocks
-        for bc in threed_coupler.bcs.values():
-            if bc.name == 'INFLOW':
-                # inflow bc, need to change name and location
-                threed_coupler.coupling_blocks['INFLOW_mpa'] = CouplingBlock.from_bc(bc, location='outlet')
-                # names between coupling blocks and bc blocks cannot match!!
-                threed_coupler.coupling_blocks['INFLOW_mpa'].name = 'INFLOW_mpa'
-            else:
-                # outlet bc
-                block_name = bc.name.replace('_','')
+        for i, bc in enumerate(threed_coupler.bcs.values()):
+            if 'inflow' not in bc.name.lower():
+                block_name = f'coupled_bc{i}'
                 threed_coupler.coupling_blocks[block_name] = CouplingBlock.from_bc(bc)
 
         print('writing svzerod_3Dcoupling.json...')
@@ -560,7 +603,7 @@ class ConfigHandler():
         print('writing inflow.flow...')
 
         with open(os.path.join(simdir, 'inflow.flow'), 'w') as ff:
-            for t, q in zip(self.bcs["INFLOW"].values['t'], self.bcs["INFLOW"].values['Q']):
+            for t, q in zip(self.bcs["INFLOW"].values['t'], [q * -1 for q in self.bcs["INFLOW"].values['Q']]):
                 ff.write(f'{t} {q}\n')
 
         return max(self.bcs["INFLOW"].values['t'])
@@ -851,6 +894,10 @@ class BoundaryCondition():
         if self.type == 'PRESSURE':
             self._P = self.values['P']
             self._t = self.values['t']
+        
+        if self.type == 'IMPEDANCE':
+            self._Z = self.values['Z']
+            self._t = self.values['t']
     
     @classmethod
     def from_config(cls, config):
@@ -971,8 +1018,16 @@ class BoundaryCondition():
     def t(self, new_t):
         self._t = new_t
         self.values['t'] = new_t
-
     
+    @property
+    def Z(self):
+        return self._Z
+    
+    @Z.setter
+    def Z(self, new_Z):
+        self._Z = new_Z
+        self.values['Z'] = new_Z
+   
 
 class SimParams():
     '''class to handle simulation parameters'''

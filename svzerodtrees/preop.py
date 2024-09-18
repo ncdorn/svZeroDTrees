@@ -386,7 +386,7 @@ def construct_cwss_trees(config_handler, result_handler, n_procs=4, log_file=Non
                                                                       config_handler.simparams,
                                                                       bc)
                 
-                config_handler.trees.append(outlet_tree)
+                config_handler.trees[bc.name] = outlet_tree
 
 
     
@@ -398,10 +398,11 @@ def construct_cwss_trees(config_handler, result_handler, n_procs=4, log_file=Non
 
     # run the tree 
     with Pool(n_procs) as p:
-        config_handler.trees = p.map(optimize_tree, config_handler.trees)
+        # TODO: fix this
+        config_handler.trees = p.map(optimize_tree, list(config_handler.trees.values()))
     
     # update the resistance in the config according to the optimized tree resistance
-    for bc, tree in zip(list(config_handler.bcs.values())[1:], config_handler.trees):
+    for bc, tree in zip(list(config_handler.bcs.values())[1:], list(config_handler.trees.values())):
         bc.R = tree.root.R_eq
 
 
@@ -455,14 +456,14 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_proc
                                                                       P_outlet=p_outs[outlet_idx],
                                                                       Q_outlet=q_outs[outlet_idx],)
                 
-                config_handler.trees.append(outlet_tree)
+                config_handler.trees[bc.name] = outlet_tree
                 # count up the outlets for indexing pressure and flow
                 outlet_idx += 1
 
 
     if n_procs is None:
         # don't run as parallel processes
-        for tree in config_handler.trees:
+        for tree in config_handler.trees.values():
             print('building ' + tree.name + ' for resistance ' + str(tree.params["bc_values"]["R"]) + '...')
             tree.optimize_tree_diameter(log_file, d_min=d_min, pries_secomb=True)
     else:
@@ -474,10 +475,11 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_proc
 
 
         with Pool(n_procs) as p:
-            config_handler.trees = p.map(build_tree, config_handler.trees)
+            # TODO: FIX THIS
+            config_handler.trees = p.map(build_tree, list(config_handler.trees.values()))
     
     # update the resistance in the config according to the optimized tree resistance
-    for bc, tree in zip(list(config_handler.bcs.values())[1:], config_handler.trees):
+    for bc, tree in zip(list(config_handler.bcs.values())[1:], list(config_handler.trees.values())):
         bc.R = tree.root.R_eq
 
 
@@ -488,7 +490,7 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_proc
     config_handler.update_stree_hemodynamics(preop_result)
 
     if n_procs is None:
-        for tree in config_handler.trees:
+        for tree in list(config_handler.trees.values()):
             tree.pries_n_secomb.optimize_params()
     else:
         # parallel the parameter optimization for Pries and Secomb adaptation
@@ -498,7 +500,8 @@ def construct_pries_trees(config_handler: ConfigHandler, result_handler,  n_proc
             return tree
         
         with Pool(n_procs) as p:
-            config_handler.trees = p.map(optimize_params, config_handler.trees)
+            # TODO: FIX THIS
+            config_handler.trees = p.map(optimize_params, list(config_handler.trees.values()))
     
 
 
@@ -517,8 +520,8 @@ def construct_coupled_cwss_trees(config_handler, simulation_dir, n_procs=4, d_mi
 
     for bc in config_handler.bcs.values():
         if config_handler.coupling_blocks[bc.name].location == 'inlet':
-            diameter = (find_vtp_area(config_handler.coupling_blocks[bc.name].surface) / np.pi)**(1/2)
-            config_handler.trees.append(StructuredTree.from_bc_config(bc, config_handler.simparams, diameter))
+            diameter = (find_vtp_area(config_handler.coupling_blocks[bc.name].surface) / np.pi)**(1/2) * 2
+            config_handler.trees[bc.name] = StructuredTree.from_bc_config(bc, config_handler.simparams, diameter)
 
 
     # function to run the tree diameter optimization
@@ -529,7 +532,7 @@ def construct_coupled_cwss_trees(config_handler, simulation_dir, n_procs=4, d_mi
 
     # run the tree 
     with Pool(n_procs) as p:
-        config_handler.trees = p.map(optimize_tree, config_handler.trees)
+        config_handler.trees = p.map(optimize_tree, list(config_handler.trees.values()))
     
 
     # update the resistance in the config according to the optimized tree resistance
@@ -538,11 +541,43 @@ def construct_coupled_cwss_trees(config_handler, simulation_dir, n_procs=4, d_mi
         # we assume that an inlet location indicates taht this is an outlet bc and threfore undergoes adaptation
         if config_handler.coupling_blocks[bc.name].location == 'inlet':
             if bc.type == 'RCR':
-                bc.Rp = config_handler.trees[outlet_idx].root.R_eq * 0.1
-                bc.Rd = config_handler.trees[outlet_idx].root.R_eq * 0.9
+                bc.Rp = config_handler.trees[bc.name].root.R_eq * 0.1
+                bc.Rd = config_handler.trees[bc.name].root.R_eq * 0.9
             elif bc.type == 'RESISTANCE':
-                bc.R = config_handler.trees[outlet_idx].root.R_eq
+                bc.R = config_handler.trees[bc.name].root.R_eq
             outlet_idx += 1
+
+
+def construct_impedance_trees(config_handler, mesh_surfaces_path, clinical_targets, d_min = 0.1):
+    '''
+    construct impedance trees for outlet BCs'''
+
+    # get outlet areas
+    cap_info = vtp_info(mesh_surfaces_path, pulmonary=False)
+
+    outlet_bc_names = [name for name, bc in config_handler.bcs.items() if 'inflow' not in bc.name.lower()]
+
+    # assumed that cap and boundary condition orders match
+    cap_to_bc = {list(cap_info.keys())[i]: outlet_bc_names[i] for i in range(len(outlet_bc_names))}
+
+    for cap_name, area in cap_info.items():
+        cap_d = (area / np.pi)**(1/2) * 2
+
+        tree = StructuredTree(name='cap_name', time=config_handler.bcs['INFLOW'].t, simparams=config_handler.simparams)
+
+        tree.build_tree(initial_d=cap_d, d_min=d_min)
+
+        # compute the impedance in frequency domain
+        tree.compute_olufsen_impedance()
+
+        bc_name = cap_to_bc[cap_name]
+
+        config_handler.bcs[bc_name] = tree.create_impedance_bc(bc_name, clinical_targets.wedge_p)
+
+    
+
+    
+    
 
 
 class ClinicalTargets():
@@ -550,7 +585,7 @@ class ClinicalTargets():
     class to handle clinical target values
     '''
 
-    def __init__(self, mpa_p, lpa_p, rpa_p, q, rpa_split, wedge_p, t, steady):
+    def __init__(self, mpa_p=None, lpa_p=None, rpa_p=None, q=None, rpa_split=None, wedge_p=None, t=None, steady=False):
         '''
         initialize the clinical targets object
         '''
@@ -561,7 +596,8 @@ class ClinicalTargets():
         self.rpa_p = rpa_p
         self.q = q
         self.rpa_split = rpa_split
-        self.q_rpa = q * rpa_split
+        if q is not None and rpa_split is not None:
+            self.q_rpa = q * rpa_split
         self.wedge_p = wedge_p
         self.steady = steady
 

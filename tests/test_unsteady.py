@@ -15,6 +15,7 @@ from svzerodtrees import operation, preop, interface
 from svzerodtrees._config_handler import ConfigHandler
 from svzerodtrees._result_handler import ResultHandler
 from svzerodtrees.preop import ClinicalTargets, PAConfig
+from svzerodtrees.inflow import Inflow
 import pickle
 
 
@@ -188,13 +189,90 @@ def test_unsteady_simple():
     result_handler.plot('preop', 'flow_in', [0], 'tests/cases/simple_config/flow_in.png', show_mean=True)
 
     
+def test_impedance():
+    '''
+    test the construction of impedance trees by svzerodtrees'''
+
+    # dummy clinical targets
+    clinical_targets = 'tests/cases/pa_unsteady/clinical_targets.csv'
+    clinical_targets = ClinicalTargets.from_csv(clinical_targets, steady=False)
+
+    n_tsteps = 2**9
+
+    d_min = 0.1
+
+    # mesh surfaces path
+    msh_surf = '../threed_models/truncated_pa/mesh-complete/mesh-surfaces'
+
+    config_handler = ConfigHandler.from_json('tests/cases/impedance/trunc_pa_imp.json')
+
+    # change the inflow
+    inflow = Inflow.periodic(path='tests/cases/pa_unsteady/inflow.flow', flip_sign=True)
+
+    inflow.rescale(tsteps=n_tsteps)
+
+    config_handler.bcs['INFLOW'] = inflow.to_bc()
+
+    config_handler.simparams.number_of_time_pts_per_cardiac_cycle = n_tsteps
+
+    preop.construct_impedance_trees(config_handler, msh_surf, clinical_targets, d_min=d_min)
+
+    result_df = config_handler.simulate()
+
+    print('simulation complete! saving config')
+
+    config_handler.to_json(f'tests/cases/impedance/trunc_pa_dmin_{d_min}')
+
+    plot_impedance_result(result_df)
+    
 
 
 
-def rh_chamber_param_sweep():
-    pass
+
+def plot_impedance_result(result_df):
+
+    mpa_result = result_df[result_df.name == 'branch0_seg0']
+
+    lpa_result = result_df[result_df.name == 'branch1_seg0']
+
+    rpa_result = result_df[result_df.name == 'branch2_seg0']
+
+    fig, axs = plt.subplots(3, 3)
+
+    axs[0,1].plot(mpa_result['time'], mpa_result['pressure_in'] / 1333.2, label='MPA')
+    axs[1,1].plot(mpa_result['time'], lpa_result['pressure_in'] / 1333.2, label='LPA')
+    axs[2,1].plot(mpa_result['time'], rpa_result['pressure_in'] / 1333.2, label='RPA')
+    for i in range(3):
+        axs[i,1].set_ylabel('pressure in (mmHg)')
+    
+    axs[0,2].plot(mpa_result['time'], mpa_result['pressure_out'] / 1333.2, label='MPA')
+    axs[1,2].plot(mpa_result['time'], lpa_result['pressure_out'] / 1333.2, label='LPA')
+    axs[2,2].plot(mpa_result['time'], rpa_result['pressure_out'] / 1333.2, label='RPA')
+    for i in range(3):
+        axs[i,2].set_ylabel('pressure out (mmHg)')
+
+    axs[0,0].plot(mpa_result['time'], mpa_result['flow_in'], label='MPA')
+    axs[1,0].plot(mpa_result['time'], lpa_result['flow_in'], label='LPA')
+    axs[2,0].plot(mpa_result['time'], rpa_result['flow_in'], label='RPA')
+    for i in range(3):
+        axs[i,0].set_ylabel('flow (cm3/s)')
+
+    plt.show()
+
+
+
+
+
 
 
 if __name__ == "__main__":
 
-    test_unsteady_simple()
+    result = pysvzerod.simulate('tests/cases/impedance/trunc_pa_dmin_0.1.json')
+
+    # print('simulation complete!')
+
+    plot_impedance_result(result)
+
+    # test_impedance()
+
+    # test_impedance_3dcoupled()
