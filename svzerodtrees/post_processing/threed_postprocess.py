@@ -103,9 +103,9 @@ def plot_data(sim_dir, coupling_block, block_name):
 
 if __name__ == '__main__':
 
-    sim_dir = '../threed_models/pipe_pres_sv0D'
+    sim_dir = '../threed_models/impedance_3D/pipe_imp_t002'
 
-    plot_data(sim_dir, 'INFLOW', 'branch0_seg0')
+    plot_data(sim_dir, 'branch0_seg0', 'inflow')
 
 
 

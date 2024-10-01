@@ -1,6 +1,6 @@
 from svzerodtrees.utils import *
 import copy
-from svzerodtrees.structuredtree import StructuredTreeOutlet
+from svzerodtrees.structuredtree import StructuredTree
 from svzerodtrees._result_handler import ResultHandler
 from svzerodtrees._config_handler import ConfigHandler
 
@@ -10,12 +10,12 @@ def adapt_pries_secomb(config_handler: ConfigHandler, result_handler: ResultHand
     adapt structured tree microvasculature model based on Pries et al. 1998
 
     :param postop_config: config dict from the stenosis repair
-    :param trees: list of StructuredTreeOutlet instances, corresponding to the outlets of the 0D model
+    :param trees: list of StructuredTree instances, corresponding to the outlets of the 0D model
     :param preop_result: preoperative result array
     :param postop_result: postoperative result array, calculated after the stenosis repair
     :param log_file: path to log file, for writing important messages for debugging purposes
 
-    :return: config dict post-adaptation, flow result post-adaptation, list of StructuredTreeOutlet instances
+    :return: config dict post-adaptation, flow result post-adaptation, list of StructuredTree instances
     '''
     # get the preop and postop outlet flowrate and pressure
     preop_q = get_outlet_data(config_handler.config, result_handler.results['preop'], 'flow_out', steady=True)
@@ -29,7 +29,7 @@ def adapt_pries_secomb(config_handler: ConfigHandler, result_handler: ResultHand
 
     write_to_log(log_file, "** adapting trees based on Pries and Secomb model **")
 
-    # loop through the vessels and create StructuredTreeOutlet instances at the outlets, from the pre-adaptation tree instances
+    # loop through the vessels and create StructuredTree instances at the outlets, from the pre-adaptation tree instances
     for vessel in config_handler.vessel_map.values():
         if vessel.bc is not None:
             if "outlet" in vessel.bc:
@@ -64,13 +64,13 @@ def adapt_constant_wss(config_handler: ConfigHandler, result_handler: ResultHand
     '''
     adapt structured trees based on the constant wall shear stress assumption
 
-    :param postop_config: config dict from the stenosis repair, with StructuredTreeOutlet instances at the outlets
-    :param trees: list of StructuredTreeOutlet instances, corresponding to the outlets of the 0D model
+    :param postop_config: config dict from the stenosis repair, with StructuredTree instances at the outlets
+    :param trees: list of StructuredTree instances, corresponding to the outlets of the 0D model
     :param preop_result: preoperative result array
     :param postop_result: postoperative result array, calculated after the stenosis repair
     :param log_file: path to log file, for writing important messages for debugging purposes
 
-    :return: config dict post-adaptation, flow result post-adaptation, list of StructuredTreeOutlet instances
+    :return: config dict post-adaptation, flow result post-adaptation, list of StructuredTree instances
     '''
     print('adapting the vessels...')
     # get the preop and postop outlet flowrates

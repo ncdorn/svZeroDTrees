@@ -206,17 +206,18 @@ def setup_simdir_from_mesh(sim_dir, zerod_config,
 
     # write svzerod_3dcoupling file
     zerod_config_handler = ConfigHandler.from_json(zerod_config)
-    period = zerod_config_handler.generate_inflow_file(sim_dir)
+    # period = zerod_config_handler.generate_inflow_file(sim_dir)
+    os.system('pwd')
     zerod_config_handler.generate_threed_coupler(sim_dir, inflow_from_0d=True)
 
     # write svpre file
-    inlet_idx, outlet_idxs = write_svpre_file(sim_dir, mesh_complete, period)
+    inlet_idx, outlet_idxs = write_svpre_file(sim_dir, mesh_complete)
 
     # write svzerod interface file
     write_svzerod_interface(sim_dir, outlet_idxs) # PATH TO ZEROD COUPLER NEEDS TO BE CHANGED IF ON SHERLOCK
 
     # write solver input file
-    dt, num_timesteps, steps_btwn_restart = write_solver_inp(sim_dir, outlet_idxs, period, n_cycles=2)
+    dt, num_timesteps, steps_btwn_restart = write_solver_inp(sim_dir, outlet_idxs, n_cycles=2)
 
     # write numstart file
     write_numstart(sim_dir)
@@ -292,7 +293,7 @@ def write_svsolver_runscript(sim_dir, steps_btwn_restarts,
         ff.write('mv post.vtu *_svZeroD .. \n')
 
 
-def write_svpre_file(sim_dir, mesh_complete, period=1.0):
+def write_svpre_file(sim_dir, mesh_complete):
     '''
     write the svpre file for the simulation
     
@@ -397,15 +398,15 @@ def write_svzerod_interface(sim_dir, outlet_idxs, interface_path='/home/users/nd
         ff.write('60.0\n\n')
 
 
-def write_solver_inp(sim_dir, outlet_idxs, period, n_cycles, dt=.001):
+def write_solver_inp(sim_dir, outlet_idxs, n_cycles, dt=.001):
     '''
     write the solver.inp file for the simulation'''
 
     print('writing solver.inp...')
 
     # Determine the number of time steps
-    num_timesteps = int(math.ceil(period * n_cycles / dt))
-    steps_btw_restarts = int(round(period / dt / 50))
+    num_timesteps = int(math.ceil(n_cycles / dt))
+    steps_btw_restarts = int(round(1.0 / dt / 50.0))
 
     with open(os.path.join(sim_dir, 'solver.inp'),'w') as solver_inp:
         solver_inp.write('Density: 1.06\n')

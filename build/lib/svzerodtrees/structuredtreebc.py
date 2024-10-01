@@ -6,22 +6,22 @@ from svzerodtrees.utils import *
 from svzerodtrees._config_handler import ConfigHandler, Vessel, BoundaryCondition, SimParams
 import math
 
-class StructuredTreeOutlet():
+class StructuredTree():
     """
     Structured tree which represents microvascular adaptation at the outlets of a 0D Windkessel model.
     utilizes the TreeVessel class which is recursive by nature to handle recursive tasks
     """
     def __init__(self, params: dict = None, name: str = None, tree_config: dict = None, simparams: SimParams = None, root: TreeVessel = None):
         """
-        Create a new StructuredTreeOutlet instance
+        Create a new StructuredTree instance
         
-        :param params: dict of 0D Windkessel parameters for the StructuredTreeOutlet class. 
+        :param params: dict of 0D Windkessel parameters for the StructuredTree class. 
             contains lenght, R, C, L, stenosis coeff, viscosity, inlet pressure and flow, bc values
-        :param name: name of the StructuredTreeOutlet instance, e.g. OutletTree3
-        :param tree_config: optional tree config dict, used to create a StructuredTreeOutlet instance from a pre-existing tree which has
+        :param name: name of the StructuredTree instance, e.g. OutletTree3
+        :param tree_config: optional tree config dict, used to create a StructuredTree instance from a pre-existing tree which has
             been saved in the model 0D config dict
         :param simparams: simulation parameters from the 0D model config file
-        :param root: TreeVessel instance, required if the StructuredTreeOutlet instance is built from a pre-existing tree
+        :param root: TreeVessel instance, required if the StructuredTree instance is built from a pre-existing tree
 
         :return: None
         """
@@ -53,7 +53,7 @@ class StructuredTreeOutlet():
             if root is None:
                 # if no TreeVessel instance is provided to create the new tree
                 raise Exception('No root TreeVessel instance provided!')
-            # add the root instance to the StructuredTreeOutlet
+            # add the root instance to the StructuredTree
             self.root = root
 
 
@@ -65,20 +65,20 @@ class StructuredTreeOutlet():
                            tree_exists=False, 
                            root: TreeVessel = None, 
                            P_outlet: list=[0.0], 
-                           Q_outlet: list=[0.0]) -> "StructuredTreeOutlet":
+                           Q_outlet: list=[0.0]) -> "StructuredTree":
         """
         Class method to creat an instance from the config dictionary of an outlet vessel
 
         :param config: config file of outlet vessel
         :param simparams: config file of simulation parameters to get viscosity
         :param bc_config: config file of the outlet boundary condition
-        :param tree_exists: True if the StructuredTreeOutlet is being created from a pre-existing tree (applicable in the adaptation 
+        :param tree_exists: True if the StructuredTree is being created from a pre-existing tree (applicable in the adaptation 
             and postop steps of the simulation pipeline)
         :param root: TreeVessel instance, required if tree_exists = True
-        :param P_outlet: pressure at the outlet of the 0D model, which is the inlet of this StructuredTreeOutlet instance
-        :param Q_outlet: flow at the outlet of the 0D model, which is the inlet of this StructuredTreeOutlet instance
+        :param P_outlet: pressure at the outlet of the 0D model, which is the inlet of this StructuredTree instance
+        :param Q_outlet: flow at the outlet of the 0D model, which is the inlet of this StructuredTree instance
 
-        :return: StructuredTreeOutlet instance
+        :return: StructuredTree instance
         """
         # if steady state, make the Q_outlet and P_outlet into a list of length two for svzerodplus config BC compatibility
         if type(Q_outlet) is not list:
@@ -111,7 +111,7 @@ class StructuredTreeOutlet():
                        simparams: SimParams,
                        diameter: float,
                        P_outlet: list=[0.0], 
-                       Q_outlet: list=[0.0]) -> "StructuredTreeOutlet":
+                       Q_outlet: list=[0.0]) -> "StructuredTree":
         '''
         Class method to create an instance from the config dictionary of an outlet boundary condition
         '''
@@ -526,7 +526,7 @@ class PriesnSecomb():
     '''
     class to perform Pries and Secomb integration on a structured tree
     '''
-    def __init__(self, tree: StructuredTreeOutlet,
+    def __init__(self, tree: StructuredTree,
                  k_p = 0.68,
                  k_m = .70,
                  k_c = 2.45,
@@ -539,7 +539,7 @@ class PriesnSecomb():
                  tol = .01, 
                  time_avg_q=True):
         '''
-        :param tree: StructuredTreeOutlet instance
+        :param tree: StructuredTree instance
         :param ps_params: pries and secomb empirical parameters. in the form [k_p, k_m, k_c, k_s, L (cm), S_0, tau_ref, Q_ref]
             units:
                 k_p, k_m, k_c, k_s [=] dimensionless
@@ -583,7 +583,7 @@ class PriesnSecomb():
         # begin euler integration
         while not converged:
             
-            # create solver config from StructuredTreeOutlet and get tree flow result
+            # create solver config from StructuredTree and get tree flow result
             self.tree.create_bcs()
             tree_result = run_svzerodplus(self.tree.block_dict)
 
@@ -670,7 +670,7 @@ class PriesnSecomb():
         self.tau_ref = ps_params[6]
         self.Q_ref = ps_params[7]
 
-        # create solver config from StructuredTreeOutlet and get tree flow result
+        # create solver config from StructuredTree and get tree flow result
         self.tree.create_bcs()
         tree_result = run_svzerodplus(self.tree.block_dict)
 
