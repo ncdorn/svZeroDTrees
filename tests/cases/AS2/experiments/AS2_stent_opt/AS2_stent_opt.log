@@ -1,3 +1,0 @@
-beginning experiment AS2_stent_opt!
-with the following configuration: 
-{'name': 'AS2_stent_opt', 'model': 'AS2_prestent', 'adapt': 'ps', 'optimized': True, 'is_full_pa_tree': True, 'trees_exist': True, 'mesh_surfaces_path': '/home/ndorn/Documents/Stanford/PhD/Simvascular/threed_models/AS2_prestent/Meshes/1.6M_elements/mesh-surfaces', 'task': 'repair', 'repair': [{'type': 'optimize stent', 'location': 'proximal', 'value': [0.5, 0.5], 'objective': 'flow split'}]}

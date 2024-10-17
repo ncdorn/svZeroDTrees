@@ -572,7 +572,7 @@ def construct_impedance_trees(config_handler, mesh_surfaces_path, clinical_targe
 
         bc_name = cap_to_bc[cap_name]
 
-        config_handler.bcs[bc_name] = tree.create_impedance_bc(bc_name, clinical_targets.wedge_p)
+        config_handler.bcs[bc_name] = tree.create_impedance_bc(bc_name, clinical_targets.wedge_p * 1333.2)
 
     
 
@@ -608,34 +608,36 @@ class ClinicalTargets():
         initialize from a csv file
         '''
         # get the flowrate
-        bsa = float(get_value_from_csv(clinical_targets, 'bsa'))
-        cardiac_index = float(get_value_from_csv(clinical_targets, 'cardiac index'))
+        df = pd.read_csv(clinical_targets)
+        df.columns = map(str.lower, df.columns)
+        bsa = df.loc[0,df.columns.str.contains("bsa")].values[0]
+        cardiac_index = df.loc[0,df.columns.str.contains("pulmonary flow index")].values[0]
         q = bsa * cardiac_index * 16.667 # cardiac output in L/min. convert to cm3/s
 
         # get the cycle duration
-        bpm = float(get_value_from_csv(clinical_targets, 'heart rate'))
+        bpm = int(df.loc[0,df.columns.str.contains("heart rate")].values[0])
         t = 60 / bpm
 
         # get the mpa pressures
-        mpa_pressures = get_value_from_csv(clinical_targets, 'mpa pressures') # mmHg
+        mpa_pressures = bsa = df.loc[0,df.columns.str.contains("mpa pressures")].values[0] # mmHg
         mpa_sys_p, mpa_dia_p = mpa_pressures.split("/")
         mpa_sys_p = int(mpa_sys_p)
         mpa_dia_p = int(mpa_dia_p)
-        mpa_mean_p = int(get_value_from_csv(clinical_targets, 'mpa mean pressure'))
+        mpa_mean_p = int(df.loc[0,df.columns.str.contains("mpa mean pressure")].values[0])
 
         # get the lpa pressures
-        lpa_pressures = get_value_from_csv(clinical_targets, 'lpa pressures') # mmHg
+        lpa_pressures = df.loc[0,df.columns.str.contains("lpa pressures")].values[0] # mmHg
         lpa_sys_p, lpa_dia_p = lpa_pressures.split("/")
         lpa_sys_p = int(lpa_sys_p)
         lpa_dia_p = int(lpa_dia_p)
-        lpa_mean_p = int(get_value_from_csv(clinical_targets, 'lpa mean pressure'))
+        lpa_mean_p = int(df.loc[0,df.columns.str.contains("lpa mean pressure")].values[0])
 
         # get the rpa pressures
-        rpa_pressures = get_value_from_csv(clinical_targets, 'rpa pressures') # mmHg
+        rpa_pressures = df.loc[0,df.columns.str.contains("rpa pressures")].values[0] # mmHg
         rpa_sys_p, rpa_dia_p = rpa_pressures.split("/")
         rpa_sys_p = int(rpa_sys_p)
         rpa_dia_p = int(rpa_dia_p)
-        rpa_mean_p = int(get_value_from_csv(clinical_targets, 'rpa mean pressure'))
+        rpa_mean_p = int(df.loc[0,df.columns.str.contains("rpa mean pressure")].values[0])
 
         # if steady, just take the mean
         if steady:
@@ -648,10 +650,10 @@ class ClinicalTargets():
             rpa_p = [rpa_sys_p, rpa_dia_p, rpa_mean_p]
 
         # get wedge pressure
-        wedge_p = int(get_value_from_csv(clinical_targets, 'wedge pressure'))
+        wedge_p = int(df.loc[0,df.columns.str.contains("wedge pressure")].values[0])
 
         # get RPA flow split
-        rpa_split = float(get_value_from_csv(clinical_targets, 'pa flow split')[0:2]) / 100
+        rpa_split = float(df.loc[0,df.columns.str.contains("flow split")].values[0])
 
         return cls(mpa_p, lpa_p, rpa_p, q, rpa_split, wedge_p, t, steady=steady)
 

@@ -281,13 +281,15 @@ class ConfigHandler():
                            self.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"])
     
 
-    def set_inflow(self, Q_in):
+    def set_inflow(self, inflow):
         '''
         set the inflow for the config
+
+        inflow: Inflow instance
         '''
 
 
-        self.bcs["INFLOW"].values["Q"] = [Q_in] * len(self.bcs["INFLOW"].values["t"])
+        self.bcs["INFLOW"] = inflow.to_bc()
 
 
     def map_vessels_to_branches(self):
@@ -494,6 +496,8 @@ class ConfigHandler():
 
         :param branch: id of the branch to get the vessels of
         :param dtype: type of data to return, either 'Vessel' class or 'dict'
+
+        :returns: list of names of coupling blocks
         '''
         if branch == 'mpa':
             branch = self.mpa.branch

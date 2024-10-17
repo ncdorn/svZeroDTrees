@@ -303,23 +303,6 @@ def write_rcrs(config, rcrs):
             idx += 1
 
 
-def get_value_from_csv(csv_file, name):
-    '''
-    get a value from a csv file with a name in the same row
-
-    :param csv_file: path to csv file
-    :param name: name of the value in the same row as the int or float value
-
-    ;return: value from csv
-
-    '''
-    with open(csv_file, 'r') as file:
-        reader = csv.reader(file)
-        for row in reader:
-            if name.lower() in row[0].lower() and name.lower()[0] == row[0].lower()[0]:
-                return row[1]  # Return the value in the same row
-
-    return None  # Return None if the name is not found
 
 
 def get_resistance_idx(vessel_config):
