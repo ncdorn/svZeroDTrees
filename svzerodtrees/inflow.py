@@ -117,12 +117,13 @@ class Inflow():
         '''
         return the inflow as a key-value pair
         '''
-
+        if type(self.q) is np.ndarray:
+            self.q = self.q.tolist()
         inflow_dict = {
             "bc_name": "INFLOW",
             "bc_type": "FLOW",
             "bc_values": {
-                "Q": self.q.tolist(),
+                "Q": self.q,
                 "t": self.t.tolist()
             }
         }

@@ -6,6 +6,8 @@ import pandas as pd
 import os
 import svzerodtrees
 from svzerodtrees._config_handler import ConfigHandler
+import xml.etree.ElementTree as ET
+import xml.dom.minidom
 
 def find_vtp_area(infile):
     # with open(infile):
@@ -78,8 +80,6 @@ def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_
                 cap_info[basename] = find_vtp_area(vtp_file)
         
         return cap_info
-
-
 
 
 def get_coupled_surfaces(simulation_dir):
@@ -188,9 +188,7 @@ def prepare_adapted_simdir(postop_dir, adapted_dir):
 
 
 def setup_simdir_from_mesh(sim_dir, zerod_config, 
-                           svpre_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre',
-                           svsolver_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mysolver',
-                           svpost_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypost'):
+                           svfsiplus_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre'):
     '''
     setup a simulation directory solely from a mesh-complete.
     :param sim_dir: path to the simulation directory where the mesh complete is located
@@ -211,24 +209,235 @@ def setup_simdir_from_mesh(sim_dir, zerod_config,
     zerod_config_handler.generate_threed_coupler(sim_dir, inflow_from_0d=True)
 
     # write svpre file
-    inlet_idx, outlet_idxs = write_svpre_file(sim_dir, mesh_complete)
+    # inlet_idx, outlet_idxs = write_svpre_file(sim_dir, mesh_complete)
 
     # write svzerod interface file
-    write_svzerod_interface(sim_dir, outlet_idxs) # PATH TO ZEROD COUPLER NEEDS TO BE CHANGED IF ON SHERLOCK
+    write_svzerod_interface(sim_dir) # PATH TO ZEROD COUPLER NEEDS TO BE CHANGED IF ON SHERLOCK
 
     # write solver input file
-    dt, num_timesteps, steps_btwn_restart = write_solver_inp(sim_dir, outlet_idxs, n_cycles=2)
+    # dt, num_timesteps, steps_btwn_restart = write_solver_inp(sim_dir, outlet_idxs, n_cycles=2)
+
+    write_svfsiplus_xml(sim_dir)
 
     # write numstart file
-    write_numstart(sim_dir)
+    # write_numstart(sim_dir)
 
     # write run script
-    write_svsolver_runscript(sim_dir, steps_btwn_restart, svpre_path, svsolver_path, svpost_path)
+    write_svsolver_runscript(sim_dir, svfsiplus_path)
 
     # move inflow file to simulation directory
     # os.system('cp ' + inflow_file + ' ' + sim_dir)
 
-    return num_timesteps
+
+def setup_svfsi_simdir(sim_dir, zerod_config, svfsi_path='/home/users/ndorn/svfsiplus-build/svFSI-build/mysvfsi'):
+
+    # need to write a method to create a svfsiplus.xml file
+    pass
+
+
+def write_svfsiplus_xml(sim_dir, n_tsteps=5000, dt=0.001, mesh_complete='mesh-complete'):
+    '''
+    write an svFSIplus.xml file from a simulation directory which contains a mesh surfaces directory
+    '''
+
+    # set mesh complete diretory
+    mesh_complete = os.path.join(sim_dir, mesh_complete)
+
+    print('writing svFSIplus.xml...')
+
+    # generate XML tree
+    svfsifile = ET.Element("svFSIFile")
+    svfsifile.set("version", "0.1")
+
+    # General Simulation Parameters
+    gensimparams = ET.SubElement(svfsifile, "GeneralSimulationParameters")
+
+    cont_prev_sim = ET.SubElement(gensimparams, "Continue_previous_simulation")
+    cont_prev_sim.text = "false"
+
+    num_spatial_dims = ET.SubElement(gensimparams, "Number of spatial dimensions")
+    num_spatial_dims.text = "3"
+
+    num_time_steps = ET.SubElement(gensimparams, "Number_of_time_steps")
+    num_time_steps.text = str(n_tsteps)
+
+    time_step_size = ET.SubElement(gensimparams, "Time_step_size")
+    time_step_size.text = str(dt)
+
+    spec_radius = ET.SubElement(gensimparams, "Spectral_radius_of_infinite_time_step")
+    spec_radius.text = "0.5"
+
+    stop_trigger = ET.SubElement(gensimparams, "Searched_file_name_to_trigger_stop")
+    stop_trigger.text = "STOP_SIM"
+
+    save_results_to_vtk = ET.SubElement(gensimparams, "Save_results_to_VTK_format")
+    save_results_to_vtk.text = "1"
+
+    name_prefix = ET.SubElement(gensimparams, "Name_prefix_of_saved_VTK_files")
+    name_prefix.text = "result"
+
+    increment_vtk = ET.SubElement(gensimparams, "Increment_in_saving_VTK_files")
+    increment_vtk.text = "20"
+
+    start_saving_tstep = ET.SubElement(gensimparams, "Start_saving_after_time_step")
+    start_saving_tstep.text = "1"
+
+    incrememnt_restart = ET.SubElement(gensimparams, "Increment_in_saving_restart_files")
+    incrememnt_restart.text = "10"
+
+    convert_bin_vtk = ET.SubElement(gensimparams, "Convert_BIN_to_VTK_format")
+    convert_bin_vtk.text = "0"
+
+    verbose = ET.SubElement(gensimparams, "Verbose")
+    verbose.text = "1"
+
+    warning = ET.SubElement(gensimparams, "Warning")
+    warning.text = "0"
+
+    debug = ET.SubElement(gensimparams, "Debug")
+    debug.text = "0"
+
+    # add mesh
+    add_mesh = ET.SubElement(svfsifile, "Add_mesh")
+    add_mesh.set("name", "msh")
+
+    msh_file_path = ET.SubElement(add_mesh, "Mesh_file_path")
+    msh_file_path.text = os.path.join(mesh_complete, 'mesh-complete.mesh.vtu')
+
+    # add faces to mesh
+    filelist_raw = glob.glob(os.path.join(mesh_complete, 'mesh-surfaces/*.vtp'))
+
+    filelist = [file for file in filelist_raw if 'wall' not in file]
+    filelist.sort()
+
+
+    for file in filelist:
+        add_face = ET.SubElement(add_mesh, "Add_face")
+        add_face.set("name", os.path.basename(file).split('.')[0])
+
+        face_file_path = ET.SubElement(add_face, "Face_file_path")
+        face_file_path.text = file
+    
+    add_wall = ET.SubElement(add_mesh, "Add_face")
+    add_wall.set("name", "wall")
+
+    wall_file_path = ET.SubElement(add_wall, "Face_file_path")
+    wall_file_path.text = os.path.join(mesh_complete, 'walls_combined.vtp')
+
+    # add equation
+    add_eqn = ET.SubElement(svfsifile, "Add_equation")
+    add_eqn.set("type", "fluid")
+
+    coupled = ET.SubElement(add_eqn, "Coupled")
+    coupled.text = "1"
+
+    min_iterations = ET.SubElement(add_eqn, "Min_iterations")
+    min_iterations.text = "3"
+
+    max_iterations = ET.SubElement(add_eqn, "Max_iterations")
+    max_iterations.text = "10"
+
+    tolerance = ET.SubElement(add_eqn, "Tolerance")
+    tolerance.text = "1e-3"
+
+    backflow_stab = ET.SubElement(add_eqn, "Backflow_stabilization_coefficient")
+    backflow_stab.text = "0.2"
+
+    density = ET.SubElement(add_eqn, "Density")
+    density.text = "1.06"
+
+    viscosity = ET.SubElement(add_eqn, "Viscosity", {"model": "Constant"})
+    value = ET.SubElement(viscosity, "Value")
+    value.text = "0.04"
+
+    output = ET.SubElement(add_eqn, "Output", {"type": "Spatial"})
+    velocity = ET.SubElement(output, "Velocity")
+    velocity.text = "true"
+
+    pressure = ET.SubElement(output, "Pressure")
+    pressure.text = "true"
+
+    traction = ET.SubElement(output, "Traction")
+    traction.text = "true"
+
+    wss = ET.SubElement(output, "WSS")
+    wss.text = "true"
+
+    vorticity = ET.SubElement(output, "Vorticity")
+    vorticity.text = "true"
+
+    divergence = ET.SubElement(output, "Divergence")
+    divergence.text = "true"
+
+    ls = ET.SubElement(add_eqn, "LS", {"type": "NS"})
+
+    linear_algebra = ET.SubElement(ls, "Linear_algebra", {"type": "fsils"})
+    preconditioner = ET.SubElement(linear_algebra, "Preconditioner")
+    preconditioner.text = "fsils"
+
+    ls_max_iterations = ET.SubElement(ls, "Max_iterations")
+    ls_max_iterations.text = "10"
+
+    ns_gm_max_iterations = ET.SubElement(ls, "NS_GM_max_iterations")
+    ns_gm_max_iterations.text = "3"
+
+    ns_cg_max_iterations = ET.SubElement(ls, "NS_CG_max_iterations")
+    ns_cg_max_iterations.text = "500"
+
+    ls_tolerance = ET.SubElement(ls, "Tolerance")
+    ls_tolerance.text = "1e-3"
+
+    ns_gm_tolerance = ET.SubElement(ls, "NS_GM_tolerance")
+    ns_gm_tolerance.text = "1e-3"
+
+    ns_cg_tolerance = ET.SubElement(ls, "NS_CG_tolerance")
+    ns_cg_tolerance.text = "1e-3"
+
+    krylov_space_dim = ET.SubElement(ls, "Krylov_space_dimension")
+    krylov_space_dim.text = "50"
+
+
+
+    couple_to_svzerod = ET.SubElement(add_eqn, "Couple_to_svZeroD")
+    couple_to_svzerod.set("type", "SI")
+
+    # add boundary conditions
+    for file in filelist:
+        add_bc = ET.SubElement(add_eqn, "Add_BC")
+        add_bc.set("name", os.path.basename(file).split('.')[0])
+        
+        typ = ET.SubElement(add_bc, "Type")
+        typ.text = "Neu"
+        time_dep = ET.SubElement(add_bc, "Time_dependence")
+        time_dep.text = "Coupled"
+    
+    # add wall bc
+    add_wall_bc = ET.SubElement(add_eqn, "Add_BC")
+    add_wall_bc.set("name", "wall")
+    typ = ET.SubElement(add_wall_bc, "Type")
+    typ.text = "Dir"
+    time_dep = ET.SubElement(add_wall_bc, "Time_dependence")
+    time_dep.text = "Steady"
+    value = ET.SubElement(add_wall_bc, "Value")
+    value.text = "0.0"
+
+    # Create the XML tree
+    tree = ET.ElementTree(svfsifile)
+
+    # def prettify(elem):
+    #     """Return a pretty-printed XML string for the Element."""
+    #     rough_string = ET.tostring(elem, 'utf-8')
+    #     reparsed = xml.dom.minidom.parseString(rough_string)
+    #     return reparsed.toprettyxml(indent="  ")
+    
+
+    # pretty_xml_str = prettify(svfsifile)
+
+    # print(pretty_xml_str)
+
+    # Write the XML to a file
+    with open(os.path.join(sim_dir, "svFSIplus.xml"), "wb") as file:
+        tree.write(file, encoding="utf-8", xml_declaration=True)
 
 
 def get_inflow_period(inflow_file):
@@ -241,10 +450,8 @@ def get_inflow_period(inflow_file):
     return period
 
 
-def write_svsolver_runscript(sim_dir, steps_btwn_restarts, 
-                             svpre_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre',
-                             svsolver_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mysolver',
-                             svpost_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypost', 
+def write_svsolver_runscript(sim_dir,
+                             svfsiplus_path='/home/users/ndorn/svfsiplus-build/svFSI-build/mysvfsi',
                              hours=6, nodes=2, procs_per_node=24):
     '''
     write a bash script to submit a job on sherlock'''
@@ -252,45 +459,41 @@ def write_svsolver_runscript(sim_dir, steps_btwn_restarts,
     print('writing svsolver runscript...')
 
     with open(os.path.join(sim_dir, 'run_solver.sh'), 'w') as ff:
-        ff.write('#!/bin/bash \n\n')
-        ff.write('#name of your job \n')
-        ff.write('#SBATCH --job-name=svFlowSolver\n')
-        ff.write('#SBATCH --partition=amarsden \n\n')
-        ff.write('# Specify the name of the output file. The %j specifies the job ID \n')
-        ff.write('#SBATCH --output=svFlowSolver.o%j \n\n')
-        ff.write('# Specify the name of the error file. The %j specifies the job ID \n')
-        ff.write('#SBATCH --error=svFlowSolver.e%j \n\n')
-        ff.write('# The walltime you require for your job \n')
-        ff.write('#SBATCH --time=' + str(hours) + ':00:00 \n\n')
-        ff.write('# Job priority. Leave as normal for now \n')
-        ff.write('#SBATCH --qos=normal \n\n')
-        ff.write('# Number of nodes are you requesting for your job. You can have 24 processors per node \n')
-        ff.write('#SBATCH --nodes=' + str(nodes) + ' \n\n')
-        ff.write('# Amount of memory you require per node. The default is 4000 MB per node \n')
-        ff.write('#SBATCH --mem=8000 \n\n')
-        ff.write('# Number of processors per node \n')
-        ff.write('#SBATCH --ntasks-per-node=' + str(procs_per_node) + ' \n\n')
-        ff.write('# Send an email to this address when your job starts and finishes \n')
-        ff.write('#SBATCH --mail-user=ndorn@stanford.edu \n')
-        ff.write('#SBATCH --mail-type=begin \n')
-        ff.write('#SBATCH --mail-type=end \n\n')
-        ff.write('module --force purge \n')
-        ff.write('ml devel \n')
-        ff.write('ml math \n')
-        ff.write('ml openmpi/4.1.2 \n')
-        ff.write('ml openblas/0.3.4 \n')
-        ff.write('ml boost/1.79.0 \n')
-        ff.write('ml system \n')
-        ff.write('ml x11 \n')
-        ff.write('ml mesa \n')
-        ff.write('ml qt/5.9.1 \n')
-        ff.write('ml gcc/12.1.0 \n')
-        ff.write('ml cmake \n\n')
-        ff.write(f'{svpre_path} {os.path.basename(sim_dir)}.svpre \n')
-        ff.write(f'srun {svsolver_path} \n')
-        ff.write(f'cd {nodes * procs_per_node}-procs_case \n')
-        ff.write(f'{svpost_path} -start 1500 -stop 2000 -incr {steps_btwn_restarts} -sol -wss -vtkcombo -vtu post.vtu \n')
-        ff.write('mv post.vtu *_svZeroD .. \n')
+        ff.write("#!/bin/bash\n\n")
+        ff.write("#name of your job \n")
+        ff.write("#SBATCH --job-name=svFlowSolver\n")
+        ff.write("#SBATCH --partition=amarsden\n\n")
+        ff.write("# Specify the name of the output file. The %j specifies the job ID\n")
+        ff.write("#SBATCH --output=svFlowSolver.o%j\n\n")
+        ff.write("# Specify the name of the error file. The %j specifies the job ID \n")
+        ff.write("#SBATCH --error=svFlowSolver.e%j\n\n")
+        ff.write("# The walltime you require for your job \n")
+        ff.write(f"#SBATCH --time={hours}:00:00\n\n")
+        ff.write("# Job priority. Leave as normal for now \n")
+        ff.write("#SBATCH --qos=normal\n\n")
+        ff.write("# Number of nodes are you requesting for your job. You can have 24 processors per node \n")
+        ff.write(f"#SBATCH --nodes={nodes} \n\n")
+        ff.write("# Amount of memory you require per node. The default is 4000 MB per node \n")
+        ff.write("#SBATCH --mem=8G\n\n")
+        ff.write("# Number of processors per node \n")
+        ff.write(f"#SBATCH --ntasks-per-node={procs_per_node} \n\n")
+        ff.write("# Send an email to this address when your job starts and finishes \n")
+        ff.write("#SBATCH --mail-user=ndorn@stanford.edu \n")
+        ff.write("#SBATCH --mail-type=begin \n")
+        ff.write("#SBATCH --mail-type=end \n")
+        ff.write("module --force purge\n\n")
+        ff.write("ml devel\n")
+        ff.write("ml math\n")
+        ff.write("ml openmpi\n")
+        ff.write("ml openblas\n")
+        ff.write("ml boost\n")
+        ff.write("ml system\n")
+        ff.write("ml x11\n")
+        ff.write("ml mesa\n")
+        ff.write("ml qt\n")
+        ff.write("ml gcc/14.2.0\n")
+        ff.write("ml cmake\n\n")
+        ff.write(f"srun {svfsiplus_path} svFSIplus.xml\n")
 
 
 def write_svpre_file(sim_dir, mesh_complete):
@@ -356,7 +559,7 @@ def write_svpre_file(sim_dir, mesh_complete):
     return inlet_idx, outlet_idxs
 
 
-def write_svzerod_interface(sim_dir, outlet_idxs, interface_path='/home/users/ndorn/svZeroDSolver/Release/src/interface/libsvzero_interface.so'):
+def write_svzerod_interface(sim_dir, interface_path='/home/users/ndorn/svZeroDSolver/Release/src/interface/libsvzero_interface.so'):
     '''
     write the svZeroD_interface.dat file for the simulation
     
@@ -372,7 +575,7 @@ def write_svzerod_interface(sim_dir, outlet_idxs, interface_path='/home/users/nd
     # get a map of bc names to outlet idxs
     outlet_blocks = [block.name for block in list(threed_coupler.coupling_blocks.values())]
 
-    bc_to_outlet = zip(outlet_blocks, outlet_idxs)
+    # bc_to_outlet = zip(outlet_blocks, outlet_idxs)
 
     with open(os.path.join(sim_dir, 'svZeroD_interface.dat'), 'w') as ff:
         ff.write('interface library path: \n')
@@ -382,8 +585,9 @@ def write_svzerod_interface(sim_dir, outlet_idxs, interface_path='/home/users/nd
         ff.write(os.path.abspath(zerod_coupler + '\n\n'))
         
         ff.write('svZeroD external coupling block names to surface IDs (where surface IDs are from *.svpre file): \n')
-        for bc, idx in bc_to_outlet:
+        for idx, bc in enumerate(outlet_blocks):
             ff.write(f'{bc} {idx}\n')
+
         ff.write('\n')
         ff.write('Initialize external coupling block flows: \n')
         ff.write('0\n\n')
@@ -565,9 +769,12 @@ def rename_msh_surfs(msh_surf_dir):
 
 if __name__ == '__main__':
     # setup a simulation dir from mesh
-    os.chdir('../threed_models/AS2_opt_fs/postop')
+    sim_dir = '../threed_models/AS2/preop/'
+    zerod_config = '../threed_models/AS2/zerod/AS2_prestent.json'
 
-    rename_msh_surfs('mesh-complete-rpa023/mesh-surfaces')
+    setup_simdir_from_mesh(sim_dir, zerod_config)
+
+
 
 
     

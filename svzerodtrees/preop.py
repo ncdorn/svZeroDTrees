@@ -548,19 +548,28 @@ def construct_coupled_cwss_trees(config_handler, simulation_dir, n_procs=4, d_mi
             outlet_idx += 1
 
 
-def construct_impedance_trees(config_handler, mesh_surfaces_path, clinical_targets, d_min = 0.1):
+def construct_impedance_trees(config_handler, mesh_surfaces_path, clinical_targets, d_min = 0.1, is_pulmonary=True):
     '''
     construct impedance trees for outlet BCs'''
 
     # get outlet areas
-    cap_info = vtp_info(mesh_surfaces_path, pulmonary=False)
+    if is_pulmonary:
+        rpa_info, lpa_info, inflow_info = vtp_info(mesh_surfaces_path, pulmonary=True)
+
+        cap_info = lpa_info | rpa_info
+
+    else:
+        cap_info = vtp_info(mesh_surfaces_path, pulmonary=False)
+
 
     outlet_bc_names = [name for name, bc in config_handler.bcs.items() if 'inflow' not in bc.name.lower()]
 
     # assumed that cap and boundary condition orders match
     cap_to_bc = {list(cap_info.keys())[i]: outlet_bc_names[i] for i in range(len(outlet_bc_names))}
 
-    for cap_name, area in cap_info.items():
+    for idx, (cap_name, area) in enumerate(cap_info.items()):
+
+        print(f'generating tree {idx} of {len(cap_info)} for cap {cap_name}...')
         cap_d = (area / np.pi)**(1/2) * 2
 
         tree = StructuredTree(name='cap_name', time=config_handler.bcs['INFLOW'].t, simparams=config_handler.simparams)
@@ -573,11 +582,6 @@ def construct_impedance_trees(config_handler, mesh_surfaces_path, clinical_targe
         bc_name = cap_to_bc[cap_name]
 
         config_handler.bcs[bc_name] = tree.create_impedance_bc(bc_name, clinical_targets.wedge_p * 1333.2)
-
-    
-
-    
-    
 
 
 class ClinicalTargets():
@@ -619,25 +623,43 @@ class ClinicalTargets():
         t = 60 / bpm
 
         # get the mpa pressures
-        mpa_pressures = bsa = df.loc[0,df.columns.str.contains("mpa pressures")].values[0] # mmHg
-        mpa_sys_p, mpa_dia_p = mpa_pressures.split("/")
-        mpa_sys_p = int(mpa_sys_p)
-        mpa_dia_p = int(mpa_dia_p)
-        mpa_mean_p = int(df.loc[0,df.columns.str.contains("mpa mean pressure")].values[0])
+        if df.columns.str.contains("mpa pressures").any():
+            print("MPA pressure clinical targets found")
+            mpa_pressures = df.loc[0,df.columns.str.contains("mpa pressures")].values[0] # mmHg
+            mpa_sys_p, mpa_dia_p = mpa_pressures.split("/")
+            mpa_sys_p = int(mpa_sys_p)
+            mpa_dia_p = int(mpa_dia_p)
+            mpa_mean_p = int(df.loc[0,df.columns.str.contains("mpa mean pressure")].values[0])  
+        else:
+            mpa_sys_p = None
+            mpa_dia_p = None
+            mpa_mean_p = None
 
         # get the lpa pressures
-        lpa_pressures = df.loc[0,df.columns.str.contains("lpa pressures")].values[0] # mmHg
-        lpa_sys_p, lpa_dia_p = lpa_pressures.split("/")
-        lpa_sys_p = int(lpa_sys_p)
-        lpa_dia_p = int(lpa_dia_p)
-        lpa_mean_p = int(df.loc[0,df.columns.str.contains("lpa mean pressure")].values[0])
+        if df.columns.str.contains("lpa pressures").any():
+            print("LPA pressure clinical targets found")
+            lpa_pressures = df.loc[0,df.columns.str.contains("lpa pressures")].values[0] # mmHg
+            lpa_sys_p, lpa_dia_p = lpa_pressures.split("/")
+            lpa_sys_p = int(lpa_sys_p)
+            lpa_dia_p = int(lpa_dia_p)
+            lpa_mean_p = int(df.loc[0,df.columns.str.contains("lpa mean pressure")].values[0])
+        else:
+            lpa_sys_p = None
+            lpa_dia_p = None
+            lpa_mean_p = None
 
         # get the rpa pressures
-        rpa_pressures = df.loc[0,df.columns.str.contains("rpa pressures")].values[0] # mmHg
-        rpa_sys_p, rpa_dia_p = rpa_pressures.split("/")
-        rpa_sys_p = int(rpa_sys_p)
-        rpa_dia_p = int(rpa_dia_p)
-        rpa_mean_p = int(df.loc[0,df.columns.str.contains("rpa mean pressure")].values[0])
+        if df.columns.str.contains("rpa pressures").any():
+            print("RPA pressure clinical targets found")
+            rpa_pressures = df.loc[0,df.columns.str.contains("rpa pressures")].values[0] # mmHg
+            rpa_sys_p, rpa_dia_p = rpa_pressures.split("/")
+            rpa_sys_p = int(rpa_sys_p)
+            rpa_dia_p = int(rpa_dia_p)
+            rpa_mean_p = int(df.loc[0,df.columns.str.contains("rpa mean pressure")].values[0])
+        else:
+            rpa_sys_p = None
+            rpa_dia_p = None
+            rpa_mean_p = None
 
         # if steady, just take the mean
         if steady:
