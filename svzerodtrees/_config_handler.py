@@ -301,6 +301,10 @@ class ConfigHandler():
         for vessel in self._config["vessels"]:
             self.vessel_branch_map[vessel['vessel_id']] = get_branch_id(vessel)[0]
 
+        self.branch_vessel_map = {}
+        for k, v in self.vessel_branch_map.items():
+            self.branch_vessel_map[v] = self.branch_vessel_map.get(v, []) + [k]
+
 
     def find_vessel_paths(self):
         '''
@@ -405,7 +409,9 @@ class ConfigHandler():
                 # this takes from the vessel map as opposed to the branch map. since the vessels are nonlinear we may have to use the vessel
                 # map in the future
                 if not any(vessel in child_vessel.children for child_vessel in self.vessel_map.values()):
-                    self.root = vessel
+                    root_br = self.vessel_branch_map[vessel.id]
+                    # account for multiple vessels in root branch
+                    self.root = self.vessel_map[self.branch_vessel_map[self.vessel_branch_map[vessel.id]][-1]]
             # organize the children in numerical order
             # we assume that the branches are sorted alphabetically, and therefore the lpa comes first.
             self.root.children.sort(key=lambda x: x.branch)
