@@ -255,7 +255,7 @@ def write_svfsiplus_xml(sim_dir, n_tsteps=5000, dt=0.001, mesh_complete='mesh-co
     cont_prev_sim = ET.SubElement(gensimparams, "Continue_previous_simulation")
     cont_prev_sim.text = "false"
 
-    num_spatial_dims = ET.SubElement(gensimparams, "Number of spatial dimensions")
+    num_spatial_dims = ET.SubElement(gensimparams, "Number_of_spatial_dimensions")
     num_spatial_dims.text = "3"
 
     num_time_steps = ET.SubElement(gensimparams, "Number_of_time_steps")
