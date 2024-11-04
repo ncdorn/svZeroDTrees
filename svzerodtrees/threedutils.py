@@ -424,6 +424,8 @@ def write_svfsiplus_xml(sim_dir, n_tsteps=5000, dt=0.001, mesh_complete='mesh-co
     # Create the XML tree
     tree = ET.ElementTree(svfsifile)
 
+    ET.indent(tree.getroot())
+
     # def prettify(elem):
     #     """Return a pretty-printed XML string for the Element."""
     #     rough_string = ET.tostring(elem, 'utf-8')
@@ -749,12 +751,12 @@ def rename_msh_surfs(msh_surf_dir):
         
     
     # # make sure LPA and RPA are named correctly, and not named for the stent
-    if 'RPA.vtp' not in filelist:
-        for file in filelist:
-            if 'RPA' in file and os.path.basename(file)[4] != '0':
-                user = input(f'RPA vtp found! would you like to replace {file} with RPA.vtp? (y/n)')
-                if user == 'y':
-                    os.system('mv ' + file + ' ' + msh_surf_dir + '/RPA.vtp')
+    # if 'RPA.vtp' not in filelist:
+    #     for file in filelist:
+    #         if 'RPA' in file and os.path.basename(file)[4] != '0':
+    #             user = input(f'RPA vtp found! would you like to replace {file} with RPA.vtp? (y/n)')
+    #             if user == 'y':
+    #                 os.system('mv ' + file + ' ' + msh_surf_dir + '/RPA.vtp')
 
     dup_files = []
     for file in filelist:
