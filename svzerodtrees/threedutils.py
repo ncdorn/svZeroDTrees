@@ -188,7 +188,7 @@ def prepare_adapted_simdir(postop_dir, adapted_dir):
 
 
 def setup_simdir_from_mesh(sim_dir, zerod_config, 
-                           svfsiplus_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre'):
+                           svfsiplus_path='/home/users/ndorn/svfsiplus-build/svFSI-build/mysvfsi'):
     '''
     setup a simulation directory solely from a mesh-complete.
     :param sim_dir: path to the simulation directory where the mesh complete is located
@@ -223,7 +223,7 @@ def setup_simdir_from_mesh(sim_dir, zerod_config,
     # write_numstart(sim_dir)
 
     # write run script
-    write_svsolver_runscript(sim_dir, svfsiplus_path)
+    write_svfsi_runscript(sim_dir, svfsiplus_path)
 
     # move inflow file to simulation directory
     # os.system('cp ' + inflow_file + ' ' + sim_dir)
@@ -452,13 +452,13 @@ def get_inflow_period(inflow_file):
     return period
 
 
-def write_svsolver_runscript(sim_dir,
+def write_svfsi_runscript(sim_dir,
                              svfsiplus_path='/home/users/ndorn/svfsiplus-build/svFSI-build/mysvfsi',
                              hours=6, nodes=2, procs_per_node=24):
     '''
     write a bash script to submit a job on sherlock'''
 
-    print('writing svsolver runscript...')
+    print('writing svFSIplus runscript...')
 
     with open(os.path.join(sim_dir, 'run_solver.sh'), 'w') as ff:
         ff.write("#!/bin/bash\n\n")
