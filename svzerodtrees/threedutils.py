@@ -768,13 +768,44 @@ def rename_msh_surfs(msh_surf_dir):
         raise Exception(f'duplicate mesh surfaces detected in this directory! these will need to be cleaned up. \n List of potential duplicate surfaces: {dup_files}')
 
 
+def scale_vtp_to_cm(vtp_file, scale_factor=10.0):
+    '''
+    scale a vtp file from mm to cm (multiply by 0.1) using vtkTransform
+    '''
+    reader = vtk.vtkXMLPolyDataReader()
+    reader.SetFileName(vtp_file)
+    reader.Update()
+
+    # get the area before scaling
+    area = find_vtp_area(vtp_file)
+    print(f'area before scaling: {area}')
+
+    transform = vtk.vtkTransform()
+    transform.Scale(scale_factor, scale_factor, scale_factor)
+
+    transform_filter = vtk.vtkTransformPolyDataFilter()
+    transform_filter.SetInputData(reader.GetOutput())
+    transform_filter.SetTransform(transform)
+    transform_filter.Update()
+
+    writer = vtk.vtkXMLPolyDataWriter()
+    writer.SetInputData(transform_filter.GetOutput())   
+    writer.SetFileName(vtp_file)
+    writer.Write()
+
+    # get the area after scaling
+    area = find_vtp_area(vtp_file)
+    print(f'area after scaling: {area}')
+
+    
 
 if __name__ == '__main__':
     # setup a simulation dir from mesh
-    sim_dir = '../threed_models/AS2/preop/'
-    zerod_config = '../threed_models/AS2/zerod/AS2_prestent.json'
+    
+    vtp_file = '../svZeroDTrees-tests/cases/threed/LPA_RPA/mesh-complete/mesh-surfaces/cap_LPA.vtp'
 
-    setup_simdir_from_mesh(sim_dir, zerod_config)
+    scale_vtp_to_cm(vtp_file)
+
 
 
 
