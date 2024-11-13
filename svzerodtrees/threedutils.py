@@ -772,6 +772,8 @@ def scale_vtp_to_cm(vtp_file, scale_factor=10.0):
     '''
     scale a vtp file from mm to cm (multiply by 0.1) using vtkTransform
     '''
+
+    print(f'scaling {vtp_file} by factor {scale_factor}...')
     reader = vtk.vtkXMLPolyDataReader()
     reader.SetFileName(vtp_file)
     reader.Update()
@@ -797,15 +799,27 @@ def scale_vtp_to_cm(vtp_file, scale_factor=10.0):
     area = find_vtp_area(vtp_file)
     print(f'area after scaling: {area}')
 
+
+def scale_msh_complete(msh_complete_dir, scale_factor=0.1):
+    '''
+    scale all vtp files in a mesh-complete directory to cm
+    '''
+    filelist_mshcomp = glob.glob(msh_complete_dir + '/*')
+    filelist_mshcomp = [file for file in filelist_mshcomp if 'mesh-surfaces' not in file]
     
+    filelist_mshsurf = glob.glob(os.path.join(msh_complete_dir, 'mesh-surfaces/*'))
+
+    filelist = filelist_mshcomp + filelist_mshsurf
+
+    for file in filelist:
+        scale_vtp_to_cm(file, scale_factor=scale_factor)
 
 if __name__ == '__main__':
     # setup a simulation dir from mesh
     
-    vtp_file = '../svZeroDTrees-tests/cases/threed/LPA_RPA/mesh-complete/mesh-surfaces/cap_LPA.vtp'
+    msh_dir = '../svZeroDTrees-tests/cases/threed/LPA_RPA/mesh-complete-scaled'
 
-    scale_vtp_to_cm(vtp_file)
-
+    scale_msh_complete(msh_dir, scale_factor=10.0)
 
 
 
