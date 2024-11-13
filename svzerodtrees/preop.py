@@ -629,6 +629,7 @@ class ClinicalTargets():
             mpa_sys_p, mpa_dia_p = mpa_pressures.split("/")
             mpa_sys_p = int(mpa_sys_p)
             mpa_dia_p = int(mpa_dia_p)
+            
             mpa_mean_p = int(df.loc[0,df.columns.str.contains("mpa mean pressure")].values[0])  
         else:
             mpa_sys_p = None

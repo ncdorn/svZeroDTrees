@@ -188,7 +188,7 @@ def prepare_adapted_simdir(postop_dir, adapted_dir):
 
 
 def setup_simdir_from_mesh(sim_dir, zerod_config, 
-                           svfsiplus_path='/home/users/ndorn/svSolver/svSolver-build/svSolver-build/mypre'):
+                           svfsiplus_path='/home/users/ndorn/svfsiplus-build/svFSI-build/mysvfsi'):
     '''
     setup a simulation directory solely from a mesh-complete.
     :param sim_dir: path to the simulation directory where the mesh complete is located
@@ -223,7 +223,7 @@ def setup_simdir_from_mesh(sim_dir, zerod_config,
     # write_numstart(sim_dir)
 
     # write run script
-    write_svsolver_runscript(sim_dir, svfsiplus_path)
+    write_svfsi_runscript(sim_dir, svfsiplus_path)
 
     # move inflow file to simulation directory
     # os.system('cp ' + inflow_file + ' ' + sim_dir)
@@ -255,7 +255,7 @@ def write_svfsiplus_xml(sim_dir, n_tsteps=5000, dt=0.001, mesh_complete='mesh-co
     cont_prev_sim = ET.SubElement(gensimparams, "Continue_previous_simulation")
     cont_prev_sim.text = "false"
 
-    num_spatial_dims = ET.SubElement(gensimparams, "Number of spatial dimensions")
+    num_spatial_dims = ET.SubElement(gensimparams, "Number_of_spatial_dimensions")
     num_spatial_dims.text = "3"
 
     num_time_steps = ET.SubElement(gensimparams, "Number_of_time_steps")
@@ -424,6 +424,8 @@ def write_svfsiplus_xml(sim_dir, n_tsteps=5000, dt=0.001, mesh_complete='mesh-co
     # Create the XML tree
     tree = ET.ElementTree(svfsifile)
 
+    ET.indent(tree.getroot())
+
     # def prettify(elem):
     #     """Return a pretty-printed XML string for the Element."""
     #     rough_string = ET.tostring(elem, 'utf-8')
@@ -450,13 +452,13 @@ def get_inflow_period(inflow_file):
     return period
 
 
-def write_svsolver_runscript(sim_dir,
+def write_svfsi_runscript(sim_dir,
                              svfsiplus_path='/home/users/ndorn/svfsiplus-build/svFSI-build/mysvfsi',
                              hours=6, nodes=2, procs_per_node=24):
     '''
     write a bash script to submit a job on sherlock'''
 
-    print('writing svsolver runscript...')
+    print('writing svFSIplus runscript...')
 
     with open(os.path.join(sim_dir, 'run_solver.sh'), 'w') as ff:
         ff.write("#!/bin/bash\n\n")
@@ -749,12 +751,12 @@ def rename_msh_surfs(msh_surf_dir):
         
     
     # # make sure LPA and RPA are named correctly, and not named for the stent
-    if 'RPA.vtp' not in filelist:
-        for file in filelist:
-            if 'RPA' in file and os.path.basename(file)[4] != '0':
-                user = input(f'RPA vtp found! would you like to replace {file} with RPA.vtp? (y/n)')
-                if user == 'y':
-                    os.system('mv ' + file + ' ' + msh_surf_dir + '/RPA.vtp')
+    # if 'RPA.vtp' not in filelist:
+    #     for file in filelist:
+    #         if 'RPA' in file and os.path.basename(file)[4] != '0':
+    #             user = input(f'RPA vtp found! would you like to replace {file} with RPA.vtp? (y/n)')
+    #             if user == 'y':
+    #                 os.system('mv ' + file + ' ' + msh_surf_dir + '/RPA.vtp')
 
     dup_files = []
     for file in filelist:
@@ -766,13 +768,58 @@ def rename_msh_surfs(msh_surf_dir):
         raise Exception(f'duplicate mesh surfaces detected in this directory! these will need to be cleaned up. \n List of potential duplicate surfaces: {dup_files}')
 
 
+def scale_vtp_to_cm(vtp_file, scale_factor=10.0):
+    '''
+    scale a vtp file from mm to cm (multiply by 0.1) using vtkTransform
+    '''
+
+    print(f'scaling {vtp_file} by factor {scale_factor}...')
+    reader = vtk.vtkXMLPolyDataReader()
+    reader.SetFileName(vtp_file)
+    reader.Update()
+
+    # get the area before scaling
+    area = find_vtp_area(vtp_file)
+    print(f'area before scaling: {area}')
+
+    transform = vtk.vtkTransform()
+    transform.Scale(scale_factor, scale_factor, scale_factor)
+
+    transform_filter = vtk.vtkTransformPolyDataFilter()
+    transform_filter.SetInputData(reader.GetOutput())
+    transform_filter.SetTransform(transform)
+    transform_filter.Update()
+
+    writer = vtk.vtkXMLPolyDataWriter()
+    writer.SetInputData(transform_filter.GetOutput())   
+    writer.SetFileName(vtp_file)
+    writer.Write()
+
+    # get the area after scaling
+    area = find_vtp_area(vtp_file)
+    print(f'area after scaling: {area}')
+
+
+def scale_msh_complete(msh_complete_dir, scale_factor=0.1):
+    '''
+    scale all vtp files in a mesh-complete directory to cm
+    '''
+    filelist_mshcomp = glob.glob(msh_complete_dir + '/*')
+    filelist_mshcomp = [file for file in filelist_mshcomp if 'mesh-surfaces' not in file]
+    
+    filelist_mshsurf = glob.glob(os.path.join(msh_complete_dir, 'mesh-surfaces/*'))
+
+    filelist = filelist_mshcomp + filelist_mshsurf
+
+    for file in filelist:
+        scale_vtp_to_cm(file, scale_factor=scale_factor)
 
 if __name__ == '__main__':
     # setup a simulation dir from mesh
-    sim_dir = '../threed_models/AS2/preop/'
-    zerod_config = '../threed_models/AS2/zerod/AS2_prestent.json'
+    
+    msh_dir = '../svZeroDTrees-tests/cases/threed/LPA_RPA/mesh-complete-scaled'
 
-    setup_simdir_from_mesh(sim_dir, zerod_config)
+    scale_msh_complete(msh_dir, scale_factor=10.0)
 
 
 
