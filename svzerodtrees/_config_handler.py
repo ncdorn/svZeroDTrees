@@ -567,7 +567,7 @@ class ConfigHandler():
                 }
             )
 
-            threed_coupler.coupling_blocks["INFLOW"] = CouplingBlock(
+            threed_coupler.coupling_blocks["inflow"] = CouplingBlock(
                 {
                     "name": "inflow",
                     "type": "FLOW",
