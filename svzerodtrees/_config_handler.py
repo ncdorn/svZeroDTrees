@@ -532,7 +532,7 @@ class ConfigHandler():
                     "density": 1.06,
                     "viscosity": 0.04,
                     "coupled_simulation": True,
-                    "number_of_time_pts": 50,
+                    "number_of_time_pts": 2,
                     "output_all_cycles": True,
                     "steady_initial": False
                 },
@@ -930,7 +930,7 @@ class BoundaryCondition():
             'bc_values': self.values
         }
     
-    def change_to_R(self):
+    def RCR_to_R(self):
         '''
         change the boundary condition to a resistance
         '''
@@ -940,8 +940,19 @@ class BoundaryCondition():
         self.type = 'RESISTANCE'
 
         self._R = self.values['R']
+    
+    def Z_to_R(self):
+        '''
+        change from impedance boundary condition to resistance'''
 
-    def change_to_RCR(self):
+        self.values = {'R': self.Z[0],
+                       'Pd': self.values['Pd']}
+        
+        self.type = 'RESISTANCE'
+        self._R = self.values['R']
+
+
+    def R_to_RCR(self):
         '''
         change the boundary condition to RCR
         '''

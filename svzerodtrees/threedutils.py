@@ -308,7 +308,11 @@ def write_svfsiplus_xml(sim_dir, n_tsteps=5000, dt=0.001, mesh_complete='mesh-co
     filelist_raw = glob.glob(os.path.join(mesh_complete, 'mesh-surfaces/*.vtp'))
 
     filelist = [file for file in filelist_raw if 'wall' not in file]
+
     filelist.sort()
+
+    inflow = filelist.pop(-1)
+    filelist.insert(0, inflow)
 
 
     for file in filelist:
