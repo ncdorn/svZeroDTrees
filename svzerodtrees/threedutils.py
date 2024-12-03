@@ -5,7 +5,7 @@ import math
 import pandas as pd
 import os
 import svzerodtrees
-from svzerodtrees._config_handler import ConfigHandler
+from svzerodtrees.config_handler import ConfigHandler
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
 
@@ -66,7 +66,6 @@ def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_
             elif (tail_name[ : len(inflow_tag)] == inflow_tag):
                 inflow_info[vtp_file] = find_vtp_area(vtp_file)
         
-
         return rpa_info, lpa_info, inflow_info
     
     else: # return cap info
@@ -457,8 +456,8 @@ def get_inflow_period(inflow_file):
 
 
 def write_svfsi_runscript(sim_dir,
-                             svfsiplus_path='/home/users/ndorn/svfsiplus-build/svFSI-build/mysvfsi',
-                             hours=6, nodes=2, procs_per_node=24):
+                          svfsiplus_path='/home/users/ndorn/svfsiplus-build/svFSI-build/mysvfsi',
+                          hours=6, nodes=2, procs_per_node=24):
     '''
     write a bash script to submit a job on sherlock'''
 

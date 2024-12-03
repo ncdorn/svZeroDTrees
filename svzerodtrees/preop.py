@@ -13,8 +13,8 @@ from svzerodtrees.post_processing.stree_visualization import *
 from scipy.optimize import minimize, Bounds
 from svzerodtrees.structuredtree import StructuredTree
 from svzerodtrees.adaptation import *
-from svzerodtrees._result_handler import ResultHandler
-from svzerodtrees._config_handler import ConfigHandler, Vessel, BoundaryCondition, Junction, SimParams
+from svzerodtrees.result_handler import ResultHandler
+from svzerodtrees.config_handler import ConfigHandler, Vessel, BoundaryCondition, Junction, SimParams
 
 
 def optimize_outlet_bcs(input_file,
