@@ -1,8 +1,8 @@
 from svzerodtrees.utils import *
 import copy
 from svzerodtrees.structuredtree import StructuredTree
-from svzerodtrees._result_handler import ResultHandler
-from svzerodtrees._config_handler import ConfigHandler
+from svzerodtrees.result_handler import ResultHandler
+from svzerodtrees.config_handler import ConfigHandler
 import numpy as np
 
 

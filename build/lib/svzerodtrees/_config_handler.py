@@ -2,7 +2,7 @@ import json
 import pickle
 import os
 from svzerodtrees.utils import *
-from svzerodtrees._result_handler import ResultHandler
+from svzerodtrees.result_handler import ResultHandler
 import pysvzerod
 
 

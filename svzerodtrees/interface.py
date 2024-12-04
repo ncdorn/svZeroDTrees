@@ -8,8 +8,8 @@ from svzerodtrees.optimization import StentOptimization
 from svzerodtrees.post_processing import plotting, project_to_centerline
 from svzerodtrees.utils import *
 from svzerodtrees.threedutils import *
-from svzerodtrees._result_handler import ResultHandler
-from svzerodtrees._config_handler import ConfigHandler
+from svzerodtrees.result_handler import ResultHandler
+from svzerodtrees.config_handler import ConfigHandler
 from svzerodtrees.post_processing.pa_plotter import PAanalyzer
 from scipy.optimize import minimize
 

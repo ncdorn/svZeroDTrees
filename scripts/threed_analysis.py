@@ -2,7 +2,7 @@ import csv
 import glob
 from svzerodtrees.threedutils import *
 from svzerodtrees.preop import optimize_pa_bcs, optimize_outlet_bcs, construct_impedance_trees
-from svzerodtrees._config_handler import ConfigHandler
+from svzerodtrees.config_handler import ConfigHandler
 
 
 def simdir_from_mesh(mesh_complete, threed_dir, zerod_dir, trees='resistance'):

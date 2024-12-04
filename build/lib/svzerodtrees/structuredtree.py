@@ -3,7 +3,7 @@ import random
 from scipy.optimize import minimize, Bounds, LinearConstraint
 from svzerodtrees.treevessel import TreeVessel
 from svzerodtrees.utils import *
-from svzerodtrees._config_handler import ConfigHandler, Vessel, BoundaryCondition, SimParams
+from svzerodtrees.config_handler import ConfigHandler, Vessel, BoundaryCondition, SimParams
 from multiprocessing import Pool
 import math
 import scipy

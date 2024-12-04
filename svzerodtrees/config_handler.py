@@ -2,7 +2,7 @@ import json
 import pickle
 import os
 from svzerodtrees.utils import *
-from svzerodtrees._result_handler import ResultHandler
+from svzerodtrees.result_handler import ResultHandler
 import pysvzerod
 
 
@@ -164,6 +164,24 @@ class ConfigHandler():
             return result_df
         
 
+    def add_result(self, label=None, svzerod_data=None):
+        '''
+        add the result to the result handler
+
+        :param label: label for the result e.g. preop, postop, adapted
+        :param svzerod_data: result from the svzerod simulation
+        '''
+
+        if self.threed_interface:
+            if svzerod_data is None:
+                raise Exception("need to provide svZeroD_data for threed interface result")
+            else:
+                for coupling_block in self.coupling_blocks.values():
+                    coupling_block.add_result(svzerod_data)
+            
+        if self.is_pulmonary:
+
+            pass
 
     def assemble_config(self):
         '''
@@ -518,11 +536,13 @@ class ConfigHandler():
             return [self.vessel_map[id].to_dict() for id in self.branch_map[branch].ids]
         
     
-    def generate_threed_coupler(self, simdir, inflow_from_0d=False):
+    def generate_threed_coupler(self, simdir, inflow_from_0d=False, mesh_complete=None):
         '''
         create a 3D-0D coupling blocks config from the boundary conditions and save it to a json
 
         :param simdir: directory to save the json to
+        :param inflow_from_0d: bool to indicate if the inflow is from the 0D model
+        :param mesh_surfaces: MeshComplete object
 
         :return coupling_block_list: list of coupling block names
         '''
@@ -532,7 +552,7 @@ class ConfigHandler():
                     "density": 1.06,
                     "viscosity": 0.04,
                     "coupled_simulation": True,
-                    "number_of_time_pts": 50,
+                    "number_of_time_pts": 2,
                     "output_all_cycles": True,
                     "steady_initial": False
                 },
@@ -583,7 +603,8 @@ class ConfigHandler():
                                 1.0,
                                 1.0
                             ]
-                    }
+                    },
+                    "surface": mesh_complete.mesh_surfaces[0].filename
                 }
             )
 
@@ -595,8 +616,8 @@ class ConfigHandler():
         # create the coupling blocks
         for i, bc in enumerate(threed_coupler.bcs.values()):
             if 'inflow' not in bc.name.lower():
-                block_name = f'coupled_bc{i}'
-                threed_coupler.coupling_blocks[block_name] = CouplingBlock.from_bc(bc)
+                block_name = bc.name.replace('_', '')
+                threed_coupler.coupling_blocks[block_name] = CouplingBlock.from_bc(bc, surface=mesh_complete.mesh_surfaces[i].filename)
 
         print('writing svzerod_3Dcoupling.json...')
         threed_coupler.to_json(os.path.join(simdir, 'svzerod_3Dcoupling.json'))
@@ -930,7 +951,7 @@ class BoundaryCondition():
             'bc_values': self.values
         }
     
-    def change_to_R(self):
+    def RCR_to_R(self):
         '''
         change the boundary condition to a resistance
         '''
@@ -940,8 +961,19 @@ class BoundaryCondition():
         self.type = 'RESISTANCE'
 
         self._R = self.values['R']
+    
+    def Z_to_R(self):
+        '''
+        change from impedance boundary condition to resistance'''
 
-    def change_to_RCR(self):
+        self.values = {'R': self.Z[0],
+                       'Pd': self.values['Pd']}
+        
+        self.type = 'RESISTANCE'
+        self._R = self.values['R']
+
+
+    def R_to_RCR(self):
         '''
         change the boundary condition to RCR
         '''
@@ -1098,7 +1130,13 @@ class CouplingBlock():
         self.periodic = config['periodic']
         self.values = config['values']
         # to be added later
-        self.surface = None
+        self.surface = config['surface']
+
+        # simulation result
+        if 'result' in config.keys():
+            self.result = config['result']
+        else:
+            self.result = {}
     
     @classmethod
     def from_config(cls, config):
@@ -1111,7 +1149,7 @@ class CouplingBlock():
         return cls(config)
     
     @classmethod
-    def from_bc(cls, bc: BoundaryCondition, coupling_type='FLOW', location='inlet', periodic=False):
+    def from_bc(cls, bc: BoundaryCondition, coupling_type='FLOW', location='inlet', periodic=False, surface=None):
         '''
         create a coupling block from a boundary condition
 
@@ -1126,18 +1164,39 @@ class CouplingBlock():
             'values': {
                         "t": [0.0, 1.0],
                         "Q": [1.0, 1.0]
-                    }
+                    },
+            'surface': surface
         }
 
         return cls(config)
         
-    
-    def to_dict(self):
+    def add_result(self, svzerod_data):
+        '''
+        :param result: svZeroDdata class instance
+        '''
+
+        # get the result array which corresponds to the coupling block name
+        time, flow, pressure = svzerod_data.get_result(self)
+
+        self.result = {}
+        self.result['time'] = time
+        self.result['flow'] = flow
+        self.result['pressure'] = pressure
+
+
+
+    def to_dict(self, with_result=False):
         '''
         convert the coupling block to a dict for zerod solver use
         '''
 
-        return self.__dict__
+        self_dict = self.__dict__
+
+        # don't want to include the result arrays in the output dict
+        if not with_result:
+            del self_dict['result']
+
+        return self_dict
     
 
 class Chamber():
