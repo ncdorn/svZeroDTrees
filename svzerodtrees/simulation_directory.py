@@ -59,25 +59,25 @@ class SimulationDirectory:
         self.path = path
 
         # mesh complete directory
-        self.mesh_complete = None
+        self.mesh_complete = mesh_complete
 
         # svZeroD_interface.dat file
-        self.svzerod_interface = None
+        self.svzerod_interface = svzerod_interface
 
         # svzerod_3Dcoupling.json file
-        self.svzerod_3Dcoupling = None
+        self.svzerod_3Dcoupling = svzerod_3Dcoupling
 
-        self.solver_runscript = None
+        self.solver_runscript = solver_runscript
 
         # svFSI.xml file
-        self.svFSIxml = None
+        self.svFSIxml = svFSIxml
 
         # simulation results
         ## svZeroD_data
-        self.zerod_data = None
+        self.zerod_data = zerod_data
 
         ## result*.vtu files
-        self.results_dir = None
+        self.results_dir = results_dir
 
     @classmethod
     def from_directory(cls, path, zerod_config, results_dir=None):
@@ -123,7 +123,7 @@ class SimulationDirectory:
             svzerod_3Dcoupling = None
 
         # check for svFSI.xml
-        svFSIxml = os.path.join(path, 'svFSI.xml')
+        svFSIxml = os.path.join(path, 'svFSIplus.xml')
         if os.path.exists(svFSIxml):
             print('svFSI.xml found')
             svFSIxml = SvFSIxml(svFSIxml)
@@ -187,13 +187,57 @@ class SimulationDirectory:
         '''
         check if the simulation directory has all the necessary files'''
 
-        pass
+        if self.mesh_complete.is_written:
+            print('mesh-complete exists')
+        else:
+            raise FileNotFoundError('mesh-complete does not exist')
+        
+        if self.svzerod_interface.is_written:
+            print('svZeroD_interface.dat written')
+        else:
+            raise FileNotFoundError('svZeroD_interface.dat does not exist')
+        
+        if self.svFSIxml.is_written:
+            print('svFSI.xml written')
+        else:
+            raise FileNotFoundError('svFSI.xml does not exist')
+        
+        if self.solver_runscript.is_written:
+            print('solver runscript written')
+        else:
+            raise FileNotFoundError('solver runscript does not exist')
+        
+
 
     def write_files(self):
         '''
         write simulation files to the simulation directory'''
 
         pass
+
+
+    def flow_split(self):
+        '''
+        get the flow split between the LPA and RPA'''
+
+        # get the LPA and RPA boundary conditions based on surface name
+        lpa_flow = 0.0
+        rpa_flow = 0.0
+        for block in self.svzerod_3Dcoupling.coupling_blocks.values():
+            if 'lpa' in block.surface.lower():
+                lpa_flow += SvZeroDdata.integrate_flow(block)
+            if 'rpa' in block.surface.lower():
+                rpa_flow += SvZeroDdata.integrate_flow(block)
+        
+        lpa_pct = lpa_flow / (lpa_flow + rpa_flow) * 100
+        rpa_pct = rpa_flow / (lpa_flow + rpa_flow) * 100
+
+        print(f'LPA flow: {lpa_flow} ({lpa_pct}%), RPA flow: {rpa_flow} ({rpa_pct}%)')
+
+        return lpa_flow, rpa_flow
+
+
+
 
 
 
@@ -734,6 +778,19 @@ class SvZeroDdata(SimFile):
         elif block.location == 'outlet':
             return self.df['time'], self.df[f'flow:{block.connected_block}:{block.name}'], self.df[f'pressure:{block.connected_block}:{block.name}']
 
+    def integrate_flow(self, block):
+        '''
+        integrate the flow at the outlet
+        
+        :coupling_block: name of the coupling block
+        :block_name: name of the block to integrate the flow over'''
+
+        time, flow, pressure = self.get_result(block)
+
+        return np.trapz(flow, time)
+        
+    
+
 class SimResults(SimFile):
     '''
     class to handle 3D simulation results in the simulation directory'''
@@ -768,4 +825,6 @@ if __name__ == '__main__':
     sim_dir = '../threed_models/SU0243/preop'
 
     simulation = SimulationDirectory.from_directory(sim_dir, '../threed_models/SU0243/preop/config_impedance_dmin01.json')
+
+    simulation.check()
 
