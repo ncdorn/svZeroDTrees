@@ -548,18 +548,17 @@ def construct_coupled_cwss_trees(config_handler, simulation_dir, n_procs=4, d_mi
             outlet_idx += 1
 
 
-def construct_impedance_trees(config_handler, mesh_surfaces_path, clinical_targets, d_min = 0.1, is_pulmonary=True):
+def construct_impedance_trees(config_handler, mesh_surfaces_path, wedge_pressure, d_min = 0.1, convert_to_cm=False, is_pulmonary=True):
     '''
     construct impedance trees for outlet BCs'''
 
     # get outlet areas
     if is_pulmonary:
-        rpa_info, lpa_info, inflow_info = vtp_info(mesh_surfaces_path, pulmonary=True)
+        rpa_info, lpa_info, inflow_info = vtp_info(mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=True)
 
         cap_info = lpa_info | rpa_info
-
     else:
-        cap_info = vtp_info(mesh_surfaces_path, pulmonary=False)
+        cap_info = vtp_info(mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=False)
 
 
     outlet_bc_names = [name for name, bc in config_handler.bcs.items() if 'inflow' not in bc.name.lower()]
@@ -581,7 +580,7 @@ def construct_impedance_trees(config_handler, mesh_surfaces_path, clinical_targe
 
         bc_name = cap_to_bc[cap_name]
 
-        config_handler.bcs[bc_name] = tree.create_impedance_bc(bc_name, clinical_targets.wedge_p * 1333.2)
+        config_handler.bcs[bc_name] = tree.create_impedance_bc(bc_name, wedge_pressure * 1333.2)
 
 
 class ClinicalTargets():

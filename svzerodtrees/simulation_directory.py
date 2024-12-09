@@ -1,6 +1,7 @@
 from svzerodtrees.utils import *
 from svzerodtrees.threedutils import *
 from svzerodtrees.config_handler import ConfigHandler
+from svzerodtrees.preop import *
 import json
 import pickle
 import os
@@ -45,18 +46,23 @@ class SimulationDirectory:
     '''
     a class for handling simulation directories of pulmonary artery simulations'''
     def __init__(self, path, 
+                 zerod_config=None,
                  mesh_complete=None, 
                  svzerod_interface=None, 
                  svzerod_3Dcoupling=None, 
                  svFSIxml=None, 
                  solver_runscript=None, 
                  zerod_data=None, 
-                 results_dir=None):
+                 results_dir=None,
+                 convert_to_cm=False):
         '''
         initialize the simulation handler which handles threed simulation data'''
 
         # path to the simulation directory
         self.path = path
+
+        # zerod model
+        self.zerod_config = zerod_config
 
         # mesh complete directory
         self.mesh_complete = mesh_complete
@@ -79,8 +85,10 @@ class SimulationDirectory:
         ## result*.vtu files
         self.results_dir = results_dir
 
+        self.convert_to_cm = convert_to_cm
+
     @classmethod
-    def from_directory(cls, path, zerod_config, results_dir=None):
+    def from_directory(cls, path, zerod_config, results_dir=None, convert_to_cm=False):
         '''
         create a simulation directory object from the path to the simulation directory
         and search for the necessary files within the path'''
@@ -160,13 +168,15 @@ class SimulationDirectory:
                 results_dir = None
 
         return cls(path,
+                   zerod_config,
                    mesh_complete, 
                    svzerod_interface, 
                    svzerod_3Dcoupling, 
                    svFSIxml, 
                    solver_runscript, 
                    zerod_data, 
-                   results_dir)
+                   results_dir,
+                   convert_to_cm)
     
     def duplicate(self, new_path):
         '''
@@ -180,32 +190,44 @@ class SimulationDirectory:
         '''
         run the simulation'''
 
+        self.check(verbose=False)
+
         os.system('clean')
         os.system(f'sbatch {self.solver_runscript.path}')
 
-    def check(self):
+    def check(self, verbose=True):
         '''
         check if the simulation directory has all the necessary files'''
 
         if self.mesh_complete.is_written:
-            print('mesh-complete exists')
+            if verbose:
+                print('mesh-complete exists')
         else:
             raise FileNotFoundError('mesh-complete does not exist')
         
         if self.svzerod_interface.is_written:
-            print('svZeroD_interface.dat written')
+            if verbose:
+                print('svZeroD_interface.dat written')
         else:
             raise FileNotFoundError('svZeroD_interface.dat does not exist')
         
         if self.svFSIxml.is_written:
-            print('svFSI.xml written')
+            if verbose:
+                print('svFSI.xml written')
         else:
             raise FileNotFoundError('svFSI.xml does not exist')
         
         if self.solver_runscript.is_written:
-            print('solver runscript written')
+            if verbose:
+                print('solver runscript written')
         else:
             raise FileNotFoundError('solver runscript does not exist')
+        
+        if self.svzerod_3Dcoupling.is_written:
+            if verbose:
+                print('svzerod_3Dcoupling.json written')
+        else:
+            raise FileNotFoundError('svzerod_3Dcoupling.json does not exist')
         
 
 
@@ -213,7 +235,47 @@ class SimulationDirectory:
         '''
         write simulation files to the simulation directory'''
 
-        pass
+        # write the 3d-0d coupling json file
+
+        
+
+        if not self.svzerod_interface.is_written:
+            self.svzerod_interface.write(self.svzerod_3Dcoupling.path)
+
+
+        if self.svFSIxml.is_written:
+            rewrite = input('\nsvFSI.xml already exists, overwrite? y/n: ')
+            if rewrite.lower() == 'y':
+                n_tsteps = int(input('number of time steps: '))
+                dt = float(input('time step size: '))
+                mesh_scale_factor = float(input('mesh scale factor (0.1 if converting from mm to cm): '))
+                self.svFSIxml.write(self.mesh_complete, n_tsteps=n_tsteps, dt=dt, scale_factor=mesh_scale_factor)
+        else:
+            self.svFSIxml.write(self.mesh_complete, n_tsteps=n_tsteps, dt=dt, scale_factor=mesh_scale_factor)
+
+        if self.solver_runscript.is_written:
+            rewrite = input('solver runscript already exists, overwrite? y/n: ')
+            if rewrite.lower() == 'y':
+                nodes = int(input('number of nodes (default 4): ') or 4)
+
+                procs_per_node = int(input('number of processors per node ( default 24): ') or 24)
+                hours = int(input('number of hours (default 6): ') or 6)
+                self.solver_runscript.write(nodes=nodes, procs_per_node=procs_per_node, hours=hours)
+        else:
+            self.solver_runscript.write()
+
+        self.check()
+
+    
+    def generate_impedance_bcs(self):
+
+        construct_impedance_trees(self.zerod_config, self.mesh_complete.mesh_surfaces_dir, wedge_pressure=6.0, convert_to_cm=self.convert_to_cm)
+
+        self.svzerod_3Dcoupling, coupling_blocks = self.zerod_config.generate_threed_coupler(self.path, 
+                                                                                             inflow_from_0d=True, 
+                                                                                             mesh_complete=self.mesh_complete)
+
+
 
 
     def flow_split(self):
@@ -265,7 +327,9 @@ class MeshComplete(SimFile):
 
         self.volume_mesh = os.path.join(path, volume_mesh)
 
-        self.walls_combined = os.path.join(path, walls_combined)
+        self.walls_combined = VTPFile.initialize(os.path.join(path, walls_combined))
+
+        self.exterior_mesh = VTPFile.initialize(os.path.join(path, exterior_mesh))
 
 
     def initialize(self):
@@ -301,6 +365,50 @@ class MeshComplete(SimFile):
         write the mesh complete directory'''
 
         pass
+
+    def scale(self, scale_factor=0.1):
+        '''
+        scale the mesh complete directory by a scale factor
+        '''
+
+        print(f'scaling mesh complete by factor {scale_factor}...')
+
+        # scale the volume mesh
+        reader = vtk.vtkXMLUnstructuredGridReader()
+        reader.SetFileName(self.volume_mesh)
+        reader.Update()
+
+        transform = vtk.vtkTransform()
+        transform.Scale(scale_factor, scale_factor, scale_factor)
+
+        transform_filter = vtk.vtkTransformFilter()
+        transform_filter.SetInputData(reader.GetOutput())
+        transform_filter.SetTransform(transform)
+        transform_filter.Update()
+
+        writer = vtk.vtkXMLUnstructuredGridWriter()
+        writer.SetInputData(transform_filter.GetOutput())
+        writer.SetFileName(self.volume_mesh)
+        writer.Write()
+
+        # scale the walls combined
+        reader = vtk.vtkXMLPolyDataReader()
+        reader.SetFileName(self.walls_combined)
+        reader.Update()
+
+        transform_filter = vtk.vtkTransformPolyDataFilter()
+        transform_filter.SetInputData(reader.GetOutput())
+        transform_filter.SetTransform(transform)
+        transform_filter.Update()
+
+        writer = vtk.vtkXMLPolyDataWriter()
+        writer.SetInputData(transform_filter.GetOutput())
+        writer.SetFileName(self.walls_combined)
+        writer.Write()
+
+        # scale the mesh surfaces
+        for surface in self.mesh_surfaces:
+            surface.scale(scale_factor=scale_factor)
 
 
 class SVZeroDInterface(SimFile):
@@ -342,7 +450,7 @@ class SVZeroDInterface(SimFile):
         
 
     def write(self,
-              zerod_coupler_path,
+              threed_coupler_path,
               interface_path='/home/users/ndorn/svZeroDSolver/Release/src/interface/libsvzero_interface.so',
               initialize_flows=0,
               initial_flow=0.0,
@@ -353,17 +461,16 @@ class SVZeroDInterface(SimFile):
         
         print('writing svZeroD interface file...')
 
+        threed_coupler = ConfigHandler.from_json(threed_coupler_path, is_pulmonary=False, is_threed_interface=True)
 
-        zerod_coupler = ConfigHandler.from_json(zerod_coupler_path, is_pulmonary=False, is_threed_interface=True)
-
-        outlet_blocks = [block.name for block in list(zerod_coupler.coupling_blocks.values())]
+        outlet_blocks = [block.name for block in list(threed_coupler.coupling_blocks.values())]
 
         with open(self.path, 'w') as ff:
             ff.write('interface library path: \n')
             ff.write(interface_path + '\n\n')
 
             ff.write('svZeroD input file: \n')
-            ff.write(zerod_coupler_path + '\n\n')
+            ff.write(threed_coupler_path + '\n\n')
             
             ff.write('svZeroD external coupling block names to surface IDs (where surface IDs are from *.svpre file): \n')
             for idx, bc in enumerate(outlet_blocks):
@@ -403,7 +510,7 @@ class SvFSIxml(SimFile):
         self.xml_tree = ET.parse(self.path)
         self.xml_root = self.xml_tree.getroot()
 
-    def write(self, mesh_complete, n_tsteps=1000, dt=0.01):
+    def write(self, mesh_complete, scale_factor=1.0, n_tsteps=1000, dt=0.01):
         '''
         write the svFSI.xml file
         
@@ -480,6 +587,9 @@ class SvFSIxml(SimFile):
         
         add_wall = ET.SubElement(add_mesh, "Add_face")
         add_wall.set("name", "wall")
+
+        mesh_scale_Factor = ET.SubElement(add_mesh, "mesh_scale_factor")
+        mesh_scale_Factor.text = str(scale_factor)
 
         wall_file_path = ET.SubElement(add_wall, "Face_file_path")
         wall_file_path.text = mesh_complete.walls_combined.path

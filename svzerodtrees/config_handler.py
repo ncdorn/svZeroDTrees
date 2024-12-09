@@ -25,6 +25,9 @@ class ConfigHandler():
 
         self.simparams = None
 
+        # bool for simulation checks
+        self.is_written = True
+
         self.is_pulmonary = is_pulmonary
         self.threed_interface = is_threed_interface
 
@@ -536,7 +539,7 @@ class ConfigHandler():
             return [self.vessel_map[id].to_dict() for id in self.branch_map[branch].ids]
         
     
-    def generate_threed_coupler(self, simdir, inflow_from_0d=False, mesh_complete=None):
+    def generate_threed_coupler(self, simdir, inflow_from_0d=True, mesh_complete=None):
         '''
         create a 3D-0D coupling blocks config from the boundary conditions and save it to a json
 
@@ -624,7 +627,7 @@ class ConfigHandler():
 
         coupling_block_list = [coupling_block.name for coupling_block in threed_coupler.coupling_blocks.values()]
 
-        return coupling_block_list
+        return threed_coupler, coupling_block_list
 
 
     def generate_inflow_file(self, simdir):
