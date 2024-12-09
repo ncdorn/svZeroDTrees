@@ -247,8 +247,7 @@ class SimulationDirectory:
 
         
 
-        if not self.svzerod_interface.is_written:
-            self.svzerod_interface.write(self.svzerod_3Dcoupling.path)
+        self.svzerod_interface.write(self.svzerod_3Dcoupling.path)
 
 
         if self.svFSIxml.is_written:
