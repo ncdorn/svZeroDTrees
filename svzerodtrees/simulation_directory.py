@@ -99,6 +99,10 @@ class SimulationDirectory:
         if os.path.exists(zerod_config):
             print('zerod model found')
             zerod_config = ConfigHandler.from_json(zerod_config, is_pulmonary=True)
+            if os.path.dirname(zerod_config.path) != path:
+                print('copying zerod model to simulation directory')
+                os.system(f'cp {zerod_config.path} {path}')
+                zerod_config.path = os.path.join(path, os.path.basename(zerod_config.path))
         else:
             raise FileNotFoundError('zerod model not found')
 
@@ -119,7 +123,7 @@ class SimulationDirectory:
             svzerod_interface = SVZeroDInterface(svzerod_interface)
         else:
             print('svZeroD_interface.dat not found')
-            svzerod_interface = None
+            svzerod_interface = SVZeroDInterface(svzerod_interface)
 
         # check for svzerod_3Dcoupling.json
         svzerod_3Dcoupling = os.path.join(path, 'svzerod_3Dcoupling.json')
@@ -127,8 +131,10 @@ class SimulationDirectory:
             print('svzerod_3Dcoupling.json found')
             svzerod_3Dcoupling = ConfigHandler.from_json(svzerod_3Dcoupling, is_pulmonary=False, is_threed_interface=True)
         else:
-            print('svzerod_3Dcoupling.json not found')
-            svzerod_3Dcoupling = None
+            print('generating svzerod_3Dcoupling.json...')
+            svzerod_3Dcoupling, coupling_blocks = zerod_config.generate_threed_coupler(path, 
+                                                                                       inflow_from_0d=True, 
+                                                                                       mesh_complete=mesh_complete)
 
         # check for svFSI.xml
         svFSIxml = os.path.join(path, 'svFSIplus.xml')
@@ -137,7 +143,7 @@ class SimulationDirectory:
             svFSIxml = SvFSIxml(svFSIxml)
         else:
             print('svFSI.xml not found')
-            svFSIxml = None
+            svFSIxml = SvFSIxml(svFSIxml)
 
         # check for solver runscript
         solver_runscript = os.path.join(path, 'run_solver.sh')
@@ -146,7 +152,7 @@ class SimulationDirectory:
             solver_runscript = SolverRunscript(solver_runscript)
         else:
             print('solver runscript not found')
-            solver_runscript = None
+            solver_runscript = SolverRunscript(solver_runscript)
 
         # check for svZeroD_data
         zerod_data = os.path.join(path, 'svZeroD_data')
@@ -156,7 +162,7 @@ class SimulationDirectory:
             svzerod_3Dcoupling.add_result(svzerod_data=svzerod_data)
         else:
             print('svZeroD_data result not found')
-            zerod_data = None
+            zerod_data = SvZeroDdata(zerod_data)
 
         # check for results directory
         if results_dir is not None:
@@ -165,7 +171,7 @@ class SimulationDirectory:
                 print('results directory found')
             else:
                 print('results directory not found')
-                results_dir = None
+                results_dir = SimResults(results_dir)
 
         return cls(path,
                    zerod_config,
@@ -229,6 +235,8 @@ class SimulationDirectory:
         else:
             raise FileNotFoundError('svzerod_3Dcoupling.json does not exist')
         
+        print('ready to run simulation!')
+        
 
 
     def write_files(self):
@@ -246,9 +254,9 @@ class SimulationDirectory:
         if self.svFSIxml.is_written:
             rewrite = input('\nsvFSI.xml already exists, overwrite? y/n: ')
             if rewrite.lower() == 'y':
-                n_tsteps = int(input('number of time steps: '))
-                dt = float(input('time step size: '))
-                mesh_scale_factor = float(input('mesh scale factor (0.1 if converting from mm to cm): '))
+                n_tsteps = int(input('number of time steps (default 5000): ') or 5000)
+                dt = float(input('time step size (default 0.001): ') or 0.001)
+                mesh_scale_factor = float(input('mesh scale factor (default 1.0, input 0.1 if converting from mm to cm): ') or 1.0)
                 self.svFSIxml.write(self.mesh_complete, n_tsteps=n_tsteps, dt=dt, scale_factor=mesh_scale_factor)
         else:
             self.svFSIxml.write(self.mesh_complete, n_tsteps=n_tsteps, dt=dt, scale_factor=mesh_scale_factor)
@@ -327,9 +335,9 @@ class MeshComplete(SimFile):
 
         self.volume_mesh = os.path.join(path, volume_mesh)
 
-        self.walls_combined = VTPFile.initialize(os.path.join(path, walls_combined))
+        self.walls_combined = VTPFile(os.path.join(path, walls_combined))
 
-        self.exterior_mesh = VTPFile.initialize(os.path.join(path, exterior_mesh))
+        self.exterior_mesh = VTPFile(os.path.join(path, exterior_mesh))
 
 
     def initialize(self):
@@ -575,15 +583,15 @@ class SvFSIxml(SimFile):
         add_mesh.set("name", "msh")
 
         msh_file_path = ET.SubElement(add_mesh, "Mesh_file_path")
-        msh_file_path.text = mesh_complete.volume_mesh.path
+        msh_file_path.text = mesh_complete.volume_mesh
 
 
         for vtp in mesh_complete.mesh_surfaces:
             add_face = ET.SubElement(add_mesh, "Add_face")
-            add_face.set("name", vtp.fielname.split('.')[0])
+            add_face.set("name", vtp.filename.split('.')[0])
 
             face_file_path = ET.SubElement(add_face, "Face_file_path")
-            face_file_path.text = file
+            face_file_path.text = vtp.path
         
         add_wall = ET.SubElement(add_mesh, "Add_face")
         add_wall.set("name", "wall")
@@ -934,7 +942,9 @@ if __name__ == '__main__':
 
     sim_dir = '../threed_models/SU0243/preop'
 
-    simulation = SimulationDirectory.from_directory(sim_dir, '../threed_models/SU0243/preop/config_impedance_dmin01.json')
+    simulation = SimulationDirectory.from_directory(sim_dir, '../threed_models/SU0243/preop/solver_0d_impedance_dmin01_cm.json')
 
-    simulation.check()
+    simulation.write_files()
+
+    
 
