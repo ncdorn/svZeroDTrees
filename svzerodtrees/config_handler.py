@@ -12,7 +12,7 @@ class ConfigHandler():
     class to handle configs with and without trees
     '''
 
-    def __init__(self, config: dict, is_pulmonary=True, is_threed_interface=False, closed_loop=False):
+    def __init__(self, config: dict, is_pulmonary=True, is_threed_interface=False, closed_loop=False, path=None):
         self._config = config
 
         self.trees = {} # list of StructuredTree instances
@@ -27,6 +27,7 @@ class ConfigHandler():
 
         # bool for simulation checks
         self.is_written = True
+        self.path = path.replace(' ', '\ ')
 
         self.is_pulmonary = is_pulmonary
         self.threed_interface = is_threed_interface
@@ -52,7 +53,7 @@ class ConfigHandler():
         if "external_solver_coupling_blocks" in config:
             is_threed_interface = True
 
-        return ConfigHandler(config, is_pulmonary, is_threed_interface)
+        return ConfigHandler(config, is_pulmonary, is_threed_interface, path=os.path.abspath(file_name))
     
     @classmethod
     def from_file(cls, file_name: str, is_pulmonary=True):
@@ -66,7 +67,7 @@ class ConfigHandler():
         if "external_solver_coupling_blocks" in config:
             is_threed_interface = True
 
-        return ConfigHandler(config, is_pulmonary, is_threed_interface)
+        return ConfigHandler(config, is_pulmonary, is_threed_interface, path=os.path.abspath(file_name))
 
 
     def to_json(self, file_name: str):
@@ -565,7 +566,8 @@ class ConfigHandler():
                 "junctions": []
             },
             is_pulmonary=False,
-            is_threed_interface=True
+            is_threed_interface=True,
+            path=os.path.join(simdir, 'svzerod_3Dcoupling.json')
         )
 
         # copy over the bcs
@@ -1185,6 +1187,7 @@ class CouplingBlock():
         self.result['time'] = time
         self.result['flow'] = flow
         self.result['pressure'] = pressure
+
 
 
 
