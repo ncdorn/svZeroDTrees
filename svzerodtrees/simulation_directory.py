@@ -54,6 +54,7 @@ class SimulationDirectory:
                  solver_runscript=None, 
                  svzerod_data=None, 
                  results_dir=None,
+                 fig_dir=None,
                  convert_to_cm=False):
         '''
         initialize the simulation handler which handles threed simulation data'''
@@ -84,6 +85,9 @@ class SimulationDirectory:
 
         ## result*.vtu files
         self.results_dir = results_dir
+
+        # figures directory
+        self.fig_dir = fig_dir
 
         self.convert_to_cm = convert_to_cm
 
@@ -173,6 +177,15 @@ class SimulationDirectory:
                 print('results directory not found')
                 results_dir = SimResults(results_dir)
 
+
+        if os.path.exists(os.path.join(path, 'figures')):
+            print('figures directory found!')
+            fig_dir = os.path.join(path, 'figures')
+        else:
+            print('creating figures directory...')
+            fig_dir = os.path.join(path, 'figures')
+            os.system(f'mkdir {fig_dir}')
+
         return cls(path,
                    zerod_config,
                    mesh_complete, 
@@ -182,6 +195,7 @@ class SimulationDirectory:
                    solver_runscript, 
                    svzerod_data, 
                    results_dir,
+                   fig_dir,
                    convert_to_cm)
     
     def duplicate(self, new_path):
@@ -303,15 +317,51 @@ class SimulationDirectory:
 
         return lpa_flow, rpa_flow
     
-    def plot_mpa_pressure(self):
+    def plot_mpa(self):
         '''
         plot the MPA pressure'''
 
-        time, flow, pressure = self.zerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['inflow'])
+        time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
 
-        plt.figure()
+        pressure = pressure / 1333.2
+
+        fig, ax = plt.subplots(3, figsize=(10, 10))
+
+        ax[0].plot(time, pressure, label='MPA pressure')
+        ax[0].set_xlabel('Time (s)')
+        ax[0].set_ylabel('Pressure (mmHg)')
+        ax[0].set_title('MPA pressure')
+
+        # add mean pressure as a horizontal line
+        ax[0].axhline(y=np.mean(pressure), color='r', linestyle='--', label='mean pressure')
+        ax[0].legend()
+
+        ax[1].plot(time, flow, label='MPA flow')
+        ax[1].set_xlabel('Time (s)')
+        ax[1].set_ylabel('Flow (mL/s)')
+        ax[1].set_title('MPA flow')
         
-        plt.plot(time, pressure)
+        ax[2].plot(flow, pressure, label='MPA pressure vs flow')
+        ax[2].set_xlabel('Flow (mL/s)')
+        ax[2].set_ylabel('Pressure (mmHg)')
+        ax[2].set_title('MPA pressure vs flow')
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.path, 'figures', 'mpa.png'))
+
+        sys_p = np.max(pressure[int(len(pressure) / 2):])
+        dias_p = np.min(pressure[int(len(pressure) / 2):])
+        mean_p = np.mean(pressure[int(len(pressure) / 2):])
+
+        print(f'MPA systolic pressure: {sys_p} mmHg')
+        print(f'MPA diastolic pressure: {dias_p} mmHg')
+        print(f'MPA mean pressure: {mean_p} mmHg')
+
+
+
+
+
+        
 
 
 
@@ -953,7 +1003,7 @@ if __name__ == '__main__':
 
     simulation = SimulationDirectory.from_directory(sim_dir, '../threed_models/SU0243/preop/solver_0d_impedance_dmin01_cm.json')
 
-    simulation.write_files()
+    simulation.plot_mpa()
 
     
 
