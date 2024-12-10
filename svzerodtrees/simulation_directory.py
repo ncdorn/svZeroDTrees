@@ -263,27 +263,32 @@ class SimulationDirectory:
 
         self.svzerod_interface.write(self.svzerod_3Dcoupling.path)
 
+        def write_svfsixml_input_params():
+            n_tsteps = int(input('number of time steps (default 5000): ') or 5000)
+            dt = float(input('time step size (default 0.001): ') or 0.001)
+            mesh_scale_factor = float(input('mesh scale factor (default 1.0, input 0.1 if converting from mm to cm): ') or 1.0)
+            self.svFSIxml.write(self.mesh_complete, n_tsteps=n_tsteps, dt=dt, scale_factor=mesh_scale_factor)
+        
+        def write_runscript_input_params():
+            nodes = int(input('number of nodes (default 4): ') or 4)
+            procs_per_node = int(input('number of processors per node ( default 24): ') or 24)
+            hours = int(input('number of hours (default 6): ') or 6)
+            self.solver_runscript.write(nodes=nodes, procs_per_node=procs_per_node, hours=hours)
+
 
         if self.svFSIxml.is_written:
             rewrite = input('\nsvFSI.xml already exists, overwrite? y/n: ')
             if rewrite.lower() == 'y':
-                n_tsteps = int(input('number of time steps (default 5000): ') or 5000)
-                dt = float(input('time step size (default 0.001): ') or 0.001)
-                mesh_scale_factor = float(input('mesh scale factor (default 1.0, input 0.1 if converting from mm to cm): ') or 1.0)
-                self.svFSIxml.write(self.mesh_complete, n_tsteps=n_tsteps, dt=dt, scale_factor=mesh_scale_factor)
+                write_svfsixml_input_params()
         else:
-            self.svFSIxml.write(self.mesh_complete, n_tsteps=n_tsteps, dt=dt, scale_factor=mesh_scale_factor)
+            write_svfsixml_input_params()
 
         if self.solver_runscript.is_written:
             rewrite = input('solver runscript already exists, overwrite? y/n: ')
             if rewrite.lower() == 'y':
-                nodes = int(input('number of nodes (default 4): ') or 4)
-
-                procs_per_node = int(input('number of processors per node ( default 24): ') or 24)
-                hours = int(input('number of hours (default 6): ') or 6)
-                self.solver_runscript.write(nodes=nodes, procs_per_node=procs_per_node, hours=hours)
+                write_runscript_input_params()
         else:
-            self.solver_runscript.write()
+            write_runscript_input_params()
 
         self.check()
 
@@ -1003,7 +1008,7 @@ if __name__ == '__main__':
 
     simulation = SimulationDirectory.from_directory(sim_dir, '../threed_models/SU0243/preop/solver_0d_impedance_dmin01_cm.json')
 
-    simulation.plot_mpa()
+    simulation.write_files()
 
     
 
