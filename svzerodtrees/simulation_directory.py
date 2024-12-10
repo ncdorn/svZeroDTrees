@@ -52,7 +52,7 @@ class SimulationDirectory:
                  svzerod_3Dcoupling=None, 
                  svFSIxml=None, 
                  solver_runscript=None, 
-                 zerod_data=None, 
+                 svzerod_data=None, 
                  results_dir=None,
                  convert_to_cm=False):
         '''
@@ -80,7 +80,7 @@ class SimulationDirectory:
 
         # simulation results
         ## svZeroD_data
-        self.zerod_data = zerod_data
+        self.svzerod_data = svzerod_data
 
         ## result*.vtu files
         self.results_dir = results_dir
@@ -162,7 +162,7 @@ class SimulationDirectory:
             svzerod_3Dcoupling.add_result(svzerod_data=svzerod_data)
         else:
             print('svZeroD_data result not found')
-            zerod_data = SvZeroDdata(zerod_data)
+            svzerod_data = SvZeroDdata(zerod_data)
 
         # check for results directory
         if results_dir is not None:
@@ -180,7 +180,7 @@ class SimulationDirectory:
                    svzerod_3Dcoupling, 
                    svFSIxml, 
                    solver_runscript, 
-                   zerod_data, 
+                   svzerod_data, 
                    results_dir,
                    convert_to_cm)
     
@@ -292,9 +292,9 @@ class SimulationDirectory:
         rpa_flow = 0.0
         for block in self.svzerod_3Dcoupling.coupling_blocks.values():
             if 'lpa' in block.surface.lower():
-                lpa_flow += SvZeroDdata.integrate_flow(block)
+                lpa_flow += self.svzerod_data.integrate_flow(block)
             if 'rpa' in block.surface.lower():
-                rpa_flow += SvZeroDdata.integrate_flow(block)
+                rpa_flow += self.svzerod_data.integrate_flow(block)
         
         lpa_pct = lpa_flow / (lpa_flow + rpa_flow) * 100
         rpa_pct = rpa_flow / (lpa_flow + rpa_flow) * 100
