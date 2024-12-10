@@ -849,6 +849,8 @@ class SolverRunscript(SimFile):
             ff.write("ml gcc/14.2.0\n")
             ff.write("ml cmake\n\n")
             ff.write(f"srun {svfsiplus_path} svFSIplus.xml\n")
+        
+        self.is_written = True
 
 
 class VTPFile(SimFile):
