@@ -283,8 +283,6 @@ class SimulationDirectory:
                                                                                              mesh_complete=self.mesh_complete)
 
 
-
-
     def flow_split(self):
         '''
         get the flow split between the LPA and RPA'''
@@ -304,6 +302,16 @@ class SimulationDirectory:
         print(f'LPA flow: {lpa_flow} ({lpa_pct}%), RPA flow: {rpa_flow} ({rpa_pct}%)')
 
         return lpa_flow, rpa_flow
+    
+    def plot_mpa_pressure(self):
+        '''
+        plot the MPA pressure'''
+
+        time, flow, pressure = self.zerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['inflow'])
+
+        plt.figure()
+        
+        plt.plot(time, pressure)
 
 
 
@@ -595,7 +603,7 @@ class SvFSIxml(SimFile):
         add_wall = ET.SubElement(add_mesh, "Add_face")
         add_wall.set("name", "wall")
 
-        mesh_scale_Factor = ET.SubElement(add_mesh, "mesh_scale_factor")
+        mesh_scale_Factor = ET.SubElement(add_mesh, "Mesh_scale_factor")
         mesh_scale_Factor.text = str(scale_factor)
 
         wall_file_path = ET.SubElement(add_wall, "Face_file_path")
@@ -887,7 +895,9 @@ class SvZeroDdata(SimFile):
 
     def get_result(self, block):
         '''
-        get the pressure and flow from the svZeroD_data DataFrame for a given CouplingBlock'''
+        get the pressure and flow from the svZeroD_data DataFrame for a given CouplingBlock
+        
+        :returns: time, flow, pressure'''
 
         if block.location == 'inlet':
             return self.df['time'], self.df[f'flow:{block.name}:{block.connected_block}'], self.df[f'pressure:{block.name}:{block.connected_block}']
