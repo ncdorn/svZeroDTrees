@@ -643,45 +643,49 @@ class ConfigHandler():
         threed_coupler.bcs = self.bcs
         if inflow_from_0d:
             # need to add a vessel between the inflwo bc and coupling block to allow effective coupling
-            threed_coupler.vessel_map[0] = Vessel.from_config(
-                {
-                   "boundary_conditions": {
-                        "inlet": "INFLOW"
-                    },
-                    "vessel_id": 0,
-                    "vessel_length": 10.0,
-                    "vessel_name": "branch0_seg0",
-                    "zero_d_element_type": "BloodVessel",
-                    "zero_d_element_values": {
-                        "C": 0.0000001,
-                        "L": 0.0,
-                        "R_poiseuille": 0.0000001,
-                        "stenosis_coefficient": 0.0
-                    }
-                }
-            )
+            inflow_idx = 0
+            for bc_name, bc in self.bcs.items():
+                if 'inflow' in bc_name.lower():
+                    threed_coupler.vessel_map[inflow_idx] = Vessel.from_config(
+                        {
+                        "boundary_conditions": {
+                                "inlet": bc_name
+                            },
+                            "vessel_id": inflow_idx,
+                            "vessel_length": 10.0,
+                            "vessel_name": f"branch{inflow_idx}_seg0",
+                            "zero_d_element_type": "BloodVessel",
+                            "zero_d_element_values": {
+                                "C": 0.0000001,
+                                "L": 0.0,
+                                "R_poiseuille": 0.0000001,
+                                "stenosis_coefficient": 0.0
+                            }
+                        }
+                    )
 
-            threed_coupler.coupling_blocks["inflow"] = CouplingBlock(
-                {
-                    "name": "inflow",
-                    "type": "FLOW",
-                    "location": "outlet",
-                    "connected_block": "branch0_seg0",
-                    "periodic": False,
-                    "values": {
-                            "t": [
-                                0,
-                                max(self.bcs["INFLOW"].values['t'])
-                            ],
-                            "Q": [
-                                1.0,
-                                1.0
-                            ]
-                    },
-                    "surface": mesh_complete.mesh_surfaces[0].filename
-                }
-            )
+                    threed_coupler.coupling_blocks[bc_name.lower()] = CouplingBlock(
+                        {
+                            "name": bc_name.lower(),
+                            "type": "FLOW",
+                            "location": "outlet",
+                            "connected_block": f"branch{inflow_idx}_seg0",
+                            "periodic": False,
+                            "values": {
+                                    "t": [
+                                        0,
+                                        max(bc.values['t'])
+                                    ],
+                                    "Q": [
+                                        1.0,
+                                        1.0
+                                    ]
+                            },
+                            "surface": f"{bc_name}.vtp"
+                        }
+                    )
 
+                    inflow_idx += 1
 
         else:
             del threed_coupler.bcs["INFLOW"] 

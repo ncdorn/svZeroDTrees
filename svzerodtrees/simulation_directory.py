@@ -93,7 +93,7 @@ class SimulationDirectory:
         self.convert_to_cm = convert_to_cm
 
     @classmethod
-    def from_directory(cls, path, zerod_config=None, results_dir=None, convert_to_cm=False):
+    def from_directory(cls, path, zerod_config=None, results_dir=None, convert_to_cm=False, is_pulmonary=True):
         '''
         create a simulation directory object from the path to the simulation directory
         and search for the necessary files within the path'''
@@ -103,7 +103,7 @@ class SimulationDirectory:
         # check for zerod model
         if zerod_config is not None and os.path.exists(zerod_config):
             print('zerod model found')
-            zerod_config = ConfigHandler.from_json(zerod_config, is_pulmonary=True)
+            zerod_config = ConfigHandler.from_json(zerod_config, is_pulmonary=is_pulmonary)
             if os.path.dirname(zerod_config.path) != path:
                 print('copying zerod model to simulation directory')
                 os.system(f'cp {zerod_config.path} {path}')
