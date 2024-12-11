@@ -323,12 +323,12 @@ class SimulationDirectory:
                     # need to get inflow path or steady flow rate
                     flow_file_path = input(f'path to flow file for {vtp.filename} OR steady flow rate: ')
                     if os.path.exists(flow_file_path):
-                        inflow = Inflow.periodic(flow_file_path)
+                        inflow = Inflow.periodic(flow_file_path, name=vtp.filename.split('.')[0])
                         inflow.rescale(tsteps=tsteps)
                     else:
                         try:
                             flow_rate = float(flow_file_path)
-                            inflow = Inflow.steady(flow_rate)
+                            inflow = Inflow.steady(flow_rate, name=vtp.filename.split('.')[0])
                             inflow.rescale(tsteps=tsteps)
                         except:
                             print('invalid input, please provide a valid path to a flow file or a steady flow rate')
@@ -1050,9 +1050,10 @@ if __name__ == '__main__':
     '''
     test the simulation directory class code'''
 
-    sim_dir = '../../Sheep/cassian/'
+    sim_dir = '../../Sheep/test-cassian/'
 
     simulation = SimulationDirectory.from_directory(sim_dir, convert_to_cm=True)
+
 
     simulation.generate_impedance_bcs()
 

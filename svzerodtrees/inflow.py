@@ -10,7 +10,7 @@ class Inflow():
     '''
     a class to handle inflow for pulmonary trees
     '''
-    def __init__(self, q, t, t_per, n_periods):
+    def __init__(self, q, t, t_per, n_periods, name="INFLOW"):
         '''
         initialize the inflow object
 
@@ -24,10 +24,11 @@ class Inflow():
         self.t_per = t_per
         self.n_periods = n_periods
         self.n_tsteps = len(t)
+        self.name = name
     
 
     @classmethod
-    def periodic(cls, path, t_per=1.0, n_periods=1, flip_sign=False):
+    def periodic(cls, path, t_per=1.0, n_periods=1, flip_sign=False, name="INFLOW"):
         '''
         create a periodic inflow
         '''
@@ -54,10 +55,10 @@ class Inflow():
             t += [time + t_per * n for time in inflow.t.to_list()]
         
         
-        return cls(q, t, t_per, n_periods)
+        return cls(q, t, t_per, n_periods, name)
     
     @classmethod
-    def steady(cls, q, t_per=1.0, n_periods=1, n_tsteps=2):
+    def steady(cls, q, t_per=1.0, n_periods=1, n_tsteps=2, name="INFLOW"):
         '''
         create a steady inflow
         '''
@@ -65,7 +66,7 @@ class Inflow():
         q = [q] * n_tsteps * n_periods
         t = np.linspace(0, t_per * n_periods, n_tsteps * n_periods)
 
-        return cls(q, t.tolist(), t_per, n_periods)
+        return cls(q, t.tolist(), t_per, n_periods, name)
     
 
     def rescale(self, cardiac_output=None, t_per=None, tsteps=None):
@@ -120,7 +121,7 @@ class Inflow():
         if type(self.q) is np.ndarray:
             self.q = self.q.tolist()
         inflow_dict = {
-            "bc_name": "INFLOW",
+            "bc_name": self.name,
             "bc_type": "FLOW",
             "bc_values": {
                 "Q": self.q,
