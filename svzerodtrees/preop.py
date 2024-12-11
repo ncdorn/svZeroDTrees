@@ -571,7 +571,7 @@ def construct_impedance_trees(config_handler, mesh_surfaces_path, wedge_pressure
         print(f'generating tree {idx} of {len(cap_info)} for cap {cap_name}...')
         cap_d = (area / np.pi)**(1/2) * 2
 
-        tree = StructuredTree(name='cap_name', time=config_handler.bcs['INFLOW'].t, simparams=config_handler.simparams)
+        tree = StructuredTree(name=cap_name, time=config_handler.bcs['INFLOW'].t, simparams=config_handler.simparams)
 
         tree.build_tree(initial_d=cap_d, d_min=d_min)
 

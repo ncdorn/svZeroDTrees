@@ -68,6 +68,29 @@ class ConfigHandler():
             is_threed_interface = True
 
         return ConfigHandler(config, is_pulmonary, is_threed_interface, path=os.path.abspath(file_name))
+    
+    @classmethod
+    def blank_threed_coupler(self, path):
+        '''
+        create a blank config dict
+        '''
+
+        config = {
+            "boundary_conditions": [],
+            "simulation_parameters": {
+                "density": 1.06,
+                "viscosity": 0.04,
+                "coupled_simulation": True,
+                "number_of_time_pts": 2,
+                "output_all_cycles": True,
+                "steady_initial": False
+            },
+            "external_solver_coupling_blocks": [],
+            "vessels": [],
+            "junctions": []
+        }
+
+        return ConfigHandler(config, is_pulmonary=False, is_threed_interface=True, path=path)
 
 
     def to_json(self, file_name: str):
@@ -303,15 +326,61 @@ class ConfigHandler():
                            self.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"])
     
 
-    def set_inflow(self, inflow):
+    def set_inflow(self, inflow, bc_name="INFLOW", threed_coupled=False):
         '''
         set the inflow for the config
 
         inflow: Inflow instance
         '''
 
+        if bc_name == bc_name.lower():
+            raise Exception("name must be uppercase!")
+        
+        if threed_coupled:
+            vessel_id = len(self.vessel_map)
+            self.vessel_map.append(
+                Vessel.from_config(
+                    {
+                    "boundary_conditions": {
+                            "inlet": bc_name
+                        },
+                        "vessel_id": 0,
+                        "vessel_length": 10.0,
+                        "vessel_name": f"branch{vessel_id}_seg0",
+                        "zero_d_element_type": "BloodVessel",
+                        "zero_d_element_values": {
+                            "C": 0.0000001,
+                            "L": 0.0,
+                            "R_poiseuille": 0.0000001,
+                            "stenosis_coefficient": 0.0
+                        }
+                    }
+                )
+            )
 
-        self.bcs["INFLOW"] = inflow.to_bc()
+            self.coupling_blocks[bc_name.lower()] = CouplingBlock(
+                {
+                    "name": bc_name.lower(),
+                    "type": "FLOW",
+                    "location": "outlet",
+                    "connected_block": f"branch{vessel_id}_seg0",
+                    "periodic": False,
+                    "values": {
+                            "t": [
+                                0,
+                                max(self.bcs[bc_name].values['t'])
+                            ],
+                            "Q": [
+                                1.0,
+                                1.0
+                            ]
+                    },
+                    "surface": "inflow"
+                }
+            )
+
+        else:
+            self.bcs[bc_name] = inflow.to_bc()
 
 
     def map_vessels_to_branches(self):
@@ -643,6 +712,7 @@ class ConfigHandler():
                 ff.write(f'{t} {q}\n')
 
         return max(self.bcs["INFLOW"].values['t'])
+
 
     @property
     def config(self):

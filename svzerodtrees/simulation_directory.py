@@ -2,6 +2,7 @@ from svzerodtrees.utils import *
 from svzerodtrees.threedutils import *
 from svzerodtrees.config_handler import ConfigHandler
 from svzerodtrees.preop import *
+from svzerodtrees.inflow import *
 import json
 import pickle
 import os
@@ -92,7 +93,7 @@ class SimulationDirectory:
         self.convert_to_cm = convert_to_cm
 
     @classmethod
-    def from_directory(cls, path, zerod_config, results_dir=None, convert_to_cm=False):
+    def from_directory(cls, path, zerod_config=None, results_dir=None, convert_to_cm=False):
         '''
         create a simulation directory object from the path to the simulation directory
         and search for the necessary files within the path'''
@@ -100,7 +101,7 @@ class SimulationDirectory:
         path = os.path.abspath(path)
 
         # check for zerod model
-        if os.path.exists(zerod_config):
+        if zerod_config is not None and os.path.exists(zerod_config):
             print('zerod model found')
             zerod_config = ConfigHandler.from_json(zerod_config, is_pulmonary=True)
             if os.path.dirname(zerod_config.path) != path:
@@ -108,7 +109,8 @@ class SimulationDirectory:
                 os.system(f'cp {zerod_config.path} {path}')
                 zerod_config.path = os.path.join(path, os.path.basename(zerod_config.path))
         else:
-            raise FileNotFoundError('zerod model not found')
+            print('zerod model not found! you will need to create one or add one...')
+            zerod_config = None
 
         # check for mesh complete
         mesh_complete = os.path.join(path, 'mesh-complete')
@@ -136,9 +138,13 @@ class SimulationDirectory:
             svzerod_3Dcoupling = ConfigHandler.from_json(svzerod_3Dcoupling, is_pulmonary=False, is_threed_interface=True)
         else:
             print('generating svzerod_3Dcoupling.json...')
-            svzerod_3Dcoupling, coupling_blocks = zerod_config.generate_threed_coupler(path, 
-                                                                                       inflow_from_0d=True, 
-                                                                                       mesh_complete=mesh_complete)
+            if zerod_config is not None:
+                svzerod_3Dcoupling, coupling_blocks = zerod_config.generate_threed_coupler(path, 
+                                                                                            inflow_from_0d=True, 
+                                                                                            mesh_complete=mesh_complete)
+            else:
+                print('zerod model not found, generating blank svzerod_3Dcoupling.json')
+                svzerod_3Dcoupling = ConfigHandler.blank_threed_coupler(path=os.path.join(path, 'svzerod_3Dcoupling.json'))
 
         # check for svFSI.xml
         svFSIxml = os.path.join(path, 'svFSIplus.xml')
@@ -295,12 +301,63 @@ class SimulationDirectory:
     
     def generate_impedance_bcs(self):
 
-        construct_impedance_trees(self.zerod_config, self.mesh_complete.mesh_surfaces_dir, wedge_pressure=6.0, convert_to_cm=self.convert_to_cm)
+        wedge_p = float(input('input wedge pressure (default 6.0): ') or 6.0)
+        d_min = float(input('minimum diameter for impedance tree (default 0.01): ') or 0.01)
 
-        self.svzerod_3Dcoupling, coupling_blocks = self.zerod_config.generate_threed_coupler(self.path, 
-                                                                                             inflow_from_0d=True, 
-                                                                                             mesh_complete=self.mesh_complete)
+        if self.zerod_config is not None:
+            construct_impedance_trees(self.zerod_config, self.mesh_complete.mesh_surfaces_dir, wedge_pressure=wedge_p, d_min=d_min, convert_to_cm=self.convert_to_cm)
 
+            self.svzerod_3Dcoupling, coupling_blocks = self.zerod_config.generate_threed_coupler(self.path, 
+                                                                                                inflow_from_0d=True, 
+                                                                                                mesh_complete=self.mesh_complete)
+        else:
+            # we will need to create the svzerod_3Dcoupling.json file from scratch and choose the inflows
+            # self.svzerod_3Dcoupling is a blank config at this point and bc's corresponding to each surface will need to be added
+
+            # add the inflows to the svzerod_3Dcoupling
+            tsteps = int(input('number of time steps for inflow (default 512): ') or 512)
+            self.svzerod_3Dcoupling.simparams.number_of_time_pts_per_cardiac_cycle = tsteps
+            bc_idx = 0
+            for vtp in self.mesh_complete.mesh_surfaces:
+                if 'inflow' in vtp.filename.lower():
+                    # need to get inflow path or steady flow rate
+                    flow_file_path = input(f'path to flow file for {vtp.filename} OR steady flow rate: ')
+                    if os.path.exists(flow_file_path):
+                        inflow = Inflow.periodic(flow_file_path)
+                        inflow.rescale(tsteps=tsteps)
+                    else:
+                        try:
+                            flow_rate = float(flow_file_path)
+                            inflow = Inflow.steady(flow_rate)
+                            inflow.rescale(tsteps=tsteps)
+                        except:
+                            print('invalid input, please provide a valid path to a flow file or a steady flow rate')
+                            return
+
+                    self.svzerod_3Dcoupling.set_inflow(inflow, vtp.filename.split('.')[0], threed_coupled=False)
+                else:
+                    # this is not an inflow so we will make an impedance boundary conditiosn for this surface
+                    cap_d = (vtp.area / np.pi)**(1/2) * 2
+
+                    if self.convert_to_cm:
+                        cap_d = cap_d / 10
+                    
+                    print(f'generating tree {bc_idx} for cap {vtp.filename} with diameter {cap_d}...')
+                    tree = StructuredTree(name=vtp.filename, time=self.svzerod_3Dcoupling.bcs['INFLOW'].t, simparams=self.svzerod_3Dcoupling.simparams)
+
+                    tree.build_tree(initial_d=cap_d, d_min=d_min)
+
+                    # compute the impedance in frequency domain
+                    tree.compute_olufsen_impedance()
+
+                    bc_name = f'IMPEDANCE_{bc_idx}'
+
+                    self.svzerod_3Dcoupling.bcs[bc_name] = tree.create_impedance_bc(bc_name, wedge_p * 1333.2)
+
+                    bc_idx += 1
+
+            self.svzerod_3Dcoupling.to_json('blank_edited_config.json')
+            self.svzerod_3Dcoupling, coupling_blocks = self.svzerod_3Dcoupling.generate_threed_coupler(self.path, inflow_from_0d=True, mesh_complete=self.mesh_complete)
 
     def flow_split(self):
         '''
@@ -362,19 +419,6 @@ class SimulationDirectory:
         print(f'MPA diastolic pressure: {dias_p} mmHg')
         print(f'MPA mean pressure: {mean_p} mmHg')
 
-
-
-
-
-        
-
-
-
-
-
-
-
-    
 
     
 
@@ -1006,11 +1050,11 @@ if __name__ == '__main__':
     '''
     test the simulation directory class code'''
 
-    sim_dir = '../threed_models/SU0243/preop'
+    sim_dir = '../../Sheep/cassian/'
 
-    simulation = SimulationDirectory.from_directory(sim_dir, '../threed_models/SU0243/preop/solver_0d_impedance_dmin01_cm.json')
+    simulation = SimulationDirectory.from_directory(sim_dir, convert_to_cm=True)
 
-    simulation.write_files()
+    simulation.generate_impedance_bcs()
 
     
 
