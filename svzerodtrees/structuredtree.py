@@ -374,7 +374,11 @@ class StructuredTree():
                 junc_id += 1
 
 
-    def compute_olufsen_impedance(self):
+    def compute_olufsen_impedance(self,
+                                  k1 = 19992500, # g/cm/s^2
+                                  k2 = -25.5267, # 1/cm 
+                                  k3 = 1104531.4909089999 # g/cm/s^2
+                                  ):
         '''
         compute the impedance of the structured tree accordin to Olufsen et al. (2000)
         '''
@@ -394,6 +398,7 @@ class StructuredTree():
 
         print(f'number of time points per cardiac cycle: {self.simparams.number_of_time_pts_per_cardiac_cycle}, len(self.time): {len(self.time)}')
 
+        print(f'k1: {k1}, k2: {k2}, k3: {k3}')
         # tsteps = int(512 * 0.6) * 2
 
         # tsteps = len(self.time)
@@ -423,7 +428,11 @@ class StructuredTree():
                 print(f'computing root impedance for timestep {k} of {tsteps//2}')
             # compute impedance at the root vessel
             # we cannot have a negative number here so we take positive frequency and then conjugate
-            Z_om[k] = np.conjugate(self.root.z0_olufsen(abs(omega[k])))
+            Z_om[k] = np.conjugate(self.root.z0_olufsen(abs(omega[k]),
+                                                        k1 = k1,
+                                                        k2 = k2,
+                                                        k3 = k3
+                                                        ))
             
         # apply self-adjoint property of the impedance
         Z_om_half = Z_om[:tsteps//2]
