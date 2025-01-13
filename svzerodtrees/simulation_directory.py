@@ -315,7 +315,6 @@ class SimulationDirectory:
 
                 try:
                     inflow = Inflow.steady(flow_rate, name=vtp.filename.split('.')[0])
-                    inflow.rescale(tsteps=tsteps)
                 except:
                     print('invalid input, please provide a valid path to a flow file or a steady flow rate')
                     return
