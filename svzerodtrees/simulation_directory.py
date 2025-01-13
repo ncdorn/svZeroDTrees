@@ -325,14 +325,14 @@ class SimulationDirectory:
 
                 bc_name = f'RESISTANCE_{bc_idx}'
 
-                self.svzerod_3Dcoupling.bcs[bc_name] = {
+                self.svzerod_3Dcoupling.bcs[bc_name] = BoundaryCondition({
                     "bc_name": "RESISTANCE_0",
                     "bc_type": "RESISTANCE",
                     "bc_values": {
                         "Pd": wedge_p,
                         "R": 100.0
                     }
-                }
+                })
 
                 bc_idx += 1
 
