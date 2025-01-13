@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import json
 import math
+import matplotlib.pyplot as plt
 from scipy.integrate import trapz
 from multiprocess import Pool
 from svzerodtrees.utils import *
@@ -15,6 +16,7 @@ from svzerodtrees.structuredtree import StructuredTree
 from svzerodtrees.adaptation import *
 from svzerodtrees.result_handler import ResultHandler
 from svzerodtrees.config_handler import ConfigHandler, Vessel, BoundaryCondition, Junction, SimParams
+from svzerodtrees.inflow import Inflow
 
 
 def optimize_outlet_bcs(input_file,
@@ -548,9 +550,14 @@ def construct_coupled_cwss_trees(config_handler, simulation_dir, n_procs=4, d_mi
             outlet_idx += 1
 
 
-def construct_impedance_trees(config_handler, mesh_surfaces_path, wedge_pressure, d_min = 0.1, convert_to_cm=False, is_pulmonary=True):
+def construct_impedance_trees(config_handler, mesh_surfaces_path, wedge_pressure, d_min = 0.1, convert_to_cm=False, is_pulmonary=True, tree_params={'lpa': [19992500, -35, 0.0, 50.0], 
+                                                                                                                                                    'rpa': [19992500, -35, 0.0, 50.0]},
+                                                                                                                                                    n_procs=24):
     '''
-    construct impedance trees for outlet BCs'''
+    construct impedance trees for outlet BCs
+    
+    :param k2: stiffness parameter 2
+    :param k3: stiffness parameter 3'''
 
     # get outlet areas
     if is_pulmonary:
@@ -572,15 +579,137 @@ def construct_impedance_trees(config_handler, mesh_surfaces_path, wedge_pressure
         cap_d = (area / np.pi)**(1/2) * 2
 
         tree = StructuredTree(name=cap_name, time=config_handler.bcs['INFLOW'].t, simparams=config_handler.simparams)
-
-        tree.build_tree(initial_d=cap_d, d_min=d_min)
+        if 'lpa' in cap_name.lower():
+            print(f'building tree with lpa parameters: {tree_params["lpa"]}')
+            k1, k2, k3, lrr = tree_params['lpa']
+        elif 'rpa' in cap_name.lower():
+            print(f'building tree with rpa parameters: {tree_params["rpa"]}')
+            k1, k2, k3, lrr = tree_params['rpa']
+        else:
+            raise ValueError('cap name not recognized')
+        tree.build_tree(initial_d=cap_d, d_min=d_min, lrr=lrr)
 
         # compute the impedance in frequency domain
-        tree.compute_olufsen_impedance()
+        tree.compute_olufsen_impedance(k2=k2, k3=k3, n_procs=n_procs)
 
         bc_name = cap_to_bc[cap_name]
 
         config_handler.bcs[bc_name] = tree.create_impedance_bc(bc_name, wedge_pressure * 1333.2)
+
+
+def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets, n_procs=24, log_file=None, d_min=0.01, tol=0.01, is_pulmonary=True, convert_to_cm=True):
+
+    if convert_to_cm:
+        scale = 0.1
+    else:
+        scale = 1
+
+    # get mean outlet area
+    if is_pulmonary:
+        rpa_info, lpa_info, inflow_info = vtp_info(mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=True)
+    
+    rpa_mean_dia = np.mean([(area / np.pi)**(1/2) * 2 for area in rpa_info.values()])
+    print(f'RPA mean diameter: {rpa_mean_dia}')
+    lpa_mean_dia = np.mean([(area / np.pi)**(1/2) * 2 for area in lpa_info.values()])
+    print(f'LPA mean diameter: {lpa_mean_dia}')
+
+    # rpa_total_area = sum(rpa_info.values())
+    # lpa_total_area = sum(lpa_info.values())
+
+    # rpa_mean_dia = (rpa_total_area / np.pi)**(1/2) * 2
+    # lpa_mean_dia = (lpa_total_area / np.pi)**(1/2) * 2
+
+    # print(f'RPA total diameter: {rpa_mean_dia}')
+    # print(f'LPA total diameter: {lpa_mean_dia}')
+
+    # create MPA/LPA/RPA sinple config
+    pa_config = PAConfig.from_config_handler(config_handler, clinical_targets)
+    # rescale inflow by number of outlets ## TODO: figure out scaling for this
+    pa_config.bcs['INFLOW'].Q = [q / ((len(lpa_info.values()) + len(rpa_info.values())) // 2) for q in pa_config.bcs['INFLOW'].Q]
+
+    if convert_to_cm:
+        pa_config.convert_to_cm()
+
+    global itera; itera = 0
+    def tree_tuning_objective(params, clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs):
+        '''
+        params: [k1_l, k1_r, k2_l, k2_r, lrr_l, lrr_r]'''
+
+        # k1_l = params[0]
+        # k1_r = params[1]
+        # k2_l = params[2]
+        # k2_r = params[3]
+        # lrr_l = params[4]
+        # lrr_r = params[5]
+
+        k1_l = 19992500.0
+        k1_r = 19992500.0
+        k2_l = params[0]
+        k2_r = params[1]
+        lrr_l = params[2]
+        lrr_r = params[3]
+
+        k3_l = 0.0
+        k3_r = 0.0
+        tree_params = {
+            'lpa': [k1_l, k2_l, k3_l, lrr_l],
+            'rpa': [k1_r, k2_r, k3_r, lrr_r]
+        }
+        pa_config.create_impedance_trees(lpa_mean_dia, rpa_mean_dia, d_min, tree_params, n_procs)
+
+        pa_config.to_json(f'pa_config_test_tuning.json')
+
+        if pa_config.bcs['LPA_BC'].Z[0] != pa_config.bcs['LPA_BC'].Z[0]:
+            print('NaN in LPA impedance')
+            pressure_loss = 5e5
+            flowsplit_loss = 5e5
+        elif pa_config.bcs['RPA_BC'].Z[0] != pa_config.bcs['RPA_BC'].Z[0]:
+            print('\n\nNaN in RPA impedance\n\n')
+            pressure_loss = 5e5
+            flowsplit_loss = 5e5
+        else:
+            try:
+                pa_config.simulate()
+
+                print(f'pa config SIMULATED, rpa split: {pa_config.rpa_split}, p_mpa = {pa_config.P_mpa}\n params: {params}')
+
+                pressure_loss = np.sum(np.dot(np.abs(np.array(pa_config.P_mpa) - np.array(clinical_targets.mpa_p)), np.array([1, 5, 1]))) ** 2
+
+                flowsplit_loss = ((pa_config.rpa_split - clinical_targets.rpa_split) * 100) ** 2
+            
+            except:
+                pressure_loss = 5e5
+                flowsplit_loss = 5e5
+
+        loss = pressure_loss + flowsplit_loss
+        
+        print(f'\n***PRESSURE LOSS: {pressure_loss}, FS LOSS: {flowsplit_loss}, TOTAL LOSS: {loss} ***\n')
+
+        return loss
+
+
+    # bounds = Bounds(lb=[0.0, 0.0, -np.inf,-np.inf, 10.0, 10.0], ub= [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf])
+    bounds = Bounds(lb=[-np.inf,-np.inf, 10.0, 10.0], ub= [np.inf, np.inf, np.inf, np.inf])
+
+    # result = minimize(tree_tuning_objective, [2e7, 2e7, -30, -30, 50.0, 50.0], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, tol=1.0)
+    result = minimize(tree_tuning_objective, [-30, -30, 66.0, 66.0], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, tol=1.0)
+
+    # format of result.x: [k2_l, k2_r, lrr_l, lrr_r]
+    print(f'Optimized parameters: {result.x}')
+
+    pa_config.plot_mpa()
+
+    # build trees for LPA/RPA
+    print('building impedance trees for all outlets with optimized LPA/RPA parameters')
+    construct_impedance_trees(config_handler, mesh_surfaces_path, clinical_targets.wedge_p, d_min=d_min, convert_to_cm=convert_to_cm, is_pulmonary=is_pulmonary, tree_params={'lpa': [19992500, result.x[0], 0.0, result.x[2]],
+                                                                                                                                                                              'rpa': [19992500, result.x[1], 0.0, result.x[3]]})
+
+    config_handler.to_json('optimized_impedance_config.json')
+    
+
+
+
+
 
 
 class ClinicalTargets():
@@ -727,8 +856,11 @@ class PAConfig():
         self.lpa_prox.stenosis_coefficient = 0.0
         self.rpa_dist = rpa_dist
         self.lpa_dist = lpa_dist
+        self.inflow = inflow
 
         self.simparams = simparams
+
+        self.simparams.output_all_cycles = False
 
         self.clinical_targets = clinical_targets
 
@@ -740,8 +872,7 @@ class PAConfig():
         self.bcs = {}
         self.initialize_config_maps()
 
-
-        self.initialize_bcs(inflow, wedge_p)
+        # need to initialize boundary conditions
 
 
     @classmethod
@@ -812,10 +943,14 @@ class PAConfig():
         run the simulation with the current config
         '''
 
-        return run_svzerodplus(self.config, dtype='dict')
+        self.result = pysvzerod.simulate(self.config)
+
+        self.rpa_split = np.mean(self.result[self.result.name=='branch3_seg0']['flow_in']) / (np.mean(self.result[self.result.name=='branch0_seg0']['flow_out']))
+
+        self.P_mpa = [np.max(self.result[self.result.name=='branch0_seg0']['pressure_in']) / 1333.2, np.min(self.result[self.result.name=='branch0_seg0']['pressure_in']) / 1333.2, np.mean(self.result[self.result.name=='branch0_seg0']['pressure_in']) / 1333.2]
     
 
-    def initialize_bcs(self, inflow: BoundaryCondition, wedge_p: float):
+    def initialize_resistance_bcs(self, inflow: BoundaryCondition, wedge_p: float):
         '''initialize the boundary conditions for the pa config
         '''
 
@@ -874,12 +1009,52 @@ class PAConfig():
             }
 
 
+    def create_impedance_trees(self, lpa_d, rpa_d, d_min, tree_params, n_procs):
+        '''
+        create impedance trees for the LPA and RPA distal vessels
+
+        lpa_d: lpa mean outlet diameter
+        rpa_d: rpa mean outlet diameter
+        tree_params: dict with keys 'lpa', 'rpa', values list currently [k2, k3, lrr]
+        '''
+
+        self.bcs["INFLOW"] = self.inflow
+
+        self.mpa.bc = {
+            "inlet": "INFLOW"
+        }
+
+        lpa_tree = StructuredTree(name='lpa_tree', time=self.inflow.t, simparams=self.simparams)
+
+        lpa_tree.build_tree(initial_d=lpa_d, d_min=d_min, lrr=tree_params['lpa'][3])
+
+        # compute the impedance in frequency domain
+        lpa_tree.compute_olufsen_impedance(k1=tree_params['lpa'][0], k2=tree_params['lpa'][1], k3=tree_params['lpa'][2], n_procs=n_procs)
+
+        self.bcs["LPA_BC"] = lpa_tree.create_impedance_bc("LPA_BC", self.clinical_targets.wedge_p * 1333.2)
+
+        rpa_tree = StructuredTree(name='rpa_tree', time=self.inflow.t, simparams=self.simparams)
+
+        rpa_tree.build_tree(initial_d=rpa_d, d_min=d_min, lrr=tree_params['rpa'][3])
+
+        # compute the impedance in frequency domain
+        rpa_tree.compute_olufsen_impedance(k1=tree_params['rpa'][0], k2=tree_params['rpa'][1], k3=tree_params['rpa'][2], n_procs=n_procs)
+
+        self.bcs["RPA_BC"] = rpa_tree.create_impedance_bc("RPA_BC", self.clinical_targets.wedge_p * 1333.2)
+
+
+
+
+
     def initialize_config_maps(self):
         '''
         initialize the junctions for the pa config
         '''
         
         # change the vessel ids of the proximal vessels
+
+        self.mpa.id = 0
+        self.mpa.name = 'branch0_seg0'
 
         self.lpa_prox.id = 1
         self.lpa_prox.name = 'branch1_seg0'
@@ -925,6 +1100,15 @@ class PAConfig():
 
         # add the vessels
         self._config['vessels'] = [vessel.to_dict() for vessel in self.vessel_map.values()]
+        
+
+    def convert_to_cm(self):
+        '''
+        convert vessel parameters to cm
+        '''
+
+        for vessel in self.vessel_map.values():
+            vessel.convert_to_cm()
         
 
     def compute_steady_loss(self, R_guess, fun='L2'):
@@ -1103,7 +1287,31 @@ class PAConfig():
         print([self.Q_rpa / self.clinical_targets.q, self.P_mpa, self.P_lpa, self.P_rpa])
 
 
+    def plot_mpa(self):
+        '''
+        plot the mpa pressure and flow
+        '''
 
+        fig, axs = plt.subplots(1, 2)
+
+        mpa_result = self.result[self.result.name=='branch0_seg0']
+
+        # plot flow
+        axs[0].plot(mpa_result['time'], mpa_result['flow_in'])
+        axs[0].set_xlabel('time (s)')
+        axs[0].set_ylabel('flow (cm3/s)')
+
+        # plot pressure
+        axs[1].plot(mpa_result['time'], mpa_result['pressure_in'])
+        axs[1].set_xlabel('time (s)')
+        axs[1].set_ylabel('pressure (mmHg)')
+
+        plt.show()
+
+
+
+
+        
 
     @property
     def config(self):

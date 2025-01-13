@@ -832,6 +832,22 @@ class Vessel():
         if 'boundary_conditions' in config:
             self.bc = config['boundary_conditions']
 
+    def convert_to_cm(self):
+        '''
+        convert the vessel parameters to cm
+        multiply R by 1000
+        divide C by 10000
+        multiply L by 10
+        '''
+
+        self.R *= 1000
+
+        self.C /= 10000
+
+        self.L *= 10
+
+
+
     #### property setters for dynamically updating the equivalent values ####
     @property
     def R(self):

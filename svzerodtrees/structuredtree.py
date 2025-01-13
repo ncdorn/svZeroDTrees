@@ -9,6 +9,9 @@ import math
 import scipy
 import json
 import pickle
+from functools import partial
+import time
+from numba import jit
 
 class StructuredTree():
     """
@@ -271,7 +274,7 @@ class StructuredTree():
                 self.block_dict["vessels"].append(current_vessel.right.params)
 
 
-    def build_tree(self, initial_d=None, d_min=0.0049, optimizing=False, asym=0.4048, xi=2.7, alpha=None, beta=None, trmrst=0.0):
+    def build_tree(self, initial_d=None, d_min=0.0049, optimizing=False, asym=0.4048, xi=2.7, alpha=None, beta=None, lrr=50.0):
         '''
         recursively build the structured tree
 
@@ -308,7 +311,7 @@ class StructuredTree():
         vessel_id = 0
         junc_id = 0
         # initialize the root vessel of the tree
-        self.root = TreeVessel.create_vessel(0, 0, initial_d, density=1.055)
+        self.root = TreeVessel.create_vessel(0, 0, initial_d, density=1.055, lrr=lrr)
         self.root.name = self.name
         # add inflow boundary condition
         self.root.params["boundary_conditions"] = {"inlet": "INFLOW"}
@@ -337,7 +340,7 @@ class StructuredTree():
                 left_dia = alpha * current_vessel.d
                 # assume pressure is conserved at the junction. 
                 # Could later replace this with a function to account for pressure loss
-                current_vessel.left = TreeVessel.create_vessel(vessel_id, next_gen, left_dia, density=1.055)
+                current_vessel.left = TreeVessel.create_vessel(vessel_id, next_gen, left_dia, density=1.055, lrr=lrr)
                 if left_dia < d_min:
                     current_vessel.left.collapsed = True
                     if current_vessel.left.gen > self.generations:
@@ -350,7 +353,7 @@ class StructuredTree():
                 # create right vessel
                 vessel_id += 1
                 right_dia = beta * current_vessel.d
-                current_vessel.right = TreeVessel.create_vessel(vessel_id, next_gen, right_dia, density=1.055)
+                current_vessel.right = TreeVessel.create_vessel(vessel_id, next_gen, right_dia, density=1.055, lrr=lrr)
                 if right_dia < d_min:
                     current_vessel.right.collapsed = True
                     if current_vessel.right.gen > self.generations:
@@ -373,11 +376,12 @@ class StructuredTree():
                 self.block_dict["junctions"].append(junction_config)
                 junc_id += 1
 
-
+    # @jit
     def compute_olufsen_impedance(self,
                                   k1 = 19992500, # g/cm/s^2
                                   k2 = -25.5267, # 1/cm 
-                                  k3 = 1104531.4909089999 # g/cm/s^2
+                                  k3 = 1104531.4909089999, # g/cm/s^2
+                                  n_procs=None
                                   ):
         '''
         compute the impedance of the structured tree accordin to Olufsen et al. (2000)
@@ -394,11 +398,11 @@ class StructuredTree():
 
         tsteps = len(self.time)
 
-        print(f'timesteps for impedance: {tsteps}')
+        # print(f'timesteps for impedance: {tsteps}')
 
-        print(f'number of time points per cardiac cycle: {self.simparams.number_of_time_pts_per_cardiac_cycle}, len(self.time): {len(self.time)}')
+        # print(f'number of time points per cardiac cycle: {self.simparams.number_of_time_pts_per_cardiac_cycle}, len(self.time): {len(self.time)}')
 
-        print(f'k1: {k1}, k2: {k2}, k3: {k3}')
+        # print(f'k1: {k1}, k2: {k2}, k3: {k3}')
         # tsteps = int(512 * 0.6) * 2
 
         # tsteps = len(self.time)
@@ -422,17 +426,35 @@ class StructuredTree():
         # with Pool(24) as p:       
         #     Z_om = p.map(self.root.z0, omega)
 
-        ## UNPARALLELIZED ##
-        for k in range(0, tsteps//2+1):
-            if (k) % 100 == 0:
-                print(f'computing root impedance for timestep {k} of {tsteps//2}')
-            # compute impedance at the root vessel
-            # we cannot have a negative number here so we take positive frequency and then conjugate
-            Z_om[k] = np.conjugate(self.root.z0_olufsen(abs(omega[k]),
-                                                        k1 = k1,
-                                                        k2 = k2,
-                                                        k3 = k3
-                                                        ))
+        
+        
+        if n_procs is not None:
+            start = time.time()
+            # make the partial function
+            z0_w_stiffness = partial(self.root.z0_olufsen, k1=k1, k2=k2, k3=k3)
+            # parallelize the computation of the impedance
+            with Pool(n_procs) as p:
+                Z_om[:tsteps//2+1] = np.conjugate(p.map(z0_w_stiffness, [abs(w) for w in omega[:tsteps//2+1]]))
+            
+            end = time.time()
+            print(f'this parallelized process took {end - start} seconds')
+        else:
+            ## UNPARALLELIZED ##
+            start = time.time()
+            for k in range(0, tsteps//2+1):
+                # if (k) % 100 == 0:
+                # print(f'computing root impedance for timestep {k} of {tsteps//2}')
+                # compute impedance at the root vessel
+                # we cannot have a negative number here so we take positive frequency and then conjugate
+                Z_om[k] = np.conjugate(self.root.z0_olufsen(abs(omega[k]),
+                                                            k1 = k1,
+                                                            k2 = k2,
+                                                            k3 = k3
+                                                            ))
+            
+            end = time.time()
+            # print(f'this UNparallelized process took {end - start} seconds')
+
             
         # apply self-adjoint property of the impedance
         Z_om_half = Z_om[:tsteps//2]

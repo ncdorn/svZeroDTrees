@@ -1,12 +1,13 @@
 import numpy as np
 import math
 from scipy.special import jv
+from numba import jit
 
 # class for recursive generation of a structured tree
 
 class TreeVessel:
     # blood vessel class for binary tree recusion operations
-    def __init__(self, params: dict, name: str = None):
+    def __init__(self, params: dict, name: str = None, lrr=50.0):
         '''
         :param params: dictionary of TreeVessel class parameters
         :param name: name of the vessel, which follows the svzerodplus naming convention
@@ -35,6 +36,8 @@ class TreeVessel:
         # self.k2    = k2
         # self.k3    = k3
 
+        self.lrr = lrr
+
         # flow values, based on Poiseulle assumption
         self.P_in = 0.0
         self.Q = 0.0
@@ -49,7 +52,7 @@ class TreeVessel:
 
 
     @classmethod
-    def create_vessel(cls, id, gen, diameter, density, H_d=0.45):
+    def create_vessel(cls, id, gen, diameter, density, lrr=None):
         '''
         class method to create a TreeVessel instance
 
@@ -66,8 +69,15 @@ class TreeVessel:
 
         viscosity = 0.049 # poise, cm2/s
         
-        # initialize the 0D parameters of the treee
-        R, C, L, l = cls.calc_zero_d_values(cls, diameter, viscosity)
+        # initialize the 0D parameters of the tree
+        r = diameter / 2
+        if lrr is None:
+            l = 12.4 * r ** 1.1  # from ingrid's paper - does this remain constant throughout adaptation?
+        else:
+            l = lrr * r
+        R = 8 * viscosity * l / (np.pi * r ** 4)
+        C = 0.0  # to implement later
+        L = 0.0  # to implement later
 
         # create name to match svzerodplus naming convention
         name = "branch" + str(id) + "_seg0" 
@@ -89,7 +99,7 @@ class TreeVessel:
                        "density": density,
                        }
 
-        return cls(params=vessel_params)
+        return cls(params=vessel_params, lrr=lrr)
 
 
     ####### beginning of property setters to dynamically update various class properties #######
@@ -157,7 +167,7 @@ class TreeVessel:
     ####### end of property setters used to dynamically update various class attributes #######
 
 
-    def calc_zero_d_values(self, diameter, mu, lrr=50.0):
+    def calc_zero_d_values(self, diameter, mu):
         '''
         calculate 0D Windkessel parameters based on a vessel diameter
 
@@ -168,9 +178,10 @@ class TreeVessel:
         '''
 
         r = diameter / 2
-        # l = 12.4 * r ** 1.1  # from ingrid's paper - does this remain constant throughout adaptation?
-        # l = 50 * r # l_rr = 50, from Olufsen et al. (1999)
-        l  = lrr * r # large l_rr to compare to olufsen et al. 1999
+        if self.lrr is None:
+            l = 12.4 * r ** 1.1  # from ingrid's paper - does this remain constant throughout adaptation?
+        else:
+            l = self.lrr * r
         R = 8 * mu * l / (np.pi * r ** 4)
         C = 0.0  # to implement later
         L = 0.0  # to implement later
@@ -360,7 +371,7 @@ class TreeVessel:
 
         return z_0
 
-
+    # @jit(forceobj=True)
     def z0_olufsen(self, omega,
                    k1 = 19992500, # g/cm/s^2
                    k2 = -25.5267, # 1/cm 

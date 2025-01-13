@@ -298,6 +298,73 @@ class SimulationDirectory:
 
         self.check()
 
+    def generate_steady_sim(self):
+        '''
+        generate simulation files for a steady simulation'''
+
+        wedge_p = float(input('input wedge pressure (default 6.0): ') or 6.0)
+
+        # add the inflows to the svzerod_3Dcoupling
+        tsteps = int(input('number of time steps for inflow (default 512): ') or 512)
+        self.svzerod_3Dcoupling.simparams.number_of_time_pts_per_cardiac_cycle = tsteps
+        bc_idx = 0
+        for vtp in self.mesh_complete.mesh_surfaces:
+            if 'inflow' in vtp.filename.lower():
+                # need to get inflow path or steady flow rate
+                flow_rate = float(input(f'input steady flow rate: '))
+
+                try:
+                    inflow = Inflow.steady(flow_rate, name=vtp.filename.split('.')[0])
+                    inflow.rescale(tsteps=tsteps)
+                except:
+                    print('invalid input, please provide a valid path to a flow file or a steady flow rate')
+                    return
+
+                self.svzerod_3Dcoupling.set_inflow(inflow, vtp.filename.split('.')[0], threed_coupled=False)
+            else:
+
+                bc_name = f'RESISTANCE_{bc_idx}'
+
+                self.svzerod_3Dcoupling.bcs[bc_name] = {
+                    "bc_name": "RESISTANCE_0",
+                    "bc_type": "RESISTANCE",
+                    "bc_values": {
+                        "Pd": wedge_p,
+                        "R": 100.0
+                    }
+                }
+
+                bc_idx += 1
+
+        self.svzerod_3Dcoupling.to_json('blank_edited_config.json')
+        self.svzerod_3Dcoupling, coupling_blocks = self.svzerod_3Dcoupling.generate_threed_coupler(self.path, inflow_from_0d=True, mesh_complete=self.mesh_complete)
+
+        self.write_files()
+    
+    def compute_pressure_drop(self):
+
+        # get the MPA pressure
+        mpa_pressure = np.mean(self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])[2][-100:])
+
+
+        # compute the pressure drop
+        lpa_outlet_pressures = []
+        rpa_outlet_pressures = []
+        for block in self.svzerod_3Dcoupling.coupling_blocks.values():
+            if 'lpa' in block.surface.lower():
+                lpa_outlet_pressures.append(np.mean(self.svzerod_data.get_result(block)[2][-100:]))
+            if 'rpa' in block.surface.lower():
+                rpa_outlet_pressures.append(np.mean(self.svzerod_data.get_result(block)[2][-100:]))
+
+        lpa_outlet_mean_pressure = np.mean(lpa_outlet_pressures)
+        rpa_outlet_mean_pressure = np.mean(rpa_outlet_pressures)
+
+        lpa_pressure_drop = mpa_pressure - lpa_outlet_mean_pressure
+        rpa_pressure_drop = mpa_pressure - rpa_outlet_mean_pressure
+
+        print(f'LPA pressure drop: {lpa_pressure_drop} mmHg, \n RPA pressure drop: {rpa_pressure_drop} mmHg')
+
+        
     
     def generate_impedance_bcs(self):
 
@@ -851,7 +918,7 @@ class SolverRunscript(SimFile):
               nodes=4, 
               procs_per_node=24, 
               hours=6, 
-              svfsiplus_path='/home/users/ndorn/svfsiplus-build/svFSI-build/mysvfsi'):
+              svfsiplus_path='/home/users/ndorn/svMP-procfix/svMP-build/svMultiPhysics-build/bin/svmultiphysics'):
         '''
         write the solver runscript file'''
 
