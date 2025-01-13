@@ -646,6 +646,13 @@ class ConfigHandler():
             inflow_idx = 0
             for bc_name, bc in self.bcs.items():
                 if 'inflow' in bc_name.lower():
+                    # adjust inflow name such that the coupling block name is the same as the bc name
+                    if bc_name == bc_name.lower():
+                        block_name = bc_name.upper()
+                    elif bc_name == bc_name.upper():
+                        block_name = bc_name.lower()
+                    else:
+                        block_name = bc_name.lower()
                     threed_coupler.vessel_map[inflow_idx] = Vessel.from_config(
                         {
                         "boundary_conditions": {
@@ -664,9 +671,9 @@ class ConfigHandler():
                         }
                     )
 
-                    threed_coupler.coupling_blocks[bc_name.lower()] = CouplingBlock(
+                    threed_coupler.coupling_blocks[block_name] = CouplingBlock(
                         {
-                            "name": bc_name.lower(),
+                            "name": block_name,
                             "type": "FLOW",
                             "location": "outlet",
                             "connected_block": f"branch{inflow_idx}_seg0",
