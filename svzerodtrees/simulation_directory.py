@@ -343,6 +343,9 @@ class SimulationDirectory:
     
     def compute_pressure_drop(self):
 
+        # get lpa, rpa flow
+        lpa_flow, rpa_flow = self.flow_split()
+
         # get the MPA pressure
         mpa_pressure = np.mean(self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])[2][-100:])
 
@@ -362,7 +365,14 @@ class SimulationDirectory:
         lpa_pressure_drop = mpa_pressure - lpa_outlet_mean_pressure
         rpa_pressure_drop = mpa_pressure - rpa_outlet_mean_pressure
 
-        print(f'LPA pressure drop: {lpa_pressure_drop} mmHg, \n RPA pressure drop: {rpa_pressure_drop} mmHg')
+        lpa_resistance = lpa_pressure_drop / lpa_flow
+        rpa_resistance = rpa_pressure_drop / rpa_flow
+
+        print(f'LPA pressure drop: {lpa_pressure_drop / 1333.2} mmHg, \n RPA pressure drop: {rpa_pressure_drop / 1333.2} mmHg')
+        print(f'LPA resistance: {lpa_resistance} dyn/cm5/s, \n RPA resistance: {rpa_resistance} dyn/cm5/s')
+
+        # def compute_simplified_zerod(lpa_resistance, rpa_resistance):
+
 
         
     
@@ -428,7 +438,9 @@ class SimulationDirectory:
 
     def flow_split(self):
         '''
-        get the flow split between the LPA and RPA'''
+        get the flow split between the LPA and RPA
+        
+        :return (lpa_flow, rpa_flow)'''
 
         # get the LPA and RPA boundary conditions based on surface name
         lpa_flow = 0.0
