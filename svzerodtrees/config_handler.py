@@ -333,8 +333,8 @@ class ConfigHandler():
         inflow: Inflow instance
         '''
 
-        if bc_name == bc_name.lower():
-            raise Exception("name must be uppercase!")
+        # if bc_name == bc_name.lower():
+        #     raise Exception("name must be uppercase!")
         
         if threed_coupled:
             vessel_id = len(self.vessel_map)
@@ -1289,7 +1289,7 @@ class CouplingBlock():
         self_dict = self.__dict__
 
         # don't want to include the result arrays in the output dict
-        if not with_result:
+        if 'result' in self_dict.keys() and not with_result:
             del self_dict['result']
 
         return self_dict

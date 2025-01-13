@@ -305,7 +305,7 @@ class SimulationDirectory:
         wedge_p = float(input('input wedge pressure (default 6.0): ') or 6.0)
 
         # add the inflows to the svzerod_3Dcoupling
-        tsteps = int(input('number of time steps for inflow (default 512): ') or 512)
+        tsteps = int(input('number of time steps for inflow (default 2): ') or 2)
         self.svzerod_3Dcoupling.simparams.number_of_time_pts_per_cardiac_cycle = tsteps
         bc_idx = 0
         for vtp in self.mesh_complete.mesh_surfaces:
@@ -315,17 +315,18 @@ class SimulationDirectory:
 
                 try:
                     inflow = Inflow.steady(flow_rate, name=vtp.filename.split('.')[0])
+                    inflow.rescale(tsteps=tsteps)
                 except:
                     print('invalid input, please provide a valid path to a flow file or a steady flow rate')
                     return
 
-                self.svzerod_3Dcoupling.set_inflow(inflow, vtp.filename.split('.')[0].upper(), threed_coupled=False)
+                self.svzerod_3Dcoupling.set_inflow(inflow, vtp.filename.split('.')[0], threed_coupled=False)
             else:
 
                 bc_name = f'RESISTANCE_{bc_idx}'
 
                 self.svzerod_3Dcoupling.bcs[bc_name] = BoundaryCondition({
-                    "bc_name": "RESISTANCE_0",
+                    "bc_name": bc_name,
                     "bc_type": "RESISTANCE",
                     "bc_values": {
                         "Pd": wedge_p,
@@ -335,7 +336,7 @@ class SimulationDirectory:
 
                 bc_idx += 1
 
-        self.svzerod_3Dcoupling.to_json('blank_edited_config.json')
+        self.svzerod_3Dcoupling.to_json('blank_zerod_config.json')
         self.svzerod_3Dcoupling, coupling_blocks = self.svzerod_3Dcoupling.generate_threed_coupler(self.path, inflow_from_0d=True, mesh_complete=self.mesh_complete)
 
         self.write_files()
