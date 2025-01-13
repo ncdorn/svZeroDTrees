@@ -311,7 +311,7 @@ class SimulationDirectory:
         for vtp in self.mesh_complete.mesh_surfaces:
             if 'inflow' in vtp.filename.lower():
                 # need to get inflow path or steady flow rate
-                flow_rate = float(input(f'input steady flow rate: '))
+                flow_rate = float(input(f'input steady flow rate for {vtp.filename}: '))
 
                 try:
                     inflow = Inflow.steady(flow_rate, name=vtp.filename.split('.')[0])
@@ -320,7 +320,7 @@ class SimulationDirectory:
                     print('invalid input, please provide a valid path to a flow file or a steady flow rate')
                     return
 
-                self.svzerod_3Dcoupling.set_inflow(inflow, vtp.filename.split('.')[0], threed_coupled=False)
+                self.svzerod_3Dcoupling.set_inflow(inflow, vtp.filename.split('.')[0].upper(), threed_coupled=False)
             else:
 
                 bc_name = f'RESISTANCE_{bc_idx}'
