@@ -93,7 +93,7 @@ class SimulationDirectory:
         self.convert_to_cm = convert_to_cm
 
     @classmethod
-    def from_directory(cls, path, zerod_config=None, results_dir=None, convert_to_cm=False, is_pulmonary=True):
+    def from_directory(cls, path='.', zerod_config=None, results_dir=None, convert_to_cm=True, is_pulmonary=True):
         '''
         create a simulation directory object from the path to the simulation directory
         and search for the necessary files within the path'''
@@ -272,7 +272,11 @@ class SimulationDirectory:
         def write_svfsixml_input_params():
             n_tsteps = int(input('number of time steps (default 5000): ') or 5000)
             dt = float(input('time step size (default 0.001): ') or 0.001)
-            mesh_scale_factor = float(input('mesh scale factor (default 1.0, input 0.1 if converting from mm to cm): ') or 1.0)
+            if self.convert_to_cm:
+                print("scaling mesh to cm...")
+                mesh_scale_factor = 0.1
+            else:
+                mesh_scale_factor = 1.0
             self.svFSIxml.write(self.mesh_complete, n_tsteps=n_tsteps, dt=dt, scale_factor=mesh_scale_factor)
         
         def write_runscript_input_params():
@@ -314,13 +318,13 @@ class SimulationDirectory:
                 flow_rate = float(input(f'input steady flow rate for {vtp.filename}: '))
 
                 try:
-                    inflow = Inflow.steady(flow_rate, name=vtp.filename.split('.')[0])
+                    inflow = Inflow.steady(flow_rate, name=vtp.filename.split('.')[0].upper())
                     inflow.rescale(tsteps=tsteps)
                 except:
                     print('invalid input, please provide a valid path to a flow file or a steady flow rate')
                     return
 
-                self.svzerod_3Dcoupling.set_inflow(inflow, vtp.filename.split('.')[0], threed_coupled=False)
+                self.svzerod_3Dcoupling.set_inflow(inflow, vtp.filename.split('.')[0].upper(), threed_coupled=False)
             else:
 
                 bc_name = f'RESISTANCE_{bc_idx}'
@@ -371,10 +375,155 @@ class SimulationDirectory:
         print(f'LPA pressure drop: {lpa_pressure_drop / 1333.2} mmHg, \n RPA pressure drop: {rpa_pressure_drop / 1333.2} mmHg')
         print(f'LPA resistance: {lpa_resistance} dyn/cm5/s, \n RPA resistance: {rpa_resistance} dyn/cm5/s')
 
-        # def compute_simplified_zerod(lpa_resistance, rpa_resistance):
+        return lpa_resistance, rpa_resistance
 
+    def generate_simplified_zerod(self):
+        '''
+        compute the simplified 0D model for a 3D pulmonary model from the steady simulation result'''
 
-        
+        lpa_resistance, rpa_resistance = self.compute_pressure_drop()
+
+        # need to rescale the inflow and make it periodic with a generic shape (see Inflow class)
+        inflow = Inflow.periodic(path=None)
+        inflow.rescale(cardiac_output=self.svzerod_3Dcoupling.bcs['INFLOW'].Q[0])
+
+        config = ConfigHandler({
+            "boundary_conditions": [
+                inflow.to_dict(),
+                {
+                    "bc_name": "LPA_BC",
+                    "bc_type": "RESISTANCE",
+                    "bc_values": {
+                        "Pd": 6.0,
+                        "R": 100.0
+                    }
+                },
+                {
+                    "bc_name": "RPA_BC",
+                    "bc_type": "RESISTANCE",
+                    "bc_values": {
+                        "Pd": 6.0,
+                        "R": 100.0
+                    }
+                }
+            ],
+            "simulation_parameters": {
+                "output_all_cycles": False,
+                "steady_initial": False,
+                "density": 1.06,
+                "model_name": "pa_reduced",
+                "number_of_cardiac_cycles": 8,
+                "number_of_time_pts_per_cardiac_cycle": 200,
+                "viscosity": 0.04
+            },
+            "junctions": [
+                {
+                    "junction_name": "J0",
+                    "junction_type": "NORMAL_JUNCTION",
+                    "inlet_vessels": [
+                        0
+                    ],
+                    "outlet_vessels": [
+                        1,
+                        3
+                    ]
+                },
+                {
+                    "junction_name": "J1",
+                    "junction_type": "NORMAL_JUNCTION",
+                    "inlet_vessels": [
+                        1
+                    ],
+                    "outlet_vessels": [
+                        2
+                    ]
+                },
+                {
+                    "junction_name": "J2",
+                    "junction_type": "NORMAL_JUNCTION",
+                    "inlet_vessels": [
+                        3
+                    ],
+                    "outlet_vessels": [
+                        4
+                    ]
+                }
+            ],
+            "vessels": [
+                {
+                    "boundary_conditions": {
+                        "inlet": "INFLOW"
+                    },
+                    "vessel_id": 0,
+                    "vessel_length": 1.0,
+                    "vessel_name": "branch0_seg0",
+                    "zero_d_element_type": "BloodVessel",
+                    "zero_d_element_values": {
+                        "R_poiseuille": 1.0,
+                        "C": 0.0,
+                        "L": 0.0,
+                        "stenosis_coefficient": 0.0
+                    }
+                },
+                {
+                    "vessel_id": 1,
+                    "vessel_length": 1.0,
+                    "vessel_name": "branch1_seg0",
+                    "zero_d_element_type": "BloodVessel",
+                    "zero_d_element_values": {
+                        "R_poiseuille": lpa_resistance / 2,
+                        "C": 0.0,
+                        "L": 0.0,
+                        "stenosis_coefficient": 0.0
+                    }
+                },
+                {
+                    "boundary_conditions": {
+                        "outlet": "LPA_BC"
+                    },
+                    "vessel_id": 2,
+                    "vessel_length": 1.0,
+                    "vessel_name": "branch2_seg0",
+                    "zero_d_element_type": "BloodVessel",
+                    "zero_d_element_values": {
+                        "R_poiseuille": lpa_resistance / 2,
+                        "C": 0.0,
+                        "L": 0.0,
+                        "stenosis_coefficient": 0.0
+                    }
+                },
+                {
+                    "vessel_id": 3,
+                    "vessel_length": 1.0,
+                    "vessel_name": "branch3_seg0",
+                    "zero_d_element_type": "BloodVessel",
+                    "zero_d_element_values": {
+                        "R_poiseuille": rpa_resistance / 2,
+                        "C": 0.0,
+                        "L": 0.0,
+                        "stenosis_coefficient": 0.0
+                    }
+                },
+                {
+                    "boundary_conditions": {
+                        "outlet": "RPA_BC"
+                    },
+                    "vessel_id": 4,
+                    "vessel_length": 1.0,
+                    "vessel_name": "branch4_seg0",
+                    "zero_d_element_type": "BloodVessel",
+                    "zero_d_element_values": {
+                        "R_poiseuille": rpa_resistance / 2,
+                        "C": 0.0,
+                        "L": 0.0,
+                        "stenosis_coefficient": 0.0
+                    }
+                }
+            ]
+        })
+
+        config.to_json('simplified_zerod_config.json')
+ 
     
     def generate_impedance_bcs(self):
 

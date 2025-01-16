@@ -608,8 +608,10 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
     if is_pulmonary:
         rpa_info, lpa_info, inflow_info = vtp_info(mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=True)
     
+    # rpa_mean_dia = 0.32
     rpa_mean_dia = np.mean([(area / np.pi)**(1/2) * 2 for area in rpa_info.values()])
     print(f'RPA mean diameter: {rpa_mean_dia}')
+    # lpa_mean_dia = 0.32
     lpa_mean_dia = np.mean([(area / np.pi)**(1/2) * 2 for area in lpa_info.values()])
     print(f'LPA mean diameter: {lpa_mean_dia}')
 
@@ -622,18 +624,20 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
     # print(f'RPA total diameter: {rpa_mean_dia}')
     # print(f'LPA total diameter: {lpa_mean_dia}')
 
-    # create MPA/LPA/RPA sinple config
-    pa_config = PAConfig.from_config_handler(config_handler, clinical_targets)
+    # create MPA/LPA/RPA simple config
+    if len(config_handler.vessel_map.values()) == 5:
+        # we have an already simplified config
+        pa_config = PAConfig.from_pa_config(config_handler, clinical_targets)
+    else:
+        pa_config = PAConfig.from_config_handler(config_handler, clinical_targets)
+        if convert_to_cm:
+            pa_config.convert_to_cm()
     # rescale inflow by number of outlets ## TODO: figure out scaling for this
     pa_config.bcs['INFLOW'].Q = [q / ((len(lpa_info.values()) + len(rpa_info.values())) // 2) for q in pa_config.bcs['INFLOW'].Q]
 
-    if convert_to_cm:
-        pa_config.convert_to_cm()
-
-    global itera; itera = 0
     def tree_tuning_objective(params, clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs):
         '''
-        params: [k1_l, k1_r, k2_l, k2_r, lrr_l, lrr_r]'''
+        params: [k1_l, k1_r, k2_l, k2_r, lrr_l, lrr_r, alpha]'''
 
         # k1_l = params[0]
         # k1_r = params[1]
@@ -648,13 +652,23 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
         k2_r = params[1]
         lrr_l = params[2]
         lrr_r = params[3]
+        # alpha = params[4]
 
         k3_l = 0.0
         k3_r = 0.0
+
+        ### WITHOUT ALPHA
         tree_params = {
             'lpa': [k1_l, k2_l, k3_l, lrr_l],
             'rpa': [k1_r, k2_r, k3_r, lrr_r]
         }
+
+        ### WITH ALPHA
+        # tree_params = {
+        #     'lpa': [k1_l, k2_l, k3_l, lrr_l, alpha],
+        #     'rpa': [k1_r, k2_r, k3_r, lrr_r, alpha]
+        # }
+
         pa_config.create_impedance_trees(lpa_mean_dia, rpa_mean_dia, d_min, tree_params, n_procs)
 
         pa_config.to_json(f'pa_config_test_tuning.json')
@@ -689,13 +703,24 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
 
 
     # bounds = Bounds(lb=[0.0, 0.0, -np.inf,-np.inf, 10.0, 10.0], ub= [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf])
+    ### WITH ALPHA
+    # bounds = Bounds(lb=[-np.inf,-np.inf, 10.0, 10.0, 0.0], ub= [np.inf, np.inf, np.inf, np.inf, np.inf])
+    ### WITHOUT ALPHA
     bounds = Bounds(lb=[-np.inf,-np.inf, 10.0, 10.0], ub= [np.inf, np.inf, np.inf, np.inf])
 
+
     # result = minimize(tree_tuning_objective, [2e7, 2e7, -30, -30, 50.0, 50.0], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, tol=1.0)
-    result = minimize(tree_tuning_objective, [-30, -30, 66.0, 66.0], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, tol=1.0)
+    ### WITH ALPHA
+    # result = minimize(tree_tuning_objective, [-30, -30, 66.0, 66.0, 2.7], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, tol=1.0)
+    ### WITHOUT ALPHA
+    result = minimize(tree_tuning_objective, [-22, -42, 98.0, 99.0], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, tol=1.0)
 
     # format of result.x: [k2_l, k2_r, lrr_l, lrr_r]
     print(f'Optimized parameters: {result.x}')
+
+    with open('optimized_params.txt', 'w') as f:
+        f.write('Optimized parameters: [k2_l, k2_r, lrr_l, lrr_r]\n')
+        f.write(str(result.x))
 
     pa_config.plot_mpa()
 
@@ -869,7 +894,7 @@ class PAConfig():
         self._config = {}
         self.junctions = {}
         self.vessel_map = {}
-        self.bcs = {}
+        self.bcs = {'INFLOW': inflow}
         self.initialize_config_maps()
 
         # need to initialize boundary conditions
@@ -927,6 +952,22 @@ class PAConfig():
                    config_handler.bcs[list(config_handler.bcs.keys())[1]].values["Pd"],
                    clinical_targets,
                    steady)
+
+    @classmethod
+    def from_pa_config(cls, pa_config_handler, clinical_targets: ClinicalTargets):
+        '''
+        initialize from a pre-existing pa config handler'''
+
+        return cls(pa_config_handler.simparams,
+                     pa_config_handler.mpa,
+                     pa_config_handler.lpa,
+                     pa_config_handler.rpa,
+                     pa_config_handler.vessel_map[2],
+                     pa_config_handler.vessel_map[4],
+                     pa_config_handler.bcs["INFLOW"],
+                     clinical_targets.wedge_p,
+                     clinical_targets,
+                     steady=False)
 
 
     def to_json(self, output_file):
@@ -1015,7 +1056,7 @@ class PAConfig():
 
         lpa_d: lpa mean outlet diameter
         rpa_d: rpa mean outlet diameter
-        tree_params: dict with keys 'lpa', 'rpa', values list currently [k2, k3, lrr]
+        tree_params: dict with keys 'lpa', 'rpa', values list currently [k2, k3, lrr, alpha]
         '''
 
         self.bcs["INFLOW"] = self.inflow
@@ -1026,7 +1067,7 @@ class PAConfig():
 
         lpa_tree = StructuredTree(name='lpa_tree', time=self.inflow.t, simparams=self.simparams)
 
-        lpa_tree.build_tree(initial_d=lpa_d, d_min=d_min, lrr=tree_params['lpa'][3])
+        lpa_tree.build_tree(initial_d=lpa_d, d_min=d_min, lrr=tree_params['lpa'][3], xi=2.7)
 
         # compute the impedance in frequency domain
         lpa_tree.compute_olufsen_impedance(k1=tree_params['lpa'][0], k2=tree_params['lpa'][1], k3=tree_params['lpa'][2], n_procs=n_procs)
@@ -1035,7 +1076,7 @@ class PAConfig():
 
         rpa_tree = StructuredTree(name='rpa_tree', time=self.inflow.t, simparams=self.simparams)
 
-        rpa_tree.build_tree(initial_d=rpa_d, d_min=d_min, lrr=tree_params['rpa'][3])
+        rpa_tree.build_tree(initial_d=rpa_d, d_min=d_min, lrr=tree_params['rpa'][3], xi=2.7)
 
         # compute the impedance in frequency domain
         rpa_tree.compute_olufsen_impedance(k1=tree_params['rpa'][0], k2=tree_params['rpa'][1], k3=tree_params['rpa'][2], n_procs=n_procs)

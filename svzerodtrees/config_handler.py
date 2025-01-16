@@ -27,7 +27,8 @@ class ConfigHandler():
 
         # bool for simulation checks
         self.is_written = True
-        self.path = path.replace(' ', '\ ')
+        if path is not None:
+            self.path = path.replace(' ', '\ ')
 
         self.is_pulmonary = is_pulmonary
         self.threed_interface = is_threed_interface
@@ -358,9 +359,9 @@ class ConfigHandler():
                 )
             )
 
-            self.coupling_blocks[bc_name.lower()] = CouplingBlock(
+            self.coupling_blocks[bc_name] = CouplingBlock(
                 {
-                    "name": bc_name.lower(),
+                    "name": bc_name,
                     "type": "FLOW",
                     "location": "outlet",
                     "connected_block": f"branch{vessel_id}_seg0",
