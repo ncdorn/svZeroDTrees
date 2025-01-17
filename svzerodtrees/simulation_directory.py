@@ -846,37 +846,41 @@ class SimulationDirectory:
 
         fig, ax = plt.subplots(1, 3, figsize=(10, 10))
 
-        block = self.svzerod_3Dcoupling.coupling_blocks['RESISTANCE_0']
-        time, flow, pressure = self.svzerod_data.get_result(block)
+        # block = self.svzerod_3Dcoupling.coupling_blocks['RESISTANCE_0']
 
-        if 'lpa' in block.surface.lower():
-            color='r'
-        elif 'rpa' in block.surface.lower():
-            color='b'
-        else:
-            color='g'
+        for block in self.svzerod_3Dcoupling.coupling_blocks.values():
 
+            time, flow, pressure = self.svzerod_data.get_result(block)
 
-        pressure = pressure / 1333.2
-
-        ax[0].plot(time, pressure, label=f'{block.surface} pressure',color=color)
-        ax[0].set_xlabel('Time (s)')
-        ax[0].set_ylabel('Pressure (mmHg)')
-        ax[0].set_title(f'outlet pressure')
+            if 'lpa' in block.surface.lower():
+                color='r'
+            elif 'rpa' in block.surface.lower():
+                color='b'
+            else:
+                color='g'
+                continue
 
 
-        ax[1].plot(time, flow, label=f'{block.surface} flow', color=color)
-        ax[1].set_xlabel('Time (s)')
-        ax[1].set_ylabel('Flow (mL/s)')
-        ax[1].set_title(f'outlet flows')
-        
-        ax[2].plot(flow, pressure, label=f'{block.surface} pressure vs flow')
-        ax[2].set_xlabel('Flow (mL/s)')
-        ax[2].set_ylabel('Pressure (mmHg)')
-        ax[2].set_title(f'outlet pressure vs flow')
+            pressure = pressure / 1333.2
 
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.path, 'figures', f'outlets.png'))
+            ax[0].plot(time, pressure, label=f'{block.surface} pressure',color=color)
+            ax[0].set_xlabel('Time (s)')
+            ax[0].set_ylabel('Pressure (mmHg)')
+            ax[0].set_title(f'outlet pressure')
+
+
+            ax[1].plot(time, flow, label=f'{block.surface} flow', color=color)
+            ax[1].set_xlabel('Time (s)')
+            ax[1].set_ylabel('Flow (mL/s)')
+            ax[1].set_title(f'outlet flows')
+            
+            ax[2].plot(flow, pressure, label=f'{block.surface} pressure vs flow')
+            ax[2].set_xlabel('Flow (mL/s)')
+            ax[2].set_ylabel('Pressure (mmHg)')
+            ax[2].set_title(f'outlet pressure vs flow')
+
+            plt.tight_layout()
+            plt.savefig(os.path.join(self.path, 'figures', f'outlets.png'))
 
 
     
