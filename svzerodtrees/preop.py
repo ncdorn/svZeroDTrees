@@ -571,6 +571,9 @@ def construct_impedance_trees(config_handler, mesh_surfaces_path, wedge_pressure
     outlet_bc_names = [name for name, bc in config_handler.bcs.items() if 'inflow' not in bc.name.lower()]
 
     # assumed that cap and boundary condition orders match
+    if len(outlet_bc_names) != len(cap_info):
+        print('number of outlet boundary conditions does not match number of cap surfaces, automatically assigning bc names...')
+        outlet_bc_names = [f'IMPEDANCE_{i}' for i in range(len(cap_info))]
     cap_to_bc = {list(cap_info.keys())[i]: outlet_bc_names[i] for i in range(len(outlet_bc_names))}
 
     for idx, (cap_name, area) in enumerate(cap_info.items()):
@@ -713,7 +716,7 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
     ### WITH ALPHA
     # result = minimize(tree_tuning_objective, [-30, -30, 66.0, 66.0, 2.7], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, tol=1.0)
     ### WITHOUT ALPHA
-    result = minimize(tree_tuning_objective, [-22, -42, 98.0, 99.0], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, tol=1.0)
+    result = minimize(tree_tuning_objective, [-31.6, -52.7, 62.4, 38.9], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, tol=1.0)
 
     # format of result.x: [k2_l, k2_r, lrr_l, lrr_r]
     print(f'Optimized parameters: {result.x}')
@@ -1347,7 +1350,7 @@ class PAConfig():
         axs[1].set_xlabel('time (s)')
         axs[1].set_ylabel('pressure (mmHg)')
 
-        plt.show()
+        plt.savefig('mpa_plot.png')
 
 
 

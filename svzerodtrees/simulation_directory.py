@@ -10,6 +10,200 @@ import vtk
 from abc import ABC, abstractmethod
 import xml.etree.ElementTree as ET
 
+
+def generate_simplified_nonlinear_zerod(cardiac_output, sys_dir='sys', dia_dir='dia', mean_dir='mean', plot=False):
+        '''
+        generate a simplified zerod config with nonlinear resistors, using data from sys/dia/mean flow steady simulations'''
+
+        sys_sim = SimulationDirectory.from_directory(sys_dir, is_pulmonary=False)
+        dia_sim = SimulationDirectory.from_directory(dia_dir, is_pulmonary=False)
+        mean_sim = SimulationDirectory.from_directory(mean_dir, is_pulmonary=False)
+
+        R_sys_lpa, R_sys_rpa = sys_sim.compute_pressure_drop()
+        R_dia_lpa, R_dia_rpa = dia_sim.compute_pressure_drop()
+        R_mean_lpa, R_mean_rpa = mean_sim.compute_pressure_drop()
+
+        # get the flow for each simulation
+        Q_sys_lpa, Q_sys_rpa = sys_sim.flow_split()
+        Q_dia_lpa, Q_dia_rpa = dia_sim.flow_split()
+        Q_mean_lpa, Q_mean_rpa = mean_sim.flow_split()
+
+        # compute the linear relationship between resistance and flow
+        S_lpa = np.polyfit([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], [R_sys_lpa, R_dia_lpa, R_mean_lpa], 1)
+        S_rpa = np.polyfit([Q_sys_rpa, Q_dia_rpa, Q_mean_rpa], [R_sys_rpa, R_dia_rpa, R_mean_rpa], 1)
+
+        if plot:
+            # plot the data and the fit
+            fig, ax = plt.subplots(1, 2, figsize=(10, 10))
+
+            q = np.linspace(0, 100, 100)
+
+            ax[0].scatter([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], [R_sys_lpa, R_dia_lpa, R_mean_lpa], label='LPA')
+            ax[0].plot(q, np.polyval(S_lpa, q), label='LPA fit')
+            ax[0].set_xlabel('Flow (mL/s)')
+            ax[0].set_ylabel('Resistance (dyn/cm5/s)')
+            ax[0].set_title('LPA flow vs resistance')
+            ax[0].legend()
+
+            ax[1].scatter([Q_sys_rpa, Q_dia_rpa, Q_mean_rpa], [R_sys_rpa, R_dia_rpa, R_mean_rpa], label='RPA')
+            ax[1].plot(q, np.polyval(S_rpa, q), label='RPA fit')
+            ax[1].set_xlabel('Flow (mL/s)')
+            ax[1].set_ylabel('Resistance (dyn/cm5/s)')
+            ax[1].set_title('RPA flow vs resistance')
+            ax[1].legend()
+
+            plt.tight_layout()
+            plt.show()
+
+
+        # create the config
+        # need to rescale the inflow and make it periodic with a generic shape (see Inflow class)
+        inflow = Inflow.periodic(path=None)
+        # inflow.rescale(cardiac_output=mean_sim.svzerod_3Dcoupling.bcs['inflow'].Q[0])
+        inflow.rescale(cardiac_output=cardiac_output)
+
+        config = ConfigHandler({
+            "boundary_conditions": [
+                inflow.to_dict(),
+                {
+                    "bc_name": "LPA_BC",
+                    "bc_type": "RESISTANCE",
+                    "bc_values": {
+                        "Pd": 6.0,
+                        "R": 100.0
+                    }
+                },
+                {
+                    "bc_name": "RPA_BC",
+                    "bc_type": "RESISTANCE",
+                    "bc_values": {
+                        "Pd": 6.0,
+                        "R": 100.0
+                    }
+                }
+            ],
+            "simulation_parameters": {
+                "output_all_cycles": False,
+                "steady_initial": False,
+                "density": 1.06,
+                "model_name": "pa_reduced",
+                "number_of_cardiac_cycles": 8,
+                "number_of_time_pts_per_cardiac_cycle": 500,
+                "viscosity": 0.04
+            },
+            "junctions": [
+                {
+                    "junction_name": "J0",
+                    "junction_type": "NORMAL_JUNCTION",
+                    "inlet_vessels": [
+                        0
+                    ],
+                    "outlet_vessels": [
+                        1,
+                        3
+                    ]
+                },
+                {
+                    "junction_name": "J1",
+                    "junction_type": "NORMAL_JUNCTION",
+                    "inlet_vessels": [
+                        1
+                    ],
+                    "outlet_vessels": [
+                        2
+                    ]
+                },
+                {
+                    "junction_name": "J2",
+                    "junction_type": "NORMAL_JUNCTION",
+                    "inlet_vessels": [
+                        3
+                    ],
+                    "outlet_vessels": [
+                        4
+                    ]
+                }
+            ],
+            "vessels": [
+                {
+                    "boundary_conditions": {
+                        "inlet": "INFLOW"
+                    },
+                    "vessel_id": 0,
+                    "vessel_length": 1.0,
+                    "vessel_name": "branch0_seg0",
+                    "zero_d_element_type": "BloodVessel",
+                    "zero_d_element_values": {
+                        "R_poiseuille": 1.0,
+                        "C": 0.0,
+                        "L": 0.0,
+                        "stenosis_coefficient": 0.0
+                    }
+                },
+                {
+                    "vessel_id": 1,
+                    "vessel_length": 1.0,
+                    "vessel_name": "branch1_seg0",
+                    "zero_d_element_type": "BloodVessel",
+                    "zero_d_element_values": {
+                        "R_poiseuille": 1.0,
+                        "C": 0.0,
+                        "L": 0.0,
+                        "stenosis_coefficient": S_lpa[0] / 2
+                    }
+                },
+                {
+                    "boundary_conditions": {
+                        "outlet": "LPA_BC"
+                    },
+                    "vessel_id": 2,
+                    "vessel_length": 1.0,
+                    "vessel_name": "branch2_seg0",
+                    "zero_d_element_type": "BloodVessel",
+                    "zero_d_element_values": {
+                        "R_poiseuille": 1.0,
+                        "C": 0.0,
+                        "L": 0.0,
+                        "stenosis_coefficient": S_lpa[0] / 2
+                    }
+                },
+                {
+                    "vessel_id": 3,
+                    "vessel_length": 1.0,
+                    "vessel_name": "branch3_seg0",
+                    "zero_d_element_type": "BloodVessel",
+                    "zero_d_element_values": {
+                        "R_poiseuille": 1.0,
+                        "C": 0.0,
+                        "L": 0.0,
+                        "stenosis_coefficient": S_rpa[0] / 2
+                    }
+                },
+                {
+                    "boundary_conditions": {
+                        "outlet": "RPA_BC"
+                    },
+                    "vessel_id": 4,
+                    "vessel_length": 1.0,
+                    "vessel_name": "branch4_seg0",
+                    "zero_d_element_type": "BloodVessel",
+                    "zero_d_element_values": {
+                        "R_poiseuille": 1.0,
+                        "C": 0.0,
+                        "L": 0.0,
+                        "stenosis_coefficient": S_rpa[0] / 2
+                    }
+                }
+            ]
+        })
+
+        config.to_json('simplified_nonlin_zerod.json')
+
+        config.simulate()
+
+        print('config is simulatable')
+
+
 class SimFile(ABC):
     '''
     abstract super class for simulation files'''
@@ -306,7 +500,7 @@ class SimulationDirectory:
         '''
         generate simulation files for a steady simulation'''
 
-        wedge_p = float(input('input wedge pressure (default 6.0): ') or 6.0)
+        wedge_p = float(input('input wedge pressure in mmHg (default 5.0): ') or 5.0) * 1333.2
 
         # add the inflows to the svzerod_3Dcoupling
         tsteps = int(input('number of time steps for inflow (default 2): ') or 2)
@@ -413,7 +607,7 @@ class SimulationDirectory:
                 "density": 1.06,
                 "model_name": "pa_reduced",
                 "number_of_cardiac_cycles": 8,
-                "number_of_time_pts_per_cardiac_cycle": 200,
+                "number_of_time_pts_per_cardiac_cycle": 500,
                 "viscosity": 0.04
             },
             "junctions": [
@@ -524,7 +718,6 @@ class SimulationDirectory:
 
         config.to_json('simplified_zerod_config.json')
  
-    
     def generate_impedance_bcs(self):
 
         wedge_p = float(input('input wedge pressure (default 6.0): ') or 6.0)
@@ -646,6 +839,44 @@ class SimulationDirectory:
         print(f'MPA systolic pressure: {sys_p} mmHg')
         print(f'MPA diastolic pressure: {dias_p} mmHg')
         print(f'MPA mean pressure: {mean_p} mmHg')
+
+    def plot_outlet(self):
+        '''
+        plot the outlet pressures'''
+
+        fig, ax = plt.subplots(1, 3, figsize=(10, 10))
+
+        block = self.svzerod_3Dcoupling.coupling_blocks['RESISTANCE_0']
+        time, flow, pressure = self.svzerod_data.get_result(block)
+
+        if 'lpa' in block.surface.lower():
+            color='r'
+        elif 'rpa' in block.surface.lower():
+            color='b'
+        else:
+            color='g'
+
+
+        pressure = pressure / 1333.2
+
+        ax[0].plot(time, pressure, label=f'{block.surface} pressure',color=color)
+        ax[0].set_xlabel('Time (s)')
+        ax[0].set_ylabel('Pressure (mmHg)')
+        ax[0].set_title(f'outlet pressure')
+
+
+        ax[1].plot(time, flow, label=f'{block.surface} flow', color=color)
+        ax[1].set_xlabel('Time (s)')
+        ax[1].set_ylabel('Flow (mL/s)')
+        ax[1].set_title(f'outlet flows')
+        
+        ax[2].plot(flow, pressure, label=f'{block.surface} pressure vs flow')
+        ax[2].set_xlabel('Flow (mL/s)')
+        ax[2].set_ylabel('Pressure (mmHg)')
+        ax[2].set_title(f'outlet pressure vs flow')
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.path, 'figures', f'outlets.png'))
 
 
     
@@ -1278,12 +1509,9 @@ if __name__ == '__main__':
     '''
     test the simulation directory class code'''
 
-    sim_dir = '../../Sheep/test-cassian/'
+    os.chdir('../threed_models/SU0243/preop-steady')
 
-    simulation = SimulationDirectory.from_directory(sim_dir, convert_to_cm=True)
-
-
-    simulation.generate_impedance_bcs()
+    generate_simplified_nonlinear_zerod(41.7, plot=True)
 
     
 
