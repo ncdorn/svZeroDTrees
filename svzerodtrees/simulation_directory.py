@@ -879,8 +879,8 @@ class SimulationDirectory:
             ax[2].set_ylabel('Pressure (mmHg)')
             ax[2].set_title(f'outlet pressure vs flow')
 
-            plt.tight_layout()
-            plt.savefig(os.path.join(self.path, 'figures', f'outlets.png'))
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.path, 'figures', f'outlets.png'))
 
 
     
