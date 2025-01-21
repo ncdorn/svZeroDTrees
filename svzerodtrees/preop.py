@@ -736,10 +736,6 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
     
 
 
-
-
-
-
 class ClinicalTargets():
     '''
     class to handle clinical target values
@@ -1068,26 +1064,23 @@ class PAConfig():
             "inlet": "INFLOW"
         }
 
-        lpa_tree = StructuredTree(name='lpa_tree', time=self.inflow.t, simparams=self.simparams)
+        self.lpa_tree = StructuredTree(name='lpa_tree', time=self.inflow.t, simparams=self.simparams)
 
-        lpa_tree.build_tree(initial_d=lpa_d, d_min=d_min, lrr=tree_params['lpa'][3], xi=2.7)
-
-        # compute the impedance in frequency domain
-        lpa_tree.compute_olufsen_impedance(k1=tree_params['lpa'][0], k2=tree_params['lpa'][1], k3=tree_params['lpa'][2], n_procs=n_procs)
-
-        self.bcs["LPA_BC"] = lpa_tree.create_impedance_bc("LPA_BC", self.clinical_targets.wedge_p * 1333.2)
-
-        rpa_tree = StructuredTree(name='rpa_tree', time=self.inflow.t, simparams=self.simparams)
-
-        rpa_tree.build_tree(initial_d=rpa_d, d_min=d_min, lrr=tree_params['rpa'][3], xi=2.7)
+        self.lpa_tree.build_tree(initial_d=lpa_d, d_min=d_min, lrr=tree_params['lpa'][3], xi=2.7)
 
         # compute the impedance in frequency domain
-        rpa_tree.compute_olufsen_impedance(k1=tree_params['rpa'][0], k2=tree_params['rpa'][1], k3=tree_params['rpa'][2], n_procs=n_procs)
+        self.lpa_tree.compute_olufsen_impedance(k1=tree_params['lpa'][0], k2=tree_params['lpa'][1], k3=tree_params['lpa'][2], n_procs=n_procs)
 
-        self.bcs["RPA_BC"] = rpa_tree.create_impedance_bc("RPA_BC", self.clinical_targets.wedge_p * 1333.2)
+        self.bcs["LPA_BC"] = self.lpa_tree.create_impedance_bc("LPA_BC", self.clinical_targets.wedge_p * 1333.2)
 
+        self.rpa_tree = StructuredTree(name='rpa_tree', time=self.inflow.t, simparams=self.simparams)
 
+        self.rpa_tree.build_tree(initial_d=rpa_d, d_min=d_min, lrr=tree_params['rpa'][3], xi=2.7)
 
+        # compute the impedance in frequency domain
+        self.rpa_tree.compute_olufsen_impedance(k1=tree_params['rpa'][0], k2=tree_params['rpa'][1], k3=tree_params['rpa'][2], n_procs=n_procs)
+
+        self.bcs["RPA_BC"] = self.rpa_tree.create_impedance_bc("RPA_BC", self.clinical_targets.wedge_p * 1333.2)
 
 
     def initialize_config_maps(self):
@@ -1331,7 +1324,7 @@ class PAConfig():
         print([self.Q_rpa / self.clinical_targets.q, self.P_mpa, self.P_lpa, self.P_rpa])
 
 
-    def plot_mpa(self):
+    def plot_mpa(self, path='mpa_plot.png'):
         '''
         plot the mpa pressure and flow
         '''
@@ -1346,11 +1339,53 @@ class PAConfig():
         axs[0].set_ylabel('flow (cm3/s)')
 
         # plot pressure
-        axs[1].plot(mpa_result['time'], mpa_result['pressure_in'])
+        axs[1].plot(mpa_result['time'], mpa_result['pressure_in'] / 1333.2)
         axs[1].set_xlabel('time (s)')
         axs[1].set_ylabel('pressure (mmHg)')
 
-        plt.savefig('mpa_plot.png')
+        plt.savefig(path)
+
+
+    def optimize_rcrs_and_compare(self):
+        '''
+        create optimized RCRs against impedance trees and compare with the resistance optimization
+        '''
+
+        # optimize rcr against lpa tree
+        print('optimizing RCR to match LPA')
+        Rp_lpa, C_lpa, Rd_lpa = self.lpa_tree.match_RCR_to_impedance()
+
+        # optimize rcr against rpa tree
+        print('optimizing RCR to match RPA')
+        Rp_rpa, C_rpa, Rd_rpa = self.rpa_tree.match_RCR_to_impedance()
+
+        self.bcs['LPA_BC'] = BoundaryCondition.from_config({
+            "bc_name": "LPA_BC",
+            "bc_type": "RCR",
+            "bc_values": {
+                "Rp": Rp_lpa,
+                "C": C_lpa,
+                "Rd": Rd_lpa,
+                "Pd": self.clinical_targets.wedge_p
+            }
+        })
+
+        self.bcs['RPA_BC'] = BoundaryCondition.from_config({
+            "bc_name": "RPA_BC",
+            "bc_type": "RCR",
+            "bc_values": {
+                "Rp": Rp_rpa,
+                "C": C_rpa,
+                "Rd": Rd_rpa,
+                "Pd": self.clinical_targets.wedge_p
+            }
+        })
+
+        self.simulate()
+
+        print('pa config with RCRs simulated')
+
+        self.plot_mpa('mpa_plot_rcr.png')
 
 
 

@@ -496,6 +496,74 @@ class StructuredTree():
         return impedance_bc
 
 
+    def match_RCR_to_impedance(self):
+        '''
+        find the RCR parameters to match the impedance from an impedance tree.'''
+
+        # get the impedance of the structured tree if self.Z_t is None
+        if self.Z_t is None:
+            self.compute_olufsen_impedance()
+
+        
+        # loss function for optimizing RCR parameters
+        def loss_function(params):
+            '''
+            loss function for optimizing RCR parameters
+
+            :param params: RCR parameters [Rp, C, Rd]
+            '''
+            # compute impedance from the RCR parameters
+            Rp, C, Rd = params
+            # calculate the impedance from the RCR parameters
+            tsteps = len(self.time)
+            period = max(self.time) * self.q / self.Lr**3
+            df = 1 / period
+            omega = [i * df * 2 * np.pi for i in range(-tsteps//2, tsteps//2)] # angular frequency vector
+
+            Z_om = np.zeros(len(omega), dtype=complex)
+
+            # Z_om[:tsteps//2+1] = np.conjugate([((1j * w * Rp * Rd * C) + (Rp + Rd)) / ((1j * w * Rd * C) + 1) for w in omega[:tsteps//2+1]])
+            # def Z(w, Rp, C, Rd):
+            #     return ((1j * w * Rp * Rd * C) + (Rp + Rd)) / ((1j * w * Rd * C) + 1)
+            Z_om[:tsteps//2+1] = np.array([np.sqrt(((Rd + Rp) ** 2 + (w * Rp * Rd * C) ** 2) / (1 + (w * Rd * C) ** 2)) for w in omega[:tsteps//2+1]])
+
+            # apply self-adjoint property of the impedance
+            Z_om_half = Z_om[:tsteps//2]
+            # add negative frequencies
+            Z_om[tsteps//2+1:] = np.conjugate(np.flipud(Z_om_half[:-1]))
+
+
+            # dimensionalize omega
+            omega = [w * self.q / self.Lr**3 for w in omega]
+
+            Z_om = np.fft.ifftshift(Z_om)
+
+            print(f'Z(w=0) = {Z_om[0]}')
+
+            Z_rcr = np.fft.ifft(Z_om)
+
+            self.Z_rcr = np.real(Z_rcr)
+
+            # calculate the squared difference between the impedance from the RCR parameters and the impedance from the structured tree
+            loss = np.sum((self.Z_t - Z_rcr)**2)
+
+            print(f'loss: {loss}')
+
+            return loss
+        
+        # initial guess for RCR parameters
+        initial_guess = [100.0, 0.0001, 900.0]
+
+        # optimize the RCR parameters
+        bounds = Bounds(lb=[0.0, 0.0, 0.0], ub=[np.inf, np.inf, np.inf])
+        # bounds = Bounds(lb=[-np.inf, -np.inf, -np.inf], ub=[np.inf, np.inf, np.inf])
+        result = minimize(loss_function, initial_guess, method='Nelder-Mead', bounds=bounds)
+
+        print(f'optimized RCR parameters: {result.x}')
+
+        return result.x
+
+
     def adapt_constant_wss(self, Q, Q_new):
         R_old = self.root.R_eq  # calculate pre-adaptation resistance
 

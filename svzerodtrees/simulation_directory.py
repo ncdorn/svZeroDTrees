@@ -287,7 +287,7 @@ class SimulationDirectory:
         self.convert_to_cm = convert_to_cm
 
     @classmethod
-    def from_directory(cls, path='.', zerod_config=None, results_dir=None, convert_to_cm=True, is_pulmonary=True):
+    def from_directory(cls, path='.', zerod_config=None, mesh_complete='mesh-complete', results_dir=None, convert_to_cm=True, is_pulmonary=True):
         '''
         create a simulation directory object from the path to the simulation directory
         and search for the necessary files within the path'''
@@ -307,8 +307,6 @@ class SimulationDirectory:
             zerod_config = None
 
         # check for mesh complete
-        mesh_complete = os.path.join(path, 'mesh-complete')
-        mesh_surfaces = os.path.join(mesh_complete, 'mesh-surfaces')
         if os.path.exists(mesh_complete):
             print('mesh-complete found')
             mesh_complete = MeshComplete(mesh_complete)
@@ -450,7 +448,8 @@ class SimulationDirectory:
             raise FileNotFoundError('svzerod_3Dcoupling.json does not exist')
         
         print('ready to run simulation!')
-        
+
+        return True
 
 
     def write_files(self):
