@@ -133,19 +133,17 @@ class Simulation:
             'dia': 1.0,
             'mean': np.mean(self.inflow.q)
         }
-
+        steady_sims = {}
         for label, q in flow_dict.items():
             dir_path = os.path.join(self.steady_dir, label)
             os.makedirs(dir_path, exist_ok=True)
             # create the steady simulation
-            sim = SimulationDirectory.from_directory(path=dir_path, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm)
-            sim.generate_steady_sim(flow_rate=q, wedge_p=self.clinical_targets.wedge_p)
-            sim.run()
+            steady_sims[label] = SimulationDirectory.from_directory(path=dir_path, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm)
+            steady_sims[label].generate_steady_sim(flow_rate=q, wedge_p=self.clinical_targets.wedge_p)
+            steady_sims[label].run()
         
         # now check simulations
-        for label, q in flow_dict.items():
-            dir_path = os.path.join(self.steady_dir, label)
-            sim = SimulationDirectory.from_directory(path=dir_path, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm)
+        for label, sim in steady_sims.items():
             sim.check_simulation()
     
     def generate_simplified_nonlinear_zerod(self, cardiac_output, sys_dir=None, dia_dir=None, mean_dir=None, plot=True):
