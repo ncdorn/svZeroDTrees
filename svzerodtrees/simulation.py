@@ -63,20 +63,22 @@ class Simulation:
         ## TO BE IMPLEMENTED LATER
         return cls(**config)
     
-    def run_pipeline(self):
+    def run_pipeline(self, run_steady=True, bcs_optimized=False):
         '''
         run the entire pipeline
         '''
+        if run_steady:
+            # run the steady simulations
+            self.run_steady_sims()
 
-        # run the steady simulations
-        self.run_steady_sims()
+            # generate the simplified zerod config
+            self.generate_simplified_nonlinear_zerod(cardiac_output=self.clinical_targets.q)
 
-        # generate the simplified zerod config
-        self.generate_simplified_nonlinear_zerod(cardiac_output=self.clinical_targets.q)
-
-        # optimize preop BCs
-        reduced_config = ConfigHandler.from_json(self.simplified_zerod_config)
-        optimize_impedance_bcs(reduced_config, self.preop_dir.mesh_surfaces.path, self.clinical_targets, opt_config_path=self.zerod_config, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
+            # optimize preop BCs
+            reduced_config = ConfigHandler.from_json(self.simplified_zerod_config)
+        
+        if not bcs_optimized:
+            optimize_impedance_bcs(reduced_config, self.preop_dir.mesh_surfaces.path, self.clinical_targets, opt_config_path=self.zerod_config, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
 
         # run preop + postop simulations
         sim_config = {
