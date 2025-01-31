@@ -5,203 +5,13 @@ from svzerodtrees.preop import *
 from svzerodtrees.inflow import *
 import json
 import pickle
+import time
 import os
 import vtk
 from abc import ABC, abstractmethod
 import xml.etree.ElementTree as ET
 
 
-def generate_simplified_nonlinear_zerod(cardiac_output, sys_dir='sys', dia_dir='dia', mean_dir='mean', plot=False):
-        '''
-        generate a simplified zerod config with nonlinear resistors, using data from sys/dia/mean flow steady simulations'''
-
-        sys_sim = SimulationDirectory.from_directory(sys_dir, is_pulmonary=False)
-        dia_sim = SimulationDirectory.from_directory(dia_dir, is_pulmonary=False)
-        mean_sim = SimulationDirectory.from_directory(mean_dir, is_pulmonary=False)
-
-        R_sys_lpa, R_sys_rpa = sys_sim.compute_pressure_drop()
-        R_dia_lpa, R_dia_rpa = dia_sim.compute_pressure_drop()
-        R_mean_lpa, R_mean_rpa = mean_sim.compute_pressure_drop()
-
-        # get the flow for each simulation
-        Q_sys_lpa, Q_sys_rpa = sys_sim.flow_split()
-        Q_dia_lpa, Q_dia_rpa = dia_sim.flow_split()
-        Q_mean_lpa, Q_mean_rpa = mean_sim.flow_split()
-
-        # compute the linear relationship between resistance and flow
-        S_lpa = np.polyfit([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], [R_sys_lpa, R_dia_lpa, R_mean_lpa], 1)
-        S_rpa = np.polyfit([Q_sys_rpa, Q_dia_rpa, Q_mean_rpa], [R_sys_rpa, R_dia_rpa, R_mean_rpa], 1)
-
-        if plot:
-            # plot the data and the fit
-            fig, ax = plt.subplots(1, 2, figsize=(10, 10))
-
-            q = np.linspace(0, 100, 100)
-
-            ax[0].scatter([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], [R_sys_lpa, R_dia_lpa, R_mean_lpa], label='LPA')
-            ax[0].plot(q, np.polyval(S_lpa, q), label='LPA fit')
-            ax[0].set_xlabel('Flow (mL/s)')
-            ax[0].set_ylabel('Resistance (dyn/cm5/s)')
-            ax[0].set_title('LPA flow vs resistance')
-            ax[0].legend()
-
-            ax[1].scatter([Q_sys_rpa, Q_dia_rpa, Q_mean_rpa], [R_sys_rpa, R_dia_rpa, R_mean_rpa], label='RPA')
-            ax[1].plot(q, np.polyval(S_rpa, q), label='RPA fit')
-            ax[1].set_xlabel('Flow (mL/s)')
-            ax[1].set_ylabel('Resistance (dyn/cm5/s)')
-            ax[1].set_title('RPA flow vs resistance')
-            ax[1].legend()
-
-            plt.tight_layout()
-            plt.show()
-
-
-        # create the config
-        # need to rescale the inflow and make it periodic with a generic shape (see Inflow class)
-        inflow = Inflow.periodic(path=None)
-        # inflow.rescale(cardiac_output=mean_sim.svzerod_3Dcoupling.bcs['inflow'].Q[0])
-        inflow.rescale(cardiac_output=cardiac_output)
-
-        config = ConfigHandler({
-            "boundary_conditions": [
-                inflow.to_dict(),
-                {
-                    "bc_name": "LPA_BC",
-                    "bc_type": "RESISTANCE",
-                    "bc_values": {
-                        "Pd": 6.0,
-                        "R": 100.0
-                    }
-                },
-                {
-                    "bc_name": "RPA_BC",
-                    "bc_type": "RESISTANCE",
-                    "bc_values": {
-                        "Pd": 6.0,
-                        "R": 100.0
-                    }
-                }
-            ],
-            "simulation_parameters": {
-                "output_all_cycles": False,
-                "steady_initial": False,
-                "density": 1.06,
-                "model_name": "pa_reduced",
-                "number_of_cardiac_cycles": 8,
-                "number_of_time_pts_per_cardiac_cycle": 500,
-                "viscosity": 0.04
-            },
-            "junctions": [
-                {
-                    "junction_name": "J0",
-                    "junction_type": "NORMAL_JUNCTION",
-                    "inlet_vessels": [
-                        0
-                    ],
-                    "outlet_vessels": [
-                        1,
-                        3
-                    ]
-                },
-                {
-                    "junction_name": "J1",
-                    "junction_type": "NORMAL_JUNCTION",
-                    "inlet_vessels": [
-                        1
-                    ],
-                    "outlet_vessels": [
-                        2
-                    ]
-                },
-                {
-                    "junction_name": "J2",
-                    "junction_type": "NORMAL_JUNCTION",
-                    "inlet_vessels": [
-                        3
-                    ],
-                    "outlet_vessels": [
-                        4
-                    ]
-                }
-            ],
-            "vessels": [
-                {
-                    "boundary_conditions": {
-                        "inlet": "INFLOW"
-                    },
-                    "vessel_id": 0,
-                    "vessel_length": 1.0,
-                    "vessel_name": "branch0_seg0",
-                    "zero_d_element_type": "BloodVessel",
-                    "zero_d_element_values": {
-                        "R_poiseuille": 1.0,
-                        "C": 0.0,
-                        "L": 0.0,
-                        "stenosis_coefficient": 0.0
-                    }
-                },
-                {
-                    "vessel_id": 1,
-                    "vessel_length": 1.0,
-                    "vessel_name": "branch1_seg0",
-                    "zero_d_element_type": "BloodVessel",
-                    "zero_d_element_values": {
-                        "R_poiseuille": 1.0,
-                        "C": 0.0,
-                        "L": 0.0,
-                        "stenosis_coefficient": S_lpa[0] / 2
-                    }
-                },
-                {
-                    "boundary_conditions": {
-                        "outlet": "LPA_BC"
-                    },
-                    "vessel_id": 2,
-                    "vessel_length": 1.0,
-                    "vessel_name": "branch2_seg0",
-                    "zero_d_element_type": "BloodVessel",
-                    "zero_d_element_values": {
-                        "R_poiseuille": 1.0,
-                        "C": 0.0,
-                        "L": 0.0,
-                        "stenosis_coefficient": S_lpa[0] / 2
-                    }
-                },
-                {
-                    "vessel_id": 3,
-                    "vessel_length": 1.0,
-                    "vessel_name": "branch3_seg0",
-                    "zero_d_element_type": "BloodVessel",
-                    "zero_d_element_values": {
-                        "R_poiseuille": 1.0,
-                        "C": 0.0,
-                        "L": 0.0,
-                        "stenosis_coefficient": S_rpa[0] / 2
-                    }
-                },
-                {
-                    "boundary_conditions": {
-                        "outlet": "RPA_BC"
-                    },
-                    "vessel_id": 4,
-                    "vessel_length": 1.0,
-                    "vessel_name": "branch4_seg0",
-                    "zero_d_element_type": "BloodVessel",
-                    "zero_d_element_values": {
-                        "R_poiseuille": 1.0,
-                        "C": 0.0,
-                        "L": 0.0,
-                        "stenosis_coefficient": S_rpa[0] / 2
-                    }
-                }
-            ]
-        })
-
-        config.to_json('simplified_nonlin_zerod.json')
-
-        config.simulate()
-
-        print('config is simulatable')
 
 
 class SimFile(ABC):
@@ -256,6 +66,9 @@ class SimulationDirectory:
 
         # path to the simulation directory
         self.path = path
+
+        # sim name
+        self.simname = f"simulation {os.path.basename(path)}"
 
         # zerod model
         self.zerod_config = zerod_config
@@ -408,12 +221,12 @@ class SimulationDirectory:
         '''
         run the simulation'''
 
-        self.check(verbose=False)
+        self.check_files(verbose=False)
 
         os.system('clean')
         os.system(f'sbatch {self.solver_runscript.path}')
 
-    def check(self, verbose=True):
+    def check_files(self, verbose=True):
         '''
         check if the simulation directory has all the necessary files'''
 
@@ -451,20 +264,25 @@ class SimulationDirectory:
 
         return True
 
-
-    def write_files(self):
+    def write_files(self, simname='SIMULATION', user_input=True, sim_config=None):
         '''
         write simulation files to the simulation directory'''
 
         # write the 3d-0d coupling json file
 
-        
+        print(f'writing files for {simname}...')
 
         self.svzerod_interface.write(self.svzerod_3Dcoupling.path)
 
-        def write_svfsixml_input_params():
-            n_tsteps = int(input('number of time steps (default 5000): ') or 5000)
-            dt = float(input('time step size (default 0.001): ') or 0.001)
+        def write_svfsixml_input_params(user_input=user_input, sim_config=sim_config):
+            if user_input:
+                n_tsteps = int(input('number of time steps (default 5000): ') or 5000)
+                dt = float(input('time step size (default 0.001): ') or 0.001)
+            else:
+                if sim_config is None:
+                    raise ValueError('sim_config is None, cannot write svFSI.xml')
+                n_tsteps = sim_config['n_tsteps']
+                dt = sim_config['dt']
             if self.convert_to_cm:
                 print("scaling mesh to cm...")
                 mesh_scale_factor = 0.1
@@ -472,43 +290,64 @@ class SimulationDirectory:
                 mesh_scale_factor = 1.0
             self.svFSIxml.write(self.mesh_complete, n_tsteps=n_tsteps, dt=dt, scale_factor=mesh_scale_factor)
         
-        def write_runscript_input_params():
-            nodes = int(input('number of nodes (default 4): ') or 4)
-            procs_per_node = int(input('number of processors per node ( default 24): ') or 24)
-            hours = int(input('number of hours (default 6): ') or 6)
-            self.solver_runscript.write(nodes=nodes, procs_per_node=procs_per_node, hours=hours)
+        def write_runscript_input_params(user_input=user_input, sim_config=sim_config):
+            if user_input:
+                nodes = int(input('number of nodes (default 4): ') or 4)
+                procs_per_node = int(input('number of processors per node ( default 24): ') or 24)
+                memory = int(input('memory per node in GB (default 16): ') or 16)
+                hours = int(input('number of hours (default 6): ') or 6)
+            else:
+                nodes = sim_config['nodes']
+                procs_per_node = sim_config['procs_per_node']
+                memory = sim_config['memory']
+                hours = sim_config['hours']
+            self.solver_runscript.write(nodes=nodes, procs_per_node=procs_per_node, hours=hours, memory=memory)
 
 
         if self.svFSIxml.is_written:
-            rewrite = input('\nsvFSI.xml already exists, overwrite? y/n: ')
-            if rewrite.lower() == 'y':
+            if user_input:
+                rewrite = input('\nsvFSI.xml already exists, overwrite? y/n: ')
+                if rewrite.lower() == 'y':
+                    write_svfsixml_input_params()
+            else:
+                # automatically rewrite
                 write_svfsixml_input_params()
         else:
             write_svfsixml_input_params()
 
         if self.solver_runscript.is_written:
-            rewrite = input('solver runscript already exists, overwrite? y/n: ')
-            if rewrite.lower() == 'y':
+            if user_input:
+                rewrite = input('solver runscript already exists, overwrite? y/n: ')
+                if rewrite.lower() == 'y':
+                    write_runscript_input_params()
+            else:
+                # automatically rewrite
                 write_runscript_input_params()
         else:
             write_runscript_input_params()
 
-        self.check()
+        self.check_files()
 
-    def generate_steady_sim(self):
+    def generate_steady_sim(self, flow_rate=None, wedge_p=None):
         '''
         generate simulation files for a steady simulation'''
 
-        wedge_p = float(input('input wedge pressure in mmHg (default 5.0): ') or 5.0) * 1333.2
+        if wedge_p is None:
+            wedge_p = float(input('input wedge pressure in mmHg (default 5.0): ') or 5.0) * 1333.2
+        else:
+            wedge_p = wedge_p * 1333.2
 
         # add the inflows to the svzerod_3Dcoupling
-        tsteps = int(input('number of time steps for inflow (default 2): ') or 2)
+        tsteps = 2
         self.svzerod_3Dcoupling.simparams.number_of_time_pts_per_cardiac_cycle = tsteps
         bc_idx = 0
         for vtp in self.mesh_complete.mesh_surfaces:
             if 'inflow' in vtp.filename.lower():
                 # need to get inflow path or steady flow rate
-                flow_rate = float(input(f'input steady flow rate for {vtp.filename}: '))
+                if flow_rate is None:
+                    flow_rate = float(input(f'input steady flow rate for {vtp.filename}: '))
+                else:
+                    flow_rate = flow_rate
 
                 try:
                     inflow = Inflow.steady(flow_rate, name=vtp.filename.split('.')[0].upper())
@@ -536,7 +375,16 @@ class SimulationDirectory:
         self.svzerod_3Dcoupling.to_json('blank_zerod_config.json')
         self.svzerod_3Dcoupling, coupling_blocks = self.svzerod_3Dcoupling.generate_threed_coupler(self.path, inflow_from_0d=True, mesh_complete=self.mesh_complete)
 
-        self.write_files()
+        sim_config = {
+            'n_tsteps': 200,
+            'dt': 0.001,
+            'nodes': 2,
+            'procs_per_node': 24,
+            'memory': 16,
+            'hours': 6
+        }
+
+        self.write_files(simname='Steady Simulation', user_input=False, sim_config=sim_config)
     
     def compute_pressure_drop(self):
 
@@ -881,7 +729,28 @@ class SimulationDirectory:
         plt.tight_layout()
         plt.savefig(os.path.join(self.path, 'figures', f'outlets.png'))
 
+    def check_simulation(self, poll_interval=60):
+        '''
+        check the simulation status'''
 
+        n_procs = self.solver_runscript.nodes * self.solver_runscript.procs_per_node
+        started_running = False
+        is_completed = False
+        while True:
+            # check for n_procs folder
+            if os.path.exists(os.path.join(self.path, f'{n_procs}-procs')):
+                if not started_running:
+                    print(f'{self.simname} has started running...')
+                    started_running = True
+                else:
+                    with open(os.path.join(self.path, f'{n_procs}-procs', 'histor.dat'), 'r') as f:
+                        lines = f.readlines()
+                        if len(lines) > 1:
+                            if str(self.svFSIxml.n_tsteps) in lines[-1].split(' ')[2]:
+                                print(f'{self.simname} has completed!')
+                                return
+            
+            time.sleep(poll_interval)
     
 
 class MeshComplete(SimFile):
@@ -1092,6 +961,9 @@ class SvFSIxml(SimFile):
         
         :param mesh_complete: MeshComplete object'''
 
+        self.n_tsteps = n_tsteps
+        self.dt = dt
+
         print('writing svFSIplus.xml...')
 
         # generate XML tree
@@ -1102,7 +974,7 @@ class SvFSIxml(SimFile):
         gensimparams = ET.SubElement(svfsifile, "GeneralSimulationParameters")
 
         cont_prev_sim = ET.SubElement(gensimparams, "Continue_previous_simulation")
-        cont_prev_sim.text = "false"
+        cont_prev_sim.text = "true"
 
         num_spatial_dims = ET.SubElement(gensimparams, "Number_of_spatial_dimensions")
         num_spatial_dims.text = "3"
@@ -1313,9 +1185,16 @@ class SolverRunscript(SimFile):
               nodes=4, 
               procs_per_node=24, 
               hours=6, 
+              memory=16,
               svfsiplus_path='/home/users/ndorn/svMP-procfix/svMP-build/svMultiPhysics-build/bin/svmultiphysics'):
         '''
         write the solver runscript file'''
+
+        self.nodes = nodes
+        self.procs_per_node = procs_per_node
+        self.hours = hours
+        self.memory = memory
+        self.svfsiplus_path = svfsiplus_path
 
         print('writing solver runscript file...')
 
@@ -1335,7 +1214,7 @@ class SolverRunscript(SimFile):
             ff.write("# Number of nodes are you requesting for your job. You can have 24 processors per node \n")
             ff.write(f"#SBATCH --nodes={nodes} \n\n")
             ff.write("# Amount of memory you require per node. The default is 4000 MB per node \n")
-            ff.write("#SBATCH --mem=8G\n\n")
+            ff.write(f"#SBATCH --mem={memory}G\n\n")
             ff.write("# Number of processors per node \n")
             ff.write(f"#SBATCH --ntasks-per-node={procs_per_node} \n\n")
             ff.write("# Send an email to this address when your job starts and finishes \n")
@@ -1512,9 +1391,6 @@ if __name__ == '__main__':
     '''
     test the simulation directory class code'''
 
-    os.chdir('../threed_models/SU0243/preop-steady')
-
-    generate_simplified_nonlinear_zerod(41.7, plot=True)
 
     
 
