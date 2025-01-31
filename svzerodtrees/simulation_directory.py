@@ -70,6 +70,8 @@ class SimulationDirectory:
         # sim name
         self.simname = f"simulation {os.path.basename(path)}"
 
+        print(f'\n\n *** INITIALIZING SIMULATION DIRECTORY: {self.simname} *** \n\n')
+
         # zerod model
         self.zerod_config = zerod_config
 
