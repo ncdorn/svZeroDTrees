@@ -120,6 +120,7 @@ class SimulationDirectory:
             zerod_config = None
 
         # check for mesh complete
+        mesh_complete = os.path.join(path, mesh_complete)
         if os.path.exists(mesh_complete):
             print('mesh-complete found')
             mesh_complete = MeshComplete(mesh_complete)
