@@ -140,7 +140,11 @@ class Simulation:
             # create the steady simulation
             steady_sims[label] = SimulationDirectory.from_directory(path=dir_path, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm)
             steady_sims[label].generate_steady_sim(flow_rate=q, wedge_p=self.clinical_targets.wedge_p)
+            # cd into directory to sumit simulation
+            os.chdir(steady_sims[label].path)
             steady_sims[label].run()
+            # cd back to the original directory
+            os.chdir(self.path)
         
         # now check simulations
         for label, sim in steady_sims.items():
