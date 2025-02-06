@@ -70,8 +70,6 @@ class SimulationDirectory:
         # sim name
         self.simname = f"simulation {os.path.basename(path)}"
 
-        print(f'\n\n *** INITIALIZING SIMULATION DIRECTORY: {self.simname} *** \n\n')
-
         # zerod model
         self.zerod_config = zerod_config
 
@@ -108,6 +106,8 @@ class SimulationDirectory:
         and search for the necessary files within the path'''
 
         path = os.path.abspath(path)
+
+        print(f'\n\n *** INITIALIZING SIMULATION DIRECTORY: {os.path.basename(path)} *** \n\n')
 
         # check for zerod model
         if zerod_config is not None and os.path.exists(zerod_config):
@@ -807,6 +807,8 @@ class MeshComplete(SimFile):
         self.mesh_surfaces = []
         for file in filelist:
             self.mesh_surfaces.append(VTPFile(file))
+
+        self.assign_lobe()
     
     def write(self):
         '''
@@ -857,6 +859,47 @@ class MeshComplete(SimFile):
         # scale the mesh surfaces
         for surface in self.mesh_surfaces:
             surface.scale(scale_factor=scale_factor)
+
+    def assign_lobe(self):
+        '''
+        assign upper, middle or lower lobe location to left and right outlets, except the inlet, based on the center of mass y coourdinate'''
+
+        # get the y coord of lpa and rpa outlets
+        lpa_locs = [vtp.get_location()[1] for vtp in self.mesh_surfaces if vtp.lpa]
+        rpa_locs = [vtp.get_location()[1] for vtp in self.mesh_surfaces if vtp.rpa]
+        
+        # get the lobe size (1/3 of the y range)
+        lpa_lobe_size = (max(lpa_locs) - min(lpa_locs)) / 3
+        rpa_lobe_size = (max(rpa_locs) - min(rpa_locs)) / 3
+
+        # assign outlet lobe location
+        for vtp in self.mesh_surfaces:
+            if vtp.lpa:
+                if vtp.get_location()[1] < min(lpa_locs) + lpa_lobe_size:
+                    vtp.lobe = 'lower'
+                elif vtp.get_location()[1] > max(lpa_locs) - lpa_lobe_size:
+                    vtp.lobe = 'upper'
+                else:
+                    vtp.lobe = 'middle'
+            elif vtp.rpa:
+                if vtp.get_location()[1] < min(rpa_locs) + rpa_lobe_size:
+                    vtp.lobe = 'lower'
+                elif vtp.get_location()[1] > max(rpa_locs) - rpa_lobe_size:
+                    vtp.lobe = 'upper'
+                else:
+                    vtp.lobe = 'middle'
+        
+        # count the number of outlets in each lobe
+        lpa_upper = len([vtp for vtp in self.mesh_surfaces if vtp.lpa and vtp.lobe == 'upper'])
+        lpa_middle = len([vtp for vtp in self.mesh_surfaces if vtp.lpa and vtp.lobe == 'middle'])
+        lpa_lower = len([vtp for vtp in self.mesh_surfaces if vtp.lpa and vtp.lobe == 'lower'])
+
+        rpa_upper = len([vtp for vtp in self.mesh_surfaces if vtp.rpa and vtp.lobe == 'upper'])
+        rpa_middle = len([vtp for vtp in self.mesh_surfaces if vtp.rpa and vtp.lobe == 'middle'])
+        rpa_lower = len([vtp for vtp in self.mesh_surfaces if vtp.rpa and vtp.lobe == 'lower'])
+
+        print(f'outlets by lobe: LPA upper: {lpa_upper}, middle: {lpa_middle}, lower: {lpa_lower}')
+        print(f'outlets by lobe: RPA upper: {rpa_upper}, middle: {rpa_middle}, lower: {rpa_lower}\n')
 
 
 class SVZeroDInterface(SimFile):
@@ -977,7 +1020,7 @@ class SvFSIxml(SimFile):
         gensimparams = ET.SubElement(svfsifile, "GeneralSimulationParameters")
 
         cont_prev_sim = ET.SubElement(gensimparams, "Continue_previous_simulation")
-        cont_prev_sim.text = "true"
+        cont_prev_sim.text = "false"
 
         num_spatial_dims = ET.SubElement(gensimparams, "Number_of_spatial_dimensions")
         num_spatial_dims.text = "3"
@@ -1249,6 +1292,8 @@ class VTPFile(SimFile):
         initialize the vtp object'''
         super().__init__(path)
 
+        self.lobe = None # to be assigned later
+
         if 'lpa' in self.filename.lower():
             self.lpa = True
             self.rpa = False
@@ -1285,6 +1330,21 @@ class VTPFile(SimFile):
         masser.Update()
 
         self.area = masser.GetSurfaceArea()
+
+    def get_location(self):
+        '''
+        get the center of mass of the outlet'''
+        reader = vtk.vtkXMLPolyDataReader()
+        reader.SetFileName(self.path)
+        reader.Update()
+        poly = reader.GetOutputPort()
+        com = vtk.vtkCenterOfMass()
+        com.SetInputConnection(poly)
+        com.Update()
+
+        self.center = com.GetCenter()
+
+        return self.center
 
     def scale(self, scale_factor=0.1):
         '''

@@ -3,6 +3,7 @@ import copy
 from svzerodtrees.structuredtree import StructuredTree
 from svzerodtrees.result_handler import ResultHandler
 from svzerodtrees.config_handler import ConfigHandler
+from svzerodtrees.simulation_directory import *
 import numpy as np
 
 
@@ -111,7 +112,7 @@ def adapt_constant_wss(config_handler: ConfigHandler, result_handler: ResultHand
     config_handler.simulate(result_handler, 'adapted')
 
 
-def adapt_constant_wss_threed(config_handler: ConfigHandler, preop_q, postop_q, log_file: str = None):
+def adapt_constant_wss_threed_OLD(config_handler: ConfigHandler, preop_q, postop_q, log_file: str = None):
     '''
     adapt structured trees coupled to a 3d simulation based on the constant wall shear stress assumption
     
@@ -144,3 +145,34 @@ def adapt_constant_wss_threed(config_handler: ConfigHandler, preop_q, postop_q, 
                 raise ValueError('unknown boundary condition type')
 
             outlet_idx += 1
+
+
+def adapt_constant_wss_threed(preop_sim_dir: SimulationDirectory, postop_sim_dir: SimulationDirectory, location: str = 'uniform'):
+    '''
+    adapt structured trees coupled to a 3d simulation based on the constant wall shear stress assumption
+    
+    :param preop_sim_dir: SimulationDirectory instance for the preoperative simulation
+    :param postop_sim_dir: SimulationDirectory instance for the postoperative simulation
+    '''
+
+    # get the preop and postop outlet flowrates
+    preop_q = get_outlet_data(preop_sim_dir.config, preop_sim_dir.results['steady'], 'flow_out', steady=True)
+    postop_q = get_outlet_data(postop_sim_dir.config, postop_sim_dir.results['steady'], 'flow_out', steady=True)
+
+    if location == 'uniform':
+            # adapt one tree each for left and right based on flow split
+            preop_lpa_flow, preop_rpa_flow = preop_sim_dir.flow_split()
+            postop_lpa_flow, postop_rpa_flow = postop_sim_dir.flow_split()
+    elif location == 'lobe':
+        # adapt one tree for upper, lower, middle lobes
+        pass
+    elif location == 'all':
+        # adapt a tree for each individual outlet
+        pass
+
+    # adapt the trees
+    adapt_constant_wss_threed(postop_sim_dir.config_handler, preop_q, postop_q, log_file=postop_sim_dir.log_file)
+
+    # simulate the adapted trees
+    postop_sim_dir.simulate('adapted')
+    postop_sim_dir.save_results('adapted')

@@ -23,6 +23,7 @@ class Simulation:
                  adapted_dir='adapted',
                  steady_dir='steady',
                  adaptation='cwss',
+                 adapt_location='uniform',
                  convert_to_cm=False,
                  optimized=False):
         
@@ -36,6 +37,7 @@ class Simulation:
         self.postop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, postop_dir), zerod_config=self.zerod_config, convert_to_cm=convert_to_cm)
         self.adapted_dir = os.path.join(self.path, adapted_dir) # just a path initially
         self.adaptation = adaptation
+        self.adapt_location = adapt_location
         self.steady_dir = os.path.join(self.path, steady_dir)
 
         ## Bools
@@ -98,6 +100,19 @@ class Simulation:
         postop_sim.run(simname='Postop Simulation', user_input=False, sim_config=sim_config)
 
         # compute adaptation
+        self.compute_adaptation
+
+
+        # run adapted simulation
+
+
+        # postprocess results
+
+    def compute_adaptation(self):
+        '''
+        compute the adaptation based on a method and location
+        '''
+
         if self.adaptation == 'cwss':
             pass
         elif self.adaptation == 'szafron':
@@ -108,14 +123,16 @@ class Simulation:
             pass
         else:
             raise ValueError('Invalid adaptation method')
-
-
-        # run adapted simulation
-
-
-        # postprocess results
-
-
+        
+        if self.adapt_location == 'uniform':
+            # adapt one tree each for left and right based on flow split
+            pass
+        elif self.adapt_location == 'lobe':
+            # adapt one tree for upper, lower, middle lobes
+            pass
+        elif self.adapt_location == 'all':
+            # adapt a tree for each individual outlet
+            pass
 
     def run_steady_sims(self):
         '''
@@ -130,7 +147,7 @@ class Simulation:
         # make the steady simulations
         flow_dict = {
             'sys': max(self.inflow.q),
-            'dia': 1.0,
+            'dia': 2.0,
             'mean': np.mean(self.inflow.q)
         }
         steady_sims = {}
