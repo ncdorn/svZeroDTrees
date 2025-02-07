@@ -3,7 +3,7 @@ import copy
 from svzerodtrees.structuredtree import StructuredTree
 from svzerodtrees.result_handler import ResultHandler
 from svzerodtrees.config_handler import ConfigHandler
-from svzerodtrees.simulation_directory import *
+from svzerodtrees.simulation_directory import SimulationDirectory
 import numpy as np
 
 
