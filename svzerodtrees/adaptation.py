@@ -3,7 +3,7 @@ import copy
 from svzerodtrees.structuredtree import StructuredTree
 from svzerodtrees.result_handler import ResultHandler
 from svzerodtrees.config_handler import ConfigHandler
-from svzerodtrees.simulation_directory import SimulationDirectory
+from svzerodtrees.simulation_directory import *
 import numpy as np
 
 
@@ -147,7 +147,7 @@ def adapt_constant_wss_threed_OLD(config_handler: ConfigHandler, preop_q, postop
             outlet_idx += 1
 
 
-def adapt_constant_wss_threed(preop_sim_dir: SimulationDirectory, postop_sim_dir: SimulationDirectory, location: str = 'uniform'):
+def adapt_constant_wss_threed(preop_sim_dir, postop_sim_dir, location: str = 'uniform'):
     '''
     adapt structured trees coupled to a 3d simulation based on the constant wall shear stress assumption
     
