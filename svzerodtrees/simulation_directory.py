@@ -1421,9 +1421,10 @@ class SvZeroDdata(SimFile):
 
         # only get times and flows over the last cardiac period 1.0s
         if time.max() > 1.0:
-            # unsteady simulation, get last period
+            # unsteady simulation, get last period of the pandas dataframd
             time = time[time > time.max() - 1.0]
-            flow = flow[time > time.max() - 1.0]
+            # use the indices of the time to get the flow
+            flow = flow[time.index]
             return np.trapz(flow, time)
         else:
             # steady simulation, only get last flow value in the pandas dataframe
