@@ -1,6 +1,8 @@
 from svzerodtrees.threedutils import *
 from matplotlib import pyplot as plt
 import numpy as np
+import os
+from PIL import Image
 
 
 def plot_preop_postop_change(svpre_file, filepath='prepost_outlet_change.png', n_steps=1000):
@@ -176,8 +178,6 @@ def plot_mpa_and_flowsplit(sim_dir):
     plt.show()
 
 
-        
-
 def integrate_flow(svzerod_data, coupling_block, block_name):
     '''
     integrate the flow at the outlet
@@ -192,6 +192,30 @@ def integrate_flow(svzerod_data, coupling_block, block_name):
     return np.trapz(flow, svzerod_data['time'])
 
 
+def pngs2gif(png_dir, gif_name):
+    '''
+    convert pngs to a gif
+    :param png_dir: path to the directory containing the pngs
+    :param gif_name: name of the gif file to create
+    '''
+
+    # List all PNG files in the directory
+    png_files = [f for f in os.listdir(png_dir) if f.endswith('.png')]
+    
+    # Sort the files if they are supposed to be in a specific order
+    png_files.sort()
+    
+    # Read images
+    images = []
+    for file in png_files:
+        file_path = os.path.join(png_dir, file)
+        images.append(Image.open(file_path))
+    
+    # Convert the images to a GIF with the specified frame rate
+    duration = 1000 // 50  # duration in milliseconds per frame
+    output_path = os.path.join(png_dir, gif_name)
+    images[0].save(output_path, save_all=True, append_images=images[1:], duration=duration, loop=0, optimize=False)
+    print(f"GIF saved as {gif_name}")
 
 
 

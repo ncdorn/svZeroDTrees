@@ -639,9 +639,9 @@ class SimulationDirectory:
         rpa_flow = 0.0
         for block in self.svzerod_3Dcoupling.coupling_blocks.values():
             if 'lpa' in block.surface.lower():
-                lpa_flow += self.svzerod_data.integrate_flow(block)
+                lpa_flow += self.svzerod_data.get_flow(block)
             if 'rpa' in block.surface.lower():
-                rpa_flow += self.svzerod_data.integrate_flow(block)
+                rpa_flow += self.svzerod_data.get_flow(block)
         
         lpa_pct = lpa_flow / (lpa_flow + rpa_flow) * 100
         rpa_pct = rpa_flow / (lpa_flow + rpa_flow) * 100
@@ -1410,16 +1410,28 @@ class SvZeroDdata(SimFile):
         elif block.location == 'outlet':
             return self.df['time'], self.df[f'flow:{block.connected_block}:{block.name}'], self.df[f'pressure:{block.connected_block}:{block.name}']
 
-    def integrate_flow(self, block):
+    def get_flow(self, block):
         '''
-        integrate the flow at the outlet
+        integrate the flow at the outlet over the last period
         
         :coupling_block: name of the coupling block
         :block_name: name of the block to integrate the flow over'''
 
         time, flow, pressure = self.get_result(block)
 
-        return np.trapz(flow, time)
+        # only get times and flows over the last cardiac period 1.0s
+        if time.max() > 1.0:
+            # unsteady simulation, get last period
+            time = time[time > time.max() - 1.0]
+            flow = flow[time > time.max() - 1.0]
+            return np.trapz(flow, time)
+        else:
+            # steady simulation, only get last flow value
+            flow = flow[-1]
+            return flow
+
+
+        
         
     
 
