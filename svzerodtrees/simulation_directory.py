@@ -1426,8 +1426,8 @@ class SvZeroDdata(SimFile):
             flow = flow[time > time.max() - 1.0]
             return np.trapz(flow, time)
         else:
-            # steady simulation, only get last flow value
-            flow = flow[-1]
+            # steady simulation, only get last flow value in the pandas dataframe
+            flow = flow.iloc[-1]
             return flow
 
 
