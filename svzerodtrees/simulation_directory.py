@@ -682,9 +682,14 @@ class SimulationDirectory:
         plt.tight_layout()
         plt.savefig(os.path.join(self.path, 'figures', 'mpa.png'))
 
-        sys_p = np.max(pressure[int(len(pressure) / 2):])
-        dias_p = np.min(pressure[int(len(pressure) / 2):])
-        mean_p = np.mean(pressure[int(len(pressure) / 2):])
+        # get the time over the last period
+        time = time[time > time.max() - 1.0]
+        # use the indices of the time to get the flow
+        pressure = pressure[time.index]
+
+        sys_p = np.max(pressure)
+        dias_p = np.min(pressure)
+        mean_p = np.mean(pressure)
 
         print(f'MPA systolic pressure: {sys_p} mmHg')
         print(f'MPA diastolic pressure: {dias_p} mmHg')

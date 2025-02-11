@@ -208,7 +208,7 @@ def pngs2gif(png_dir, gif_name):
     # Read images
     images = []
     for file in png_files:
-        file_path = os.path.join(png_dir, file)
+        file_path = os.path.join(os.path.dirname(png_dir), file)
         images.append(Image.open(file_path))
     
     # Convert the images to a GIF with the specified frame rate
