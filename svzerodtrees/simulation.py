@@ -196,7 +196,7 @@ class Simulation:
 
         # compute the linear relationship between resistance and flow
         S_lpa = np.polyfit([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], [R_sys_lpa, R_dia_lpa, R_mean_lpa], 1)
-        S_rpa = np.polyfit([sum(Q_sys_rpa.values()), sum(Q_dia_rpa.values()), sum(Q_mean_rpa.values())], [R_sys_rpa, R_dia_rpa, R_mean_rpa], 1)
+        S_rpa = np.polyfit([Q_sys_rpa, Q_dia_rpa, Q_mean_rpa], [R_sys_rpa, R_dia_rpa, R_mean_rpa], 1)
 
         if plot:
             # plot the data and the fit
