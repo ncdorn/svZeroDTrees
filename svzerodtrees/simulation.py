@@ -181,9 +181,9 @@ class Simulation:
         if mean_dir is None:
             mean_dir = os.path.join(self.steady_dir, 'mean')
 
-        sys_sim = SimulationDirectory.from_directory(sys_dir, is_pulmonary=False)
-        dia_sim = SimulationDirectory.from_directory(dia_dir, is_pulmonary=False)
-        mean_sim = SimulationDirectory.from_directory(mean_dir, is_pulmonary=False)
+        sys_sim = SimulationDirectory.from_directory(sys_dir, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, is_pulmonary=True)
+        dia_sim = SimulationDirectory.from_directory(dia_dir, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, is_pulmonary=True)
+        mean_sim = SimulationDirectory.from_directory(mean_dir, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, is_pulmonary=True)
 
         R_sys_lpa, R_sys_rpa = sys_sim.compute_pressure_drop()
         R_dia_lpa, R_dia_rpa = dia_sim.compute_pressure_drop()
