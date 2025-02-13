@@ -414,8 +414,8 @@ class SimulationDirectory:
         lpa_pressure_drop = mpa_pressure - lpa_outlet_mean_pressure
         rpa_pressure_drop = mpa_pressure - rpa_outlet_mean_pressure
 
-        lpa_resistance = lpa_pressure_drop / lpa_flow
-        rpa_resistance = rpa_pressure_drop / rpa_flow
+        lpa_resistance = lpa_pressure_drop / sum(lpa_flow.values())
+        rpa_resistance = rpa_pressure_drop / sum(rpa_flow.values())
 
         print(f'LPA pressure drop: {lpa_pressure_drop / 1333.2} mmHg, \n RPA pressure drop: {rpa_pressure_drop / 1333.2} mmHg')
         print(f'LPA resistance: {lpa_resistance} dyn/cm5/s, \n RPA resistance: {rpa_resistance} dyn/cm5/s')
