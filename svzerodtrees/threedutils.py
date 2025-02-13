@@ -64,7 +64,7 @@ def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_
         for vtp_file in filelist:
             vtp_name = os.path.basename(vtp_file)
             if 'wall' not in vtp_name:
-                if 'lpa' in vtp_name.lower():
+                if 'rpa' in vtp_name.lower():
                     rpa_info[vtp_file] = find_vtp_area(vtp_file, convert_to_cm)
 
                 elif 'lpa' in vtp_name.lower():
