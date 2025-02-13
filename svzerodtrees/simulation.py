@@ -169,10 +169,11 @@ class Simulation:
         for label, sim in steady_sims.items():
             sim.check_simulation()
     
-    def generate_simplified_nonlinear_zerod(self, cardiac_output, sys_dir=None, dia_dir=None, mean_dir=None, plot=True):
+    def generate_simplified_nonlinear_zerod(self, sys_dir=None, dia_dir=None, mean_dir=None, plot=True):
         '''
         generate a simplified zerod config with nonlinear resistors, using data from sys/dia/mean flow steady simulations'''
-
+        cardiac_output = self.clinical_targets.q
+        
         if sys_dir is None:
             sys_dir = os.path.join(self.steady_dir, 'sys')
         if dia_dir is None:
