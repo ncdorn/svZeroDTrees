@@ -62,15 +62,16 @@ def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_
         lpa_info = {}
 
         for vtp_file in filelist:
-            tail_name = vtp_file[len(mesh_surfaces_path) - 1 : ]
-            if (tail_name[ : len(rpa_branch_tag)] == rpa_branch_tag):
-                rpa_info[vtp_file] = find_vtp_area(vtp_file, convert_to_cm)
+            vtp_name = os.path.basename(vtp_file)
+            if 'wall' not in vtp_name:
+                if 'lpa' in vtp_name.lower():
+                    rpa_info[vtp_file] = find_vtp_area(vtp_file, convert_to_cm)
 
-            elif (tail_name[ : len(lpa_branch_tag)] == lpa_branch_tag):
-                lpa_info[vtp_file] = find_vtp_area(vtp_file, convert_to_cm)
+                elif 'lpa' in vtp_name.lower():
+                    lpa_info[vtp_file] = find_vtp_area(vtp_file, convert_to_cm)
 
-            elif (tail_name[ : len(inflow_tag)] == inflow_tag):
-                inflow_info[vtp_file] = find_vtp_area(vtp_file, convert_to_cm)
+                elif 'inflow' in vtp_name.lower():
+                    inflow_info[vtp_file] = find_vtp_area(vtp_file, convert_to_cm)
         
         return rpa_info, lpa_info, inflow_info
     
