@@ -190,12 +190,12 @@ class Simulation:
         R_mean_lpa, R_mean_rpa = mean_sim.compute_pressure_drop()
 
         # get the flow for each simulation
-        Q_sys_lpa, Q_sys_rpa = sys_sim.flow_split(verbose=False)
-        Q_dia_lpa, Q_dia_rpa = dia_sim.flow_split(verbose=False)
-        Q_mean_lpa, Q_mean_rpa = mean_sim.flow_split(verbose=False)
+        Q_sys_lpa, Q_sys_rpa = [sum(q.values()) for q in sys_sim.flow_split(verbose=False)]
+        Q_dia_lpa, Q_dia_rpa = [sum(q.values()) for q in dia_sim.flow_split(verbose=False)]
+        Q_mean_lpa, Q_mean_rpa = [sum(q.values()) for q in mean_sim.flow_split(verbose=False)]
 
         # compute the linear relationship between resistance and flow
-        S_lpa = np.polyfit([sum(Q_sys_lpa.values()), sum(Q_dia_lpa.values()), sum(Q_mean_lpa.values())], [R_sys_lpa, R_dia_lpa, R_mean_lpa], 1)
+        S_lpa = np.polyfit([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], [R_sys_lpa, R_dia_lpa, R_mean_lpa], 1)
         S_rpa = np.polyfit([sum(Q_sys_rpa.values()), sum(Q_dia_rpa.values()), sum(Q_mean_rpa.values())], [R_sys_rpa, R_dia_rpa, R_mean_rpa], 1)
 
         if plot:
