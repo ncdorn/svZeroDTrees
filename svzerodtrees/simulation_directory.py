@@ -8,6 +8,7 @@ import pickle
 import time
 import os
 import vtk
+import math
 from abc import ABC, abstractmethod
 import xml.etree.ElementTree as ET
 
@@ -344,7 +345,7 @@ class SimulationDirectory:
         tsteps = 2
         self.svzerod_3Dcoupling.simparams.number_of_time_pts_per_cardiac_cycle = tsteps
         bc_idx = 0
-        for vtp in self.mesh_complete.mesh_surfaces:
+        for vtp in self.mesh_complete.mesh_surfaces.values():
             if 'inflow' in vtp.filename.lower():
                 # need to get inflow path or steady flow rate
                 if flow_rate is None:
@@ -587,7 +588,7 @@ class SimulationDirectory:
             tsteps = int(input('number of time steps for inflow (default 512): ') or 512)
             self.svzerod_3Dcoupling.simparams.number_of_time_pts_per_cardiac_cycle = tsteps
             bc_idx = 0
-            for vtp in self.mesh_complete.mesh_surfaces:
+            for vtp in self.mesh_complete.mesh_surfaces.values():
                 if 'inflow' in vtp.filename.lower():
                     # need to get inflow path or steady flow rate
                     flow_file_path = input(f'path to flow file for {vtp.filename} OR steady flow rate: ')
@@ -635,18 +636,47 @@ class SimulationDirectory:
         :return (lpa_flow, rpa_flow)'''
 
         # get the LPA and RPA boundary conditions based on surface name
-        lpa_flow = 0.0
-        rpa_flow = 0.0
+        lpa_flow = {
+            'upper': 0.0,
+            'middle': 0.0,
+            'lower': 0.0
+        }
+        rpa_flow = {
+            'upper': 0.0,
+            'middle': 0.0,
+            'lower': 0.0
+        }
         for block in self.svzerod_3Dcoupling.coupling_blocks.values():
-            if 'lpa' in block.surface.lower():
-                lpa_flow += self.svzerod_data.get_flow(block)
-            if 'rpa' in block.surface.lower():
-                rpa_flow += self.svzerod_data.get_flow(block)
-        
-        lpa_pct = lpa_flow / (lpa_flow + rpa_flow) * 100
-        rpa_pct = rpa_flow / (lpa_flow + rpa_flow) * 100
+            if 'inflow' in block.surface.lower():
+                continue
+            outlet = self.mesh_complete.mesh_surfaces[block.surface]
+            if outlet.lpa:
+                if outlet.lobe == 'upper':
+                    lpa_flow['upper'] += self.svzerod_data.get_flow(block)
+                elif outlet.lobe == 'middle':
+                    lpa_flow['middle'] += self.svzerod_data.get_flow(block)
+                elif outlet.lobe == 'lower':
+                    lpa_flow['lower'] += self.svzerod_data.get_flow(block)
+            elif outlet.rpa:
+                if outlet.lobe == 'upper':
+                    rpa_flow['upper'] += self.svzerod_data.get_flow(block)
+                elif outlet.lobe == 'middle':
+                    rpa_flow['middle'] += self.svzerod_data.get_flow(block)
+                elif outlet.lobe == 'lower':
+                    rpa_flow['lower'] += self.svzerod_data.get_flow(block)
+        # get the total flow
 
-        print(f'LPA flow: {lpa_flow} ({lpa_pct}%), RPA flow: {rpa_flow} ({rpa_pct}%)')
+        total_flow = sum(lpa_flow.values()) + sum(rpa_flow.values())
+        lpa_pct = math.trunc(sum(lpa_flow.values()) / total_flow * 1000) / 10
+        rpa_pct = math.trunc(sum(rpa_flow.values()) / total_flow * 1000) / 10
+
+
+
+        # get upper/middle/lower flow split
+
+
+        print(f'LPA flow: {sum(lpa_flow.values())} ({lpa_pct}%) | upper: {math.trunc(lpa_flow["upper"] / total_flow * 1000) / 10}% | middle: {math.trunc(lpa_flow["middle"] / total_flow * 1000) / 10}% | lower: {math.trunc(lpa_flow["lower"] / total_flow * 1000) / 10}%')
+        print(f'RPA flow: {sum(rpa_flow.values())} ({rpa_pct}%) | upper: {math.trunc(rpa_flow["upper"] / total_flow * 1000) / 10}% | middle: {math.trunc(rpa_flow["middle"] / total_flow * 1000) / 10}% | lower: {math.trunc(rpa_flow["lower"] / total_flow * 1000) / 10}%')
 
         return lpa_flow, rpa_flow
     
@@ -809,9 +839,9 @@ class MeshComplete(SimFile):
             filelist.remove(inflow)
             filelist.insert(0, inflow)
         
-        self.mesh_surfaces = []
+        self.mesh_surfaces = {}
         for file in filelist:
-            self.mesh_surfaces.append(VTPFile(file))
+            self.mesh_surfaces[os.path.basename(file)] = VTPFile(file)
 
         self.assign_lobe()
     
@@ -865,20 +895,20 @@ class MeshComplete(SimFile):
         for surface in self.mesh_surfaces:
             surface.scale(scale_factor=scale_factor)
 
-    def assign_lobe(self):
+    def assign_lobe_old(self):
         '''
         assign upper, middle or lower lobe location to left and right outlets, except the inlet, based on the center of mass y coourdinate'''
 
         # get the y coord of lpa and rpa outlets
-        lpa_locs = [vtp.get_location()[1] for vtp in self.mesh_surfaces if vtp.lpa]
-        rpa_locs = [vtp.get_location()[1] for vtp in self.mesh_surfaces if vtp.rpa]
+        lpa_locs = [vtp.get_location()[1] for vtp in self.mesh_surfaces.values() if vtp.lpa]
+        rpa_locs = [vtp.get_location()[1] for vtp in self.mesh_surfaces.values() if vtp.rpa]
         
         # get the lobe size (1/3 of the y range)
         lpa_lobe_size = (max(lpa_locs) - min(lpa_locs)) / 3
         rpa_lobe_size = (max(rpa_locs) - min(rpa_locs)) / 3
 
         # assign outlet lobe location
-        for vtp in self.mesh_surfaces:
+        for vtp in self.mesh_surfaces.values():
             if vtp.lpa:
                 if vtp.get_location()[1] < min(lpa_locs) + lpa_lobe_size:
                     vtp.lobe = 'lower'
@@ -895,16 +925,57 @@ class MeshComplete(SimFile):
                     vtp.lobe = 'middle'
         
         # count the number of outlets in each lobe
-        lpa_upper = len([vtp for vtp in self.mesh_surfaces if vtp.lpa and vtp.lobe == 'upper'])
-        lpa_middle = len([vtp for vtp in self.mesh_surfaces if vtp.lpa and vtp.lobe == 'middle'])
-        lpa_lower = len([vtp for vtp in self.mesh_surfaces if vtp.lpa and vtp.lobe == 'lower'])
+        lpa_upper = len([vtp for vtp in self.mesh_surfaces.values() if vtp.lpa and vtp.lobe == 'upper'])
+        lpa_middle = len([vtp for vtp in self.mesh_surfaces.values() if vtp.lpa and vtp.lobe == 'middle'])
+        lpa_lower = len([vtp for vtp in self.mesh_surfaces.values() if vtp.lpa and vtp.lobe == 'lower'])
 
-        rpa_upper = len([vtp for vtp in self.mesh_surfaces if vtp.rpa and vtp.lobe == 'upper'])
-        rpa_middle = len([vtp for vtp in self.mesh_surfaces if vtp.rpa and vtp.lobe == 'middle'])
-        rpa_lower = len([vtp for vtp in self.mesh_surfaces if vtp.rpa and vtp.lobe == 'lower'])
+        rpa_upper = len([vtp for vtp in self.mesh_surfaces.values() if vtp.rpa and vtp.lobe == 'upper'])
+        rpa_middle = len([vtp for vtp in self.mesh_surfaces.values() if vtp.rpa and vtp.lobe == 'middle'])
+        rpa_lower = len([vtp for vtp in self.mesh_surfaces.values() if vtp.rpa and vtp.lobe == 'lower'])
 
         print(f'outlets by lobe: LPA upper: {lpa_upper}, middle: {lpa_middle}, lower: {lpa_lower}')
         print(f'outlets by lobe: RPA upper: {rpa_upper}, middle: {rpa_middle}, lower: {rpa_lower}\n')
+
+
+    def assign_lobe(self):
+        '''
+        assign lobes by sorting the outlets and taking top 1/3 as upper, middle 1/3 as middle and bottom 1/3 as lower
+        '''
+        # sort lpa and rpa outlets by y coordinates
+        sorted_lpa = sorted([outlet for outlet in self.mesh_surfaces.values() if outlet.lpa], key=lambda x: x.get_location()[1])
+        sorted_rpa = sorted([outlet for outlet in self.mesh_surfaces.values() if outlet.rpa], key=lambda x: x.get_location()[1])
+        
+        # get lobe size (1/3 of the y range)
+        lpa_lobe_quarter = len(sorted_lpa) // 4
+        rpa_lobe_quarter = len(sorted_rpa) // 4
+
+        # assign outlet lobe location
+        for i, vtp in enumerate(sorted_lpa):
+            if i < lpa_lobe_quarter:
+                vtp.lobe = 'lower'
+            elif i < lpa_lobe_quarter * 3:
+                vtp.lobe = 'middle'
+            else:
+                vtp.lobe = 'upper'
+        for i, vtp in enumerate(sorted_rpa):
+            if i < rpa_lobe_quarter:
+                vtp.lobe = 'lower'
+            elif i < rpa_lobe_quarter * 3:
+                vtp.lobe = 'middle'
+            else:
+                vtp.lobe = 'upper'
+
+        # count the number of outlets in each lobe
+        lpa_upper = len([vtp for vtp in self.mesh_surfaces.values() if vtp.lpa and vtp.lobe == 'upper'])
+        lpa_middle = len([vtp for vtp in self.mesh_surfaces.values() if vtp.lpa and vtp.lobe == 'middle'])
+        lpa_lower = len([vtp for vtp in self.mesh_surfaces.values() if vtp.lpa and vtp.lobe == 'lower'])
+        rpa_upper = len([vtp for vtp in self.mesh_surfaces.values() if vtp.rpa and vtp.lobe == 'upper'])
+        rpa_middle = len([vtp for vtp in self.mesh_surfaces.values() if vtp.rpa and vtp.lobe == 'middle'])
+        rpa_lower = len([vtp for vtp in self.mesh_surfaces.values() if vtp.rpa and vtp.lobe == 'lower'])
+
+        print(f'outlets by lobe: LPA upper: {lpa_upper}, middle: {lpa_middle}, lower: {lpa_lower}')
+        print(f'outlets by lobe: RPA upper: {rpa_upper}, middle: {rpa_middle}, lower: {rpa_lower}\n')
+
 
 
 class SVZeroDInterface(SimFile):
@@ -1077,7 +1148,7 @@ class SvFSIxml(SimFile):
         msh_file_path.text = mesh_complete.volume_mesh
 
 
-        for vtp in mesh_complete.mesh_surfaces:
+        for vtp in mesh_complete.mesh_surfaces.values():
             add_face = ET.SubElement(add_mesh, "Add_face")
             add_face.set("name", vtp.filename.split('.')[0])
 
@@ -1171,7 +1242,7 @@ class SvFSIxml(SimFile):
         couple_to_svzerod.set("type", "SI")
 
         # add boundary conditions
-        for vtp in mesh_complete.mesh_surfaces:
+        for vtp in mesh_complete.mesh_surfaces.values():
             add_bc = ET.SubElement(add_eqn, "Add_BC")
             add_bc.set("name", vtp.filename.split('.')[0])
             

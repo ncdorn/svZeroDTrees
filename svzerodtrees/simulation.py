@@ -78,6 +78,8 @@ class Simulation:
 
             # optimize preop BCs
             reduced_config = ConfigHandler.from_json(self.simplified_zerod_config)
+        else:
+            reduced_config = ConfigHandler.from_json(self.simplified_zerod_config)
         
         if not bcs_optimized:
             optimize_impedance_bcs(reduced_config, self.preop_dir.mesh_surfaces.path, self.clinical_targets, opt_config_path=self.zerod_config, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
