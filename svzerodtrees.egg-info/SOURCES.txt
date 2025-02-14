@@ -11,6 +11,7 @@ svzerodtrees/optimization.py
 svzerodtrees/preop.py
 svzerodtrees/result_handler.py
 svzerodtrees/run_experiment.py
+svzerodtrees/simulation.py
 svzerodtrees/simulation_directory.py
 svzerodtrees/structuredtree.py
 svzerodtrees/threedutils.py

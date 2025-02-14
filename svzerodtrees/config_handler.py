@@ -701,6 +701,7 @@ class ConfigHandler():
 
         # create the coupling blocks
         for i, bc in enumerate(threed_coupler.bcs.values()):
+            
             if 'inflow' not in bc.name.lower():
                 block_name = bc.name.replace('_', '')
                 threed_coupler.coupling_blocks[block_name] = CouplingBlock.from_bc(bc, surface=mesh_complete.mesh_surfaces[i].filename)
