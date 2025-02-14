@@ -703,7 +703,7 @@ class ConfigHandler():
         for i, bc in enumerate(threed_coupler.bcs.values()):
             if 'inflow' not in bc.name.lower():
                 block_name = bc.name.replace('_', '')
-                threed_coupler.coupling_blocks[block_name] = CouplingBlock.from_bc(bc, surface=mesh_complete.mesh_surfaces[i].filename)
+                threed_coupler.coupling_blocks[block_name] = CouplingBlock.from_bc(bc, surface=list(mesh_complete.mesh_surfaces.values())[i].filename)
 
         print('writing svzerod_3Dcoupling.json...')
         threed_coupler.to_json(os.path.join(simdir, 'svzerod_3Dcoupling.json'))
