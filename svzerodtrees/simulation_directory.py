@@ -936,6 +936,23 @@ class MeshComplete(SimFile):
         print(f'outlets by lobe: LPA upper: {lpa_upper}, middle: {lpa_middle}, lower: {lpa_lower}')
         print(f'outlets by lobe: RPA upper: {rpa_upper}, middle: {rpa_middle}, lower: {rpa_lower}\n')
 
+    def swap_lpa_rpa(self):
+        '''
+        swap the lpa and rpa outlets
+        '''
+
+        for filename in os.listdir(self.mesh_surfaces_dir):
+            new_filename = None
+            if "LPA" in filename:
+                new_filename = filename.replace("LPA", "RPA_")
+            elif "RPA" in filename:
+                new_filename = filename.replace("RPA", "LPA_")
+            
+            if new_filename:
+                os.rename(os.path.join(self.mesh_surfaces_dir, filename), os.path.join(self.mesh_surfaces_dir, new_filename))
+                print(f"Renamed: {filename} to {new_filename}")
+
+        self.initialize()
 
     def assign_lobe(self):
         '''
