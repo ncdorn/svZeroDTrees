@@ -380,8 +380,8 @@ class SimulationDirectory:
         self.svzerod_3Dcoupling, coupling_blocks = self.svzerod_3Dcoupling.generate_threed_coupler(self.path, inflow_from_0d=True, mesh_complete=self.mesh_complete)
 
         sim_config = {
-            'n_tsteps': 200,
-            'dt': 0.001,
+            'n_tsteps': 100,
+            'dt': 0.0005,
             'nodes': 2,
             'procs_per_node': 24,
             'memory': 16,
