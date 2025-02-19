@@ -1,5 +1,8 @@
 from svzerodtrees.threedutils import *
 from matplotlib import pyplot as plt
+import numpy as np
+import os
+from PIL import Image
 
 
 def plot_preop_postop_change(svpre_file, filepath='prepost_outlet_change.png', n_steps=1000):
@@ -77,9 +80,10 @@ def plot_data(sim_dir, coupling_block, block_name):
 
     # load the data
     data = pd.read_csv(os.path.join(sim_dir, 'svZeroD_data'), sep='\s+')
-    data.rename({'188': 'time'}, axis=1, inplace=True)
 
-    data[pres_col] = data[pres_col] / 1333.2 # convert pressure to mmHg
+    data.rename({data.columns[0]: 'time'}, axis=1, inplace=True)
+
+    data[pres_col] = data[pres_col] / 13.332 # convert pressure to mmHg
 
     fig, axs = plt.subplots(2, 1)
 
@@ -97,15 +101,133 @@ def plot_data(sim_dir, coupling_block, block_name):
     plt.show()
 
 
+def plot_mpa_and_flowsplit(sim_dir):
+    '''
+    plot mpa flow + pressure and the flow split between the lpa and rpa
+    
+    param sim_dir: path to the simulation directory containing mesh-complete, svZeroD_data, svZeroD_interface.dat, svzerod_3Dcoupling.json
+    '''
+
+    data = pd.read_csv(os.path.join(sim_dir, 'svZeroD_data'), sep='\s+')
+
+    data.rename({data.columns[0]: 'time'}, axis=1, inplace=True)
+
+    # get the mesh complete names to form lpa/rpa map
+    filelist_raw = glob.glob(os.path.join(sim_dir, 'mesh-complete/mesh-surfaces/*.vtp'))
+
+    filelist = [file for file in filelist_raw if 'wall' not in file]
+
+    filelist.sort()
+
+    # remove inflow
+    filelist.remove(filelist[-1])
+
+    zerod_coupler = os.path.join(sim_dir, 'svzerod_3Dcoupling.json')
+
+    threed_coupler = ConfigHandler.from_json(zerod_coupler, is_pulmonary=False, is_threed_interface=True)
+
+    # get a map of bc names to outlet idxs
+    outlet_blocks = [block.name for block in list(threed_coupler.coupling_blocks.values())]
+
+    outlet_blocks.remove('mpa')
+
+    block_to_outlet = {block: file for block, file in zip(outlet_blocks, filelist)}
+
+    lpa_rpa_block_map = {'lpa': [], 'rpa': []}
+    for block in outlet_blocks:
+        if 'lpa' in block_to_outlet[block].lower():
+            lpa_rpa_block_map['lpa'].append(block)
+        elif 'rpa' in block_to_outlet[block].lower():
+            lpa_rpa_block_map['rpa'].append(block)
+
+    # get the mpa pressure and flow
+    plot_data(sim_dir, 'branch0_seg0', 'mpa')
+
+    # get the flow split
+    lpa_flow = 0.0
+    rpa_flow = 0.0
+    for lpa_block in lpa_rpa_block_map['lpa']:
+        res = lpa_block[:10]
+        idx = int(lpa_block[10:])
+        bc_name = f'{res}_{idx}'
+        lpa_flow += integrate_flow(data, lpa_block, bc_name)
+
+    for rpa_block in lpa_rpa_block_map['rpa']:
+        res = rpa_block[:10]
+        idx = int(rpa_block[10:])
+        bc_name = f'{res}_{idx}'
+        rpa_flow += integrate_flow(data, rpa_block, bc_name)
+
+    plt.figure()
+
+    percent = {'LPA': lpa_flow / (lpa_flow + rpa_flow) * 100,
+                'RPA': rpa_flow / (lpa_flow + rpa_flow) * 100}
+        
+    q = {'LPA': lpa_flow,
+            'RPA': rpa_flow}
+
+    # plot the stacked bar graph
+    bottom = 0.0
+    for vessel, value in q.items():
+        plt.bar(' ', value, label=vessel, bottom=bottom, 
+                     # color=colors[vessel]
+                     )
+        plt.text(' ', value / 2 + bottom, f'{vessel}: {str(int(percent[vessel]))}%', ha='center', va='center')
+        bottom += value
+    plt.ylabel('flow [cm^3/s]')
+
+    plt.show()
+
+
+def integrate_flow(svzerod_data, coupling_block, block_name):
+    '''
+    integrate the flow at the outlet
+    
+    :coupling_block: name of the coupling block
+    :block_name: name of the block to integrate the flow over'''
+
+    flow_col = f'flow:{coupling_block}:{block_name}'
+
+    flow = svzerod_data[flow_col]
+
+    return np.trapz(flow, svzerod_data['time'])
+
+
+def pngs2gif(png_dir, gif_name):
+    '''
+    convert pngs to a gif
+    :param png_dir: path to the directory containing the pngs
+    :param gif_name: name of the gif file to create
+    '''
+
+    # List all PNG files in the directory
+    png_files = [f for f in os.listdir(png_dir) if f.endswith('.png')]
+    
+    # Sort the files if they are supposed to be in a specific order
+    png_files.sort()
+    
+    # Read images
+    images = []
+    for file in png_files:
+        file_path = os.path.join(os.path.dirname(png_dir), file)
+        images.append(Image.open(file_path))
+    
+    # Convert the images to a GIF with the specified frame rate
+    duration = 1000 // 50  # duration in milliseconds per frame
+    output_path = os.path.join(png_dir, gif_name)
+    images[0].save(output_path, save_all=True, append_images=images[1:], duration=duration, loop=0, optimize=False)
+    print(f"GIF saved as {gif_name}")
 
 
 
 
 if __name__ == '__main__':
 
-    sim_dir = '../threed_models/impedance_3D/pipe_imp_t002'
+    sim_dir = '../threed_models/SU0243/preop'
 
-    plot_data(sim_dir, 'branch0_seg0', 'inflow')
+    plot_mpa_and_flowsplit(sim_dir)
+
+    
 
 
 

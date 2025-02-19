@@ -5,11 +5,11 @@ import math
 import pandas as pd
 import os
 import svzerodtrees
-from svzerodtrees._config_handler import ConfigHandler
+from svzerodtrees.config_handler import ConfigHandler
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
 
-def find_vtp_area(infile):
+def find_vtp_area(infile, convert_to_cm=False):
     # with open(infile):
         # print('file able to be opened!')
     reader = vtk.vtkXMLPolyDataReader()
@@ -19,10 +19,16 @@ def find_vtp_area(infile):
     masser = vtk.vtkMassProperties()
     masser.SetInputConnection(poly)
     masser.Update()
-    return masser.GetSurfaceArea()
+
+    if convert_to_cm:
+        # convert from mm^2 to cm^2 if the model has been segmented in mm
+        return masser.GetSurfaceArea() / 100
+    else:
+        # mesh is in cm, no change needed
+        return masser.GetSurfaceArea()
 
 # Sort cap VTP files into inflow / RPA branches / LPA branches. Obtain their names & cap areas.
-def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_branch_tag='LPA', pulmonary=True):
+def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_branch_tag='LPA', convert_to_cm=False, pulmonary=True):
     '''
     Sort cap VTP files into inflow / RPA branches / LPA branches. Obtain their names & cap areas.
     
@@ -56,17 +62,17 @@ def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_
         lpa_info = {}
 
         for vtp_file in filelist:
-            tail_name = vtp_file[len(mesh_surfaces_path) - 1 : ]
-            if (tail_name[ : len(rpa_branch_tag)] == rpa_branch_tag):
-                rpa_info[vtp_file] = find_vtp_area(vtp_file)
+            vtp_name = os.path.basename(vtp_file)
+            if 'wall' not in vtp_name:
+                if 'rpa' in vtp_name.lower():
+                    rpa_info[vtp_file] = find_vtp_area(vtp_file, convert_to_cm)
 
-            elif (tail_name[ : len(lpa_branch_tag)] == lpa_branch_tag):
-                lpa_info[vtp_file] = find_vtp_area(vtp_file)
+                elif 'lpa' in vtp_name.lower():
+                    lpa_info[vtp_file] = find_vtp_area(vtp_file, convert_to_cm)
 
-            elif (tail_name[ : len(inflow_tag)] == inflow_tag):
-                inflow_info[vtp_file] = find_vtp_area(vtp_file)
+                elif 'inflow' in vtp_name.lower():
+                    inflow_info[vtp_file] = find_vtp_area(vtp_file, convert_to_cm)
         
-
         return rpa_info, lpa_info, inflow_info
     
     else: # return cap info
@@ -77,7 +83,7 @@ def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_
             if inflow_tag in basename:
                 continue
             elif 'wall' not in basename:
-                cap_info[basename] = find_vtp_area(vtp_file)
+                cap_info[basename] = find_vtp_area(vtp_file, convert_to_cm)
         
         return cap_info
 
@@ -308,7 +314,11 @@ def write_svfsiplus_xml(sim_dir, n_tsteps=5000, dt=0.001, mesh_complete='mesh-co
     filelist_raw = glob.glob(os.path.join(mesh_complete, 'mesh-surfaces/*.vtp'))
 
     filelist = [file for file in filelist_raw if 'wall' not in file]
+
     filelist.sort()
+
+    inflow = filelist.pop(-1)
+    filelist.insert(0, inflow)
 
 
     for file in filelist:
@@ -453,8 +463,8 @@ def get_inflow_period(inflow_file):
 
 
 def write_svfsi_runscript(sim_dir,
-                             svfsiplus_path='/home/users/ndorn/svfsiplus-build/svFSI-build/mysvfsi',
-                             hours=6, nodes=2, procs_per_node=24):
+                          svfsiplus_path='/home/users/ndorn/svfsiplus-build/svFSI-build/mysvfsi',
+                          hours=6, nodes=2, procs_per_node=24):
     '''
     write a bash script to submit a job on sherlock'''
 

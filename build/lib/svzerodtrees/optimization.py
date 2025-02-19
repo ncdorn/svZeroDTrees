@@ -1,6 +1,6 @@
 from svzerodtrees.utils import *
-from svzerodtrees._result_handler import ResultHandler
-from svzerodtrees._config_handler import ConfigHandler
+from svzerodtrees.result_handler import ResultHandler
+from svzerodtrees.config_handler import ConfigHandler
 from svzerodtrees import preop, operation, adaptation
 from scipy.optimize import minimize, Bounds
 import pickle

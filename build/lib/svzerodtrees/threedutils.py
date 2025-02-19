@@ -5,7 +5,7 @@ import math
 import pandas as pd
 import os
 import svzerodtrees
-from svzerodtrees._config_handler import ConfigHandler
+from svzerodtrees.config_handler import ConfigHandler
 
 def find_vtp_area(infile):
     # with open(infile):

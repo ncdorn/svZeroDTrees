@@ -3,12 +3,15 @@ import random
 from scipy.optimize import minimize, Bounds, LinearConstraint
 from svzerodtrees.treevessel import TreeVessel
 from svzerodtrees.utils import *
-from svzerodtrees._config_handler import ConfigHandler, Vessel, BoundaryCondition, SimParams
+from svzerodtrees.config_handler import ConfigHandler, Vessel, BoundaryCondition, SimParams
 from multiprocessing import Pool
 import math
 import scipy
 import json
 import pickle
+from functools import partial
+import time
+from numba import jit
 
 class StructuredTree():
     """
@@ -271,7 +274,7 @@ class StructuredTree():
                 self.block_dict["vessels"].append(current_vessel.right.params)
 
 
-    def build_tree(self, initial_d=None, d_min=0.0049, optimizing=False, asym=0.4048, xi=2.7, alpha=None, beta=None, trmrst=0.0):
+    def build_tree(self, initial_d=None, d_min=0.0049, optimizing=False, asym=0.4048, xi=2.7, alpha=None, beta=None, lrr=50.0):
         '''
         recursively build the structured tree
 
@@ -308,7 +311,7 @@ class StructuredTree():
         vessel_id = 0
         junc_id = 0
         # initialize the root vessel of the tree
-        self.root = TreeVessel.create_vessel(0, 0, initial_d, density=1.055)
+        self.root = TreeVessel.create_vessel(0, 0, initial_d, density=1.055, lrr=lrr)
         self.root.name = self.name
         # add inflow boundary condition
         self.root.params["boundary_conditions"] = {"inlet": "INFLOW"}
@@ -337,7 +340,7 @@ class StructuredTree():
                 left_dia = alpha * current_vessel.d
                 # assume pressure is conserved at the junction. 
                 # Could later replace this with a function to account for pressure loss
-                current_vessel.left = TreeVessel.create_vessel(vessel_id, next_gen, left_dia, density=1.055)
+                current_vessel.left = TreeVessel.create_vessel(vessel_id, next_gen, left_dia, density=1.055, lrr=lrr)
                 if left_dia < d_min:
                     current_vessel.left.collapsed = True
                     if current_vessel.left.gen > self.generations:
@@ -350,7 +353,7 @@ class StructuredTree():
                 # create right vessel
                 vessel_id += 1
                 right_dia = beta * current_vessel.d
-                current_vessel.right = TreeVessel.create_vessel(vessel_id, next_gen, right_dia, density=1.055)
+                current_vessel.right = TreeVessel.create_vessel(vessel_id, next_gen, right_dia, density=1.055, lrr=lrr)
                 if right_dia < d_min:
                     current_vessel.right.collapsed = True
                     if current_vessel.right.gen > self.generations:
@@ -373,8 +376,13 @@ class StructuredTree():
                 self.block_dict["junctions"].append(junction_config)
                 junc_id += 1
 
-
-    def compute_olufsen_impedance(self):
+    # @jit
+    def compute_olufsen_impedance(self,
+                                  k1 = 19992500, # g/cm/s^2
+                                  k2 = -25.5267, # 1/cm 
+                                  k3 = 1104531.4909089999, # g/cm/s^2
+                                  n_procs=None
+                                  ):
         '''
         compute the impedance of the structured tree accordin to Olufsen et al. (2000)
         '''
@@ -390,10 +398,11 @@ class StructuredTree():
 
         tsteps = len(self.time)
 
-        print(f'timesteps for impedance: {tsteps}')
+        # print(f'timesteps for impedance: {tsteps}')
 
-        print(f'number of time points per cardiac cycle: {self.simparams.number_of_time_pts_per_cardiac_cycle}, len(self.time): {len(self.time)}')
+        # print(f'number of time points per cardiac cycle: {self.simparams.number_of_time_pts_per_cardiac_cycle}, len(self.time): {len(self.time)}')
 
+        # print(f'k1: {k1}, k2: {k2}, k3: {k3}')
         # tsteps = int(512 * 0.6) * 2
 
         # tsteps = len(self.time)
@@ -417,13 +426,35 @@ class StructuredTree():
         # with Pool(24) as p:       
         #     Z_om = p.map(self.root.z0, omega)
 
-        ## UNPARALLELIZED ##
-        for k in range(0, tsteps//2+1):
-            if (k) % 100 == 0:
-                print(f'computing root impedance for timestep {k} of {tsteps//2}')
-            # compute impedance at the root vessel
-            # we cannot have a negative number here so we take positive frequency and then conjugate
-            Z_om[k] = np.conjugate(self.root.z0_olufsen(abs(omega[k])))
+        
+        
+        if n_procs is not None:
+            start = time.time()
+            # make the partial function
+            z0_w_stiffness = partial(self.root.z0_olufsen, k1=k1, k2=k2, k3=k3)
+            # parallelize the computation of the impedance
+            with Pool(n_procs) as p:
+                Z_om[:tsteps//2+1] = np.conjugate(p.map(z0_w_stiffness, [abs(w) for w in omega[:tsteps//2+1]]))
+            
+            end = time.time()
+            print(f'this parallelized process took {end - start} seconds')
+        else:
+            ## UNPARALLELIZED ##
+            start = time.time()
+            for k in range(0, tsteps//2+1):
+                # if (k) % 100 == 0:
+                # print(f'computing root impedance for timestep {k} of {tsteps//2}')
+                # compute impedance at the root vessel
+                # we cannot have a negative number here so we take positive frequency and then conjugate
+                Z_om[k] = np.conjugate(self.root.z0_olufsen(abs(omega[k]),
+                                                            k1 = k1,
+                                                            k2 = k2,
+                                                            k3 = k3
+                                                            ))
+            
+            end = time.time()
+            # print(f'this UNparallelized process took {end - start} seconds')
+
             
         # apply self-adjoint property of the impedance
         Z_om_half = Z_om[:tsteps//2]
@@ -463,6 +494,74 @@ class StructuredTree():
         })
 
         return impedance_bc
+
+
+    def match_RCR_to_impedance(self):
+        '''
+        find the RCR parameters to match the impedance from an impedance tree.'''
+
+        # get the impedance of the structured tree if self.Z_t is None
+        if self.Z_t is None:
+            self.compute_olufsen_impedance()
+
+        
+        # loss function for optimizing RCR parameters
+        def loss_function(params):
+            '''
+            loss function for optimizing RCR parameters
+
+            :param params: RCR parameters [Rp, C, Rd]
+            '''
+            # compute impedance from the RCR parameters
+            Rp, C, Rd = params
+            # calculate the impedance from the RCR parameters
+            tsteps = len(self.time)
+            period = max(self.time) * self.q / self.Lr**3
+            df = 1 / period
+            omega = [i * df * 2 * np.pi for i in range(-tsteps//2, tsteps//2)] # angular frequency vector
+
+            Z_om = np.zeros(len(omega), dtype=complex)
+
+            # Z_om[:tsteps//2+1] = np.conjugate([((1j * w * Rp * Rd * C) + (Rp + Rd)) / ((1j * w * Rd * C) + 1) for w in omega[:tsteps//2+1]])
+            # def Z(w, Rp, C, Rd):
+            #     return ((1j * w * Rp * Rd * C) + (Rp + Rd)) / ((1j * w * Rd * C) + 1)
+            Z_om[:tsteps//2+1] = np.array([np.sqrt(((Rd + Rp) ** 2 + (w * Rp * Rd * C) ** 2) / (1 + (w * Rd * C) ** 2)) for w in omega[:tsteps//2+1]])
+
+            # apply self-adjoint property of the impedance
+            Z_om_half = Z_om[:tsteps//2]
+            # add negative frequencies
+            Z_om[tsteps//2+1:] = np.conjugate(np.flipud(Z_om_half[:-1]))
+
+
+            # dimensionalize omega
+            omega = [w * self.q / self.Lr**3 for w in omega]
+
+            Z_om = np.fft.ifftshift(Z_om)
+
+            print(f'Z(w=0) = {Z_om[0]}')
+
+            Z_rcr = np.fft.ifft(Z_om)
+
+            self.Z_rcr = np.real(Z_rcr)
+
+            # calculate the squared difference between the impedance from the RCR parameters and the impedance from the structured tree
+            loss = np.sum((self.Z_t - Z_rcr)**2)
+
+            print(f'loss: {loss}')
+
+            return loss
+        
+        # initial guess for RCR parameters
+        initial_guess = [100.0, 0.0001, 900.0]
+
+        # optimize the RCR parameters
+        bounds = Bounds(lb=[0.0, 0.0, 0.0], ub=[np.inf, np.inf, np.inf])
+        # bounds = Bounds(lb=[-np.inf, -np.inf, -np.inf], ub=[np.inf, np.inf, np.inf])
+        result = minimize(loss_function, initial_guess, method='Nelder-Mead', bounds=bounds)
+
+        print(f'optimized RCR parameters: {result.x}')
+
+        return result.x
 
 
     def adapt_constant_wss(self, Q, Q_new):
