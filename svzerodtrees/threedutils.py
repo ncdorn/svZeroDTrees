@@ -768,7 +768,7 @@ def rename_msh_surfs(msh_surf_dir):
         raise Exception(f'duplicate mesh surfaces detected in this directory! these will need to be cleaned up. \n List of potential duplicate surfaces: {dup_files}')
 
 
-def scale_vtp_to_cm(vtp_file, scale_factor=10.0):
+def scale_vtp_to_cm(vtp_file, scale_factor=0.1):
     '''
     scale a vtp file from mm to cm (multiply by 0.1) using vtkTransform
     '''

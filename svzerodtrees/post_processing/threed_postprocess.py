@@ -77,7 +77,7 @@ def plot_data(sim_dir, coupling_block, block_name):
 
     # load the data
     data = pd.read_csv(os.path.join(sim_dir, 'svZeroD_data'), sep='\s+')
-    data.rename({'6': 'time'}, axis=1, inplace=True)
+    data.rename({'188': 'time'}, axis=1, inplace=True)
 
     data[pres_col] = data[pres_col] / 1333.2 # convert pressure to mmHg
 
