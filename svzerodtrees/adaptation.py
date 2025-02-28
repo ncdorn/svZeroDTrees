@@ -176,3 +176,38 @@ def adapt_constant_wss_threed(preop_sim_dir, postop_sim_dir, location: str = 'un
     # simulate the adapted trees
     postop_sim_dir.simulate('adapted')
     postop_sim_dir.save_results('adapted')
+
+
+def adapt_threed(preop_sim_dir, postop_sim_dir, adapted_sim_path, location: str = 'uniform', method: str = 'cwss'):
+    '''
+    adapt structured trees coupled to a 3d simulation based on the constant wall shear stress assumption
+    
+    :param preop_coupler_path: path to the preoperative coupling file
+    :param postop_coupler_path: path to the postoperative coupling file
+    :param preop_svzerod_data: path to preop svZeroD_data
+    :param postop_svzerod_data: path to postop svZeroD_data
+    :param location: str indicating the location of the adaptation
+    :param method: str indicating the adaptation method
+    '''
+
+    # get the preop and postop outlet flowrates
+    if location == 'uniform':
+        # adapt one tree each for left and right based on flow split
+        preop_lpa_flow, preop_rpa_flow = [sum(flow.values()) for flow in preop_sim_dir.flow_split()]
+        postop_lpa_flow, postop_rpa_flow = [sum(flow.values()) for flow in postop_sim_dir.flow_split()]
+    elif location == 'lobe':
+        preop_lpa_flow, preop_rpa_flow = preop_sim_dir.flow_split()
+        postop_lpa_flow, postop_rpa_flow = postop_sim_dir.flow_split()
+    elif location == 'all':
+        # adapt a tree for each individual outlet
+        pass
+
+    print(f"preop_lpa_flow: {preop_lpa_flow}, preop_rpa_flow: {preop_rpa_flow}")
+
+
+    adapted_sim_dir = SimulationDirectory.from_directory(adapted_sim_path, mesh_complete=preop_sim_dir.mesh_complete.path)
+
+
+    return adapted_sim_dir
+
+

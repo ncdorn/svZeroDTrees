@@ -215,6 +215,23 @@ class StructuredTree():
 
 # **** I/O METHODS ****
 
+    def to_dict(self):
+        '''
+        convert the StructuredTree instance parameters to a dictionary
+        '''
+
+        params = {
+            "name": self.name,
+            "initial_d": self.initial_d,
+            "d_min": self.d_min,
+            "k1": self.k1,
+            "k2": self.k2,
+            "k3": self.k3,
+            "n_procs": self.n_procs,
+
+        }
+        return params
+
     def to_json(self, filename):
         '''
         write the structured tree to a json file
@@ -305,6 +322,11 @@ class StructuredTree():
             beta = asym**(1/2) * alpha
             print(f"alpha: {alpha}, beta: {beta}")
 
+        # make self params
+        self.initial_d = initial_d
+        self.alpha = alpha
+        self.beta = beta
+        self.lrr = lrr
         # add r_min into the block dict
         self.d_min = d_min
         # initialize counting values
@@ -386,6 +408,12 @@ class StructuredTree():
         '''
         compute the impedance of the structured tree accordin to Olufsen et al. (2000)
         '''
+
+        # initialize class params
+        self.k1 = k1
+        self.k2 = k2
+        self.k3 = k3
+        self.n_procs = n_procs
 
         # inflow to tree must be periodic!!
         # if sum(np.gradient(self.Q_in)) == 0.0:
@@ -486,6 +514,7 @@ class StructuredTree():
         impedance_bc = BoundaryCondition({
             "bc_name": f"{name}",
             "bc_type": "IMPEDANCE",
+            "tree": self.name,
             "bc_values": {
                 "Z": self.Z_t.tolist(),
                 "t": self.time,

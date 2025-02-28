@@ -5,6 +5,7 @@ from svzerodtrees.preop import *
 from svzerodtrees.inflow import *
 import json
 import pickle
+import copy
 import time
 import os
 import vtk
@@ -390,43 +391,111 @@ class SimulationDirectory:
 
         self.write_files(simname='Steady Simulation', user_input=False, sim_config=sim_config)
     
-    def compute_pressure_drop(self):
-
-        # get lpa, rpa flow
-        lpa_flow, rpa_flow = self.flow_split()
-
-        # get the MPA pressure
-        mpa_pressure = np.mean(self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])[2][-100:])
+    def compute_pressure_drop(self, steady=True):
+        '''
+        compute the pressure drop across the LPA and RPA based on the simulation results'''
 
 
         # compute the pressure drop
-        lpa_outlet_pressures = []
-        rpa_outlet_pressures = []
-        for block in self.svzerod_3Dcoupling.coupling_blocks.values():
-            if 'lpa' in block.surface.lower():
-                lpa_outlet_pressures.append(np.mean(self.svzerod_data.get_result(block)[2][-100:]))
-            if 'rpa' in block.surface.lower():
-                rpa_outlet_pressures.append(np.mean(self.svzerod_data.get_result(block)[2][-100:]))
+        if steady:
+            print("computing steady pressure drop...")
+            # get lpa, rpa flow
+            lpa_flow, rpa_flow = self.flow_split()
 
-        lpa_outlet_mean_pressure = np.mean(lpa_outlet_pressures)
-        rpa_outlet_mean_pressure = np.mean(rpa_outlet_pressures)
+            # get the MPA pressure
+            mpa_pressure = np.mean(self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])[2][-100:])
 
-        lpa_pressure_drop = mpa_pressure - lpa_outlet_mean_pressure
-        rpa_pressure_drop = mpa_pressure - rpa_outlet_mean_pressure
+            lpa_outlet_pressures = []
+            rpa_outlet_pressures = []
+            for block in self.svzerod_3Dcoupling.coupling_blocks.values():
+                if 'lpa' in block.surface.lower():
+                    lpa_outlet_pressures.append(np.mean(self.svzerod_data.get_result(block)[2][-100:]))
+                if 'rpa' in block.surface.lower():
+                    rpa_outlet_pressures.append(np.mean(self.svzerod_data.get_result(block)[2][-100:]))
 
-        lpa_resistance = lpa_pressure_drop / sum(lpa_flow.values())
-        rpa_resistance = rpa_pressure_drop / sum(rpa_flow.values())
+            lpa_outlet_mean_pressure = np.mean(lpa_outlet_pressures)
+            rpa_outlet_mean_pressure = np.mean(rpa_outlet_pressures)
 
-        print(f'LPA pressure drop: {lpa_pressure_drop / 1333.2} mmHg, \n RPA pressure drop: {rpa_pressure_drop / 1333.2} mmHg')
-        print(f'LPA resistance: {lpa_resistance} dyn/cm5/s, \n RPA resistance: {rpa_resistance} dyn/cm5/s')
+            lpa_pressure_drop = mpa_pressure - lpa_outlet_mean_pressure
+            rpa_pressure_drop = mpa_pressure - rpa_outlet_mean_pressure
+
+            lpa_resistance = lpa_pressure_drop / sum(lpa_flow.values())
+            rpa_resistance = rpa_pressure_drop / sum(rpa_flow.values())
+
+            print(f'LPA pressure drop: {lpa_pressure_drop / 1333.2} mmHg, \n RPA pressure drop: {rpa_pressure_drop / 1333.2} mmHg')
+            print(f'LPA resistance: {lpa_resistance} dyn/cm5/s, \n RPA resistance: {rpa_resistance} dyn/cm5/s')
+        
+        else:
+            print("computing systolic/diastolic/mean pressure drop...")
+            lpa_flow, rpa_flow = self.flow_split(steady=False)
+
+            # get the MPA mean, systolic, diastolic pressure
+            time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
+            time = time[time > time.max() - 1.0]
+            pressure = pressure[time.index]
+            sys_p = np.max(pressure)
+            dia_p = np.min(pressure)
+            mean_p = np.mean(pressure)
+
+            lpa_outlet_pressures = {'sys': [], 'dia': [], 'mean': []}
+            rpa_outlet_pressures = {'sys': [], 'dia': [], 'mean': []}
+            for block in self.svzerod_3Dcoupling.coupling_blocks.values():
+                if 'lpa' in block.surface.lower():
+                    time, flow, pressure = self.svzerod_data.get_result(block)
+                    time = time[time > time.max() - 1.0]
+                    pressure = pressure[time.index]
+                    lpa_outlet_pressures['sys'].append(np.max(pressure))
+                    lpa_outlet_pressures['dia'].append(np.min(pressure))
+                    lpa_outlet_pressures['mean'].append(np.mean(pressure))
+                if 'rpa' in block.surface.lower():
+                    time, flow, pressure = self.svzerod_data.get_result(block)
+                    time = time[time > time.max() - 1.0]
+                    pressure = pressure[time.index]
+                    rpa_outlet_pressures['sys'].append(np.max(pressure))
+                    rpa_outlet_pressures['dia'].append(np.min(pressure))
+                    rpa_outlet_pressures['mean'].append(np.mean(pressure))
+
+            lpa_pressure_drops = {
+                'sys': sys_p - np.mean(lpa_outlet_pressures['sys']),
+                'dia': dia_p - np.mean(lpa_outlet_pressures['dia']),
+                'mean': mean_p - np.mean(lpa_outlet_pressures['mean'])
+            }
+            rpa_pressure_drops = {
+                'sys': sys_p - np.mean(rpa_outlet_pressures['sys']),
+                'dia': dia_p - np.mean(rpa_outlet_pressures['dia']),
+                'mean': mean_p - np.mean(rpa_outlet_pressures['mean'])
+            }
+
+            lpa_resistance = {
+                'sys': lpa_pressure_drops['sys'] / sum(lpa_flow['sys'].values()),
+                'dia': lpa_pressure_drops['dia'] / sum(lpa_flow['dia'].values()),
+                'mean': lpa_pressure_drops['mean'] / sum(lpa_flow['mean'].values())
+            }
+            rpa_resistance = {
+                'sys': rpa_pressure_drops['sys'] / sum(rpa_flow['sys'].values()),
+                'dia': rpa_pressure_drops['dia'] / sum(rpa_flow['dia'].values()),
+                'mean': rpa_pressure_drops['mean'] / sum(rpa_flow['mean'].values())
+            }
+
+            print(f'LPA pressure drop: {lpa_pressure_drops["sys"] / 1333.2} mmHg, {lpa_pressure_drops["dia"] / 1333.2} mmHg, {lpa_pressure_drops["mean"] / 1333.2} mmHg')
+            print(f'RPA pressure drop: {rpa_pressure_drops["sys"] / 1333.2} mmHg, {rpa_pressure_drops["dia"] / 1333.2} mmHg, {rpa_pressure_drops["mean"] / 1333.2} mmHg')
+            
+            # compute nonlinear resistance coefficient by fitting resistance vs flows
+            S_lpa = np.polyfit([sum(lpa_flow['sys'].values()), sum(lpa_flow['dia'].values()), sum(lpa_flow['mean'].values())], [lpa_resistance["sys"], lpa_resistance["dia"], lpa_resistance["mean"]], 1)
+            S_rpa = np.polyfit([sum(rpa_flow['sys'].values()), sum(rpa_flow['dia'].values()), sum(rpa_flow['mean'].values())], [rpa_resistance["sys"], rpa_resistance["dia"], rpa_resistance["mean"]], 1)
+            lpa_resistance = S_lpa[0]
+            rpa_resistance = S_rpa[0]
+
 
         return lpa_resistance, rpa_resistance
 
-    def generate_simplified_zerod(self):
+    def generate_simplified_zerod(self, nonlinear=True):
         '''
         compute the simplified 0D model for a 3D pulmonary model from the steady simulation result'''
 
-        lpa_resistance, rpa_resistance = self.compute_pressure_drop()
+
+
+        lpa_resistance, rpa_resistance = self.compute_pressure_drop(steady=not nonlinear)
 
         # need to rescale the inflow and make it periodic with a generic shape (see Inflow class)
         inflow = Inflow.periodic(path=None)
@@ -516,10 +585,10 @@ class SimulationDirectory:
                     "vessel_name": "branch1_seg0",
                     "zero_d_element_type": "BloodVessel",
                     "zero_d_element_values": {
-                        "R_poiseuille": lpa_resistance / 2,
+                        "R_poiseuille": 1.0 if nonlinear else lpa_resistance / 2,
                         "C": 0.0,
                         "L": 0.0,
-                        "stenosis_coefficient": 0.0
+                        "stenosis_coefficient": lpa_resistance / 2 if nonlinear else 0.0
                     }
                 },
                 {
@@ -531,10 +600,10 @@ class SimulationDirectory:
                     "vessel_name": "branch2_seg0",
                     "zero_d_element_type": "BloodVessel",
                     "zero_d_element_values": {
-                        "R_poiseuille": lpa_resistance / 2,
+                        "R_poiseuille": 1.0 if nonlinear else lpa_resistance / 2,
                         "C": 0.0,
                         "L": 0.0,
-                        "stenosis_coefficient": 0.0
+                        "stenosis_coefficient": lpa_resistance / 2 if nonlinear else 0.0
                     }
                 },
                 {
@@ -543,10 +612,10 @@ class SimulationDirectory:
                     "vessel_name": "branch3_seg0",
                     "zero_d_element_type": "BloodVessel",
                     "zero_d_element_values": {
-                        "R_poiseuille": rpa_resistance / 2,
+                        "R_poiseuille": 1.0 if nonlinear else rpa_resistance / 2,
                         "C": 0.0,
                         "L": 0.0,
-                        "stenosis_coefficient": 0.0
+                        "stenosis_coefficient": rpa_resistance / 2 if nonlinear else 0.0
                     }
                 },
                 {
@@ -558,10 +627,10 @@ class SimulationDirectory:
                     "vessel_name": "branch4_seg0",
                     "zero_d_element_type": "BloodVessel",
                     "zero_d_element_values": {
-                        "R_poiseuille": rpa_resistance / 2,
+                        "R_poiseuille": 1.0 if nonlinear else rpa_resistance / 2,
                         "C": 0.0,
                         "L": 0.0,
-                        "stenosis_coefficient": 0.0
+                        "stenosis_coefficient": rpa_resistance / 2 if nonlinear else 0.0
                     }
                 }
             ]
@@ -629,55 +698,91 @@ class SimulationDirectory:
             self.svzerod_3Dcoupling.to_json('blank_edited_config.json')
             self.svzerod_3Dcoupling, coupling_blocks = self.svzerod_3Dcoupling.generate_threed_coupler(self.path, inflow_from_0d=True, mesh_complete=self.mesh_complete)
 
-    def flow_split(self, verbose=True):
+    def flow_split(self, steady=True, verbose=True):
         '''
         get the flow split between the LPA and RPA
         
         :return (lpa_flow, rpa_flow)'''
 
         # get the LPA and RPA boundary conditions based on surface name
-        lpa_flow = {
-            'upper': 0.0,
-            'middle': 0.0,
-            'lower': 0.0
-        }
-        rpa_flow = {
-            'upper': 0.0,
-            'middle': 0.0,
-            'lower': 0.0
-        }
-        for block in self.svzerod_3Dcoupling.coupling_blocks.values():
-            if 'inflow' in block.surface.lower():
-                continue
-            outlet = self.mesh_complete.mesh_surfaces[block.surface]
-            if outlet.lpa:
-                if outlet.lobe == 'upper':
-                    lpa_flow['upper'] += self.svzerod_data.get_flow(block)
-                elif outlet.lobe == 'middle':
-                    lpa_flow['middle'] += self.svzerod_data.get_flow(block)
-                elif outlet.lobe == 'lower':
-                    lpa_flow['lower'] += self.svzerod_data.get_flow(block)
-            elif outlet.rpa:
-                if outlet.lobe == 'upper':
-                    rpa_flow['upper'] += self.svzerod_data.get_flow(block)
-                elif outlet.lobe == 'middle':
-                    rpa_flow['middle'] += self.svzerod_data.get_flow(block)
-                elif outlet.lobe == 'lower':
-                    rpa_flow['lower'] += self.svzerod_data.get_flow(block)
-        # get the total flow
+        if steady:
+            lpa_flow = {
+                'upper': 0.0,
+                'middle': 0.0,
+                'lower': 0.0
+            }
+            rpa_flow = {
+                'upper': 0.0,
+                'middle': 0.0,
+                'lower': 0.0
+            }
+            for block in self.svzerod_3Dcoupling.coupling_blocks.values():
+                if 'inflow' in block.surface.lower():
+                    continue
+                outlet = self.mesh_complete.mesh_surfaces[block.surface]
+                if outlet.lpa:
+                    if outlet.lobe == 'upper':
+                        lpa_flow['upper'] += self.svzerod_data.get_flow(block)
+                    elif outlet.lobe == 'middle':
+                        lpa_flow['middle'] += self.svzerod_data.get_flow(block)
+                    elif outlet.lobe == 'lower':
+                        lpa_flow['lower'] += self.svzerod_data.get_flow(block)
+                elif outlet.rpa:
+                    if outlet.lobe == 'upper':
+                        rpa_flow['upper'] += self.svzerod_data.get_flow(block)
+                    elif outlet.lobe == 'middle':
+                        rpa_flow['middle'] += self.svzerod_data.get_flow(block)
+                    elif outlet.lobe == 'lower':
+                        rpa_flow['lower'] += self.svzerod_data.get_flow(block)
+           
+            # get the total flow
+            total_flow = sum(lpa_flow.values()) + sum(rpa_flow.values())
+            lpa_pct = math.trunc(sum(lpa_flow.values()) / total_flow * 1000) / 10
+            rpa_pct = math.trunc(sum(rpa_flow.values()) / total_flow * 1000) / 10
 
-        total_flow = sum(lpa_flow.values()) + sum(rpa_flow.values())
-        lpa_pct = math.trunc(sum(lpa_flow.values()) / total_flow * 1000) / 10
-        rpa_pct = math.trunc(sum(rpa_flow.values()) / total_flow * 1000) / 10
+            # get upper/middle/lower flow split
+            if verbose:
+                print(f'LPA flow: {sum(lpa_flow.values())} ({lpa_pct}%) | upper: {math.trunc(lpa_flow["upper"] / total_flow * 1000) / 10}% | middle: {math.trunc(lpa_flow["middle"] / total_flow * 1000) / 10}% | lower: {math.trunc(lpa_flow["lower"] / total_flow * 1000) / 10}%')
+                print(f'RPA flow: {sum(rpa_flow.values())} ({rpa_pct}%) | upper: {math.trunc(rpa_flow["upper"] / total_flow * 1000) / 10}% | middle: {math.trunc(rpa_flow["middle"] / total_flow * 1000) / 10}% | lower: {math.trunc(rpa_flow["lower"] / total_flow * 1000) / 10}%')
 
+        else:
+            # unsteady case, need to compute sys, dia, mean flows
+            lpa_flow = {
+                "sys": {
+                    'upper': 0.0,
+                    'middle': 0.0,
+                    'lower': 0.0
+                },
+                "dia": {
+                    'upper': 0.0,
+                    'middle': 0.0,
+                    'lower': 0.0
+                },
+                "mean": {
+                    'upper': 0.0,
+                    'middle': 0.0,
+                    'lower': 0.0
+                }
+            }
+            rpa_flow = copy.deepcopy(lpa_flow)
 
-
-        # get upper/middle/lower flow split
-
-        if verbose:
-            print(f'LPA flow: {sum(lpa_flow.values())} ({lpa_pct}%) | upper: {math.trunc(lpa_flow["upper"] / total_flow * 1000) / 10}% | middle: {math.trunc(lpa_flow["middle"] / total_flow * 1000) / 10}% | lower: {math.trunc(lpa_flow["lower"] / total_flow * 1000) / 10}%')
-            print(f'RPA flow: {sum(rpa_flow.values())} ({rpa_pct}%) | upper: {math.trunc(rpa_flow["upper"] / total_flow * 1000) / 10}% | middle: {math.trunc(rpa_flow["middle"] / total_flow * 1000) / 10}% | lower: {math.trunc(rpa_flow["lower"] / total_flow * 1000) / 10}%')
-
+            for block in self.svzerod_3Dcoupling.coupling_blocks.values():
+                if 'inflow' in block.surface.lower():
+                    continue
+                outlet = self.mesh_complete.mesh_surfaces[block.surface]
+                time, flow, pressure = self.svzerod_data.get_result(block)
+                time = time[time > time.max() - 1.0]
+                last_half_time = time[time > time.max() - 0.5]
+                # use the indices of the time to get the flow
+                if outlet.lpa:
+                    lpa_flow['sys'][outlet.lobe] += np.max(flow[time.index])
+                    lpa_flow['dia'][outlet.lobe] += np.min(flow[time.index])
+                    lpa_flow['mean'][outlet.lobe] += np.mean(flow[time.index])
+                elif outlet.rpa:
+                    rpa_flow['sys'][outlet.lobe] += np.max(flow[time.index])
+                    rpa_flow['dia'][outlet.lobe] += np.min(flow[time.index])
+                    rpa_flow['mean'][outlet.lobe] += np.mean(flow[time.index])
+        
         return lpa_flow, rpa_flow
     
     def plot_mpa(self):
@@ -685,6 +790,11 @@ class SimulationDirectory:
         plot the MPA pressure'''
 
         time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
+
+        # remove the 1st period of results
+        time = time[time > 1.0]
+        flow = flow[time.index]
+        pressure = pressure[time.index]
 
         pressure = pressure / 1333.2
 

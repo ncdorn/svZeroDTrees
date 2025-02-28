@@ -15,7 +15,7 @@ class ConfigHandler():
     def __init__(self, config: dict, is_pulmonary=True, is_threed_interface=False, closed_loop=False, path=None):
         self._config = config
 
-        self.trees = {} # list of StructuredTree instances
+        self.tree_params = {} # list of StructuredTree params
 
         # initialize config maps
         self.branch_map = {} # {branch id: Vessel instance}
@@ -88,7 +88,8 @@ class ConfigHandler():
             },
             "external_solver_coupling_blocks": [],
             "vessels": [],
-            "junctions": []
+            "junctions": [],
+            "trees": []
         }
 
         return ConfigHandler(config, is_pulmonary=False, is_threed_interface=True, path=path)
@@ -100,6 +101,7 @@ class ConfigHandler():
 
         :param file_name: name of the file to write to
         '''
+
         with open(file_name, 'w') as ff:
             json.dump(self.config, ff, indent=4)
 
@@ -240,6 +242,9 @@ class ConfigHandler():
 
         if self.threed_interface:
             self._config['external_solver_coupling_blocks'] = [coupling_block.to_dict() for coupling_block in self.coupling_blocks.values()]
+        
+        if hasattr(self, 'tree_params'):
+            self._config['trees'] = list(self.tree_params.values())
 
 
     def plot_inflow(self):
@@ -493,6 +498,10 @@ class ConfigHandler():
             self.valves = {}
             for valve in self._config['valves']:
                 self.valves[valve['name']] = Valve.from_config(valve)
+        
+        if 'trees' in self._config.keys():
+            for tree_params in self._config['trees']:
+                self.tree_params[tree_params['name']] = tree_params
 
         # find the root vessel
         if self._config['vessels'] != []:
@@ -633,7 +642,8 @@ class ConfigHandler():
                 "external_solver_coupling_blocks": [],
                 "boundary_conditions": [],
                 "vessels": [],
-                "junctions": []
+                "junctions": [],
+                "trees": []
             },
             is_pulmonary=False,
             is_threed_interface=True,
@@ -706,6 +716,8 @@ class ConfigHandler():
                 block_name = bc.name.replace('_', '')
                 threed_coupler.coupling_blocks[block_name] = CouplingBlock.from_bc(bc, surface=list(mesh_complete.mesh_surfaces.values())[i].filename)
 
+        # copy the trees over
+        threed_coupler.tree_params = self.tree_params
         print('writing svzerod_3Dcoupling.json...')
         threed_coupler.to_json(os.path.join(simdir, 'svzerod_3Dcoupling.json'))
 
