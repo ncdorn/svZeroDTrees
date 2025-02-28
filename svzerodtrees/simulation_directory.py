@@ -793,6 +793,7 @@ class SimulationDirectory:
 
         # remove the 1st period of results
         time = time[time > 1.0]
+        print(f'length of time: {len(time)}')
         flow = flow[time.index]
         pressure = pressure[time.index]
 
