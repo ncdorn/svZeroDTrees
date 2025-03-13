@@ -15,7 +15,8 @@ from scipy.optimize import minimize, Bounds
 from svzerodtrees.structuredtree import StructuredTree
 from svzerodtrees.adaptation import *
 from svzerodtrees.result_handler import ResultHandler
-from svzerodtrees.config_handler import ConfigHandler, Vessel, BoundaryCondition, Junction, SimParams
+from svzerodtrees.config_handler import ConfigHandler
+from svzerodtrees.blocks import *
 from svzerodtrees.inflow import Inflow
 
 
@@ -587,8 +588,8 @@ def construct_impedance_trees(config_handler, mesh_surfaces_path, wedge_pressure
     if use_mean:
         '''use the mean diameter of the cap surfaces to construct the lpa and rpa trees and use these trees for all outlets'''
         if specify_diameter:
-            lpa_mean_dia = float(input('Enter the root diameter of the LPA tree: '))
-            rpa_mean_dia = float(input('Enter the root diameter of the RPA tree: '))
+            k1_l, k2_l, k3_l, lrr_l, lpa_mean_dia = tree_params['lpa']
+            k1_r, k2_r, k3_r, lrr_r, rpa_mean_dia = tree_params['rpa']
 
         else:
             lpa_mean_dia = np.mean([(area / np.pi)**(1/2) * 2 for area in lpa_info.values()])
@@ -602,22 +603,27 @@ def construct_impedance_trees(config_handler, mesh_surfaces_path, wedge_pressure
             print(f'LPA std diameter: {lpa_std_dia}')
             print(f'RPA std diameter: {rpa_std_dia}')
 
+            k1_l, k2_l, k3_l, lrr_l = tree_params['lpa']
+
+            k1_r, k2_r, k3_r, lrr_r = tree_params['rpa']
+
         lpa_tree = StructuredTree(name='LPA', time=config_handler.bcs['INFLOW'].t, simparams=config_handler.simparams)
         print(f'building LPA tree with lpa parameters: {tree_params["lpa"]}')
-        k1_l, k2_l, k3_l, lrr_l = tree_params['lpa']
+        
 
         lpa_tree.build_tree(initial_d=lpa_mean_dia, d_min=d_min, lrr=lrr_l)
         lpa_tree.compute_olufsen_impedance(k2=k2_l, k3=k3_l, n_procs=n_procs)
+        lpa_tree.plot_stiffness(path='lpa_stiffness_plot.png')
 
         # add tree to config handler
         config_handler.tree_params[lpa_tree.name] = lpa_tree.to_dict()
 
         rpa_tree = StructuredTree(name='RPA', time=config_handler.bcs['INFLOW'].t, simparams=config_handler.simparams)
         print(f'building RPA tree with rpa parameters: {tree_params["rpa"]}')
-        k1_r, k2_r, k3_r, lrr_r = tree_params['rpa']
 
         rpa_tree.build_tree(initial_d=rpa_mean_dia, d_min=d_min, lrr=lrr_r)
         rpa_tree.compute_olufsen_impedance(k2=k2_r, k3=k3_r, n_procs=n_procs)
+        rpa_tree.plot_stiffness(path='rpa_stiffness_plot.png')
 
         # add tree to config handler
         print(rpa_tree.to_dict())
@@ -662,7 +668,7 @@ def construct_impedance_trees(config_handler, mesh_surfaces_path, wedge_pressure
             config_handler.bcs[bc_name] = tree.create_impedance_bc(bc_name, wedge_pressure * 1333.2)
 
 
-def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets, opt_config_path='optimized_impedanc_config.json', n_procs=24, log_file=None, d_min=0.01, tol=0.01, is_pulmonary=True, convert_to_cm=True):
+def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets, opt_config_path='optimized_impedance_config.json', n_procs=24, log_file=None, d_min=0.01, tol=0.01, is_pulmonary=True, convert_to_cm=True):
 
     if convert_to_cm:
         scale = 0.1
@@ -714,12 +720,14 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
         k1_l = 19992500.0
         k1_r = 19992500.0
         k2_l = params[0]
-        k2_r = params[0]
+        k2_r = params[1]
         d_min = [d_min, d_min] # optimize d_min this time
-        lpa_mean_dia = params[1] # this time we vary input diameter
-        rpa_mean_dia = params[2]
-        lrr_l = 13.0
-        lrr_r = 13.0
+        lpa_mean_dia = params[2] # this time we vary input diameter
+        rpa_mean_dia = params[3]
+        lrr_l = 3.0
+        lrr_r = 3.0
+        # lrr_l = 3.0
+        # lrr_r = 3.0
         # xi = params[2]
 
         # for sheep, try with fixed l_rr (10.0) and optimize other parameters!!
@@ -765,10 +773,18 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
                 else:
                     weights = np.array([1, 1, 1])
                 
-                pressure_loss = np.sum(np.dot(np.abs(np.array(pa_config.P_mpa) - np.array(clinical_targets.mpa_p)) / clinical_targets.mpa_p, weights)) ** 2
+                pressure_loss = np.sum(np.dot(np.abs(np.array(pa_config.P_mpa) - np.array(clinical_targets.mpa_p)) / clinical_targets.mpa_p, weights)) ** 2 * 100
 
-                flowsplit_loss = ((pa_config.rpa_split - clinical_targets.rpa_split) / clinical_targets.rpa_split) ** 2
-            
+                flowsplit_loss = ((pa_config.rpa_split - clinical_targets.rpa_split) / clinical_targets.rpa_split) ** 2 * 100
+
+                # write parameters to csv file
+                # write the optimized results + params to file
+                with open('optimized_params.csv', 'w') as f:
+                    f.write("pa,k1,k2,k3,lrr,diameter,loss,flow_split,p_mpa\n")
+                    # do unique for lpa, rpa
+                    f.write(f'lpa,{k1_l},{k2_l},{k3_l},{lrr_l},{lpa_mean_dia},{loss},{1 - pa_config.rpa_split},[{pa_config.P_mpa[0]} {pa_config.P_mpa[1]} {pa_config.P_mpa[2]}]\n')
+                    f.write(f'rpa,{k1_r},{k2_r},{k3_r},{lrr_r},{rpa_mean_dia},{loss},{pa_config.rpa_split},[{pa_config.P_mpa[0]} {pa_config.P_mpa[1]} {pa_config.P_mpa[2]}]\n')
+                    
             except:
                 pressure_loss = 5e5
                 flowsplit_loss = 5e5
@@ -784,14 +800,29 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
     ### WITH ALPHA
     # bounds = Bounds(lb=[-np.inf,-np.inf, 10.0, 10.0, 0.0], ub= [np.inf, np.inf, np.inf, np.inf, np.inf])
     ### WITHOUT ALPHA
-    bounds = Bounds(lb=[-np.inf, 0.01, 0.01], ub= [np.inf, np.inf, np.inf])
 
+    # need to implement grid search for stiffnesses...
+    print("performing search for best k2 stiffness...")
+    k2_search = [-25, -50, -75, -100, -125, -150]
+    min_loss = 1e5
+    k2_opt = 0
+    for k2 in k2_search:
+        loss = tree_tuning_objective([k2, k2, lpa_mean_dia, rpa_mean_dia], clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs)
+        print(f'k2: {k2}, loss: {loss}')
+        if loss < min_loss:
+            min_loss = loss
+            k2_opt = k2
+
+    print(f'optimal k2: {k2_opt} with loss {min_loss}')
+
+    # bounds for optimization
+    bounds = Bounds(lb=[-np.inf, -np.inf, 0.01, 0.01])
 
     # result = minimize(tree_tuning_objective, [2e7, 2e7, -30, -30, 50.0, 50.0], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, tol=1.0)
     ### WITH ALPHA
     # result = minimize(tree_tuning_objective, [-30, -30, 66.0, 66.0, 2.7], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, tol=1.0)
     ### WITHOUT ALPHA
-    result = minimize(tree_tuning_objective, [-15, lpa_mean_dia * 2, rpa_mean_dia * 2], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds)
+    result = minimize(tree_tuning_objective, [k2_opt, k2_opt, lpa_mean_dia, rpa_mean_dia], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds)
 
     # format of result.x: [k2_l, k2_r, lrr_l, lrr_r]
     print(f'Optimized parameters: {result.x}')
@@ -799,168 +830,16 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
     # simulate the final pa config
     pa_config.simulate()
 
-    # write the optimized results + params to file
-    with open('optimized_params.txt', 'a') as f:
-        f.write(f'pa config SIMULATED, rpa split: {pa_config.rpa_split}, p_mpa = {pa_config.P_mpa}\n')
-        f.wrte(f'loss funcion value: {result.fun}\n')
-        f.write('Optimized parameters: [k2_l, k2_r, lrr_l, lrr_r]\n')
-        f.write(str(result.x) + '\n')
-
     pa_config.plot_mpa()
 
     # build trees for LPA/RPA
     print('building impedance trees for all outlets with optimized LPA/RPA parameters')
     # clear bcs from config_handler
-    construct_impedance_trees(config_handler, mesh_surfaces_path, clinical_targets.wedge_p, d_min=d_min, convert_to_cm=convert_to_cm, is_pulmonary=is_pulmonary, use_mean=True, tree_params={'lpa': [19992500, result.x[0], 0.0, result.x[2]],
-                                                                                                                                                                              'rpa': [19992500, result.x[1], 0.0, result.x[3]]})
+    construct_impedance_trees(config_handler, mesh_surfaces_path, clinical_targets.wedge_p, d_min=d_min, convert_to_cm=convert_to_cm, is_pulmonary=is_pulmonary, use_mean=True, specify_diameter=True, tree_params={'lpa': [19992500, result.x[0], 0.0, 3.0, result.x[2]],
+                                                                                                                                                                              'rpa': [19992500, result.x[1], 0.0, 3.0, result.x[3]]})
 
     config_handler.to_json(opt_config_path)
-    
 
-# def optimize_impedance_bcs_alpha_beta(config_handler, mesh_surfaces_path, clinical_targets, opt_config_path='optimized_impedanc_config.json', n_procs=24, log_file=None, d_min=0.01, tol=0.01, is_pulmonary=True, convert_to_cm=True):
-#     '''
-#     optimize impedance bcs with alpha/bets'''
-#     if convert_to_cm:
-#         scale = 0.1
-#     else:
-#         scale = 1
-
-#     # get mean outlet area
-#     if is_pulmonary:
-#         rpa_info, lpa_info, inflow_info = vtp_info(mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=True)
-    
-#     # rpa_mean_dia = 0.32
-#     rpa_mean_dia = np.mean([(area / np.pi)**(1/2) * 2 for area in rpa_info.values()])
-#     print(f'RPA mean diameter: {rpa_mean_dia}')
-#     # lpa_mean_dia = 0.32
-#     lpa_mean_dia = np.mean([(area / np.pi)**(1/2) * 2 for area in lpa_info.values()])
-#     print(f'LPA mean diameter: {lpa_mean_dia}')
-
-#     # rpa_total_area = sum(rpa_info.values())
-#     # lpa_total_area = sum(lpa_info.values())
-
-#     # rpa_mean_dia = (rpa_total_area / np.pi)**(1/2) * 2
-#     # lpa_mean_dia = (lpa_total_area / np.pi)**(1/2) * 2
-
-#     # print(f'RPA total diameter: {rpa_mean_dia}')
-#     # print(f'LPA total diameter: {lpa_mean_dia}')
-
-#     # create MPA/LPA/RPA simple config
-#     if len(config_handler.vessel_map.values()) == 5:
-#         # we have an already simplified config
-#         pa_config = PAConfig.from_pa_config(config_handler, clinical_targets)
-#     else:
-#         pa_config = PAConfig.from_config_handler(config_handler, clinical_targets)
-#         if convert_to_cm:
-#             pa_config.convert_to_cm()
-#     # rescale inflow by number of outlets ## TODO: figure out scaling for this
-#     pa_config.bcs['INFLOW'].Q = [q / ((len(lpa_info.values()) + len(rpa_info.values())) // 2) for q in pa_config.bcs['INFLOW'].Q]
-
-#     def tree_tuning_objective(params, clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs):
-#         '''
-#         params: [k1_l, k1_r, k2_l, k2_r, lrr_l, lrr_r, alpha]'''
-
-#         # k1_l = params[0]
-#         # k1_r = params[1]
-#         # k2_l = params[2]
-#         # k2_r = params[3]
-#         lrr_l = params[4]
-#         lrr_r = params[4]
-
-#         k1_l = 19992500.0
-#         k1_r = 19992500.0
-#         k2_l = params[0]
-#         k2_r = params[1]
-#         # lrr_l = 10.0
-#         # lrr_r = 10.0
-#         alpha = params[2]
-#         beta = params[3]
-
-#         # for sheep, try with fixed l_rr (10.0) and optimize other parameters!!
-
-#         k3_l = 0.0
-#         k3_r = 0.0
-
-#         ### WITHOUT ALPHA
-#         # tree_params = {
-#         #     'lpa': [k1_l, k2_l, k3_l, lrr_l],
-#         #     'rpa': [k1_r, k2_r, k3_r, lrr_r]
-#         # }
-
-#         ### WITH ALPHA
-#         tree_params = {
-#             'lpa': [k1_l, k2_l, k3_l, lrr_l, alpha, beta],
-#             'rpa': [k1_r, k2_r, k3_r, lrr_r, alpha, beta]
-#         }
-
-#         pa_config.create_impedance_trees(lpa_mean_dia, rpa_mean_dia, d_min, tree_params, n_procs)
-
-#         pa_config.to_json(f'pa_config_test_tuning.json')
-
-#         if pa_config.bcs['LPA_BC'].Z[0] != pa_config.bcs['LPA_BC'].Z[0]:
-#             print('NaN in LPA impedance')
-#             pressure_loss = 5e5
-#             flowsplit_loss = 5e5
-#         elif pa_config.bcs['RPA_BC'].Z[0] != pa_config.bcs['RPA_BC'].Z[0]:
-#             print('\n\nNaN in RPA impedance\n\n')
-#             pressure_loss = 5e5
-#             flowsplit_loss = 5e5
-#         else:
-#             try:
-#                 pa_config.simulate()
-
-#                 print(f'pa config SIMULATED, rpa split: {pa_config.rpa_split}, p_mpa = {pa_config.P_mpa}\n params: {params}')
-
-#                 pressure_loss = np.sum(np.dot(np.abs(np.array(pa_config.P_mpa) - np.array(clinical_targets.mpa_p)), np.array([1, 1, 5]))) ** 2
-
-#                 flowsplit_loss = ((pa_config.rpa_split - clinical_targets.rpa_split) * 100) ** 2
-            
-#             except:
-#                 pressure_loss = 5e5
-#                 flowsplit_loss = 5e5
-
-#         loss = pressure_loss + flowsplit_loss
-        
-#         print(f'\n***PRESSURE LOSS: {pressure_loss}, FS LOSS: {flowsplit_loss}, TOTAL LOSS: {loss} ***\n')
-
-#         return loss
-
-
-#     # bounds = Bounds(lb=[0.0, 0.0, -np.inf,-np.inf, 10.0, 10.0], ub= [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf])
-#     ### WITH ALPHA
-#     # bounds = Bounds(lb=[-np.inf,-np.inf, 10.0, 10.0, 0.0], ub= [np.inf, np.inf, np.inf, np.inf, np.inf])
-#     ### WITHOUT ALPHA
-#     bounds = Bounds(lb=[-np.inf,-np.inf, 0.0, 0.0, 10.0], ub= [np.inf, np.inf, 0.91, 0.91, np.inf])
-
-
-#     # result = minimize(tree_tuning_objective, [2e7, 2e7, -30, -30, 50.0, 50.0], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, tol=1.0)
-#     ### WITH ALPHA
-#     # result = minimize(tree_tuning_objective, [-30, -30, 66.0, 66.0, 2.7], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, tol=1.0)
-#     ### WITHOUT ALPHA
-#     result = minimize(tree_tuning_objective, [-50.0, -50.0, 0.9, 0.6, 20.0], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds)
-
-#     # format of result.x: [k2_l, k2_r, lrr_l, lrr_r]
-#     print(f'Optimized parameters: {result.x}')
-
-#     # simulate the final pa config
-#     pa_config.simulate()
-
-#     # write the optimized results + params to file
-#     with open('optimized_params.txt', 'a') as f:
-#         f.write(f'pa config SIMULATED, rpa split: {pa_config.rpa_split}, p_mpa = {pa_config.P_mpa}\n')
-#         f.wrte(f'loss funcion value: {result.fun}\n')
-#         f.write('Optimized parameters: [k2_l, k2_r, lrr_l, lrr_r]\n')
-#         f.write(str(result.x) + '\n')
-
-#     pa_config.plot_mpa()
-
-#     # build trees for LPA/RPA
-#     print('building impedance trees for all outlets with optimized LPA/RPA parameters')
-#     # clear bcs from config_handler
-#     construct_impedance_trees(config_handler, mesh_surfaces_path, clinical_targets.wedge_p, d_min=d_min, convert_to_cm=convert_to_cm, is_pulmonary=is_pulmonary, use_mean=True, tree_params={'lpa': [19992500, result.x[0], 0.0, result.x[2]],
-#                                                                                                                                                                               'rpa': [19992500, result.x[1], 0.0, result.x[3]]})
-
-#     config_handler.to_json(opt_config_path)
 
 class ClinicalTargets():
     '''
@@ -1049,10 +928,10 @@ class PAConfig():
         self.rpa_prox = rpa_prox
         # edit the parameters of the prox rpa, lpa
         self.rpa_prox.length = 10.0
-        self.rpa_prox.stenosis_coefficient = 0.0
+        # self.rpa_prox.stenosis_coefficient = 0.0
         self.lpa_prox = lpa_prox
         self.lpa_prox.length = 10.0
-        self.lpa_prox.stenosis_coefficient = 0.0
+        # self.lpa_prox.stenosis_coefficient = 0.0
         self.rpa_dist = rpa_dist
         self.lpa_dist = lpa_dist
         self.inflow = inflow
@@ -1152,7 +1031,7 @@ class PAConfig():
         '''
 
         with open(output_file, 'w') as ff:
-            json.dump(self.config, ff)
+            json.dump(self.config, ff, indent=4)
 
 
     def simulate(self):
@@ -1206,9 +1085,9 @@ class PAConfig():
                     "bc_name": "RPA_BC",
                     "bc_type": "RCR",
                     "bc_values": {
-                        "Rp": 100.0,
+                        "Rp": 1.0,
                         "C": 1e-4,
-                        "Rd": 900.0,
+                        "Rd": 9.0,
                         "Pd": wedge_p
                     }
                 }),
@@ -1217,9 +1096,9 @@ class PAConfig():
                     "bc_name": "LPA_BC",
                     "bc_type": "RCR",
                     "bc_values": {
-                        "Rp": 100.0,
+                        "Rp": 1.0,
                         "C": 1e-4,
-                        "Rd": 900.0,
+                        "Rd": 9.0,
                         "Pd": wedge_p
                     }
                 })
@@ -1501,7 +1380,7 @@ class PAConfig():
         print([self.Q_rpa / self.clinical_targets.q, self.P_mpa, self.P_lpa, self.P_rpa])
 
 
-    def plot_mpa(self, path='mpa_plot.png'):
+    def plot_mpa(self, path='pa_config_mpa_plot.png'):
         '''
         plot the mpa pressure and flow
         '''
@@ -1520,7 +1399,48 @@ class PAConfig():
         axs[1].set_xlabel('time (s)')
         axs[1].set_ylabel('pressure (mmHg)')
 
-        plt.savefig(path)
+        if path is None:
+            plt.show()
+        else:
+            plt.savefig(path)
+
+
+    def plot_outlets(self, path='pa_config_outlets_plot.png'):
+        '''
+        plot the flow and pressure at the outlets of the pa config
+        '''
+
+        fig, axs = plt.subplots(2, 2)
+
+        lpa_result = self.result[self.result.name=='branch2_seg0']
+        rpa_result = self.result[self.result.name=='branch4_seg0']
+
+        # plot flow
+        axs[0,0].plot(lpa_result['time'], lpa_result['flow_out'])
+        axs[0,0].set_xlabel('time (s)')
+        axs[0,0].set_ylabel('flow (cm3/s)')
+        axs[0,0].set_title('LPA flow')
+
+        axs[0,1].plot(rpa_result['time'], rpa_result['flow_out'])
+        axs[0,1].set_xlabel('time (s)')
+        axs[0,1].set_ylabel('flow (cm3/s)')
+        axs[0,1].set_title('RPA flow')
+
+        # plot pressure
+        axs[1,0].plot(lpa_result['time'], lpa_result['pressure_out'] / 1333.2)
+        axs[1,0].set_xlabel('time (s)')
+        axs[1,0].set_ylabel('pressure (mmHg)')
+        axs[1,0].set_title('LPA pressure')
+
+        axs[1,1].plot(rpa_result['time'], rpa_result['pressure_out'] / 1333.2)
+        axs[1,1].set_xlabel('time (s)')
+        axs[1,1].set_ylabel('pressure (mmHg)')
+        axs[1,1].set_title('RPA pressure')
+
+        if path is None:
+            plt.show()
+        else:
+            plt.savefig(path)
 
 
     def optimize_rcrs_and_compare(self):

@@ -6,6 +6,7 @@ from svzerodtrees.inflow import *
 from svzerodtrees.simulation_directory import *
 from svzerodtrees.structuredtree import *
 import json
+import pandas as pd
 import pickle
 import os
 import vtk
@@ -40,6 +41,9 @@ class Simulation:
         self.adapt_location = adapt_location
         self.steady_dir = os.path.join(self.path, steady_dir)
 
+        # simulation parameters
+        self.n_tsteps = 2000
+
         ## Bools
         self.optimized = optimized
         self.convert_to_cm = convert_to_cm
@@ -48,7 +52,7 @@ class Simulation:
 
         # use a generic inflow profile
         self.inflow = Inflow.periodic()
-        self.inflow.rescale(cardiac_output=self.clinical_targets.q)
+        self.inflow.rescale(cardiac_output=self.clinical_targets.q, tsteps=self.n_tsteps)
 
         # make a figures directory
         self.figures_dir = os.path.join(self.path, 'figures')
@@ -74,7 +78,7 @@ class Simulation:
             self.run_steady_sims()
 
             # generate the simplified zerod config
-            self.generate_simplified_nonlinear_zerod(cardiac_output=self.clinical_targets.q)
+            self.generate_simplified_nonlinear_zerod()
 
             # optimize preop BCs
             reduced_config = ConfigHandler.from_json(self.simplified_zerod_config)
@@ -83,6 +87,30 @@ class Simulation:
         
         if not bcs_optimized:
             optimize_impedance_bcs(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, opt_config_path=self.zerod_config, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
+            # need to create coupling config and add to preop/postop directories
+        
+        else:
+            # check if zerod config exists
+            if not os.path.exists(self.zerod_config):
+                pass
+
+            # construct trees
+            opt_params = pd.read_csv(os.path.join(self.path, 'optimized_params.csv'))
+            tree_params = {
+                'lpa': [opt_params['k1'][opt_params.pa=='lpa'].values[0], opt_params['k2'][opt_params.pa=='lpa'].values[0], opt_params['k3'][opt_params.pa=='lpa'].values[0], opt_params['lrr'][opt_params.pa=='lpa'].values[0], opt_params['diameter'][opt_params.pa=='lpa'].values[0]],
+                'rpa': [opt_params['k1'][opt_params.pa=='rpa'].values[0], opt_params['k2'][opt_params.pa=='rpa'].values[0], opt_params['k3'][opt_params.pa=='rpa'].values[0], opt_params['lrr'][opt_params.pa=='rpa'].values[0], opt_params['diameter'][opt_params.pa=='rpa'].values[0]]
+            }
+
+            # generate blank threed coupler
+            # blank_threed_coupler = ConfigHandler.blank_threed_coupler(path=os.path.join(self.path, 'svzerod_3Dcoupling.json'))
+            zerod_config = ConfigHandler.from_json(self.simplified_zerod_config)
+            zerod_config.inflows[0].rescale(tsteps=2000)
+
+            # create the trees
+            construct_impedance_trees(zerod_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets.wedge_p, d_min=0.01, convert_to_cm=self.convert_to_cm, use_mean=True, specify_diameter=True, tree_params=tree_params)
+
+            # convert trees to svzerod_3dcoupling BUG: NOT ENOUGH TIMESTEPS, NEED TO SPECIFY ZEROD CONFIG OR INFLOW
+            impedance_threed_coupler, coupling_block_list = zerod_config.generate_threed_coupler(self.preop_dir.path, mesh_complete=self.preop_dir.mesh_complete)
 
         # run preop + postop simulations
         sim_config = {
@@ -94,12 +122,12 @@ class Simulation:
             'hours': 16
         }
         preop_sim = SimulationDirectory.from_directory(self.preop_dir.path, self.zerod_config, convert_to_cm=self.convert_to_cm)
-        preop_sim.write_files()
-        preop_sim.run(simname='Preop Simulation', user_input=False, sim_config=sim_config)
+        preop_sim.write_files(simname='Preop Simulation', user_input=False, sim_config=sim_config)
+        preop_sim.run()
 
         postop_sim = SimulationDirectory.from_directory(self.postop_dir.path, self.zerod_config, convert_to_cm=self.convert_to_cm)
-        postop_sim.write_files()
-        postop_sim.run(simname='Postop Simulation', user_input=False, sim_config=sim_config)
+        postop_sim.write_files(simname='Postop Simulation', user_input=False, sim_config=sim_config)
+        postop_sim.run()
 
         # compute adaptation
         self.compute_adaptation

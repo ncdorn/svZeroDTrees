@@ -3,7 +3,7 @@ import random
 from scipy.optimize import minimize, Bounds, LinearConstraint
 from svzerodtrees.treevessel import TreeVessel
 from svzerodtrees.utils import *
-from svzerodtrees.config_handler import ConfigHandler, Vessel, BoundaryCondition, SimParams
+from svzerodtrees.blocks import *
 import math
 
 class StructuredTree():

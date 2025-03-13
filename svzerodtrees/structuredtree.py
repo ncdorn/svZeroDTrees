@@ -3,7 +3,8 @@ import random
 from scipy.optimize import minimize, Bounds, LinearConstraint
 from svzerodtrees.treevessel import TreeVessel
 from svzerodtrees.utils import *
-from svzerodtrees.config_handler import ConfigHandler, Vessel, BoundaryCondition, SimParams
+from svzerodtrees.config_handler import ConfigHandler
+from svzerodtrees.blocks import *
 from multiprocessing import Pool
 import math
 import scipy
@@ -465,7 +466,7 @@ class StructuredTree():
                 Z_om[:tsteps//2+1] = np.conjugate(p.map(z0_w_stiffness, [abs(w) for w in omega[:tsteps//2+1]]))
             
             end = time.time()
-            print(f'this parallelized process took {end - start} seconds')
+            print(f'this parallelized process took {end - start} seconds for d_root = {self.initial_d} and d_min = {self.d_min}')
         else:
             ## UNPARALLELIZED ##
             start = time.time()
@@ -514,8 +515,8 @@ class StructuredTree():
         impedance_bc = BoundaryCondition({
             "bc_name": f"{name}",
             "bc_type": "IMPEDANCE",
-            "tree": self.name,
             "bc_values": {
+                "tree": self.name,
                 "Z": self.Z_t.tolist(),
                 "t": self.time,
                 "Pd": Pd,
@@ -822,6 +823,28 @@ class StructuredTree():
         '''
         return len(self.block_dict["vessels"])
 
+
+    def plot_stiffness(self, path='stiffness_plot.png'):
+        '''
+        plot the value of Eh/r from d_root to d_min for the tree stiffness value
+        '''
+
+        d = np.linspace(self.initial_d, self.d_min, 100)
+        Eh_r = np.zeros(len(d))
+
+        # compute Eh/r for each d
+        for i in range(len(d)):
+            Eh_r[i] = self.k1 * np.exp(self.k2 * d[i] / 2) + self.k3
+
+        plt.plot(d, Eh_r)
+        plt.xlabel('diameter (cm)')
+        plt.ylabel('Eh/r')
+        plt.title('Eh/r vs. diameter')
+        plt.savefig(path)
+
+
+
+        
     @property
     def R(self):
         '''

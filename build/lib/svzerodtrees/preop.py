@@ -14,7 +14,8 @@ from scipy.optimize import minimize, Bounds
 from svzerodtrees.structuredtree import StructuredTree
 from svzerodtrees.adaptation import *
 from svzerodtrees.result_handler import ResultHandler
-from svzerodtrees.config_handler import ConfigHandler, Vessel, BoundaryCondition, Junction, SimParams
+from svzerodtrees.config_handler import ConfigHandler
+from svzerodtrees.blocks import *
 
 
 def optimize_outlet_bcs(input_file,

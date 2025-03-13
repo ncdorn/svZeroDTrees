@@ -10,7 +10,7 @@ class Inflow():
     '''
     a class to handle inflow for pulmonary trees
     '''
-    def __init__(self, q, t, t_per, n_periods, name="INFLOW"):
+    def __init__(self, q, t, t_per=1.0, n_periods=1, name="INFLOW"):
         '''
         initialize the inflow object
 
