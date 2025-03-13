@@ -301,7 +301,8 @@ class BoundaryCondition():
             self._t = self.values['t']
         
         if self.type == 'IMPEDANCE':
-            self.tree = self.values['tree']
+            if 'tree' in self.values.keys():
+                self.tree = self.values['tree']
             self._Z = self.values['Z']
             self._t = self.values['t']
     

@@ -837,6 +837,7 @@ class StructuredTree():
             Eh_r[i] = self.k1 * np.exp(self.k2 * d[i] / 2) + self.k3
 
         plt.plot(d, Eh_r)
+        plt.yscale('log')
         plt.xlabel('diameter (cm)')
         plt.ylabel('Eh/r')
         plt.title('Eh/r vs. diameter')

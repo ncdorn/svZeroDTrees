@@ -14,7 +14,7 @@ class ConfigHandler():
     class to handle configs with and without trees
     '''
 
-    def __init__(self, config: dict, is_pulmonary=True, is_threed_interface=False, closed_loop=False, path=None):
+    def __init__(self, config: dict, is_pulmonary=False, is_threed_interface=False, closed_loop=False, path=None):
         self._config = config
 
         self.tree_params = {} # list of StructuredTree params
@@ -24,6 +24,7 @@ class ConfigHandler():
         self.vessel_map = {} # {vessel id: Vessel instance}
         self.junctions = {} # {junction name: Junction instance}
         self.bcs = {} # {bc name: BoundaryCondition instance}
+        self.inflows = {} # (inflow name: Inflow)
 
         self.simparams = None
 
@@ -44,7 +45,7 @@ class ConfigHandler():
 
     #### I/O METHODS ####
     @classmethod
-    def from_json(cls, file_name: str, is_pulmonary=True, is_threed_interface=False):
+    def from_json(cls, file_name: str, is_pulmonary=False, is_threed_interface=False):
         '''
         load in a config dict from json file
 
@@ -59,7 +60,7 @@ class ConfigHandler():
         return ConfigHandler(config, is_pulmonary, is_threed_interface, path=os.path.abspath(file_name))
     
     @classmethod
-    def from_file(cls, file_name: str, is_pulmonary=True):
+    def from_file(cls, file_name: str, is_pulmonary=False):
         '''
         load in a config dict from binary file via pickle
         '''
@@ -223,8 +224,8 @@ class ConfigHandler():
         # this is a separate config for debugging purposes
         self._config = {}
         # set the inflows
-        for inflow in self.inflows:
-            self.set_inflow(inflow, inflow.name)
+        for name, inflow in self.inflows.items():
+            self.set_inflow(inflow, name)
         # add the boundary conditions
         self._config['boundary_conditions'] = [bc.to_dict() for bc in self.bcs.values()]
 
@@ -456,10 +457,8 @@ class ConfigHandler():
         
         # initialize the boundary condition map (dict of boundary conditions)
         for bc_config in self._config['boundary_conditions']:
-            # create inflow object from inflow
-            self.inflows = []
             if 'inflow' in bc_config['bc_name'].lower():
-                self.inflows.append(Inflow(bc_config['bc_values']['Q'], bc_config['bc_values']['t'], t_per=np.max(bc_config['bc_values']['t']), name=bc_config['bc_name']))
+                self.inflows[bc_config['bc_name']] = Inflow(bc_config['bc_values']['Q'], bc_config['bc_values']['t'], t_per=np.max(bc_config['bc_values']['t']), name=bc_config['bc_name'])
             self.bcs[bc_config['bc_name']] = BoundaryCondition.from_config(bc_config)
 
         # initialize the simulation parameters

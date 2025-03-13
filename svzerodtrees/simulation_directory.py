@@ -114,7 +114,7 @@ class SimulationDirectory:
         # check for zerod model
         if zerod_config is not None and os.path.exists(zerod_config):
             print('zerod model found')
-            zerod_config = ConfigHandler.from_json(zerod_config, is_pulmonary=is_pulmonary)
+            zerod_config = ConfigHandler.from_json(zerod_config, is_pulmonary=False)
             if os.path.dirname(zerod_config.path) != path:
                 print('copying zerod model to simulation directory')
                 os.system(f'cp {zerod_config.path} {path}')
@@ -143,18 +143,14 @@ class SimulationDirectory:
 
         # check for svzerod_3Dcoupling.json
         svzerod_3Dcoupling = os.path.join(path, 'svzerod_3Dcoupling.json')
-        if os.path.exists(svzerod_3Dcoupling):
-            print('svzerod_3Dcoupling.json found')
-            svzerod_3Dcoupling = ConfigHandler.from_json(svzerod_3Dcoupling, is_pulmonary=False, is_threed_interface=True)
-        else:
+        if zerod_config is not None and mesh_complete is not None:
             print('generating svzerod_3Dcoupling.json...')
-            if zerod_config is not None:
-                svzerod_3Dcoupling, coupling_blocks = zerod_config.generate_threed_coupler(path, 
-                                                                                            inflow_from_0d=True, 
-                                                                                            mesh_complete=mesh_complete)
-            else:
-                print('zerod model not found, generating blank svzerod_3Dcoupling.json')
-                svzerod_3Dcoupling = ConfigHandler.blank_threed_coupler(path=os.path.join(path, 'svzerod_3Dcoupling.json'))
+            svzerod_3Dcoupling, coupling_blocks = zerod_config.generate_threed_coupler(path, 
+                                                                                        inflow_from_0d=True, 
+                                                                                        mesh_complete=mesh_complete)
+        else:
+            print('zerod model not found or mesh-complete not found, generating blank svzerod_3Dcoupling.json')
+            svzerod_3Dcoupling = ConfigHandler.blank_threed_coupler(path=os.path.join(path, 'svzerod_3Dcoupling.json'))
 
         # check for svFSI.xml
         svFSIxml = os.path.join(path, 'svFSIplus.xml')
