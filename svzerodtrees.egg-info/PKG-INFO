@@ -1,8 +1,6 @@
-Metadata-Version: 2.2
+Metadata-Version: 2.1
 Name: svzerodtrees
 Version: 0.0.0
-<<<<<<< HEAD
-=======
 Requires-Dist: scipy>=1.9.1
 Requires-Dist: numpy>=1.22.3
 Requires-Dist: vtk>=9.1.0
@@ -13,5 +11,3 @@ Requires-Dist: svsuperestimator
 Requires-Dist: multiprocess
 Requires-Dist: pysvzerod
 Requires-Dist: pyyaml
-Dynamic: requires-dist
->>>>>>> 4d2150d78e7496e778856d0f3684923d2ce3b5d8

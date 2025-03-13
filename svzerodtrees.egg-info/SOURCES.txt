@@ -3,6 +3,7 @@ setup.py
 svzerodtrees/__init__.py
 svzerodtrees/_closedloop_handler.py
 svzerodtrees/adaptation.py
+svzerodtrees/blocks.py
 svzerodtrees/config_handler.py
 svzerodtrees/inflow.py
 svzerodtrees/interface.py

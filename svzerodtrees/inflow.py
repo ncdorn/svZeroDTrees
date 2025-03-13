@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from scipy.integrate import trapz
 import scipy
 import sys
-from .config_handler import BoundaryCondition
+from .blocks import BoundaryCondition
 
 class Inflow():
     '''

@@ -222,7 +222,6 @@ class ConfigHandler():
 
         # this is a separate config for debugging purposes
         self._config = {}
-
         # set the inflows
         for inflow in self.inflows:
             self.set_inflow(inflow, inflow.name)
