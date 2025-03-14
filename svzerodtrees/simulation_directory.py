@@ -3,6 +3,7 @@ from svzerodtrees.threedutils import *
 from svzerodtrees.config_handler import ConfigHandler
 from svzerodtrees.preop import *
 from svzerodtrees.inflow import *
+import matplotlib.pyplot as plt
 import json
 import pickle
 import copy
@@ -465,25 +466,61 @@ class SimulationDirectory:
                 'mean': mean_p - np.mean(rpa_outlet_pressures['mean'])
             }
 
+            Q_sys_lpa = sum(lpa_flow['sys'].values())
+            Q_dia_lpa = sum(lpa_flow['dia'].values())
+            Q_mean_lpa = sum(lpa_flow['mean'].values())
+            Q_sys_rpa = sum(rpa_flow['sys'].values())
+            Q_dia_rpa = sum(rpa_flow['dia'].values())
+            Q_mean_rpa = sum(rpa_flow['mean'].values())
+
             lpa_resistance = {
-                'sys': lpa_pressure_drops['sys'] / sum(lpa_flow['sys'].values()),
-                'dia': lpa_pressure_drops['dia'] / sum(lpa_flow['dia'].values()),
-                'mean': lpa_pressure_drops['mean'] / sum(lpa_flow['mean'].values())
+                'sys': lpa_pressure_drops['sys'] / Q_sys_lpa,
+                'dia': lpa_pressure_drops['dia'] / Q_dia_lpa,
+                'mean': lpa_pressure_drops['mean'] / Q_mean_lpa
             }
             rpa_resistance = {
-                'sys': rpa_pressure_drops['sys'] / sum(rpa_flow['sys'].values()),
-                'dia': rpa_pressure_drops['dia'] / sum(rpa_flow['dia'].values()),
-                'mean': rpa_pressure_drops['mean'] / sum(rpa_flow['mean'].values())
+                'sys': rpa_pressure_drops['sys'] / Q_sys_rpa,
+                'dia': rpa_pressure_drops['dia'] / Q_dia_rpa,
+                'mean': rpa_pressure_drops['mean'] / Q_mean_rpa
             }
 
             print(f'LPA pressure drop: {lpa_pressure_drops["sys"] / 1333.2} mmHg, {lpa_pressure_drops["dia"] / 1333.2} mmHg, {lpa_pressure_drops["mean"] / 1333.2} mmHg')
             print(f'RPA pressure drop: {rpa_pressure_drops["sys"] / 1333.2} mmHg, {rpa_pressure_drops["dia"] / 1333.2} mmHg, {rpa_pressure_drops["mean"] / 1333.2} mmHg')
+
+            print(f'LPA resistance: {lpa_resistance["sys"]} dyn/cm5/s, {lpa_resistance["dia"]} dyn/cm5/s, {lpa_resistance["mean"]} dyn/cm5/s')
+            print(f'RPA resistance: {rpa_resistance["sys"]} dyn/cm5/s, {rpa_resistance["dia"]} dyn/cm5/s, {rpa_resistance["mean"]} dyn/cm5/s')
+
+            print(f'LPA flow: {Q_sys_lpa} dyn/cm5/s, {Q_dia_lpa} dyn/cm5/s, {Q_mean_lpa} dyn/cm5/s')
+            print(f'RPA flow: {Q_sys_rpa} dyn/cm5/s, {Q_dia_rpa} dyn/cm5/s, {Q_mean_rpa} dyn/cm5/s')
             
             # compute nonlinear resistance coefficient by fitting resistance vs flows
-            S_lpa = np.polyfit([sum(lpa_flow['sys'].values()), sum(lpa_flow['dia'].values()), sum(lpa_flow['mean'].values())], [lpa_resistance["sys"], lpa_resistance["dia"], lpa_resistance["mean"]], 1)
-            S_rpa = np.polyfit([sum(rpa_flow['sys'].values()), sum(rpa_flow['dia'].values()), sum(rpa_flow['mean'].values())], [rpa_resistance["sys"], rpa_resistance["dia"], rpa_resistance["mean"]], 1)
+            S_lpa = np.polyfit([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], [lpa_resistance["sys"], lpa_resistance["dia"], lpa_resistance["mean"]], 1)
+            S_rpa = np.polyfit([Q_sys_lpa, Q_dia_rpa, Q_mean_rpa], [rpa_resistance["sys"], rpa_resistance["dia"], rpa_resistance["mean"]], 1)
             lpa_resistance = S_lpa[0]
             rpa_resistance = S_rpa[0]
+
+            # plot the resistance fit
+            fig, ax = plt.subplots(1, 2, figsize=(10, 10))
+
+            q = np.linspace(0, 100, 100)
+
+            ax[0].scatter([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], [lpa_resistance["sys"], lpa_resistance["dia"], lpa_resistance["mean"]], label='LPA')
+            ax[0].plot(q, np.polyval(S_lpa, q), label='LPA fit')
+            ax[0].set_xlabel('Flow (mL/s)')
+            ax[0].set_ylabel('Resistance (dyn/cm5/s)')
+            ax[0].set_title('LPA flow vs resistance')
+            ax[0].legend()
+
+            ax[1].scatter([Q_sys_rpa, Q_dia_rpa, Q_mean_rpa], [rpa_resistance["sys"], rpa_resistance["dia"], rpa_resistance["mean"]], label='RPA')
+            ax[1].plot(q, np.polyval(S_rpa, q), label='RPA fit')
+            ax[1].set_xlabel('Flow (mL/s)')
+            ax[1].set_ylabel('Resistance (dyn/cm5/s)')
+            ax[1].set_title('RPA flow vs resistance')
+            ax[1].legend()
+
+            plt.tight_layout()
+            plt.savefig(os.path.join(self.figures_dir, 'resistance_fit.png'))
+
 
 
         return lpa_resistance, rpa_resistance
