@@ -502,6 +502,8 @@ class SimulationDirectory:
             # plot the resistance fit
             fig, ax = plt.subplots(1, 2, figsize=(10, 10))
 
+            print(f'length of ax is {len(ax)}')
+
             q = np.linspace(0, 100, 100)
 
             ax[0].scatter([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], [lpa_resistance["sys"], lpa_resistance["dia"], lpa_resistance["mean"]], label='LPA')
