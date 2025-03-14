@@ -500,8 +500,6 @@ class SimulationDirectory:
             # plot the resistance fit
             fig, ax = plt.subplots(1, 2, figsize=(10, 10))
 
-            print(f'length of ax is {len(ax)}')
-
             q = np.linspace(0, 100, 100)
 
             ax[0].scatter([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], [lpa_resistance["sys"], lpa_resistance["dia"], lpa_resistance["mean"]], label='LPA')
@@ -519,7 +517,7 @@ class SimulationDirectory:
             ax[1].legend()
 
             plt.tight_layout()
-            plt.savefig(os.path.join(self.figures_dir, 'resistance_fit.png'))
+            plt.savefig(os.path.join(self.fig_dir, 'resistance_fit.png'))
 
             lpa_resistance = S_lpa[0]
             rpa_resistance = S_rpa[0]
