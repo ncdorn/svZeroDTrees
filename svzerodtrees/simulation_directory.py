@@ -496,8 +496,6 @@ class SimulationDirectory:
             # compute nonlinear resistance coefficient by fitting resistance vs flows
             S_lpa = np.polyfit([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], [lpa_resistance["sys"], lpa_resistance["dia"], lpa_resistance["mean"]], 1)
             S_rpa = np.polyfit([Q_sys_lpa, Q_dia_rpa, Q_mean_rpa], [rpa_resistance["sys"], rpa_resistance["dia"], rpa_resistance["mean"]], 1)
-            lpa_resistance = S_lpa[0]
-            rpa_resistance = S_rpa[0]
 
             # plot the resistance fit
             fig, ax = plt.subplots(1, 2, figsize=(10, 10))
@@ -522,6 +520,9 @@ class SimulationDirectory:
 
             plt.tight_layout()
             plt.savefig(os.path.join(self.figures_dir, 'resistance_fit.png'))
+
+            lpa_resistance = S_lpa[0]
+            rpa_resistance = S_rpa[0]
 
 
 
