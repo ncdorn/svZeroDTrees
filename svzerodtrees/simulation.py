@@ -113,7 +113,6 @@ class Simulation:
             construct_impedance_trees(self.zerod_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets.wedge_p, d_min=0.01, convert_to_cm=self.convert_to_cm, use_mean=True, specify_diameter=True, tree_params=tree_params)
 
             impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(self.preop_dir.path, mesh_complete=self.preop_dir.mesh_complete)
-
         # run preop + postop simulations
         sim_config = {
             'n_tsteps': 10000,
@@ -400,6 +399,19 @@ class Simulation:
 
         print('simplified zerod config is simulatable')
         
+
+    def plot_optimized_pa_config(self, path='pa_config_test_tuning.json'):
+        '''
+        plot the optimized zerod config
+        '''
+
+        # load the config
+        config_handler = ConfigHandler.from_json(path)
+        optimized_pa_config = PAConfig.from_pa_config(config_handler, self.clinical_targets)
+
+        # plot the config
+        optimized_pa_config.plot_mpa()
+
 
     def postprocess_3d_results(self):
         '''

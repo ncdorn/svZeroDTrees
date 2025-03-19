@@ -434,7 +434,7 @@ class SimulationDirectory:
             time = time[time > time.max() - 1.0]
             pressure = pressure[time.index]
             sys_p = np.max(pressure)
-            dia_p = np.min(pressure)
+            dia_p = pressure.iloc[0]
             mean_p = np.mean(pressure)
 
             lpa_outlet_pressures = {'sys': [], 'dia': [], 'mean': []}
@@ -445,14 +445,14 @@ class SimulationDirectory:
                     time = time[time > time.max() - 1.0]
                     pressure = pressure[time.index]
                     lpa_outlet_pressures['sys'].append(np.max(pressure))
-                    lpa_outlet_pressures['dia'].append(np.min(pressure))
+                    lpa_outlet_pressures['dia'].append(pressure.iloc[0])
                     lpa_outlet_pressures['mean'].append(np.mean(pressure))
                 if 'rpa' in block.surface.lower():
                     time, flow, pressure = self.svzerod_data.get_result(block)
                     time = time[time > time.max() - 1.0]
                     pressure = pressure[time.index]
                     rpa_outlet_pressures['sys'].append(np.max(pressure))
-                    rpa_outlet_pressures['dia'].append(np.min(pressure))
+                    rpa_outlet_pressures['dia'].append(pressure.iloc[0])
                     rpa_outlet_pressures['mean'].append(np.mean(pressure))
 
             lpa_pressure_drops = {
@@ -813,11 +813,11 @@ class SimulationDirectory:
                 # use the indices of the time to get the flow
                 if outlet.lpa:
                     lpa_flow['sys'][outlet.lobe] += np.max(flow[time.index])
-                    lpa_flow['dia'][outlet.lobe] += np.min(flow[time.index])
+                    lpa_flow['dia'][outlet.lobe] += flow[time.index].iloc[0]
                     lpa_flow['mean'][outlet.lobe] += np.mean(flow[time.index])
                 elif outlet.rpa:
                     rpa_flow['sys'][outlet.lobe] += np.max(flow[time.index])
-                    rpa_flow['dia'][outlet.lobe] += np.min(flow[time.index])
+                    rpa_flow['dia'][outlet.lobe] += flow[time.index].iloc[0]
                     rpa_flow['mean'][outlet.lobe] += np.mean(flow[time.index])
         
         return lpa_flow, rpa_flow
