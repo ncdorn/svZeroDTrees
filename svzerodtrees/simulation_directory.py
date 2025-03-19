@@ -1110,7 +1110,7 @@ class MeshComplete(SimFile):
         for filename in os.listdir(self.mesh_surfaces_dir):
             if '_pa_' in filename:
                 tag, vtp = filename.split('.')
-                tag = tag.replace('_pa_', 'pa')
+                tag = tag.replace('_pa_', 'pa_')
                 if 'x' in tag:
                     tag = tag.split('_x')[0]
                 new_filename = f'{tag}.{vtp}'
