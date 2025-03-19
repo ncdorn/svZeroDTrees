@@ -1102,6 +1102,24 @@ class MeshComplete(SimFile):
 
         self.initialize()
 
+    def rename_vtps_(self):
+        '''
+        convert surface names from cap_l_pa_n_x.vtp (Derrick's naming convention) to cap_lpa_n.vtp
+        '''
+
+        for filename in os.listdir(self.mesh_surfaces_dir):
+            if '_pa_' in filename:
+                tag, vtp = filename.split('.')
+                tag = tag.replace('_pa_', 'pa')
+                if 'x' in tag:
+                    tag = tag.split('_x')[0]
+                new_filename = f'{tag}.{vtp}'
+                os.rename(os.path.join(self.mesh_surfaces_dir, filename), os.path.join(self.mesh_surfaces_dir, new_filename))
+                print(f"Renamed: {filename} to {new_filename}")
+
+
+
+
     def assign_lobe(self):
         '''
         assign lobes by sorting the outlets and taking top 1/3 as upper, middle 1/3 as middle and bottom 1/3 as lower
