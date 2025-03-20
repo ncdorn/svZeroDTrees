@@ -343,7 +343,7 @@ class SimulationDirectory:
             wedge_p = wedge_p * 1333.2
 
         # add the inflows to the svzerod_3Dcoupling
-        tsteps = 2
+        tsteps = 100
         self.svzerod_3Dcoupling.simparams.number_of_time_pts_per_cardiac_cycle = tsteps
         bc_idx = 0
         for vtp in self.mesh_complete.mesh_surfaces.values():
