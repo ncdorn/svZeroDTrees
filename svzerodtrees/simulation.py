@@ -82,12 +82,12 @@ class Simulation:
             self.generate_simplified_nonlinear_zerod()
 
             # optimize preop BCs
-            reduced_config = ConfigHandler.from_json(self.simplified_zerod_config)
+            reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
         else:
-            reduced_config = ConfigHandler.from_json(self.simplified_zerod_config)
+            reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
         
         if not bcs_optimized:
-            optimize_impedance_bcs(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, opt_config_path=self.zerod_config, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
+            optimize_impedance_bcs(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, opt_config_path=self.zerod_config_path, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
             # need to create coupling config and add to preop/postop directories
         
         else:
@@ -113,6 +113,7 @@ class Simulation:
             construct_impedance_trees(self.zerod_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets.wedge_p, d_min=0.01, convert_to_cm=self.convert_to_cm, use_mean=True, specify_diameter=True, tree_params=tree_params)
 
             impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(self.preop_dir.path, mesh_complete=self.preop_dir.mesh_complete)
+            self.zerod_config.to_json(self.zerod_config_path)
         # run preop + postop simulations
         sim_config = {
             'n_tsteps': 10000,

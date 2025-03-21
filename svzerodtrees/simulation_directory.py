@@ -100,6 +100,8 @@ class SimulationDirectory:
         # figures directory
         self.fig_dir = fig_dir
 
+        self.results_file = os.path.join(self.path, 'results.txt')
+
         self.convert_to_cm = convert_to_cm
 
     @classmethod
@@ -781,7 +783,11 @@ class SimulationDirectory:
             if verbose:
                 print(f'LPA flow: {sum(lpa_flow.values())} ({lpa_pct}%) | upper: {math.trunc(lpa_flow["upper"] / total_flow * 1000) / 10}% | middle: {math.trunc(lpa_flow["middle"] / total_flow * 1000) / 10}% | lower: {math.trunc(lpa_flow["lower"] / total_flow * 1000) / 10}%')
                 print(f'RPA flow: {sum(rpa_flow.values())} ({rpa_pct}%) | upper: {math.trunc(rpa_flow["upper"] / total_flow * 1000) / 10}% | middle: {math.trunc(rpa_flow["middle"] / total_flow * 1000) / 10}% | lower: {math.trunc(rpa_flow["lower"] / total_flow * 1000) / 10}%')
-
+            
+            with open(self.results_file, 'a') as f:
+                f.write(f'LPA flow: {sum(lpa_flow.values())} ({lpa_pct}%) | upper: {math.trunc(lpa_flow["upper"] / total_flow * 1000) / 10}% | middle: {math.trunc(lpa_flow["middle"] / total_flow * 1000) / 10}% | lower: {math.trunc(lpa_flow["lower"] / total_flow * 1000) / 10}%\n')
+                f.write(f'RPA flow: {sum(rpa_flow.values())} ({rpa_pct}%) | upper: {math.trunc(rpa_flow["upper"] / total_flow * 1000) / 10}% | middle: {math.trunc(rpa_flow["middle"] / total_flow * 1000) / 10}% | lower: {math.trunc(rpa_flow["lower"] / total_flow * 1000) / 10}%\n\n')
+        
         else:
             # unsteady case, need to compute sys, dia, mean flows
             lpa_flow = {
@@ -872,6 +878,11 @@ class SimulationDirectory:
         print(f'MPA systolic pressure: {sys_p} mmHg')
         print(f'MPA diastolic pressure: {dias_p} mmHg')
         print(f'MPA mean pressure: {mean_p} mmHg')
+
+        with open(self.results_file, 'a') as f:
+            f.write(f'MPA systolic pressure: {sys_p} mmHg\n')
+            f.write(f'MPA diastolic pressure: {dias_p} mmHg\n')
+            f.write(f'MPA mean pressure: {mean_p} mmHg\n\n')
 
     def plot_outlet(self):
         '''
