@@ -336,14 +336,11 @@ class SimulationDirectory:
 
         self.check_files()
 
-    def generate_steady_sim(self, flow_rate=None, wedge_p=0.0):
+    def generate_steady_sim(self, flow_rate=None):
         '''
         generate simulation files for a steady simulation'''
 
-        if wedge_p is None:
-            wedge_p = float(input('input wedge pressure in mmHg (default 5.0): ') or 5.0) * 1333.2
-        else:
-            wedge_p = wedge_p * 1333.2
+        wedge_p = 0.0
 
         # add the inflows to the svzerod_3Dcoupling
         tsteps = 100
