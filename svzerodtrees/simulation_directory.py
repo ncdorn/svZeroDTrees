@@ -3,6 +3,7 @@ from svzerodtrees.threedutils import *
 from svzerodtrees.config_handler import ConfigHandler
 from svzerodtrees.preop import *
 from svzerodtrees.inflow import *
+from scipy.optimize import minimize, Bounds
 import matplotlib.pyplot as plt
 import json
 import pickle
@@ -335,7 +336,7 @@ class SimulationDirectory:
 
         self.check_files()
 
-    def generate_steady_sim(self, flow_rate=None, wedge_p=None):
+    def generate_steady_sim(self, flow_rate=None, wedge_p=0.0):
         '''
         generate simulation files for a steady simulation'''
 
@@ -373,7 +374,7 @@ class SimulationDirectory:
                     "bc_type": "RESISTANCE",
                     "bc_values": {
                         "Pd": wedge_p,
-                        "R": 100.0
+                        "R": 0.0
                     }
                 })
 
@@ -528,13 +529,16 @@ class SimulationDirectory:
 
         return lpa_resistance, rpa_resistance
 
-    def generate_simplified_zerod(self, nonlinear=True):
+    def generate_simplified_zerod(self, nonlinear=True, optimize=False):
         '''
         compute the simplified 0D model for a 3D pulmonary model from the steady simulation result'''
 
 
-
-        lpa_resistance, rpa_resistance = self.compute_pressure_drop(steady=not nonlinear)
+        if optimize:
+            print("Optimizing nonlinear resistance coefficients against 3D result...")
+            lpa_resistance, rpa_resistance = self.optimize_nonlinear_resistance('simplified_zerod_config.json')
+        else:
+            lpa_resistance, rpa_resistance = self.compute_pressure_drop(steady=not nonlinear)
 
         # need to rescale the inflow and make it periodic with a generic shape (see Inflow class)
         inflow = Inflow.periodic(path=None)
@@ -677,6 +681,86 @@ class SimulationDirectory:
 
         config.to_json('simplified_zerod_config.json')
  
+    def optimize_nonlinear_resistance(self, tuned_pa_config):
+        '''
+        Get the nonlinear resistance coefficients for the LPA and RPA by optimizing against the pressure drop in the unsteady result
+        This function assumes that the simulation has been run and the results are available in svZeroD_data
+        '''
+        if self.svzerod_data is None:
+            raise ValueError("svZeroD_data not found. Please run the simulation first.")
+        
+        # get the MPA pressure
+        time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
+        time = time[time > time.max() - 1.0]
+        pressure = pressure[time.index]
+        flow = flow[time.index]
+
+        # get rpa split
+        lpa_flow, rpa_flow = self.flow_split()
+        rpa_split = sum(lpa_flow['mean'].values()) / (sum(lpa_flow['mean'].values()) + sum(rpa_flow['mean'].values()))
+
+        targets = {'mean': np.mean(pressure) / 1333.2, 'sys': np.max(pressure) / 1333.2, 'dia': np.min(pressure) / 1333.2, 'rpa_split': rpa_split}
+
+        # compute a loss function of a nonlinear resistance model with impedance boundary conditions
+        # self.generate_simplified_zerod(nonlinear=True)  # generate the simplified 0D model with nonlinear resistance
+        nonlinear_config = ConfigHandler.from_json(tuned_pa_config) # pa config with tuned boundary conditions
+        # rescale inflow back up to the original cardiac output
+        nonlinear_config.inflows['INFLOW'].rescale(scalar = 2)
+
+        def loss_function(nonlinear_resistance, targets, nonlinear_config):
+            # Update the nonlinear resistance values in the simplified 0D model
+            # nonlinear resistance in format [lpa, rpa]
+            nonlinear_config.vessel_map[1].stenosis_coefficient = nonlinear_resistance[0] / 2
+            nonlinear_config.vessel_map[2].stenosis_coefficient = nonlinear_resistance[0] / 2
+            nonlinear_config.vessel_map[3].stenosis_coefficient = nonlinear_resistance[1] / 2
+            nonlinear_config.vessel_map[4].stenosis_coefficient = nonlinear_resistance[1] / 2
+
+            result = pysvzerod.simulate(nonlinear_config.config) # Run the simulation with the updated nonlinear resistance
+
+            mpa_result = result[result.name == 'branch0_seg0']
+            mpa_result = mpa_result[mpa_result.time > mpa_result.time.max() - 1.0]
+            flow = mpa_result.flow_in
+            pressure = mpa_result.pressure_in
+            mean_pressure = np.mean(pressure) / 1333.2
+            sys_pressure = np.max(pressure) / 1333.2
+            dia_pressure = np.min(pressure) / 1333.2
+
+            # get rpa split
+            rpa_result = result[result.name == 'branch3_seg0']
+            rpa_result = rpa_result[rpa_result.time > rpa_result.time.max() - 1.0]
+            rpa_flow = rpa_result.flow_in
+            rpa_split = np.trapz(rpa_flow, rpa_result.time) / np.trapz(flow, mpa_result.time)
+
+            # compute loss
+            loss = (abs(mean_pressure - targets['mean']) ** 2 +
+                    abs(sys_pressure - targets['sys']) ** 2 +
+                    abs(dia_pressure - targets['dia']) ** 2)
+                    # abs(rpa_split - targets['rpa_split']) * 100 ** 2)
+            print(f"pressures: {int(sys_pressure * 100) / 100} / {int(dia_pressure * 100) / 100}/{int(mean_pressure * 100) / 100} mmHg, target: {int(targets['sys'] * 100) / 100}/{int(targets['dia'] * 100) / 100}/{int(targets['mean'] * 100) / 100} mmHg")
+            print(f"RPA split: {rpa_split}, target: {targets['rpa_split']}")
+            print(f"Current nonlinear resistances: LPA = {nonlinear_resistance[0]}, RPA = {nonlinear_resistance[1]}, Loss = {loss}")
+            
+            return loss
+        
+        # initial_guess = self.compute_pressure_drop(steady=False)  # get the initial guess for nonlinear resistance
+        initial_guess = [1000.0, 1000.0]
+        print(f"Starting optimization with initial guess for nonlinear resistances: LPA = {initial_guess[0]}, RPA = {initial_guess[1]}")
+        bounds = Bounds(lb=[0, 0])  # set bounds for the nonlinear resistances to be positive and non-zero
+        result = minimize(loss_function, initial_guess, args=(targets, nonlinear_config),
+                          method='Nelder-Mead', options={'disp': True}, bounds=bounds)
+        
+        print("Optimization complete.")
+        optimized_resistances = result.x
+        print(f"Optimized LPA nonlinear resistance: {optimized_resistances[0]}")
+        print(f"Optimized RPA nonlinear resistance: {optimized_resistances[1]}")
+
+        return optimized_resistances.tolist()  # return as a list for easier handling
+        
+        
+
+
+
+
     def generate_impedance_bcs(self):
 
         wedge_p = float(input('input wedge pressure (default 6.0): ') or 6.0)
@@ -737,7 +821,7 @@ class SimulationDirectory:
             self.svzerod_3Dcoupling.to_json('blank_edited_config.json')
             self.svzerod_3Dcoupling, coupling_blocks = self.svzerod_3Dcoupling.generate_threed_coupler(self.path, inflow_from_0d=True, mesh_complete=self.mesh_complete)
 
-    def flow_split(self, steady=True, verbose=True):
+    def flow_split(self, steady=False, verbose=True):
         '''
         get the flow split between the LPA and RPA
         
@@ -1129,8 +1213,6 @@ class MeshComplete(SimFile):
                 print(f"Renamed: {filename} to {new_filename}")
 
 
-
-
     def assign_lobe(self):
         '''
         assign lobes by sorting the outlets and taking top 1/3 as upper, middle 1/3 as middle and bottom 1/3 as lower
@@ -1170,6 +1252,7 @@ class MeshComplete(SimFile):
         print(f'outlets by lobe: LPA upper: {lpa_upper}, middle: {lpa_middle}, lower: {lpa_lower}')
         print(f'outlets by lobe: RPA upper: {rpa_upper}, middle: {rpa_middle}, lower: {rpa_lower}\n')
 
+        self.n_outlets = lpa_upper + lpa_middle + lpa_lower + rpa_upper + rpa_middle + rpa_lower
 
 
 class SVZeroDInterface(SimFile):
@@ -1702,10 +1785,6 @@ class SvZeroDdata(SimFile):
             return flow
 
 
-        
-        
-    
-
 class SimResults(SimFile):
     '''
     class to handle 3D simulation results in the simulation directory'''
@@ -1736,6 +1815,11 @@ class SimResults(SimFile):
 if __name__ == '__main__':
     '''
     test the simulation directory class code'''
+    os.chdir('../../Sheep/cassian/preop')
+
+    sim = SimulationDirectory.from_directory()
+
+    sim.optimize_nonlinear_resistance('../pa_config_test_tuning.json')
 
 
     

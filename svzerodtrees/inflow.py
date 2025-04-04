@@ -594,7 +594,7 @@ class Inflow():
         return cls(q, t.tolist(), t_per, n_periods, name)
     
 
-    def rescale(self, cardiac_output=None, t_per=None, tsteps=None):
+    def rescale(self, cardiac_output=None, t_per=None, tsteps=None, scalar=None):
         '''
         rescale the inflow to a given cardiac output and period
 
@@ -616,6 +616,9 @@ class Inflow():
         if t_per is not None:
             self.t_per = t_per
             self.t = np.linspace(0, t_per * self.n_periods, self.n_tsteps * self.n_periods)
+        
+        if scalar is not None:
+            self.q = [q * scalar for q in self.q]
         
         if type(self.t) is np.ndarray:
             self.t = self.t.tolist()

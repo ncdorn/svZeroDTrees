@@ -203,6 +203,7 @@ def adapt_threed(preop_sim_dir, postop_sim_dir, adapted_sim_path, location: str 
         pass
 
     print(f"preop_lpa_flow: {preop_lpa_flow}, preop_rpa_flow: {preop_rpa_flow}")
+    print(f"postop LPA flow: {postop_lpa_flow}, postop RPA flow: {postop_rpa_flow}")
 
 
     adapted_sim_dir = SimulationDirectory.from_directory(adapted_sim_path, mesh_complete=preop_sim_dir.mesh_complete.path)

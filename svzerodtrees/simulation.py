@@ -106,6 +106,7 @@ class Simulation:
                 self.zerod_config = ConfigHandler.from_json(self.zerod_config_path)
             else:
                 self.zerod_config = ConfigHandler.from_json(self.simplified_zerod_config)
+
             # rescale the inflow, in this case the first element in the inflows dict
             self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(tsteps=2000)
 

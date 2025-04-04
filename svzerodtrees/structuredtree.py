@@ -597,7 +597,7 @@ class StructuredTree():
         return result.x
 
 
-    def adapt_constant_wss(self, Q, Q_new):
+    def adapt_constant_wss(self, Q, Q_new, method='cwss'):
         R_old = self.root.R_eq  # calculate pre-adaptation resistance
 
         def constant_wss(d, Q=Q, Q_new=Q_new):
@@ -613,6 +613,14 @@ class StructuredTree():
             # adapt the diameter of the vessel based on the constant shear stress assumption
 
             return (Q_new / Q) ** (1 / 3) * d
+        
+        def constant_wss_ims(d, Q=Q, Q_new=Q_new):
+            '''
+            update the diameter based on constant wall shear stress and intramural stress'''
+
+            # dDdt = K_tau_d * ()
+
+            pass
 
         def update_diameter(vessel, update_func):
             '''
@@ -631,13 +639,17 @@ class StructuredTree():
 
         
         # recursive step
-        update_diameter(self.root, constant_wss)
+        if method=='cwss':
+            update_diameter(self.root, constant_wss)
+        elif method=='cwss_ims':
+            pass
 
         self.create_block_dict()
 
         R_new = self.root.R_eq  # calculate post-adaptation resistance
 
         return R_old, R_new
+
 
 
     def optimize_tree_diameter(self, resistance=None, log_file=None, d_min=0.0049, pries_secomb=False):
@@ -839,14 +851,16 @@ class StructuredTree():
         for i in range(len(d)):
             Eh_r[i] = self.k1 * np.exp(self.k2 * d[i] / 2) + self.k3
 
-        plt.plot(d, Eh_r)
-        plt.yscale('log')
-        plt.xlabel('diameter (cm)')
-        plt.ylabel('Eh/r')
-        plt.title('Eh/r vs. diameter')
-        plt.savefig(path)
-
-
+        if path is None:
+            return d, Eh_r
+        else:
+            plt.figure()
+            plt.plot(d, Eh_r)
+            plt.yscale('log')
+            plt.xlabel('diameter (cm)')
+            plt.ylabel('Eh/r')
+            plt.title('Eh/r vs. diameter')
+            plt.savefig(path)
 
         
     @property

@@ -728,8 +728,8 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
         rpa_mean_dia = params[3]
         lrr_l = params[4]
         lrr_r = params[4]
-        # lrr_l = 3.0
-        # lrr_r = 3.0
+        # lrr_l = 10.0
+        # lrr_r = 10.0
         # xi = params[2]
 
         # for sheep, try with fixed l_rr (10.0) and optimize other parameters!!
@@ -768,11 +768,13 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
 
                 print(f'pa config SIMULATED, rpa split: {pa_config.rpa_split}, p_mpa = {pa_config.P_mpa}\n params: {params}')
 
+                pa_config.plot_mpa(path='figures/pa_config_plot.png')
+
                 if clinical_targets.mpa_p[1] < clinical_targets.wedge_p:
                     # diastolic pressure < wedge pressure so we neglect it in the optimization
                     weights = np.array([1, 0, 1])
                 else:
-                    weights = np.array([1, 1, 1])
+                    weights = np.array([2, 1, 1])
                 
                 pressure_loss = np.sum(np.dot(np.abs(np.array(pa_config.P_mpa) - np.array(clinical_targets.mpa_p)) / clinical_targets.mpa_p, weights)) ** 2 * 100
 
@@ -804,18 +806,20 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
     ### WITHOUT ALPHA
 
     # need to implement grid search for stiffnesses...
+    l_rr_guess = 5.0
     print("performing search for best k2 stiffness...")
-    k2_search = [-25, -50, -75, -100, -125, -150]
+    # k2_search = [-50]
+    k2_search = [-25, -50, -75, -100]
     min_loss = 1e5
     k2_opt = 0
     for k2 in k2_search:
-        loss = tree_tuning_objective([k2, k2, lpa_mean_dia, rpa_mean_dia, 10.0], clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs)
+        loss = tree_tuning_objective([k2, k2, lpa_mean_dia, rpa_mean_dia, l_rr_guess], clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs)
         print(f'k2: {k2}, loss: {loss}')
         if loss < min_loss:
             min_loss = loss
             k2_opt = k2
 
-    print(f'optimal k2: {k2_opt} with loss {min_loss}')
+    # print(f'optimal k2: {k2_opt} with loss {min_loss}')
 
     # bounds for optimization
     bounds = Bounds(lb=[-np.inf, -np.inf, 0.01, 0.01, 1.0])
@@ -824,7 +828,7 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
     ### WITH ALPHA
     # result = minimize(tree_tuning_objective, [-30, -30, 66.0, 66.0, 2.7], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, tol=1.0)
     ### WITHOUT ALPHA
-    result = minimize(tree_tuning_objective, [k2_opt, k2_opt, lpa_mean_dia, rpa_mean_dia, 10.0], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds)
+    result = minimize(tree_tuning_objective, [k2_opt, k2_opt, lpa_mean_dia, rpa_mean_dia, l_rr_guess], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds)
 
     # format of result.x: [k2_l, k2_r, lrr_l, lrr_r]
     print(f'Optimized parameters: {result.x}')
@@ -1405,6 +1409,8 @@ class PAConfig():
             plt.show()
         else:
             plt.savefig(path)
+
+            plt.close(fig)
 
 
     def plot_outlets(self, path='pa_config_outlets_plot.png'):
