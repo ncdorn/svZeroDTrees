@@ -702,7 +702,7 @@ class SimulationDirectory:
         # self.generate_simplified_zerod(nonlinear=True)  # generate the simplified 0D model with nonlinear resistance
         nonlinear_config = ConfigHandler.from_json(tuned_pa_config) # pa config with tuned boundary conditions
         # rescale inflow back up to the original cardiac output
-        nonlinear_config.inflows['INFLOW'].rescale(scalar = 2)
+        # nonlinear_config.inflows['INFLOW'].rescale(scalar = 2)
 
         def loss_function(nonlinear_resistance, targets, nonlinear_config):
             # Update the nonlinear resistance values in the simplified 0D model
