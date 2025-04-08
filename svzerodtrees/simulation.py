@@ -89,32 +89,30 @@ class Simulation:
         if not bcs_optimized:
             optimize_impedance_bcs(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, opt_config_path=self.zerod_config_path, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
             # need to create coupling config and add to preop/postop directories
-        
+                # build trees for LPA/RPA
+
+        # construct trees
+        opt_params = pd.read_csv(os.path.join(self.path, 'optimized_params.csv'))
+        tree_params = {
+            'lpa': [opt_params['k1'][opt_params.pa=='lpa'].values[0], opt_params['k2'][opt_params.pa=='lpa'].values[0], opt_params['k3'][opt_params.pa=='lpa'].values[0], opt_params['lrr'][opt_params.pa=='lpa'].values[0], opt_params['diameter'][opt_params.pa=='lpa'].values[0]],
+            'rpa': [opt_params['k1'][opt_params.pa=='rpa'].values[0], opt_params['k2'][opt_params.pa=='rpa'].values[0], opt_params['k3'][opt_params.pa=='rpa'].values[0], opt_params['lrr'][opt_params.pa=='rpa'].values[0], opt_params['diameter'][opt_params.pa=='rpa'].values[0]]
+        }
+
+        # generate blank threed coupler
+        # blank_threed_coupler = ConfigHandler.blank_threed_coupler(path=os.path.join(self.path, 'svzerod_3Dcoupling.json'))
+        if os.path.exists(self.zerod_config_path):
+            self.zerod_config = ConfigHandler.from_json(self.zerod_config_path)
         else:
-            # check if zerod config exists
+            self.zerod_config = ConfigHandler.from_json(self.simplified_zerod_config)
 
-            # construct trees
-            opt_params = pd.read_csv(os.path.join(self.path, 'optimized_params.csv'))
-            tree_params = {
-                'lpa': [opt_params['k1'][opt_params.pa=='lpa'].values[0], opt_params['k2'][opt_params.pa=='lpa'].values[0], opt_params['k3'][opt_params.pa=='lpa'].values[0], opt_params['lrr'][opt_params.pa=='lpa'].values[0], opt_params['diameter'][opt_params.pa=='lpa'].values[0]],
-                'rpa': [opt_params['k1'][opt_params.pa=='rpa'].values[0], opt_params['k2'][opt_params.pa=='rpa'].values[0], opt_params['k3'][opt_params.pa=='rpa'].values[0], opt_params['lrr'][opt_params.pa=='rpa'].values[0], opt_params['diameter'][opt_params.pa=='rpa'].values[0]]
-            }
+        # rescale the inflow, in this case the first element in the inflows dict
+        self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(tsteps=2000)
 
-            # generate blank threed coupler
-            # blank_threed_coupler = ConfigHandler.blank_threed_coupler(path=os.path.join(self.path, 'svzerod_3Dcoupling.json'))
-            if os.path.exists(self.zerod_config_path):
-                self.zerod_config = ConfigHandler.from_json(self.zerod_config_path)
-            else:
-                self.zerod_config = ConfigHandler.from_json(self.simplified_zerod_config)
+        # create the trees
+        construct_impedance_trees(self.zerod_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets.wedge_p, d_min=0.01, convert_to_cm=self.convert_to_cm, use_mean=True, specify_diameter=True, tree_params=tree_params)
 
-            # rescale the inflow, in this case the first element in the inflows dict
-            self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(tsteps=2000)
-
-            # create the trees
-            construct_impedance_trees(self.zerod_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets.wedge_p, d_min=0.01, convert_to_cm=self.convert_to_cm, use_mean=True, specify_diameter=True, tree_params=tree_params)
-
-            impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(self.preop_dir.path, mesh_complete=self.preop_dir.mesh_complete)
-            self.zerod_config.to_json(self.zerod_config_path)
+        impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(self.preop_dir.path, mesh_complete=self.preop_dir.mesh_complete)
+        self.zerod_config.to_json(self.zerod_config_path)
         # run preop + postop simulations
         sim_config = {
             'n_tsteps': 10000,
