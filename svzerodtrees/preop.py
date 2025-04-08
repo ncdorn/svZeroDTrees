@@ -774,7 +774,7 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
                     # diastolic pressure < wedge pressure so we neglect it in the optimization
                     weights = np.array([1, 0, 1])
                 else:
-                    weights = np.array([1.1, 1.1, 1])
+                    weights = np.array([1.2, 1, 1.1])
                 
                 pressure_loss = np.sum(np.dot(np.abs(np.array(pa_config.P_mpa) - np.array(clinical_targets.mpa_p)) / clinical_targets.mpa_p, weights)) ** 2 * 100
 

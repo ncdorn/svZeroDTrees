@@ -694,7 +694,7 @@ class SimulationDirectory:
 
         # get rpa split
         lpa_flow, rpa_flow = self.flow_split()
-        rpa_split = sum(lpa_flow['mean'].values()) / (sum(lpa_flow['mean'].values()) + sum(rpa_flow['mean'].values()))
+        rpa_split = sum(rpa_flow['mean'].values()) / (sum(lpa_flow['mean'].values()) + sum(rpa_flow['mean'].values()))
 
         targets = {'mean': np.mean(pressure) / 1333.2, 'sys': np.max(pressure) / 1333.2, 'dia': np.min(pressure) / 1333.2, 'rpa_split': rpa_split}
 
@@ -731,8 +731,8 @@ class SimulationDirectory:
             # compute loss
             loss = (abs(mean_pressure - targets['mean']) ** 2 +
                     abs(sys_pressure - targets['sys']) ** 2 +
-                    abs(dia_pressure - targets['dia']) ** 2)
-                    # abs(rpa_split - targets['rpa_split']) * 100 ** 2)
+                    abs(dia_pressure - targets['dia']) ** 2 +
+                    abs(rpa_split - targets['rpa_split']) * 100 ** 2)
             print(f"pressures: {int(sys_pressure * 100) / 100} / {int(dia_pressure * 100) / 100}/{int(mean_pressure * 100) / 100} mmHg, target: {int(targets['sys'] * 100) / 100}/{int(targets['dia'] * 100) / 100}/{int(targets['mean'] * 100) / 100} mmHg")
             print(f"RPA split: {rpa_split}, target: {targets['rpa_split']}")
             print(f"Current nonlinear resistances: LPA = {nonlinear_resistance[0]}, RPA = {nonlinear_resistance[1]}, Loss = {loss}")
