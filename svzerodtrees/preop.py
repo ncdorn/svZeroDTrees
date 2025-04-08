@@ -806,10 +806,10 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
     ### WITHOUT ALPHA
 
     # need to implement grid search for stiffnesses...
-    l_rr_guess = 5.0
+    l_rr_guess = 10.0
     print("performing search for best k2 stiffness...")
     # k2_search = [-50]
-    k2_search = [-50]
+    k2_search = [-25, -50, -75, -100]
     min_loss = 1e5
     k2_opt = 0
     for k2 in k2_search:
@@ -828,7 +828,7 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
     ### WITH ALPHA
     # result = minimize(tree_tuning_objective, [-30, -30, 66.0, 66.0, 2.7], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, tol=1.0)
     ### WITHOUT ALPHA
-    result = minimize(tree_tuning_objective, [k2_opt, k2_opt, lpa_mean_dia, rpa_mean_dia, l_rr_guess], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, maxiter=100)
+    result = minimize(tree_tuning_objective, [k2_opt, k2_opt, lpa_mean_dia, rpa_mean_dia, l_rr_guess], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, options={'maxiter': 100})
 
     # format of result.x: [k2_l, k2_r, lrr_l, lrr_r]
     print(f'Optimized parameters: {result.x}')
