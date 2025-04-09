@@ -809,7 +809,7 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
     l_rr_guess = 10.0
     print("performing search for best k2 stiffness...")
     # k2_search = [-50]
-    k2_search = [-25, -50, -75, -100]
+    k2_search = [-50]
     min_loss = 1e5
     k2_opt = 0
     for k2 in k2_search:
