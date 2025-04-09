@@ -915,11 +915,16 @@ class SimulationDirectory:
 
         time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
 
-        # remove the 1st period of results
-        time = time[time > 1.0]
-        print(f'length of time: {len(time)}')
-        flow = flow[time.index]
-        pressure = pressure[time.index]
+        
+        if time.max() > 1.0:
+            # remove the 1st period of results
+            time = time[time > 1.0]
+            print(f'length of time: {len(time)}')
+            flow = flow[time.index]
+            pressure = pressure[time.index]
+        else:
+            print('Taking result from 1st period! results may not be converged')
+            print(f'length of time: {len(time)}')
 
         pressure = pressure / 1333.2
 
