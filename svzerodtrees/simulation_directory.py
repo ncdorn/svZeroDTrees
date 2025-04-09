@@ -818,14 +818,16 @@ class SimulationDirectory:
             self.svzerod_3Dcoupling.to_json('blank_edited_config.json')
             self.svzerod_3Dcoupling, coupling_blocks = self.svzerod_3Dcoupling.generate_threed_coupler(self.path, inflow_from_0d=True, mesh_complete=self.mesh_complete)
 
-    def flow_split(self, steady=False, verbose=True):
+    def flow_split(self, get_mean=False, verbose=True):
         '''
         get the flow split between the LPA and RPA
+
+        :param get_mean: boolean, whether to return mean flow or sys/dia/mean flow
         
         :return (lpa_flow, rpa_flow)'''
 
         # get the LPA and RPA boundary conditions based on surface name
-        if steady:
+        if get_mean:
             lpa_flow = {
                 'upper': 0.0,
                 'middle': 0.0,
@@ -925,6 +927,7 @@ class SimulationDirectory:
         else:
             print('Taking result from 1st period! results may not be converged')
             print(f'length of time: {len(time)}')
+            print(f'pressure at t=0.2: {pressure[time[time == 0.2].index].values[0] / 1333.2} mmHg')
 
         pressure = pressure / 1333.2
 
