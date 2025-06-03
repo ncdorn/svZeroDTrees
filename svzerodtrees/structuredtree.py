@@ -225,6 +225,7 @@ class StructuredTree():
             "name": self.name,
             "initial_d": self.initial_d,
             "d_min": self.d_min,
+            "lrr": self.lrr,
             "k1": self.k1,
             "k2": self.k2,
             "k3": self.k3,
@@ -416,26 +417,7 @@ class StructuredTree():
         self.k3 = k3
         self.n_procs = n_procs
 
-        # inflow to tree must be periodic!!
-        # if sum(np.gradient(self.Q_in)) == 0.0:
-        #     raise ValueError("Tree inflow must be periodic to compute the impedance")
-        
-        # tsteps = self.simparams.number_of_time_pts_per_cardiac_cycle
-
-        # needs to be a multiple of 2 (we use 0.6 because it is 1.2/2)
-        # tsteps = int(math.ceil(self.simparams.number_of_time_pts_per_cardiac_cycle * 0.6)) * 2
-
         tsteps = len(self.time)
-
-        # print(f'timesteps for impedance: {tsteps}')
-
-        # print(f'number of time points per cardiac cycle: {self.simparams.number_of_time_pts_per_cardiac_cycle}, len(self.time): {len(self.time)}')
-
-        # print(f'k1: {k1}, k2: {k2}, k3: {k3}')
-        # tsteps = int(512 * 0.6) * 2
-
-        # tsteps = len(self.time)
-
 
         period = max(self.time) * self.q / self.Lr**3
 
@@ -597,7 +579,7 @@ class StructuredTree():
         return result.x
 
 
-    def adapt_constant_wss(self, Q, Q_new, method='cwss'):
+    def adapt_constant_wss(self, Q, Q_new, method='cwss', n_iter=1):
         R_old = self.root.R_eq  # calculate pre-adaptation resistance
 
         def constant_wss(d, Q=Q, Q_new=Q_new):
@@ -637,18 +619,64 @@ class StructuredTree():
 
                 vessel.d = update_func(vessel.d)
 
-        
         # recursive step
-        if method=='cwss':
+        for i in range(n_iter):
+            print(f'performing cwss adaptation iteration {i}')
+            self.initial_d = constant_wss(self.initial_d, Q=Q, Q_new=Q_new)
             update_diameter(self.root, constant_wss)
-        elif method=='cwss_ims':
-            pass
 
         self.create_block_dict()
 
         R_new = self.root.R_eq  # calculate post-adaptation resistance
 
         return R_old, R_new
+
+
+    def adapt_wss_ims(self, Q, Q_new, n_iter=100):
+        '''
+        adapt the diameter of the structured tree based on the flowrate through the model
+
+        :param Q: original flowrate through the vessel
+        :param Q_new: post-operative flowrate through the model
+        :param method: adaptation method to use
+        :param n_iter: number of iterations to perform
+
+        :return: pre-adaptation and post-adaptation resistance
+        '''
+
+        preop_result = self.simulate(Q_in=[Q, Q], Pd=self.Pd)
+
+        assign_flow_to_root(preop_result, self.root)
+
+        postop_result = self.simulate(Q_in=[Q_new, Q_new], Pd=self.Pd)
+
+        def adapt_vessel(vessel):
+            '''
+            recursive step to adapt the vessel diameter'''
+
+            if vessel:
+                # get flow from postop result
+                vessel_name = f"branch{vessel.id}_seg0"
+                Q_new = get_branch_result(postop_result, 'flow_in', vessel_name)
+                P_new = get_branch_result(postop_result, 'pressure_in', vessel_name)
+                # adapt the diameter based on the flow
+                vessel.adapt_cwss_ims(Q_new, P_new, n_iter=n_iter)
+                # recursive step
+                adapt_vessel(vessel.left)
+                adapt_vessel(vessel.right)
+        
+        print(f"adapting tree diameter with Q = {Q} Q_new = {Q_new}")
+
+        adapt_vessel(self.root)
+
+        adapted_result = self.simulate(Q_in=[Q_new, Q_new], Pd=self.Pd)
+        assign_flow_to_root(adapted_result, self.root)
+
+
+
+
+
+
 
 
 
@@ -849,7 +877,7 @@ class StructuredTree():
 
         # compute Eh/r for each d
         for i in range(len(d)):
-            Eh_r[i] = self.k1 * np.exp(self.k2 * d[i] / 2) + self.k3
+            Eh_r[i] = (self.k1 * np.exp(self.k2 * d[i] / 2) + self.k3) / 1333.2
 
         if path is None:
             return d, Eh_r
@@ -858,7 +886,7 @@ class StructuredTree():
             plt.plot(d, Eh_r)
             plt.yscale('log')
             plt.xlabel('diameter (cm)')
-            plt.ylabel('Eh/r')
+            plt.ylabel('Eh/r (mmHg)')
             plt.title('Eh/r vs. diameter')
             plt.savefig(path)
 
@@ -928,20 +956,20 @@ class StructuredTree():
             })
             self.block_dict["simulation_parameters"] = self.simparams.to_dict()
 
-        if self.Q_in is None:
-            self.Q_in = Q_in
+        self.Q_in = Q_in
 
-        if self.Pd is None:
-            self.Pd = Pd
+        self.Pd = Pd
         
         # create solver config from StructuredTree and get tree flow result
         self.create_bcs()
 
-        result = run_svzerodplus(self.block_dict)
+        # result = run_svzerodplus(self.block_dict)
+
+        result = pysvzerod.simulate(self.block_dict)
 
         # assign flow result to TreeVessel instances to allow for visualization, adaptation, etc.
-
-        assign_flow_to_root(result, self.root)
+        # currently this conflicts with adaptation computation, where we do not want to assign flow to root every time we simulate
+        # assign_flow_to_root(result, self.root)
 
         return result
     

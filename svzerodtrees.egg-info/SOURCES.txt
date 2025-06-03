@@ -23,8 +23,10 @@ svzerodtrees.egg-info/SOURCES.txt
 svzerodtrees.egg-info/dependency_links.txt
 svzerodtrees.egg-info/requires.txt
 svzerodtrees.egg-info/top_level.txt
+svzerodtrees/post_processing/ParaviewPostProcessor.py
 svzerodtrees/post_processing/__init__.py
 svzerodtrees/post_processing/pa_plotter.py
+svzerodtrees/post_processing/paraview_time_series_visualization.py
 svzerodtrees/post_processing/plotting.py
 svzerodtrees/post_processing/project_to_centerline.py
 svzerodtrees/post_processing/stree_visualization.py

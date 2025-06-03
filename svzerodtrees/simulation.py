@@ -5,6 +5,7 @@ from svzerodtrees.preop import *
 from svzerodtrees.inflow import *
 from svzerodtrees.simulation_directory import *
 from svzerodtrees.structuredtree import *
+from svzerodtrees.adaptation import *
 import json
 import pandas as pd
 import pickle
@@ -23,8 +24,11 @@ class Simulation:
                  postop_dir='postop',
                  adapted_dir='adapted',
                  steady_dir='steady',
-                 adaptation='cwss',
-                 adapt_location='uniform',
+                 adaptation_config = {
+                     "method": "wss-ims",
+                     "location": "uniform",
+                     "iterations": 100,
+                 },
                  zerod_config='zerod_config.json',
                  convert_to_cm=False,
                  optimized=False):
@@ -37,13 +41,22 @@ class Simulation:
 
         self.preop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, preop_dir), zerod_config=self.zerod_config_path, convert_to_cm=convert_to_cm)
         self.postop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, postop_dir), zerod_config=self.zerod_config_path, convert_to_cm=convert_to_cm)
-        self.adapted_dir = os.path.join(self.path, adapted_dir) # just a path initially
-        self.adaptation = adaptation
-        self.adapt_location = adapt_location
+        self.adapted_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, adapted_dir), mesh_complete=self.postop_dir.mesh_complete.path, convert_to_cm=convert_to_cm)
+        self.adaptation_method = adaptation_config["method"]
+        self.adapt_location = adaptation_config["location"]
+        self.adaptation_iters = adaptation_config["iterations"]
         self.steady_dir = os.path.join(self.path, steady_dir)
 
         # simulation parameters
         self.n_tsteps = 2000
+        self.threed_sim_config = {
+                'n_tsteps': 10000,
+                'dt': 0.0005,
+                'nodes': 4,
+                'procs_per_node': 24,
+                'memory': 16,
+                'hours': 16
+            }
 
         ## Bools
         self.optimized = optimized
@@ -70,7 +83,7 @@ class Simulation:
         ## TO BE IMPLEMENTED LATER
         return cls(**config)
     
-    def run_pipeline(self, run_steady=True, bcs_optimized=False):
+    def run_pipeline(self, run_steady=True, optimize_bcs=False, run_threed=True):
         '''
         run the entire pipeline
         '''
@@ -86,7 +99,7 @@ class Simulation:
         else:
             reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
         
-        if not bcs_optimized:
+        if optimize_bcs:
             optimize_impedance_bcs(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, opt_config_path=self.zerod_config_path, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
             # need to create coupling config and add to preop/postop directories
                 # build trees for LPA/RPA
@@ -105,41 +118,39 @@ class Simulation:
         else:
             self.zerod_config = ConfigHandler.from_json(self.simplified_zerod_config)
 
-        # rescale the inflow, in this case the first element in the inflows dict
-        self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(tsteps=2000)
+        if run_threed:
+            # rescale the inflow, in this case the first element in the inflows dict
+            self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(tsteps=2000)
 
-        # create the trees
-        construct_impedance_trees(self.zerod_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets.wedge_p, d_min=0.01, convert_to_cm=self.convert_to_cm, use_mean=True, specify_diameter=True, tree_params=tree_params)
+            # create the trees
+            construct_impedance_trees(self.zerod_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets.wedge_p, d_min=0.01, convert_to_cm=self.convert_to_cm, use_mean=True, specify_diameter=True, tree_params=tree_params)
 
-        impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(self.preop_dir.path, mesh_complete=self.preop_dir.mesh_complete)
-        self.zerod_config.to_json(self.zerod_config_path)
-        # run preop + postop simulations
-        sim_config = {
-            'n_tsteps': 10000,
-            'dt': 0.0005,
-            'nodes': 4,
-            'procs_per_node': 24,
-            'memory': 16,
-            'hours': 16
-        }
-        preop_sim = SimulationDirectory.from_directory(self.preop_dir.path, self.zerod_config_path, convert_to_cm=self.convert_to_cm)
-        preop_sim.write_files(simname='Preop Simulation', user_input=False, sim_config=sim_config)
-        preop_sim.run()
+            impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(self.preop_dir.path, mesh_complete=self.preop_dir.mesh_complete)
+            self.zerod_config.to_json(self.zerod_config_path)
+            # run preop + postop simulations
+            preop_sim = SimulationDirectory.from_directory(self.preop_dir.path, self.zerod_config_path, convert_to_cm=self.convert_to_cm)
+            preop_sim.write_files(simname='Preop Simulation', user_input=False, sim_config=self.threed_sim_config)
+            preop_sim.run()
 
-        postop_sim = SimulationDirectory.from_directory(self.postop_dir.path, self.zerod_config_path, convert_to_cm=self.convert_to_cm)
-        postop_sim.write_files(simname='Postop Simulation', user_input=False, sim_config=sim_config)
-        postop_sim.run()
+            postop_sim = SimulationDirectory.from_directory(self.postop_dir.path, self.zerod_config_path, convert_to_cm=self.convert_to_cm)
+            postop_sim.write_files(simname='Postop Simulation', user_input=False, sim_config=self.threed_sim_config)
+            postop_sim.run()
 
         # compute adaptation
-        self.compute_adaptation
-
+        self.microvascular_adaptor = MicrovascularAdaptor(self.preop_dir, self.postop_dir, self.adapted_dir, 
+                                                          'optimized_params.csv', 
+                                                          self.clinical_targets,
+                                                          self.adaptation_method, self.adapt_location, self.adaptation_iters,
+                                                          self.convert_to_cm)
+        
+        self.microvascular_adaptor.adapt(fig_dir = self.figures_dir)
 
         # run adapted simulation
-
+        self.adapted_dir.write_files(simname='Adapted Simulation', user_input=False, sim_config=self.threed_sim_config)
 
         # postprocess results
 
-    def compute_adaptation(self):
+    def compute_adaptation(self, preopSimDir, postopSimDir,  adaptedSimDir):
         '''
         compute the adaptation based on a method and location
         '''
