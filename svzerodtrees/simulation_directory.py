@@ -63,6 +63,7 @@ class SimulationDirectory:
                  solver_runscript=None, 
                  svzerod_data=None, 
                  results_dir=None,
+                 clinical_target=None,
                  fig_dir=None,
                  convert_to_cm=False):
         '''
@@ -98,6 +99,8 @@ class SimulationDirectory:
         ## result*.vtu files
         self.results_dir = results_dir
 
+        self.clinical_targets = clinical_target
+
         # figures directory
         self.fig_dir = fig_dir
 
@@ -106,7 +109,7 @@ class SimulationDirectory:
         self.convert_to_cm = convert_to_cm
 
     @classmethod
-    def from_directory(cls, path='.', zerod_config=None, mesh_complete='mesh-complete', results_dir=None, convert_to_cm=True, is_pulmonary=True):
+    def from_directory(cls, path='.', zerod_config: str =None, mesh_complete: str ='mesh-complete', results_dir: str =None, convert_to_cm: bool =True, is_pulmonary=True):
         '''
         create a simulation directory object from the path to the simulation directory
         and search for the necessary files within the path'''
@@ -205,6 +208,11 @@ class SimulationDirectory:
             fig_dir = os.path.join(path, 'figures')
             os.system(f'mkdir {fig_dir}')
 
+        if os.path.exists(os.path.join(path, 'clinical_targets.csv')):
+            print('clinical targets found!')
+            clinical_targets = ClinicalTargets.from_csv(os.path.join(path, 'clinical_targets.csv'))
+        else:
+            clinical_targets = None
         return cls(path,
                    zerod_config,
                    mesh_complete, 
@@ -214,6 +222,7 @@ class SimulationDirectory:
                    solver_runscript, 
                    svzerod_data, 
                    results_dir,
+                   clinical_targets,
                    fig_dir,
                    convert_to_cm)
     
@@ -400,7 +409,7 @@ class SimulationDirectory:
         if steady:
             print("computing steady pressure drop...")
             # get lpa, rpa flow
-            lpa_flow, rpa_flow = self.flow_split()
+            lpa_flow, rpa_flow = self.flow_split(get_mean=True)
 
             # get the MPA pressure
             mpa_pressure = np.mean(self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])[2][-100:])
@@ -427,7 +436,7 @@ class SimulationDirectory:
         
         else:
             print("computing systolic/diastolic/mean pressure drop...")
-            lpa_flow, rpa_flow = self.flow_split(steady=False)
+            lpa_flow, rpa_flow = self.flow_split(get_mean=False)
 
             # get the MPA mean, systolic, diastolic pressure
             time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
@@ -484,13 +493,16 @@ class SimulationDirectory:
                 'mean': rpa_pressure_drops['mean'] / Q_mean_rpa
             }
 
-            print(f'LPA pressure drop: {lpa_pressure_drops["sys"] / 1333.2} mmHg, {lpa_pressure_drops["dia"] / 1333.2} mmHg, {lpa_pressure_drops["mean"] / 1333.2} mmHg')
+            print(f'\nLPA pressure drop: {lpa_pressure_drops["sys"] / 1333.2} mmHg, {lpa_pressure_drops["dia"] / 1333.2} mmHg, {lpa_pressure_drops["mean"] / 1333.2} mmHg')
             print(f'RPA pressure drop: {rpa_pressure_drops["sys"] / 1333.2} mmHg, {rpa_pressure_drops["dia"] / 1333.2} mmHg, {rpa_pressure_drops["mean"] / 1333.2} mmHg')
 
-            print(f'LPA resistance: {lpa_resistance["sys"]} dyn/cm5/s, {lpa_resistance["dia"]} dyn/cm5/s, {lpa_resistance["mean"]} dyn/cm5/s')
-            print(f'RPA resistance: {rpa_resistance["sys"]} dyn/cm5/s, {rpa_resistance["dia"]} dyn/cm5/s, {rpa_resistance["mean"]} dyn/cm5/s')
+            print(f'\nLPA resistance:  sys {lpa_resistance["sys"]} dyn/cm5/s, dia {lpa_resistance["dia"]} dyn/cm5/s, mean {lpa_resistance["mean"]} dyn/cm5/s')
+            print(f'RPA resistance: sys {rpa_resistance["sys"]} dyn/cm5/s, dia {rpa_resistance["dia"]} dyn/cm5/s, mean {rpa_resistance["mean"]} dyn/cm5/s')
 
-            print(f'LPA flow: {Q_sys_lpa} dyn/cm5/s, {Q_dia_lpa} dyn/cm5/s, {Q_mean_lpa} dyn/cm5/s')
+            print(f'\nLPA PVR: {lpa_resistance["mean"] / 80.0} Wood units')
+            print(f'RPA PVR: {rpa_resistance["mean"] / 80.0} Wood units')
+
+            print(f'\nLPA flow: {Q_sys_lpa} dyn/cm5/s, {Q_dia_lpa} dyn/cm5/s, {Q_mean_lpa} dyn/cm5/s')
             print(f'RPA flow: {Q_sys_rpa} dyn/cm5/s, {Q_dia_rpa} dyn/cm5/s, {Q_mean_rpa} dyn/cm5/s')
             
             # compute nonlinear resistance coefficient by fitting resistance vs flows
@@ -751,12 +763,16 @@ class SimulationDirectory:
         print(f"Optimized LPA nonlinear resistance: {optimized_resistances[0]}")
         print(f"Optimized RPA nonlinear resistance: {optimized_resistances[1]}")
 
+        # save the config with half of the tuned resistances
+        print('saving config with 0.5 * the tuned resistances...')
+        nonlinear_config.vessel_map[1].stenosis_coefficient = optimized_resistances[0] / 4
+        nonlinear_config.vessel_map[2].stenosis_coefficient = optimized_resistances[0] / 4
+        nonlinear_config.vessel_map[3].stenosis_coefficient = optimized_resistances[1] / 4
+        nonlinear_config.vessel_map[4].stenosis_coefficient = optimized_resistances[1] / 4
+
         return optimized_resistances.tolist()  # return as a list for easier handling
         
         
-
-
-
 
     def generate_impedance_bcs(self):
 
@@ -911,9 +927,11 @@ class SimulationDirectory:
         
         return lpa_flow, rpa_flow
     
-    def plot_mpa(self):
+    def plot_mpa(self, clinical_targets=None, plot_pf_loop=True):
         '''
-        plot the MPA pressure'''
+        plot the MPA pressure
+        
+        :param clinical_targets: csv of clinical targets'''
 
         time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
 
@@ -931,29 +949,49 @@ class SimulationDirectory:
 
         pressure = pressure / 1333.2
 
-        fig, ax = plt.subplots(3, figsize=(10, 10))
+        if plot_pf_loop:
+            fig, ax = plt.subplots(3, figsize=(10, 10))
+        else:
+            fig, ax = plt.subplots(2, figsize=(10, 10))
+
+        # plot clinical targets as horizontal lines, if available
+        if clinical_targets is not None:
+            clinical_targets = ClinicalTargets.from_csv(clinical_targets)
+            clinical_systolic = clinical_targets.mpa_p[0]
+            clinical_diastolic = clinical_targets.mpa_p[1]
+            clinical_mean = clinical_targets.mpa_p[2]
+
+            ax[0].axhline(y=clinical_mean, color='green', linestyle='--', linewidth=1.5, label='Clinical Mean Pressure')
+            ax[0].axhline(y=clinical_systolic, color='red', linestyle='--', linewidth=1.5, label='Clinical Systolic Pressure')
+            ax[0].axhline(y=clinical_diastolic, color='purple', linestyle='--', linewidth=1.5, label='Clinical Diastolic Pressure')
+
 
         ax[0].plot(time, pressure, label='MPA pressure')
-        ax[0].set_xlabel('Time (s)')
-        ax[0].set_ylabel('Pressure (mmHg)')
-        ax[0].set_title('MPA pressure')
+        ax[0].set_title("Simulated Pressure Waveform vs. Clinical Targets", fontsize=14)
+        ax[0].set_xlabel("Cardiac Cycle (normalized time)", fontsize=12)
+        ax[0].set_ylabel("Pressure (mmHg)", fontsize=12)
+        ax[0].grid(True, linestyle='--', alpha=0.6)
 
         # add mean pressure as a horizontal line
-        ax[0].axhline(y=np.mean(pressure), color='r', linestyle='--', label='mean pressure')
-        ax[0].legend()
+        ax[0].axhline(y=np.mean(pressure), color='b', linestyle='-', label='Simulated Mean Pressure')
+        ax[0].legend(loc='upper right')
 
         ax[1].plot(time, flow, label='MPA flow')
         ax[1].set_xlabel('Time (s)')
         ax[1].set_ylabel('Flow (mL/s)')
         ax[1].set_title('MPA flow')
         
-        ax[2].plot(flow, pressure, label='MPA pressure vs flow')
-        ax[2].set_xlabel('Flow (mL/s)')
-        ax[2].set_ylabel('Pressure (mmHg)')
-        ax[2].set_title('MPA pressure vs flow')
+        if plot_pf_loop:
+            ax[2].plot(flow, pressure, label='MPA pressure vs flow')
+            ax[2].set_xlabel('Flow (mL/s)')
+            ax[2].set_ylabel('Pressure (mmHg)')
+            ax[2].set_title('MPA pressure vs flow')
 
         plt.tight_layout()
-        plt.savefig(os.path.join(self.path, 'figures', 'mpa.png'))
+        if plot_pf_loop:
+            plt.savefig(os.path.join(self.path, 'figures', 'mpa_w_pf.png'))
+        else:
+            plt.savefig(os.path.join(self.path, 'figures', 'mpa.png'))
 
         # get the time over the last period
         time = time[time > time.max() - 1.0]
@@ -1000,6 +1038,7 @@ class SimulationDirectory:
             ax[0].set_xlabel('Time (s)')
             ax[0].set_ylabel('Pressure (mmHg)')
             ax[0].set_title(f'outlet pressure')
+            ax[0].set_ylim(bottom=0)
 
 
             ax[1].plot(time, flow, label=f'{block.surface} flow', color=color)
@@ -1014,6 +1053,41 @@ class SimulationDirectory:
 
         plt.tight_layout()
         plt.savefig(os.path.join(self.path, 'figures', f'outlets.png'))
+
+    def get_pvr(self):
+        '''
+        get the pulmonary vascular resistance from the svZeroD_data file'''
+
+        # get the MPA pressure
+        time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
+        time = time[time > time.max() - 1.0]
+        pressure = pressure[time.index]
+        flow = flow[time.index]
+        mean_pressure = np.mean(pressure)
+
+        # get rpa flow
+        lpa_flow, rpa_flow = self.flow_split()
+        rpa_flow = sum(rpa_flow['mean'].values())
+
+        # get lpa flow
+        lpa_flow = sum(lpa_flow['mean'].values())
+
+        # get the wedge pressure
+        if self.clinical_targets is not None:
+            wedge_pressure = self.clinical_targets.wedge_p * 1333.2
+        else:
+            print('no clinical targets found, using 5.0 mmHg as wedge pressure')
+            wedge_pressure = 5.0 * 1333.2
+        
+        # get the pvr
+        pvr = (mean_pressure - wedge_pressure) / (lpa_flow + rpa_flow) / 80.0
+        print(f'PVR: {pvr} WU')
+        with open(self.results_file, 'a') as f:
+            f.write(f'PVR: {pvr} WU\n\n')
+
+
+
+
 
     def check_simulation(self, poll_interval=60):
         '''

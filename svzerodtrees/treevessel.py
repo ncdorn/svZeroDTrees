@@ -15,6 +15,7 @@ class TreeVessel:
         self.name = name # name of the, tree only has a str in the root node
         self.params = params # vessel params dict
         self._d = self.params["vessel_D"] # diameter in cm
+        self._r = self._d / 2 # radius in cm
         self.l = self.params["vessel_length"] # length in cm
         self.id = self.params["vessel_id"]
         self.gen = self.params["generation"]
@@ -26,22 +27,35 @@ class TreeVessel:
         self.L = self.params["zero_d_element_values"].get("L")
         self.a = np.pi * self._d ** 2 / 4 # cross sectional area
 
-        ### parameters for compliance model ###
-        
-        # self.k1 = 19992500 # g/cm/s^2
-        # self.k2 = -25.526700000000002 # 1/cm
-        # self.k3 = 1104531.4909089999 # g/cm/s^2
+        self.h = self._r / 10 # currently assume thin wall, could be higher with remodelling!
 
-        # self.k1    = k1
-        # self.k2    = k2
-        # self.k3    = k3
+        ### *** PARAMETERS FOR ADAPTATION *** ###
+        # diameter gain parameters for remodeling
+        self.K_tau_r = 1e-6
+        self.K_sig_r = 1e-6
+        # thickness gain parameters
+        self.K_tau_h = 1e-5
+        self.K_sig_h = 1e-5
+
+        # homeostatic values
+        self.wss_h = None # homeostatic wall shear stress
+        self.ims_h = None # homeostatic intramural stress
+
+        # global array idk
+        self.idx = None # index in the flattened array of vessels, to be set later
+
+        # adaptation parameters
+        self.r_adapt = self._r
+        self.h_adapt = self.h
+        self.dt = 1e-5 # timestep for integration
+
 
         self.lrr = lrr
 
         # flow values, based on Poiseulle assumption
         self.P_in = 0.0
         self.Q = 0.0
-        self.t_w = 0.0
+        self.P_out = 0.0
 
         # daughter segments for recursion
         self._left = None
@@ -162,9 +176,128 @@ class TreeVessel:
     @d.setter
     def d(self, new_d):
         self._d = new_d
+        self._r = new_d / 2
+        self.update_vessel_params()
+
+    @property 
+    def r(self):
+        return self._r
+    
+    @r.setter
+    def r(self, new_r):
+        self._r = new_r
+        self._d = new_r * 2
         self.update_vessel_params()
 
     ####### end of property setters used to dynamically update various class attributes #######
+
+    def wall_shear_stress(self, Q=None, r=None, mean=True):
+        '''
+        calculate the wall shear stress in the vessel
+        :param mean: boolean to determine if the mean wall shear stress should be calculated
+        :return: wall shear stress
+        '''
+
+        if Q is None:
+            Q = self.Q
+
+        if r is None:
+            r = self.r
+
+        if mean:
+            t_w = np.mean(Q * 4 * self.eta / (np.pi * r ** 3))
+        else:
+            t_w = Q * 4 * self.eta / (np.pi * r ** 3)
+
+        return t_w
+    
+    def intramural_stress(self, P=None, h=None, mean=True):
+        '''
+        calculate the intramural stress in the vessel
+        :return: intramural stress
+        '''
+
+        if P is None:
+            P = self.P_in
+
+        if h is None:
+            h = self.h
+
+        # intramural stress
+        if mean:
+            sigma_theta = np.mean(P * self.r / self.h)
+        else:
+            sigma_theta = P * self.r / self.h
+
+        return sigma_theta
+    
+    def adapt_cwss_ims(self, Q_new, P_new, n_iter=100, verbose=False):
+
+        '''
+        adapt the diameter of the vessel based on the wall shear stress and intramural stress
+        :param Q_new: new flow rate
+        :param P_new: new pressure
+        :return: change in diameter
+        '''
+
+        r_initial = self.r
+        h_initial = self.h
+        # calculate homeostatic values
+        wss_h = self.wall_shear_stress(Q=self.Q)
+        ims_h = self.intramural_stress(P=self.P_in)
+
+        def integrate_adaptation(Q_new, P_new, iter):
+            # calculate new wall shear stress and intramural stress
+            wss_new = self.wall_shear_stress(Q=Q_new)
+            ims_new = self.intramural_stress(P=P_new)
+
+            # calculate change in diameter and thickness
+            dr = (k_tau_r * (wss_new - wss_h) + k_sig_r * (ims_new - ims_h)) * self.dt # * self.r 
+            dh = (-k_tau_h * (wss_new - wss_h) + k_sig_h * (ims_new - ims_h)) * self.dt # * self.h
+
+            # update radius and thickness
+            self.r += dr
+            self.h += dh
+
+            if self.r < 0.0:
+                raise ValueError(f"Adaptation resulted in negative radius: {self.r}. Check adaptation parameters or initial conditions.")
+            if self.h < 0.0:
+                raise ValueError(f"Adaptation resulted in negative thickness: {self.h}. Check adaptation parameters or initial conditions.")
+
+            if verbose:
+                if (iter + 1) % 100 == 0:
+                    print(f"\nAdaptation step {iter + 1}: wss_h={wss_h}, wss_new={wss_new}, ims_h={ims_h}, ims_new={ims_new}")
+                    print(f"dr={dr}, dh={dh}, new radius={self.r}, new thickness={self.h}")
+                    print(f"one iteration of cwss adaptation would give r = {np.mean((Q_new / self.Q) ** (1 / 3) * r_initial)}\n")
+            
+            return dr, dh
+        
+        if verbose:
+            print(f"adapting with Q_old={np.mean(self.Q)}, P_old={np.mean(self.P_in)}, Q_new={np.mean(Q_new)}, P_new={np.mean(P_new)}\n")
+        for i in range(n_iter):  # adapt for 100 timesteps
+            dr, dh = integrate_adaptation(Q_new, P_new, i)
+
+        if verbose:
+            print(f" ***ADAPTATION RESULTS FOR VESSEL {self.name} after {n_iter} iterations *** ")
+            print(f"adaptation parameters: dt: {self.dt}, k_wss_r={k_wss_r}, k_ims_r={k_ims_r}, k_wss_h={k_wss_h}, k_ims_h={k_ims_h}")
+            print(f"Q_old={np.mean(self.Q)}, Q_new={np.mean(Q_new)}, P_old={np.mean(self.P_in)}, P_new={np.mean(P_new)}")
+            print(f"initial radius: {r_initial}, adapted radius: {self.r}. initial thickness: {h_initial}, adapted thickness: {self.h}")
+            print(f"final dr: {dr}, final dh: {dh}\n")
+
+        # Approach 1: treat each individual vessel in isolation and adapt each vessel until it converges
+        # update wss and ims with each new radius
+        
+
+        # Approach 2: update the flow in the network with every timestep. treat the flow from the outlet of hte model but you redistribute based on how vessels are adapting
+
+        # Approach 3: rerun the 3D model every time
+
+        
+
+        # return dr, dh
+    
+
+
 
 
     def calc_zero_d_values(self, diameter, mu):
@@ -195,10 +328,12 @@ class TreeVessel:
         '''
 
         # update viscosity
-        self.eta = self.fl_visc(self.d)
-        self.params["viscosity"] = self.eta
+        # self.eta = self.fl_visc(self.d)
+        # self.params["viscosity"] = self.eta
+
+        self.eta = 0.049
         
-        R, C, L, l = self.calc_zero_d_values()
+        R, C, L, l = self.calc_zero_d_values(self.d, self.eta)
         self.params["vessel_length"] = l
         self.params["vessel_D"] = self.d
         self.params["zero_d_element_values"]["R_poiseuille"] = R
@@ -213,6 +348,7 @@ class TreeVessel:
         '''
         if the vessel is collapsed, add a distal pressure outlet boundary condition to the vessel config
         '''
+        
         self.params["boundary_conditions"] = {
         
             "outlet": "P_d" + str(self.id)
@@ -341,7 +477,7 @@ class TreeVessel:
         
             ## computing z_0 (impedance at the beginning of the vessel)
             # first, compute Eh/r using empirical relationship from Olufsen et al. (1999)
-            Eh_r = self.k1 * np.exp(self.k2 * self.d / 2) + self.k3
+            Eh_r = self.k1 * np.exp(self.k2 * self.d / 2) + self.k3 # update with new h and r
             # compute compliance using Eh/r relationship
             self.C = 3 * self.a / 2 / Eh_r
 

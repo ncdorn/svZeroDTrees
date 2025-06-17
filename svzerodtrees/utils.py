@@ -214,7 +214,7 @@ def get_branch_result(result_array, data_name: str, branch: int, steady: bool=Fa
     '''
     get the flow, pressure or wss result for a model branch form an unformatted result
 
-    :param result_array: svzerodplus result array
+    :param result_array: svzerodplus DataFrame
     :param data_name: q, p or wss
     :param branch: branch id to get result for
     :param steady: True if the model inflow is steady or youw want to get the average value
@@ -225,7 +225,8 @@ def get_branch_result(result_array, data_name: str, branch: int, steady: bool=Fa
     if steady:
         return np.mean(result_array[data_name][branch])
     else:
-        return result_array[data_name][branch]
+        # return result_array[data_name][branch] # old code
+        return result_array[result_array.name == branch][data_name].to_numpy()
 
 
 def get_resistances(config):
@@ -410,9 +411,11 @@ def assign_flow_to_root(result_array, root, steady=False):
     def assign_flow(vessel):
         if vessel:
             # assign flow values to the vessel
-            vessel.Q = get_branch_result(result_array, 'flow_in', vessel.id, steady=steady)
-            vessel.P_in = get_branch_result(result_array, 'pressure_in', vessel.id, steady=steady)
-            vessel.t_w = vessel.Q * 4 * vessel.eta / (np.pi * vessel.d)
+            vessel_name = f"branch{vessel.id}_seg0"
+            vessel.Q = get_branch_result(result_array, 'flow_in', vessel_name, steady=steady)
+            vessel.P_in = get_branch_result(result_array, 'pressure_in', vessel_name, steady=steady)
+
+            # print(f"vessel {vessel.id} Q: {vessel.Q}, P_in: {vessel.P_in}, t_w: {vessel.wall_shear_stress()}, sigma_theta: {vessel.intramural_stress()}")
             # recursive step
             assign_flow(vessel.left)
             assign_flow(vessel.right)
