@@ -509,7 +509,52 @@ class StructuredTree():
         })
 
         return impedance_bc
+    
+    def create_resistance_bc(self, name, Pd: float = 0.0):
+        '''
+        create a resistance bc from the tree using the trees root equivalent resistance'''
 
+        self.Pd = Pd
+
+        resistance_bc = BoundaryCondition({
+            "bc_name": f"{name}",
+            "bc_type": "RESISTANCE",
+            "bc_values": {
+                "R": self.root.R_eq,
+                "Pd": Pd,
+            }
+        })
+
+        return resistance_bc
+    
+    def compute_homeostatic_state(self, Q):
+        '''
+        compute the homeostatic state of the structured tree by adapting the diameter of the vessels to a given flow rate Q
+        '''
+    
+        print("computing homeostatic state for structured tree...")
+        # simulation with initial flow
+        preop_result = self.simulate(Q_in=[Q, Q], Pd=self.Pd)
+
+        # assign homeostatic wss and ims
+        def assign_homeostatic_wss_ims(vessel):
+            '''
+            recursive step to assign homeostatic wss and ims to the vessel
+            '''
+
+            if vessel:
+                # get flow from postop result
+                vessel_name = f"branch{vessel.id}_seg0"
+                Q = get_branch_result(preop_result, 'flow_in', vessel_name)
+                P = get_branch_result(preop_result, 'pressure_in', vessel_name)
+                # adapt the diameter based on the flow
+                vessel.wss_h = vessel.wall_shear_stress(Q)
+                vessel.ims_h = vessel.intramural_stress(P)
+
+                assign_homeostatic_wss_ims(vessel.left)
+                assign_homeostatic_wss_ims(vessel.right)
+
+        assign_homeostatic_wss_ims(self.root)
 
     def match_RCR_to_impedance(self):
         '''
@@ -660,7 +705,7 @@ class StructuredTree():
                 Q_new = get_branch_result(postop_result, 'flow_in', vessel_name)
                 P_new = get_branch_result(postop_result, 'pressure_in', vessel_name)
                 # adapt the diameter based on the flow
-                vessel.adapt_cwss_ims(Q_new, P_new, n_iter=n_iter)
+                vessel.adapt_cwss_ims(Q_new, P_new, n_iter=n_iter, verbose=False)
                 # recursive step
                 adapt_vessel(vessel.left)
                 adapt_vessel(vessel.right)
@@ -673,7 +718,53 @@ class StructuredTree():
         assign_flow_to_root(adapted_result, self.root)
 
 
+    def adapt_wss_ims_method2(self, Q, Q_new, n_iter=100):
+        '''
+        adapt the diameter of the structured tree based on the flowrate through the model using a different method
 
+        :param Q: original flowrate through the vessel
+        :param Q_new: post-operative flowrate through the model
+        :param n_iter: number of iterations to perform
+
+        :return: pre-adaptation and post-adaptation resistance
+        '''
+        print(f"running preop tree simulation with Q = {Q} and Pd = {self.Pd}")
+        preop_result = self.simulate(Q_in=[Q, Q], Pd=self.Pd)
+        assign_flow_to_root(preop_result, self.root)
+
+        print(f"running postop tree simulation with Q = {Q_new} and Pd = {self.Pd}")
+        iteration_result = self.simulate(Q_in=[Q_new, Q_new], Pd=self.Pd)
+
+        def adapt_vessel(vessel):
+            '''
+            recursive step to adapt the vessel diameter'''
+
+            if vessel:
+                # get flow from postop result
+                vessel_name = f"branch{vessel.id}_seg0"
+                Q_new = get_branch_result(iteration_result, 'flow_in', vessel_name)
+                P_new = get_branch_result(iteration_result, 'pressure_in', vessel_name)
+                # adapt the diameter based on the flow
+                vessel.adapt_cwss_ims(Q_new, P_new, n_iter=1)
+                # recursive step
+                adapt_vessel(vessel.left)
+                adapt_vessel(vessel.right)
+        
+        print(f"adapting tree diameter with Q = {Q} Q_new = {Q_new}")
+
+        for i in range(n_iter):
+            print(f"adapting {self.count_vessels()} vessel diameters for tree {self.name}...")
+            adapt_vessel(self.root)
+            # after adapting the vessel diameters, we need to simulate the tree again to get the new flow and pressure values
+            iteration_result = self.simulate(Q_in=[Q_new, Q_new], Pd=self.Pd)
+            # assign_flow_to_root(iteration_result, self.root)
+
+            print(f"adaptation iteration {i+1} of {n_iter}, root diameter = {self.root.d}, root resistance = {self.root.R_eq}")
+        
+
+
+        adapted_result = self.simulate(Q_in=[Q_new, Q_new], Pd=self.Pd)
+        assign_flow_to_root(adapted_result, self.root)
 
 
 
@@ -972,13 +1063,21 @@ class StructuredTree():
         # assign_flow_to_root(result, self.root)
 
         return result
-    
 
-    def visualize(self):
-        '''
-        TO BE IMPLEMENTED
-        '''
-        pass
+    def enumerate_vessels(self, start_idx=0):
+        """Return a deterministic DFS ordering and stamp each vessel with .idx."""
+
+        vessel_order = []
+        def _dfs(v):
+            if v is None:
+                return
+            v.idx = len(vessel_order) + start_idx       # store once, forever
+            vessel_order.append(v)
+            _dfs(v.left)
+            _dfs(v.right)
+        
+        _dfs(self.root)
+        return vessel_order
 
 
 class PriesnSecomb():

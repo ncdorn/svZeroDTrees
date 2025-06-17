@@ -29,10 +29,26 @@ class TreeVessel:
 
         self.h = self._r / 10 # currently assume thin wall, could be higher with remodelling!
 
+        ### *** PARAMETERS FOR ADAPTATION *** ###
+        # diameter gain parameters for remodeling
+        self.K_tau_r = 1e-6
+        self.K_sig_r = 1e-6
+        # thickness gain parameters
+        self.K_tau_h = 1e-5
+        self.K_sig_h = 1e-5
+
+        # homeostatic values
+        self.wss_h = None # homeostatic wall shear stress
+        self.ims_h = None # homeostatic intramural stress
+
+        # global array idk
+        self.idx = None # index in the flattened array of vessels, to be set later
+
         # adaptation parameters
         self.r_adapt = self._r
         self.h_adapt = self.h
-        self.dt = 0.00001 # timestep for integration
+        self.dt = 1e-5 # timestep for integration
+
 
         self.lrr = lrr
 
@@ -224,13 +240,6 @@ class TreeVessel:
         :return: change in diameter
         '''
 
-        # diametergain parameters
-        k_wss_r = 0.00001
-        k_ims_r = 0.00001
-        # thickness gain parameters
-        k_wss_h = 0.00001
-        k_ims_h = 0.00001
-
         r_initial = self.r
         h_initial = self.h
         # calculate homeostatic values
@@ -243,8 +252,8 @@ class TreeVessel:
             ims_new = self.intramural_stress(P=P_new)
 
             # calculate change in diameter and thickness
-            dr = (k_wss_r * (wss_new - wss_h) + k_ims_r * (ims_new - ims_h)) * self.dt
-            dh = (k_wss_h * (wss_new - wss_h) + k_ims_h * (ims_new - ims_h)) * self.dt
+            dr = (k_tau_r * (wss_new - wss_h) + k_sig_r * (ims_new - ims_h)) * self.dt # * self.r 
+            dh = (-k_tau_h * (wss_new - wss_h) + k_sig_h * (ims_new - ims_h)) * self.dt # * self.h
 
             # update radius and thickness
             self.r += dr
@@ -268,11 +277,12 @@ class TreeVessel:
         for i in range(n_iter):  # adapt for 100 timesteps
             dr, dh = integrate_adaptation(Q_new, P_new, i)
 
-        print(f" ***ADAPTATION RESULTS FOR VESSEL {self.name} after {n_iter} iterations *** ")
-        print(f"adaptation parameters: dt: {self.dt}, k_wss_r={k_wss_r}, k_ims_r={k_ims_r}, k_wss_h={k_wss_h}, k_ims_h={k_ims_h}")
-        print(f"Q_old={np.mean(self.Q)}, Q_new={np.mean(Q_new)}, P_old={np.mean(self.P_in)}, P_new={np.mean(P_new)}")
-        print(f"initial radius: {r_initial}, adapted radius: {self.r}. initial thickness: {h_initial}, adapted thickness: {self.h}")
-        print(f"final dr: {dr}, final dh: {dh}\n")
+        if verbose:
+            print(f" ***ADAPTATION RESULTS FOR VESSEL {self.name} after {n_iter} iterations *** ")
+            print(f"adaptation parameters: dt: {self.dt}, k_wss_r={k_wss_r}, k_ims_r={k_ims_r}, k_wss_h={k_wss_h}, k_ims_h={k_ims_h}")
+            print(f"Q_old={np.mean(self.Q)}, Q_new={np.mean(Q_new)}, P_old={np.mean(self.P_in)}, P_new={np.mean(P_new)}")
+            print(f"initial radius: {r_initial}, adapted radius: {self.r}. initial thickness: {h_initial}, adapted thickness: {self.h}")
+            print(f"final dr: {dr}, final dh: {dh}\n")
 
         # Approach 1: treat each individual vessel in isolation and adapt each vessel until it converges
         # update wss and ims with each new radius
@@ -467,7 +477,7 @@ class TreeVessel:
         
             ## computing z_0 (impedance at the beginning of the vessel)
             # first, compute Eh/r using empirical relationship from Olufsen et al. (1999)
-            Eh_r = self.k1 * np.exp(self.k2 * self.d / 2) + self.k3
+            Eh_r = self.k1 * np.exp(self.k2 * self.d / 2) + self.k3 # update with new h and r
             # compute compliance using Eh/r relationship
             self.C = 3 * self.a / 2 / Eh_r
 

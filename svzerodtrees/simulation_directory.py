@@ -409,7 +409,7 @@ class SimulationDirectory:
         if steady:
             print("computing steady pressure drop...")
             # get lpa, rpa flow
-            lpa_flow, rpa_flow = self.flow_split()
+            lpa_flow, rpa_flow = self.flow_split(get_mean=True)
 
             # get the MPA pressure
             mpa_pressure = np.mean(self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])[2][-100:])

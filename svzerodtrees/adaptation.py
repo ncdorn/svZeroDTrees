@@ -220,7 +220,8 @@ class MicrovascularAdaptor:
     def __init__(self, 
                  preopSimulationDirectory, 
                  postopSimulationDirectory, 
-                 adaptedSimulationDirectory, 
+                 adaptedSimulationDirectory,
+                 reducedOrderPA: json,
                  treeParams: csv, 
                  clinicalTargets,
                  method: str = 'cwss', 
@@ -240,6 +241,9 @@ class MicrovascularAdaptor:
         self.preopSimulationDirectory = preopSimulationDirectory
         self.postopSimulationDirectory = postopSimulationDirectory
         self.adaptedSimulationDirectory = adaptedSimulationDirectory
+
+        self.simple_pa = ConfigHandler.from_json(reducedOrderPA, is_pulmonary=True)
+
         # grab tree params from csv, of form [k1, k2, k3, lrr, diameter]
         opt_params = pd.read_csv(os.path.join(treeParams))
         self.treeParams = {
@@ -385,3 +389,6 @@ class MicrovascularAdaptor:
                         raise ValueError('cap name not recognized')
                     
     
+    def adaptCWSS_IMS(self, fig_dir: str = None):
+        # TODO: Implement later as here we are using the 3D model to adapt the trees
+        pass
