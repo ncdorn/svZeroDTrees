@@ -41,7 +41,8 @@ class Simulation:
 
         self.preop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, preop_dir), zerod_config=self.zerod_config_path, convert_to_cm=convert_to_cm)
         self.postop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, postop_dir), zerod_config=self.zerod_config_path, convert_to_cm=convert_to_cm)
-        self.adapted_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, adapted_dir), mesh_complete=self.postop_dir.mesh_complete.path, convert_to_cm=convert_to_cm)
+        if adapted_dir is not None:
+            self.adapted_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, adapted_dir), mesh_complete=self.postop_dir.mesh_complete.path, convert_to_cm=convert_to_cm)
         self.adaptation_method = adaptation_config["method"]
         self.adapt_location = adaptation_config["location"]
         self.adaptation_iters = adaptation_config["iterations"]
@@ -83,7 +84,7 @@ class Simulation:
         ## TO BE IMPLEMENTED LATER
         return cls(**config)
     
-    def run_pipeline(self, run_steady=True, optimize_bcs=False, run_threed=True):
+    def run_pipeline(self, run_steady=True, optimize_bcs=False, run_threed=True, adapt=True):
         '''
         run the entire pipeline
         '''
@@ -129,24 +130,26 @@ class Simulation:
             preop_sim = SimulationDirectory.from_directory(self.preop_dir.path, self.zerod_config_path, convert_to_cm=self.convert_to_cm)
             preop_sim.write_files(simname='Preop Simulation', user_input=False, sim_config=self.threed_sim_config)
             preop_sim.run()
-
+        
+        if adapt:
+            # run postop simulation
             postop_sim = SimulationDirectory.from_directory(self.postop_dir.path, self.zerod_config_path, convert_to_cm=self.convert_to_cm)
             postop_sim.write_files(simname='Postop Simulation', user_input=False, sim_config=self.threed_sim_config)
             postop_sim.run()
 
-        # compute adaptation
-        self.microvascular_adaptor = MicrovascularAdaptor(self.preop_dir, self.postop_dir, self.adapted_dir, 
-                                                          'optimized_params.csv', 
-                                                          self.clinical_targets,
-                                                          self.adaptation_method, self.adapt_location, self.adaptation_iters,
-                                                          self.convert_to_cm)
-        
-        self.microvascular_adaptor.adapt(fig_dir = self.figures_dir)
+            # compute adaptation
+            self.microvascular_adaptor = MicrovascularAdaptor(self.preop_dir, self.postop_dir, self.adapted_dir, 
+                                                            'optimized_params.csv', 
+                                                            self.clinical_targets,
+                                                            self.adaptation_method, self.adapt_location, self.adaptation_iters,
+                                                            self.convert_to_cm)
+            
+            self.microvascular_adaptor.adapt(fig_dir = self.figures_dir)
 
-        # run adapted simulation
-        self.adapted_dir.write_files(simname='Adapted Simulation', user_input=False, sim_config=self.threed_sim_config)
+            # run adapted simulation
+            self.adapted_dir.write_files(simname='Adapted Simulation', user_input=False, sim_config=self.threed_sim_config)
 
-        # postprocess results
+            # postprocess results
 
     def compute_adaptation(self, preopSimDir, postopSimDir,  adaptedSimDir):
         '''
