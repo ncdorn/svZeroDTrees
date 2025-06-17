@@ -91,12 +91,10 @@ class Simulation:
             # run the steady simulations
             self.run_steady_sims()
 
+        else:
             # generate the simplified zerod config
             self.generate_simplified_nonlinear_zerod()
 
-            # optimize preop BCs
-            reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
-        else:
             reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
         
         if optimize_bcs:
