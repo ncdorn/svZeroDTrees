@@ -1,7 +1,7 @@
 import csv
 import glob
 from svzerodtrees.threedutils import *
-from svzerodtrees.preop import optimize_pa_bcs, optimize_outlet_bcs, construct_impedance_trees
+from svzerodtrees.preop.preop import optimize_pa_bcs, optimize_outlet_bcs, construct_impedance_trees
 from svzerodtrees.config_handler import ConfigHandler
 
 

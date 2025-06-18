@@ -1,16 +1,12 @@
 from svzerodtrees.utils import *
-from svzerodtrees.threedutils import *
-from svzerodtrees.config_handler import ConfigHandler
-from svzerodtrees.preop import *
-from svzerodtrees.inflow import *
-from svzerodtrees.simulation_directory import *
-from svzerodtrees.structuredtree import *
-from svzerodtrees.adaptation import *
+from .threedutils import *
+from ..io import *
+from ..tune_bcs import *
+from .simulation_directory import *
+from ..adaptation import *
 import json
 import pandas as pd
-import pickle
 import os
-import vtk
 
 class Simulation:
     '''

@@ -3,9 +3,10 @@ import sys
 import json
 import time
 import pickle
-from svzerodtrees import preop, operation, adaptation
+from svzerodtrees import operation, adaptation
 from svzerodtrees.optimization import StentOptimization
 from svzerodtrees.post_processing import plotting, project_to_centerline
+from svzerodtrees.preop import preop
 from svzerodtrees.utils import *
 from svzerodtrees.threedutils import *
 from svzerodtrees.result_handler import ResultHandler

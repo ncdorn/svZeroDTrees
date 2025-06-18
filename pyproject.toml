@@ -1,0 +1,56 @@
+[project]
+name = "svzerodtrees"
+version = "0.1.0"
+description = "Structured tree boundary condition modeling for svZeroD cardiovascular simulations"
+authors = [{ name = "Nick Dorn", email = "ndorn@stanford.edu" }]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.8"
+
+dependencies = [
+    "scipy >= 1.9.1",
+    "numpy >= 1.22.3",
+    "vtk >= 9.1.0",
+    "pandas >= 1.4.3",
+    "matplotlib >= 3.5.0",
+    "networkx",
+    "svsuperestimator",
+    "multiprocess",
+    "pysvzerod",
+    "pyyaml"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "ruff",
+    "mypy",
+    "ipykernel",
+    "jupyterlab"
+]
+
+[project.urls]
+"Source" = "https://github.com/yourusername/svzerodtrees"
+"Bug Tracker" = "https://github.com/yourusername/svzerodtrees/issues"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = { find = {} }
+
+[tool.setuptools.package-data]
+"svzerodtrees" = ["**/*.json", "**/*.yaml", "**/*.csv"]
+
+[tool.black]
+line-length = 88
+
+[tool.ruff]
+line-length = 88
+select = ["E", "F", "I"]
+
+[tool.mypy]
+strict = true
+ignore_missing_imports = true

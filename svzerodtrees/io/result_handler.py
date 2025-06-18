@@ -3,6 +3,8 @@ import pickle
 import json
 from scipy.integrate import trapz
 
+# TODO: likely delete this, it is currently not imported by __init__.py
+
 class ResultHandler:
     '''
     class to handle preop, postop and post adaptation results from the structured tree simulation

@@ -6,7 +6,7 @@ sys.path.append("/Applications/ParaView-5.12.0-RC3.app/Contents/Python")
 from vtkmodules.util.numpy_support import vtk_to_numpy
 import glob
 from paraview.simple import *
-from svzerodtrees.preop import ClinicalTargets
+from svzerodtrees.preop.preop import ClinicalTargets
 import os
 from pathlib import Path
 from PIL import Image
