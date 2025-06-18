@@ -1,6 +1,10 @@
 import json
 import csv
 from ..io import ConfigHandler
+import matplotlib.pyplot as plt
+import os
+from ..microvasculature import StructuredTree
+from ..utils import *
 class MicrovascularAdaptor: 
     '''
     class for computing microvascular adaptation from a preop and postop result

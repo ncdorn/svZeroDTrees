@@ -1,8 +1,8 @@
 from svzerodtrees.utils import *
 import copy
-from svzerodtrees.structuredtree import StructuredTree
-from svzerodtrees.io import ConfigHandler
-from svzerodtrees.simulation_directory import *
+from ..microvasculature import StructuredTree
+from ..io import ConfigHandler
+from ..simulation import *
 import numpy as np
 
 

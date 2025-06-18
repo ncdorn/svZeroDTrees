@@ -7,17 +7,15 @@ import math
 import matplotlib.pyplot as plt
 from scipy.integrate import trapz
 from multiprocess import Pool
-from svzerodtrees.utils import *
+from .utils import *
 from svzerodtrees.simulation.threedutils import *
 from svzerodtrees.post_processing.plotting import *
 from svzerodtrees.post_processing.stree_visualization import *
 from scipy.optimize import minimize, Bounds
-from svzerodtrees.structuredtree import StructuredTree
+from ..microvasculature import StructuredTree
 from svzerodtrees.adaptation import *
-from svzerodtrees.result_handler import ResultHandler
-from svzerodtrees.config_handler import ConfigHandler
-from svzerodtrees.blocks import *
-from svzerodtrees.inflow import Inflow
+from ..io import *
+from ..io.blocks import *
 
 
 def construct_impedance_trees(config_handler, mesh_surfaces_path, wedge_pressure, d_min = 0.1, convert_to_cm=False, is_pulmonary=True, tree_params={'lpa': [19992500, -35, 0.0, 50.0], 
@@ -403,10 +401,6 @@ def optimize_outlet_bcs(input_file,
             np.sum(np.array([1 / bc.Rp for bc in list(config_handler.bcs.values())[1:]]) ** 2) + \
             np.sum(np.array([1 / bc.Rd for bc in list(config_handler.bcs.values())[1:]]) ** 2)
             # p_diff = (pred_p[0] - target_ps[0]) ** 2
-
-        # penalty = 0
-        # for i, p in enumerate(pred_p):
-        #     penalty += loss_function_bound_penalty(p, target_ps[i])
             
 
         # add flow split to optimization by checking RPA flow against flow split
