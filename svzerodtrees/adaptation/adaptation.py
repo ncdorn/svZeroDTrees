@@ -1,11 +1,13 @@
-from svzerodtrees.utils import *
+from ..utils import write_to_log, get_outlet_data, write_resistances
+from .utils import *
 import copy
 from ..microvasculature import StructuredTree
 from ..io import ConfigHandler
+from ..io.result_handler import ResultHandler
 from ..simulation import *
 import numpy as np
 
-
+# this needs to be deprecated.
 def adapt_constant_wss(config_handler: ConfigHandler, result_handler: ResultHandler, log_file: str = None):
     '''
     adapt structured trees based on the constant wall shear stress assumption

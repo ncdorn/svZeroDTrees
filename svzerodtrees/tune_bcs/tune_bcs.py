@@ -1,21 +1,20 @@
-import copy
 import csv
-from pathlib import Path
 import numpy as np
-import json
-import math
-import matplotlib.pyplot as plt
-from scipy.integrate import trapz
-from multiprocess import Pool
-from .utils import *
-from svzerodtrees.simulation.threedutils import *
-from svzerodtrees.post_processing.plotting import *
-from svzerodtrees.post_processing.stree_visualization import *
 from scipy.optimize import minimize, Bounds
-from ..microvasculature import StructuredTree
-from svzerodtrees.adaptation import *
+import math
+from multiprocessing import Pool
+
 from ..io import *
-from ..io.blocks import *
+from ..io.utils import get_branch_result
+from ..io.result_handler import ResultHandler # need to deprecate this
+from ..utils import *
+from ..adaptation.utils import write_resistances
+from ..simulation.threedutils import vtp_info, get_coupled_surfaces, find_vtp_area
+from ..microvasculature import StructuredTree
+
+from .clinical_targets import ClinicalTargets
+from .utils import *
+from . import PAConfig
 
 
 def construct_impedance_trees(config_handler, mesh_surfaces_path, wedge_pressure, d_min = 0.1, convert_to_cm=False, is_pulmonary=True, tree_params={'lpa': [19992500, -35, 0.0, 50.0], 

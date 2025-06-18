@@ -1,5 +1,19 @@
 
+import copy
+import json
+import pysvzerod
+import numpy as np
+from scipy.integrate import trapz
+from scipy.optimize import minimize, Bounds
+import math
+import matplotlib.pyplot as plt
 
+# svzerodtrees imports
+from ..io.blocks import Vessel, BoundaryCondition, SimParams
+from .clinical_targets import ClinicalTargets
+from ..microvasculature import StructuredTree
+from ..io.blocks import Junction
+from ..io.utils import get_branch_result
 class PAConfig():
     '''
     a class to handle the reduced pa config for boundary condition optimization
