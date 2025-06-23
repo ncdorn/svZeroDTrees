@@ -1,4 +1,6 @@
 build
+data
 examples
-scripts
 svzerodtrees
+tests
+workflows
