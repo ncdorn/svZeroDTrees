@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 Metadata-Version: 2.2
-=======
-Metadata-Version: 2.4
->>>>>>> 97f9b4f46d5571e078425af1a0bb8f6242af4e9c
 Name: svzerodtrees
 Version: 0.0.0
 Requires-Dist: scipy>=1.9.1
