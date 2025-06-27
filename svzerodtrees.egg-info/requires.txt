@@ -8,3 +8,11 @@ svsuperestimator
 multiprocess
 pysvzerod
 pyyaml
+
+[dev]
+pytest
+black
+ruff
+mypy
+ipykernel
+jupyterlab

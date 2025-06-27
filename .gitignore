@@ -1,0 +1,76 @@
+# === Python artifacts ===
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+*.pyo
+
+# Byte-compiled / optimized / DLLs
+*.pyc
+*.pyo
+*.pyd
+*.dll
+*.dylib
+*.exe
+
+# Virtual environments
+venv/
+env/
+.env/
+.envrc
+.venv/
+
+# Pip / Poetry / Build artifacts
+*.egg-info/
+*.egg
+*.whl
+dist/
+build/
+
+# === Jupyter / notebooks ===
+.ipynb_checkpoints/
+*.ipynb~ 
+
+# VS Code / PyCharm
+.vscode/
+.idea/
+
+# Mac / Windows cruft
+.DS_Store
+Thumbs.db
+
+# === Scientific project-specific ===
+*.npz
+*.npy
+*.h5
+*.xdmf
+*.pvtu
+*.xdmf
+*.xdmf2
+
+# Results / logs / sandbox outputs
+logs/
+sandbox/
+*_trace.csv
+*.log
+
+# Test coverage / pytest cache
+htmlcov/
+.coverage
+.tox/
+.pytest_cache/
+.nox/
+
+# MyPy / Ruff / Black caches
+.mypy_cache/
+.ruff_cache/
+
+# === Files you often want to ignore ===
+*.bak
+*.old
+*.tmp
+*~
+
+# === Optional: ignore your local config files ===
+# If you keep personal experiment configs
+configs/local_*.json

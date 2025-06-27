@@ -4,7 +4,7 @@ import numpy as np
 from scipy.interpolate import interp1d
 from collections import defaultdict
 from vtk.util.numpy_support import numpy_to_vtk
-from svzerodtrees.utils import *
+from .utils import *
 import pysvzerod
 from svsuperestimator.reader._centerline_handler import CenterlineHandler
 
