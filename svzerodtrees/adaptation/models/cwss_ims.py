@@ -22,6 +22,7 @@ class CWSSIMSAdaptation(AdaptationModel):
 
         geom_change = np.max(np.abs((y - last_update_y) / last_update_y))
         if geom_change > 1e-3 and t > last_t_holder[0] + 1e-12:
+            print(f"Geometry change at t={t:.2f} s: {geom_change:.3e} and rpa split: {simple_pa.rpa_split:.3f}")
             simulate_outlet_trees(simple_pa)
             last_update_y[:] = y
             last_t_holder[0] = t
@@ -38,7 +39,7 @@ class CWSSIMSAdaptation(AdaptationModel):
         return dydt
 
     def event(self, t, y, *args):
-        gchange = np.max(np.abs((y - args[0]) / args[0]))  # args[0] = last_update_y
+        gchange = np.max(np.abs((y - args[1]) / args[1]))  # args[1] = last_update_y
         return gchange - 5e-7
     event.terminal = True
     event.direction = -1

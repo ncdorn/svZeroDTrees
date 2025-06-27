@@ -1,4 +1,4 @@
-from svzerodtrees.utils import *
+from ..utils import *
 from .threedutils import *
 from ..io import *
 from ..tune_bcs import *
@@ -88,11 +88,10 @@ class Simulation:
             # run the steady simulations
             self.run_steady_sims()
 
-        else:
-            # generate the simplified zerod config
-            self.generate_simplified_nonlinear_zerod()
+        # generate the simplified zerod config
+        self.generate_simplified_nonlinear_zerod()
 
-            reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
+        reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
         
         if optimize_bcs:
             optimize_impedance_bcs(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, opt_config_path=self.zerod_config_path, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)

@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import os
 from ..microvasculature import StructuredTree
 from ..utils import *
+from ..simulation.threedutils import vtp_info
 class MicrovascularAdaptor: 
     '''
     class for computing microvascular adaptation from a preop and postop result

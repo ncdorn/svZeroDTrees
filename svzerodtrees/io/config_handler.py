@@ -2,9 +2,10 @@ import json
 import pickle
 import os
 from svzerodtrees.utils import *
-from svzerodtrees.result_handler import ResultHandler
-from svzerodtrees.inflow import Inflow
-from svzerodtrees.blocks import *
+from .result_handler import ResultHandler
+from .inflow_handler import Inflow
+from .blocks import *
+from .utils import *
 import pysvzerod
 
 

@@ -65,3 +65,10 @@ def time_to_95(sol):
             return ti
     return np.nan
 
+
+def wrap_event(event_func, *extra_args):
+    def wrapped_event(t, y, *args):
+        return event_func(t, y, *extra_args)
+    wrapped_event.terminal = getattr(event_func, "terminal", False)
+    wrapped_event.direction = getattr(event_func, "direction", 0)
+    return wrapped_event

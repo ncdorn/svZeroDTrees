@@ -254,18 +254,21 @@ class PAConfig():
 
         self.bcs["RPA_BC"] = self.rpa_tree.create_impedance_bc("RPA_BC", 1, self.clinical_targets.wedge_p * 1333.2)
 
-    def create_steady_trees(self, lpa_d, rpa_d, d_min, tree_params, n_procs):
+
+    def create_steady_trees(self, lpa_params, rpa_params):
         '''
         create trees for steady simulation where we just take the tree resistance
         '''
 
         self.lpa_tree = StructuredTree(name='lpa_tree', time=self.inflow.t, simparams=None)
-        self.lpa_tree.build_tree(initial_d=lpa_d, d_min=d_min[0], lrr=tree_params['lpa'][3], alpha=tree_params['lpa'][4], beta=tree_params['lpa'][5])
+        self.lpa_tree.build_tree(initial_d=lpa_params.diameter, 
+                                 d_min=lpa_params.d_min, lrr=lpa_params.lrr, alpha=lpa_params.alpha, beta=lpa_params.beta)
 
         self.bcs["LPA_BC"] = self.lpa_tree.create_resistance_bc("LPA_BC", self.clinical_targets.wedge_p * 1333.2)
 
         self.rpa_tree = StructuredTree(name='rpa_tree', time=self.inflow.t, simparams=None)
-        self.rpa_tree.build_tree(initial_d=rpa_d, d_min=d_min[1], lrr=tree_params['rpa'][3], alpha=tree_params['rpa'][4], beta=tree_params['rpa'][5])
+        self.rpa_tree.build_tree(initial_d=rpa_params.diameter, 
+                                 d_min=rpa_params.d_min, lrr=rpa_params.lrr, alpha=rpa_params.alpha, beta=rpa_params.beta)
 
         self.bcs["RPA_BC"] = self.rpa_tree.create_resistance_bc("RPA_BC", self.clinical_targets.wedge_p * 1333.2)
 

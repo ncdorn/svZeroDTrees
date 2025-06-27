@@ -1,6 +1,6 @@
 import pandas as pd
 import csv
-
+from ..utils import write_to_log
 class ClinicalTargets():
     '''
     class to handle clinical target values

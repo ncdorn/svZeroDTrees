@@ -5,7 +5,7 @@ import math
 import pandas as pd
 import os
 import svzerodtrees
-from svzerodtrees.config_handler import ConfigHandler
+from ..io import ConfigHandler
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
 
@@ -165,11 +165,10 @@ def get_nsteps(solver_input_file, svpre_file):
 
     return n_timesteps
 
-
+'''
+TODO: Remove
 def prepare_adapted_simdir(postop_dir, adapted_dir):
-    '''
-    prepare the adapted simulation directory with the properly edited simulation files
-    '''
+    # prepare the adapted simulation directory with the properly edited simulation files
     # copy the simulation files to the adapted simulation directory
     os.system('cp -rp ' + postop_dir + '/{*.svpre,*.flow,mesh-complete,solver.inp,svZeroD_interface.dat,*.sh,numstart.dat} ' + adapted_dir)
     # cd into the adapted simulation directory
@@ -191,7 +190,7 @@ def prepare_adapted_simdir(postop_dir, adapted_dir):
         ff.writelines(lines)
 
     write_svsolver_runscript(os.getcwd(), 20)
-
+'''
 
 def setup_simdir_from_mesh(sim_dir, zerod_config, 
                            svfsiplus_path='/home/users/ndorn/svfsiplus-build/svFSI-build/mysvfsi'):
