@@ -6,7 +6,8 @@ class ClinicalTargets():
     class to handle clinical target values
     '''
 
-    def __init__(self, mpa_p=None, lpa_p=None, rpa_p=None, q=None, rpa_split=None, wedge_p=None, t=None, steady=False):
+    def __init__(self, mpa_p=None, lpa_p=None, rpa_p=None, q=None, rpa_split=None, wedge_p=None, t=None, steady=False,
+                 rvot_flow=None, ivc_flow=None, svc_flow=None):
         '''
         initialize the clinical targets object
         '''
@@ -16,6 +17,12 @@ class ClinicalTargets():
         self.lpa_p = lpa_p
         self.rpa_p = rpa_p
         self.q = q
+
+        # fontan flows
+        self.rvot_flow = rvot_flow
+        self.ivc_flow = ivc_flow
+        self.svc_flow = svc_flow
+
         self.rpa_split = rpa_split
         if q is not None and rpa_split is not None:
             self.q_rpa = q * rpa_split
@@ -35,6 +42,16 @@ class ClinicalTargets():
         # get the mpa flowrate
         q = float(df.loc[0,'mpa_flow'])
 
+        if "rvot_flow" in df.columns and "ivc_flow" in df.columns and "svc_flow" in df.columns:
+            print("RVOT, IVC, SVC BCs detected")
+            rvot_flow = float(df.loc[0,"rvot_flow"])
+            ivc_flow = float(df.loc[0,"ivc_flow"])
+            svc_flow = float(df.loc[0,"svc_flow"])
+        else:
+            rvot_flow = None
+            ivc_flow = None
+            svc_flow = None
+
         # get the mpa pressures
         mpa_p = [float(p) for p in df.loc[0,"mpa_pressure"].split("/")] # sys, dia, mean
 
@@ -44,7 +61,7 @@ class ClinicalTargets():
         # get RPA flow split
         rpa_split = float(df.loc[0,"rpa_split"])
 
-        return cls(mpa_p, q=q, rpa_split=rpa_split, wedge_p=wedge_p, steady=steady)
+        return cls(mpa_p, q=q, rpa_split=rpa_split, wedge_p=wedge_p, steady=steady, rvot_flow=rvot_flow, ivc_flow=ivc_flow, svc_flow=svc_flow)
 
         
     def log_clinical_targets(self, log_file):

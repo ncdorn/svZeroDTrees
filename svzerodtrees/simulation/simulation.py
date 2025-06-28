@@ -62,8 +62,17 @@ class Simulation:
         self.clinical_targets = ClinicalTargets.from_csv(clinical_targets)
 
         # use a generic inflow profile
-        self.inflow = Inflow.periodic()
-        self.inflow.rescale(cardiac_output=self.clinical_targets.q, tsteps=self.n_tsteps)
+
+        if self.clinical_targets.rvot_flow is not None:
+            print("Using fontan inflow profile for simulation")
+            # fontan inflow
+            self.inflow = Inflow.periodic()
+            self.inflow.rescale(cardiac_output=self.clinical_targets.rvot_flow, tsteps=self.n_tsteps)
+            self.inflow.add_steady_flow(self.clinical_targets.ivc_flow)
+            self.inflow.add_steady_flow(self.clinical_targets.svc_flow)
+        else:
+            self.inflow = Inflow.periodic()
+            self.inflow.rescale(cardiac_output=self.clinical_targets.q, tsteps=self.n_tsteps)
 
         # make a figures directory
         self.figures_dir = os.path.join(self.path, 'figures')
@@ -185,7 +194,7 @@ class Simulation:
         # make the steady simulations
         flow_dict = {
             'sys': max(self.inflow.q),
-            'dia': 2.0,
+            'dia': max(2.0, min(self.inflow.q)),
             'mean': np.mean(self.inflow.q)
         }
         steady_sims = {}
@@ -258,15 +267,9 @@ class Simulation:
             plt.savefig(os.path.join(self.figures_dir, 'resistance_fit.png'))
 
 
-        # create the config
-        # need to rescale the inflow and make it periodic with a generic shape (see Inflow class)
-        inflow = Inflow.periodic(path=None)
-        # inflow.rescale(cardiac_output=mean_sim.svzerod_3Dcoupling.bcs['inflow'].Q[0])
-        inflow.rescale(cardiac_output=cardiac_output)
-
         config = ConfigHandler({
             "boundary_conditions": [
-                inflow.to_dict(),
+                self.inflow.to_dict(),
                 {
                     "bc_name": "LPA_BC",
                     "bc_type": "RESISTANCE",

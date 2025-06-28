@@ -10,7 +10,7 @@ class Inflow():
     '''
     a class to handle inflow for pulmonary trees
     '''
-    def __init__(self, q, t, t_per=1.0, n_periods=1, name="INFLOW"):
+    def __init__(self, q: list, t: list, t_per=1.0, n_periods=1, name="INFLOW"):
         '''
         initialize the inflow object
 
@@ -623,6 +623,14 @@ class Inflow():
         if type(self.t) is np.ndarray:
             self.t = self.t.tolist()
 
+    def add_steady_flow(self, q_steady):
+        '''
+        add a steady flow to the inflow
+
+        :param q_steady: the steady flow rate in ml/s
+        '''
+
+        self.q = [q + q_steady for q in self.q]
         
 
     def plot(self, ax):
