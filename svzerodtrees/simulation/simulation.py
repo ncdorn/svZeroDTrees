@@ -65,12 +65,14 @@ class Simulation:
 
         if self.clinical_targets.rvot_flow is not None:
             print("Using fontan inflow profile for simulation")
+            self.is_fontan = True
             # fontan inflow
             self.inflow = Inflow.periodic()
             self.inflow.rescale(cardiac_output=self.clinical_targets.rvot_flow, tsteps=self.n_tsteps)
             self.inflow.add_steady_flow(self.clinical_targets.ivc_flow)
             self.inflow.add_steady_flow(self.clinical_targets.svc_flow)
         else:
+            self.is_fontan = False
             self.inflow = Inflow.periodic()
             self.inflow.rescale(cardiac_output=self.clinical_targets.q, tsteps=self.n_tsteps)
 
