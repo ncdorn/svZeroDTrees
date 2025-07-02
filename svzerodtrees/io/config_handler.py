@@ -181,21 +181,9 @@ class ConfigHandler():
         # assemble the config
         self.assemble_config()
 
-        # run the simulation
-        result = run_svzerodplus(self.config)
-
-        result["time"] = self.get_time_series()
-
-        if result_handler is not None:
-            # add the vessels to the result handler
-            result_handler.vessels[label] = self.config['vessels']
-            # add the result to the result handler
-            result_handler.add_unformatted_result(result, label)
-
-        else:
-            result_df = pysvzerod.simulate(self.config)
-            
-            return result_df
+        result_df = pysvzerod.simulate(self.config)
+        
+        return result_df
         
 
     def add_result(self, label=None, svzerod_data=None):
