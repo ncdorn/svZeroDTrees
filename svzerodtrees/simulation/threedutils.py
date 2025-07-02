@@ -4,7 +4,7 @@ import json
 import math
 import pandas as pd
 import os
-import svzerodtrees
+from svzerodtrees.io import Inflow
 from ..io import ConfigHandler
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
@@ -822,6 +822,8 @@ def scale_msh_complete(msh_complete_dir, scale_factor=0.1):
 
     for file in filelist:
         scale_vtp_to_cm(file, scale_factor=scale_factor)
+
+
 
 if __name__ == '__main__':
     # setup a simulation dir from mesh

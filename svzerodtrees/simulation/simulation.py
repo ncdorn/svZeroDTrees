@@ -130,6 +130,10 @@ class Simulation:
             # create the trees
             construct_impedance_trees(self.zerod_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets.wedge_p, d_min=0.01, convert_to_cm=self.convert_to_cm, use_mean=True, specify_diameter=True, tree_params=tree_params)
 
+            # if is fontan, add the fontan inflows
+            if self.is_fontan:
+                self.make_fontan_inflows()
+
             impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(self.preop_dir.path, mesh_complete=self.preop_dir.mesh_complete)
             self.zerod_config.to_json(self.zerod_config_path)
             # run preop + postop simulations
@@ -431,3 +435,17 @@ class Simulation:
         '''
 
         pass
+
+
+    def make_fontan_inflows(self):
+
+            mpa_inflow = Inflow.periodic()
+            mpa_inflow.rescale(cardiac_output=self.clinical_targets.rvot_flow, tsteps=2048)
+            ivc_inflow = Inflow.steady(self.clinical_targets.ivc_flow)
+            svc_inflow = Inflow.steady(self.clinical_targets.svc_flow)
+
+            self.zerod_config.inflows = {
+                                            "INFLOW": mpa_inflow,
+                                            "INFLOW_SVC": svc_inflow,
+                                            "INFLOW_IVC": ivc_inflow
+                                    }
