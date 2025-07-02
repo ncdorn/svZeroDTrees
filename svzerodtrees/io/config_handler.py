@@ -626,6 +626,9 @@ class ConfigHandler():
 
         :return coupling_block_list: list of coupling block names
         '''
+        # assemble config to account for any changes made to the config
+        self.assemble_config()
+
         threed_coupler = ConfigHandler(
             {
                 "simulation_parameters": {

@@ -440,7 +440,7 @@ class Simulation:
     def make_fontan_inflows(self):
 
             mpa_inflow = Inflow.periodic()
-            mpa_inflow.rescale(cardiac_output=self.clinical_targets.rvot_flow, tsteps=2048)
+            mpa_inflow.rescale(cardiac_output=self.clinical_targets.rvot_flow, tsteps=2000)
             ivc_inflow = Inflow.steady(self.clinical_targets.ivc_flow)
             svc_inflow = Inflow.steady(self.clinical_targets.svc_flow)
 
