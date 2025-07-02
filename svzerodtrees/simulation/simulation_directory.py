@@ -101,6 +101,7 @@ class SimulationDirectory:
         if os.path.exists(mesh_complete):
             print('mesh-complete found')
             mesh_complete = MeshComplete(mesh_complete)
+            mesh_complete.rename_vtps()
         else:
             print('mesh-complete not found')
             mesh_complete = None
@@ -504,7 +505,7 @@ class SimulationDirectory:
 
         return lpa_resistance, rpa_resistance
 
-    def generate_simplified_zerod(self, nonlinear=True, optimize=False):
+    def generate_simplified_zerod(self, path='simplified_nonlinear_zerod.json', nonlinear=True, optimize=False):
         '''
         compute the simplified 0D model for a 3D pulmonary model from the steady simulation result'''
 
@@ -654,7 +655,7 @@ class SimulationDirectory:
             ]
         })
 
-        config.to_json('simplified_zerod_config.json')
+        config.to_json(path)
  
     def optimize_nonlinear_resistance(self, tuned_pa_config):
         '''
@@ -675,6 +676,7 @@ class SimulationDirectory:
         rpa_split = sum(rpa_flow['mean'].values()) / (sum(lpa_flow['mean'].values()) + sum(rpa_flow['mean'].values()))
 
         targets = {'mean': np.mean(pressure) / 1333.2, 'sys': np.max(pressure) / 1333.2, 'dia': np.min(pressure) / 1333.2, 'rpa_split': rpa_split}
+        # targets = {'mean': 34, 'sys': 68, 'dia': 8, 'rpa_split': targets['rpa_split']}
 
         # compute a loss function of a nonlinear resistance model with impedance boundary conditions
         # self.generate_simplified_zerod(nonlinear=True)  # generate the simplified 0D model with nonlinear resistance
@@ -707,10 +709,15 @@ class SimulationDirectory:
             rpa_split = np.trapz(rpa_flow, rpa_result.time) / np.trapz(flow, mpa_result.time)
 
             # compute loss
-            loss = (abs(mean_pressure - targets['mean']) ** 2 +
-                    abs(sys_pressure - targets['sys']) ** 2 +
-                    abs(dia_pressure - targets['dia']) ** 2 +
-                    abs(rpa_split - targets['rpa_split']) * 100 ** 2)
+            loss = (abs((mean_pressure - targets['mean'])/targets['mean']) ** 2 +
+                    abs((sys_pressure - targets['sys'])/targets['sys']) ** 2 +
+                    abs((dia_pressure - targets['dia'])/targets['dia']) ** 2 +
+                    abs((rpa_split - targets['rpa_split'])/targets['rpa_split'] * 1) ** 2 + 
+                    nonlinear_resistance[0] * 0.00001 +  # penalize large resistances
+                    nonlinear_resistance[1] * 0.00001 + 
+                    (1 / (nonlinear_resistance[0] + 1e-6)) +  # penalize small resistances
+                    (1 / (nonlinear_resistance[1] + 1e-6))
+                    )
             print(f"pressures: {int(sys_pressure * 100) / 100} / {int(dia_pressure * 100) / 100}/{int(mean_pressure * 100) / 100} mmHg, target: {int(targets['sys'] * 100) / 100}/{int(targets['dia'] * 100) / 100}/{int(targets['mean'] * 100) / 100} mmHg")
             print(f"RPA split: {rpa_split}, target: {targets['rpa_split']}")
             print(f"Current nonlinear resistances: LPA = {nonlinear_resistance[0]}, RPA = {nonlinear_resistance[1]}, Loss = {loss}")
@@ -718,7 +725,7 @@ class SimulationDirectory:
             return loss
         
         # initial_guess = self.compute_pressure_drop(steady=False)  # get the initial guess for nonlinear resistance
-        initial_guess = [1000.0, 1000.0]
+        initial_guess = [500, 500]
         print(f"Starting optimization with initial guess for nonlinear resistances: LPA = {initial_guess[0]}, RPA = {initial_guess[1]}")
         bounds = Bounds(lb=[0, 0])  # set bounds for the nonlinear resistances to be positive and non-zero
         result = minimize(loss_function, initial_guess, args=(targets, nonlinear_config),

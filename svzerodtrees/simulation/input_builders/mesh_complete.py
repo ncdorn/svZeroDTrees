@@ -167,7 +167,7 @@ class MeshComplete(SimulationFile):
 
         self.initialize()
 
-    def rename_vtps_(self):
+    def rename_vtps(self):
         '''
         convert surface names from cap_l_pa_n_x.vtp (Derrick's naming convention) to cap_lpa_n.vtp
         '''

@@ -4,6 +4,9 @@ from .integrator import run_adaptation
 from .models import CWSSIMSAdaptation
 from ..tune_bcs import ClinicalTargets
 import pandas as pd
+import itertools
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from typing import List, Tuple
 
 '''
 this file is for setting up adaptation experiments
@@ -53,3 +56,83 @@ def run_single_gain_cwss_ims_adaptation(
 
     return results_df
 
+
+def run_single_Karr_worker(args) -> Tuple[List[float], pd.DataFrame]:
+    K_arr, preop_config_path, postop_config_path, optimized_tree_params_csv, clinical_targets_csv = args
+    print(f"Running parallel adaptation with K_arr {K_arr}")
+
+    # Generate fresh preop/postop objects for this run
+    preop_pa, postop_pa = initialize_from_paths(
+        preop_config_path,
+        postop_config_path,
+        optimized_tree_params_csv,
+        clinical_targets_csv
+    )
+
+    result, flow_log, sol, postop_pa = run_adaptation(
+        preop_pa,
+        postop_pa,
+        CWSSIMSAdaptation,
+        K_arr
+    )
+
+    # Package result with the tested K_arr
+    df = pd.DataFrame([result])
+    for i in range(4):
+        df[f'K_{i}'] = K_arr[i]
+    return (K_arr, df)
+
+
+def run_parallel_gain_combinations(
+    relatives: List[float],
+    base_gain: float,
+    preop_config_path: str,
+    postop_config_path: str,
+    optimized_tree_params_csv: str,
+    clinical_targets_csv: str,
+    max_workers: int = None,
+    combinations_csv_path: str = 'K_arr_combinations.csv'
+) -> pd.DataFrame:
+    """
+    Sweep over all combinations of relative gains scaled by base_gain
+    for the 4 parameters in K_arr, but keep only combinations
+    with at least 2 active (non-zero) gains. Run in parallel.
+    """
+    # Create all possible combinations
+    all_combinations = list(itertools.product(relatives, repeat=4))
+    
+    # Filter to only those with at least 2 non-zero entries
+    valid_combinations = [combo for combo in all_combinations if sum(1 for x in combo if x != 0) >= 2]
+
+    print(f"Generated {len(valid_combinations)} valid combinations (at least 2 active gains) out of {len(all_combinations)} total.")
+
+    # Scale by base_gain
+    scaled_K_arrs = [[base_gain * x for x in combo] for combo in valid_combinations]
+
+    # Write CSV manifest
+    df_manifest = pd.DataFrame(scaled_K_arrs, columns=['K_0', 'K_1', 'K_2', 'K_3'])
+    df_manifest.to_csv(combinations_csv_path, index=False)
+    print(f"Saved tested K_arr vectors to {combinations_csv_path}")
+
+    # Prepare args for parallel processing
+    args_list = [
+        (K_arr, preop_config_path, postop_config_path, optimized_tree_params_csv, clinical_targets_csv)
+        for K_arr in scaled_K_arrs
+    ]
+
+
+    all_results = []
+
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(run_single_Karr_worker, args): args[0] for args in args_list}
+
+        for future in as_completed(futures):
+            K_arr = futures[future]
+            try:
+                K_values, df = future.result()
+                all_results.append(df)
+            except Exception as e:
+                print(f"K_arr {K_arr} failed with error: {e}")
+
+    combined_df = pd.concat(all_results, ignore_index=True)
+    return combined_df
