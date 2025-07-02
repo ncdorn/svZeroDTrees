@@ -1,6 +1,6 @@
 import json
 import csv
-from ..simulation.simulation_directory import SimulationDirectory
+from ..simulation import *
 from ..io import ConfigHandler
 import matplotlib.pyplot as plt
 import os
