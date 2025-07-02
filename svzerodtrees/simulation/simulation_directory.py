@@ -205,10 +205,14 @@ class SimulationDirectory:
         '''
         run the simulation'''
 
+        os.chdir(self.path)
+
         self.check_files(verbose=False)
 
         os.system('clean')
         os.system(f'sbatch {self.solver_runscript.path}')
+
+        os.chdir("..")
 
     def check_files(self, verbose=True):
         '''
