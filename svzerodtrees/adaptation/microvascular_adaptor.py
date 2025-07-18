@@ -1,13 +1,14 @@
 import json
 import csv
-from ..simulation import *
+
 from ..io import ConfigHandler
 import matplotlib.pyplot as plt
 import os
 from ..microvasculature import StructuredTree
 from ..utils import *
 from ..simulation.threedutils import vtp_info
-from ..tune_bcs import ClinicalTargets
+from ..simulation.simulation_directory import SimulationDirectory
+from ..tune_bcs.clinical_targets import ClinicalTargets
 from .setup import *
 from .integrator import run_adaptation
 from .models import CWSSIMSAdaptation
@@ -163,7 +164,10 @@ class MicrovascularAdaptor:
         create the impedance boundary conditions for the adapted trees
         '''
         # if self.location == 'uniform':
-        
+
+        Z_t_l_adapt, time = self.lpa_tree.compute_olufsen_impedance(self.tree_params['lpa'][0], self.tree_params['lpa'][1], self.tree_params['lpa'][2], n_procs=24, tsteps=2000)
+        Z_t_r_adapt, time = self.rpa_tree.compute_olufsen_impedance(self.tree_params['rpa'][0], self.tree_params['rpa'][1], self.tree_params['rpa'][2], n_procs=24, tsteps=2000)
+
         cap_info = vtp_info(self.postop_simdir.mesh_complete.mesh_surfaces_dir, convert_to_cm=self.convert_to_cm, pulmonary=False)
 
         outlet_bc_names = [name for name, bc in self.postop_simdir.svzerod_3Dcoupling.bcs.items() if 'inflow' not in bc.name.lower()]
@@ -181,15 +185,14 @@ class MicrovascularAdaptor:
         for idx, (cap_name, area) in enumerate(cap_info.items()):
                     print(f'generating tree {idx + 1} of {len(cap_info)} for cap {cap_name}...')
                     if 'lpa' in cap_name.lower():
-                        self.postop_simdir.svzerod_3Dcoupling.bcs[cap_to_bc[cap_name]] = self.lpa_tree.create_impedance_bc(cap_to_bc[cap_name], 0, self.clinicalTargets.wedge_p * 1333.2)
+                        self.postop_simdir.svzerod_3Dcoupling.bcs[cap_to_bc[cap_name]] = self.lpa_tree.create_impedance_bc(cap_to_bc[cap_name], 0, self.clinical_targets.wedge_p * 1333.2)
                     elif 'rpa' in cap_name.lower():
-                        self.postop_simdir.svzerod_3Dcoupling.bcs[cap_to_bc[cap_name]] = self.rpa_tree.create_impedance_bc(cap_to_bc[cap_name], 1, self.clinicalTargets.wedge_p * 1333.2)
+                        self.postop_simdir.svzerod_3Dcoupling.bcs[cap_to_bc[cap_name]] = self.rpa_tree.create_impedance_bc(cap_to_bc[cap_name], 1, self.clinical_targets.wedge_p * 1333.2)
                     else:
                         raise ValueError('cap name not recognized')
                     
     
     def adapt_cwss_ims(self, K_arr, fig_dir: str = None):
-        # TODO: Implement later as here we are using the 3D model to adapt the trees
 
         preop_pa = self.simple_pa
 
@@ -201,7 +204,12 @@ class MicrovascularAdaptor:
 
         # rescale postop stenosis coefficient
         postop_pa.lpa.stenosis_coefficient *= S_lpa_postop / S_lpa_preop
+        postop_pa.vessel_map[2].stenosis_coefficient *= S_lpa_postop / S_lpa_preop
         postop_pa.rpa.stenosis_coefficient *= S_rpa_postop / S_rpa_preop
+        postop_pa.vessel_map[4].stenosis_coefficient *= S_rpa_postop / S_rpa_preop
+
+        print("rescaled postop lpa stenosis coefficient to " + str(postop_pa.lpa.stenosis_coefficient))
+        print("rescaled postop rpa stenosis coefficient to " + str(postop_pa.rpa.stenosis_coefficient))
 
         # save pa jsons
         preop_pa.to_json(os.path.join(self.preop_simdir.path, 'preop_simple_pa.json'))
@@ -223,6 +231,8 @@ class MicrovascularAdaptor:
         self.lpa_tree = postop_pa.lpa_tree
         self.rpa_tree = postop_pa.rpa_tree
 
+        # rescale inflow
+
         # distribute the impedance to lpa and rpa specifically
         self.createImpedanceBCs()
         
@@ -236,7 +246,3 @@ class MicrovascularAdaptor:
         print("saving adapted config to " + self.adapted_simdir.svzerod_3Dcoupling.path)
         self.adapted_simdir.svzerod_3Dcoupling.to_json(self.adapted_simdir.svzerod_3Dcoupling.path)
 
-
-
-
-        pass

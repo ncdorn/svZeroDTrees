@@ -3,7 +3,7 @@ from .threedutils import *
 from ..io import *
 from ..tune_bcs import *
 from .simulation_directory import *
-from ..adaptation import *
+from ..adaptation import MicrovascularAdaptor
 import json
 import pandas as pd
 import os

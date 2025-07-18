@@ -3,12 +3,9 @@ from .threedutils import *
 from ..io import *
 from scipy.optimize import minimize, Bounds
 import matplotlib.pyplot as plt
-import json
-import pickle
 import copy
 import time
 import os
-import vtk
 import math
 from .input_builders import *
 from ..tune_bcs import ClinicalTargets

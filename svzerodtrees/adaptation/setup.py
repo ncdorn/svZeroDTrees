@@ -4,7 +4,7 @@ import numpy as np
 from ..microvasculature import TreeParameters
 from ..io import ConfigHandler
 from ..tune_bcs import PAConfig
-from ..tune_bcs import ClinicalTargets
+from ..tune_bcs.clinical_targets import ClinicalTargets
 
 '''
 this file is used to set up objects for adaptation computation
@@ -94,8 +94,8 @@ def initialize_from_paths(
     lpa_params, rpa_params = load_optimized_params(optimized_tree_params_csv)
 
     # RESET D_MIN FOR TESTING
-    lpa_params.d_min = 0.1
-    rpa_params.d_min = 0.1
+    lpa_params.d_min = 0.05
+    rpa_params.d_min = 0.05
 
     preop_pa = create_preop_model(preop_config_path, clinical_targets, lpa_params, rpa_params)
     simulate_homeostatic_state(preop_pa)

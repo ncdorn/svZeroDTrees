@@ -8,7 +8,7 @@ from ..io import *
 from ..io.utils import get_branch_result
 from ..io.result_handler import ResultHandler # need to deprecate this
 from ..utils import *
-from ..adaptation.utils import write_resistances
+from ..utils import write_resistances
 from ..simulation.threedutils import vtp_info, get_coupled_surfaces, find_vtp_area
 from ..microvasculature import StructuredTree
 

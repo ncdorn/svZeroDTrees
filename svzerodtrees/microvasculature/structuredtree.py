@@ -2,6 +2,7 @@ import numpy as np
 from scipy.optimize import minimize, Bounds, LinearConstraint
 from .treevessel import TreeVessel
 from ..utils import *
+from .utils import assign_flow_to_root
 from ..io import ConfigHandler
 from ..io.blocks import *
 from multiprocessing import Pool
@@ -401,7 +402,8 @@ class StructuredTree():
                                   k1 = 19992500, # g/cm/s^2
                                   k2 = -25.5267, # 1/cm 
                                   k3 = 1104531.4909089999, # g/cm/s^2
-                                  n_procs=None
+                                  n_procs=None,
+                                  tsteps=None
                                   ):
         '''
         compute the impedance of the structured tree accordin to Olufsen et al. (2000)
@@ -413,7 +415,10 @@ class StructuredTree():
         self.k3 = k3
         self.n_procs = n_procs
 
-        tsteps = len(self.time)
+        if tsteps is None:
+            tsteps = len(self.time)
+        else:
+            tsteps = int(tsteps)
 
         period = max(self.time) * self.q / self.Lr**3
 

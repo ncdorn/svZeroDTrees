@@ -109,6 +109,31 @@ def run_parallel_gain_combinations(
     # Scale by base_gain
     scaled_K_arrs = [[base_gain * x for x in combo] for combo in valid_combinations]
 
+    combined_df = run_parallel_gains(
+        scaled_K_arrs,
+        preop_config_path,
+        postop_config_path,
+        optimized_tree_params_csv,
+        clinical_targets_csv,
+        max_workers=max_workers,
+        combinations_csv_path=combinations_csv_path
+    )
+
+    return combined_df
+
+
+def run_parallel_gains(
+    scaled_K_arrs: List[List[float]],
+    preop_config_path: str,
+    postop_config_path: str,
+    optimized_tree_params_csv: str,
+    clinical_targets_csv: str,
+    max_workers: int = None,
+    combinations_csv_path: str = 'K_arr_combinations.csv'
+) -> pd.DataFrame:
+    """
+    Run adaptations for all scaled K_arrs in parallel.
+    """
     # Write CSV manifest
     df_manifest = pd.DataFrame(scaled_K_arrs, columns=['K_0', 'K_1', 'K_2', 'K_3'])
     df_manifest.to_csv(combinations_csv_path, index=False)
@@ -135,4 +160,55 @@ def run_parallel_gain_combinations(
                 print(f"K_arr {K_arr} failed with error: {e}")
 
     combined_df = pd.concat(all_results, ignore_index=True)
+
     return combined_df
+
+import itertools
+import pandas as pd
+from typing import List, Tuple
+
+def run_gains(
+    scaled_K_arrs: List[List[float]],
+    preop_config_path: str,
+    postop_config_path: str,
+    optimized_tree_params_csv: str,
+    clinical_targets_csv: str,
+) -> pd.DataFrame:
+    """
+    Run gain sweeps for the CWSS-IMS adaptation model, testing combinations of gains
+    without parallelization. 
+
+    Parameters:
+    - preop_config_path: path to preop JSON config
+    - postop_config_path: path to postop JSON config
+    - optimized_tree_params_csv: CSV of optimized geometry parameters
+    - clinical_targets_csv: CSV of clinical flow splits and pressures
+    - relative_values: list of scaling values to multiply by base_gain (1e-7)
+    - min_active_gains: minimum number of gains that must be non-zero
+
+    Returns:
+    - DataFrame logging results for each gain combination
+    """
+
+    # Logging list of dicts
+    results = []
+
+    for K_arr in scaled_K_arrs:
+        
+        # Initialize patient-specific PA objects
+        preop_pa, postop_pa = initialize_from_paths(
+            preop_config_path,
+            postop_config_path,
+            optimized_tree_params_csv,
+            clinical_targets_csv
+        )
+        
+        # Run adaptation
+        result, flow_log, sol, postop_pa = run_adaptation(preop_pa, postop_pa, CWSSIMSAdaptation, K_arr)
+
+        results.append(result)
+
+    # Convert to DataFrame for easy analysis / CSV
+    results_df = pd.DataFrame(results)
+
+    return results_df

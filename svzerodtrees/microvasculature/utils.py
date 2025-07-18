@@ -21,3 +21,18 @@ def assign_flow_to_root(result_array, root, steady=False):
             assign_flow(vessel.right)
     
     assign_flow(root)
+
+
+def assign_flow_to_tree(result_array, tree, steady=False):
+    '''
+    assign flow values to each TreeVessel instance in a StructuredTree
+
+    :param result_array: svzerodplus result array of the structured tree
+    :param tree: StructuredTree instance
+    '''
+    vessels = tree.enumerate_vessels()
+
+    for vessel in vessels:
+        vessel_name = f"branch{vessel.id}_seg0"
+        vessel.Q = get_branch_result(result_array, 'flow_in', vessel_name, steady=steady)
+        vessel.P_in = get_branch_result(result_array, 'pressure_in', vessel_name, steady=steady)

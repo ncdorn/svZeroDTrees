@@ -134,7 +134,20 @@ def get_outlet_data(config: dict, result_array, data_name: str, steady=True):
 
     return data_out
 
+def write_resistances(config, resistances):
+    '''
+    write a list of resistances to the outlet bcs of a config dict
 
+    :param config: svzerodplus config dict
+    :param resistances: list of resistances, ordered by outlet in the config
+    '''
+    idx = 0
+    for bc_config in config["boundary_conditions"]:
+        if bc_config["bc_type"] == 'RESISTANCE':
+
+            bc_config['bc_values']['R'] = resistances[idx]
+
+            idx += 1
 
 
 ### UNIT CONVERSIONS ###
