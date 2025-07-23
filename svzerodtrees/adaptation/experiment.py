@@ -1,12 +1,14 @@
 
 from .setup import *
-from .integrator import run_adaptation
+from .integrator import run_adaptation, run_adaptation_outsidesim
 from .models import CWSSIMSAdaptation
 from ..tune_bcs import ClinicalTargets
 import pandas as pd
 import itertools
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import List, Tuple
+from .utils import append_result_to_csv
+import os
 
 '''
 this file is for setting up adaptation experiments
@@ -58,29 +60,30 @@ def run_single_gain_cwss_ims_adaptation(
 
 
 def run_single_Karr_worker(args) -> Tuple[List[float], pd.DataFrame]:
-    K_arr, preop_config_path, postop_config_path, optimized_tree_params_csv, clinical_targets_csv = args
-    print(f"Running parallel adaptation with K_arr {K_arr}")
+    K_arr, preop_config_path, postop_config_path, optimized_tree_params_csv, clinical_targets_csv, output_csv_path = args
+    print(f"Running adaptation with K_arr {K_arr}")
 
-    # Generate fresh preop/postop objects for this run
-    preop_pa, postop_pa = initialize_from_paths(
-        preop_config_path,
-        postop_config_path,
-        optimized_tree_params_csv,
-        clinical_targets_csv
-    )
+    try:
+        preop_pa, postop_pa = initialize_from_paths(
+            preop_config_path, postop_config_path, optimized_tree_params_csv, clinical_targets_csv
+        )
 
-    result, flow_log, sol, postop_pa = run_adaptation(
-        preop_pa,
-        postop_pa,
-        CWSSIMSAdaptation,
-        K_arr
-    )
+        result, flow_log, sol, postop_pa = run_adaptation(
+            preop_pa, postop_pa, CWSSIMSAdaptation, K_arr
+        )
 
-    # Package result with the tested K_arr
-    df = pd.DataFrame([result])
-    for i in range(4):
-        df[f'K_{i}'] = K_arr[i]
-    return (K_arr, df)
+        df = pd.DataFrame([result])
+        # for i in range(4):
+        #     df[f'K_{i}'] = K_arr[i]
+
+        # print(f"saving result with adapted split {postop_pa.rpa_split}")
+
+        # append_result_to_csv(df, output_csv_path)
+        return (K_arr, df)
+
+    except Exception as e:
+        print(f"Worker failed for K_arr {K_arr}: {e}")
+        raise
 
 
 def run_parallel_gain_combinations(
@@ -129,22 +132,18 @@ def run_parallel_gains(
     optimized_tree_params_csv: str,
     clinical_targets_csv: str,
     max_workers: int = None,
-    combinations_csv_path: str = 'K_arr_combinations.csv'
+    combinations_csv_path: str = 'K_arr_combinations.csv',
+    output_csv_path: str = 'K_arr_results.csv'
 ) -> pd.DataFrame:
-    """
-    Run adaptations for all scaled K_arrs in parallel.
-    """
-    # Write CSV manifest
+
     df_manifest = pd.DataFrame(scaled_K_arrs, columns=['K_0', 'K_1', 'K_2', 'K_3'])
     df_manifest.to_csv(combinations_csv_path, index=False)
     print(f"Saved tested K_arr vectors to {combinations_csv_path}")
 
-    # Prepare args for parallel processing
     args_list = [
-        (K_arr, preop_config_path, postop_config_path, optimized_tree_params_csv, clinical_targets_csv)
+        (K_arr, preop_config_path, postop_config_path, optimized_tree_params_csv, clinical_targets_csv, output_csv_path)
         for K_arr in scaled_K_arrs
     ]
-
 
     all_results = []
 
@@ -155,13 +154,14 @@ def run_parallel_gains(
             K_arr = futures[future]
             try:
                 K_values, df = future.result()
-                all_results.append(df)
+                all_results.append(df)  # Optional: still return combined DataFrame
             except Exception as e:
                 print(f"K_arr {K_arr} failed with error: {e}")
 
-    combined_df = pd.concat(all_results, ignore_index=True)
-
-    return combined_df
+    if all_results:
+        return pd.concat(all_results, ignore_index=True)
+    else:
+        return pd.DataFrame()
 
 import itertools
 import pandas as pd
@@ -173,6 +173,7 @@ def run_gains(
     postop_config_path: str,
     optimized_tree_params_csv: str,
     clinical_targets_csv: str,
+    fig_dir: str = 'figures',
 ) -> pd.DataFrame:
     """
     Run gain sweeps for the CWSS-IMS adaptation model, testing combinations of gains
@@ -204,7 +205,21 @@ def run_gains(
         )
         
         # Run adaptation
-        result, flow_log, sol, postop_pa = run_adaptation(preop_pa, postop_pa, CWSSIMSAdaptation, K_arr)
+        result, flow_log, sol, postop_pa, hists = run_adaptation(preop_pa, postop_pa, CWSSIMSAdaptation, K_arr)
+
+        if fig_dir is not None:
+            if not os.path.exists(fig_dir):
+                os.makedirs(fig_dir)
+
+            for i, hist in enumerate(hists):
+                hist_path = os.path.join(fig_dir, f'histogram_{i}.png')
+                hist.savefig(hist_path)
+                print(f"Saved histogram to {hist_path}")
+            
+            # save sol.y to CSV
+            sol_y_path = os.path.join(fig_dir, 'sol_y.csv')
+            pd.DataFrame(sol.y).to_csv(sol_y_path, index=False)
+            print(f"Saved sol.y to {sol_y_path}")
 
         results.append(result)
 

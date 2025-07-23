@@ -134,6 +134,8 @@ class Simulation:
             if self.is_fontan:
                 self.make_fontan_inflows()
 
+                print(f'\n\n INFLOWS: {self.zerod_config.inflows} \n\n')
+
             impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(self.preop_dir.path, mesh_complete=self.preop_dir.mesh_complete)
             self.zerod_config.to_json(self.zerod_config_path)
             # run preop + postop simulations
@@ -438,14 +440,16 @@ class Simulation:
 
 
     def make_fontan_inflows(self):
+            
+        print("generating fontan inflows for simulation...")
 
-            mpa_inflow = Inflow.periodic()
-            mpa_inflow.rescale(cardiac_output=self.clinical_targets.rvot_flow, tsteps=2000)
-            ivc_inflow = Inflow.steady(self.clinical_targets.ivc_flow)
-            svc_inflow = Inflow.steady(self.clinical_targets.svc_flow)
+        mpa_inflow = Inflow.periodic()
+        mpa_inflow.rescale(cardiac_output=self.clinical_targets.rvot_flow, tsteps=2000)
+        ivc_inflow = Inflow.steady(self.clinical_targets.ivc_flow)
+        svc_inflow = Inflow.steady(self.clinical_targets.svc_flow)
 
-            self.zerod_config.inflows = {
-                                            "INFLOW": mpa_inflow,
-                                            "INFLOW_SVC": svc_inflow,
-                                            "INFLOW_IVC": ivc_inflow
-                                    }
+        self.zerod_config.inflows = {
+                                        "INFLOW": mpa_inflow,
+                                        "INFLOW_SVC": svc_inflow,
+                                        "INFLOW_IVC": ivc_inflow
+                                }

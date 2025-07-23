@@ -196,6 +196,8 @@ class MicrovascularAdaptor:
 
         preop_pa = self.simple_pa
 
+        # preop_pa.inflows["INFLOW"].q = [q / (self.postop_simdir.mesh_complete.n_outlets // 2) for q in preop_pa.inflows["INFLOW"].q]
+
         # compute difference in pressure drop to get postop nonlinear resistance
         S_lpa_preop, S_rpa_preop = self.preop_simdir.compute_pressure_drop(steady=False)
         S_lpa_postop, S_rpa_postop = self.postop_simdir.compute_pressure_drop(steady=False)

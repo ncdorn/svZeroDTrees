@@ -27,14 +27,18 @@ class CWSSIMSAdaptation(AdaptationModel):
         simple_pa.simulate()
 
         geom_rel_change = (y - last_update_y) / last_update_y
-        geom_change = np.max(np.abs(geom_rel_change))
-        if geom_change > 1e-3 and t > last_t_holder[0] + 1e-12:
+        geom_change = np.mean(np.abs(geom_rel_change))
+        # if geom_change > 1e-2 and t > last_t_holder[0] + 1e-12:
+
+        # simulate_outlet_trees(simple_pa)
+
+        if t > last_t_holder[0] + 1e-12:
             max_idx = np.argmax(np.abs(geom_rel_change))
             max_val = y[max_idx]
             max_prev_val = last_update_y[max_idx]
             max_change = geom_rel_change[max_idx]
-            print(f"Geometry change at t={t:.2f} s: {geom_change:.3e} and rpa split: {simple_pa.rpa_split:.3f}")
-            print(f" -> Max change at index {max_idx}: from y = {max_prev_val:.4e} to y = {max_val:.4e} with change {abs(max_change):.3e}")
+            print(f"Geometry change at t={t:.2f} mean: {geom_change:.3e} and rpa split: {simple_pa.rpa_split:.3f}")
+            # print(f" -> Max change at index {max_idx}: from y = {max_prev_val:.4e} to y = {max_val:.4e} with change {abs(max_change):.3e}")
             simulate_outlet_trees(simple_pa)
             last_update_y[:] = y
             last_t_holder[0] = t
@@ -50,7 +54,8 @@ class CWSSIMSAdaptation(AdaptationModel):
             dydt[base]   = self.K_arr[0]*(tau - v.wss_h) + self.K_arr[1]*(sig - v.ims_h)
             dydt[base+1] = -self.K_arr[2]*(tau - v.wss_h) + self.K_arr[3]*(sig - v.ims_h)
         return dydt
-    
+
+
     def event(self, t, y, *args, triggered=[False], was_positive=[False]):
         """
         Terminates integration when EITHER geometry OR flow split change is small.
@@ -65,8 +70,8 @@ class CWSSIMSAdaptation(AdaptationModel):
         rpa_split = simple_pa.rpa_split
 
         # Geometry relative change
-        rel_geom_r = np.max(np.abs((y[0::2] - last_y[0::2]) / last_y[0::2]))
-        rel_geom_h = np.max(np.abs((y[1::2] - last_y[1::2]) / last_y[1::2]))
+        rel_geom_r = np.mean(np.abs((y[0::2] - last_y[0::2]) / last_y[0::2]))
+        rel_geom_h = np.mean(np.abs((y[1::2] - last_y[1::2]) / last_y[1::2]))
         geom_change = max(rel_geom_r, rel_geom_h)
 
         # Flow split relative change
@@ -77,11 +82,11 @@ class CWSSIMSAdaptation(AdaptationModel):
             flow_split_change = 1.0
 
         # Tolerances
-        geom_tol = 1e-6
+        geom_tol = 1e-6 # 1e-5 was better?
         split_tol = 1e-4
 
         # Determine convergence
-        converged = geom_change - geom_tol < 0 or flow_split_change - split_tol < 0
+        converged = geom_change - geom_tol < 0 # or flow_split_change - split_tol < 0
 
         if converged:
             triggered[0] = True
@@ -98,12 +103,30 @@ class CWSSIMSAdaptation(AdaptationModel):
             val = 1.0  # Defensive: return positive if it was never positive
         
         # val = 1.0 if not triggered[0] else (-1.0 if was_positive[0] else 1.0)
-        print(f"[event] t={t:.4f}, geom_change={geom_change:.2e}, flow_split_change={flow_split_change:.2e}, val={val}")
+        # print(f"[event] t={t:.4f}, geom_change={geom_change:.2e}, flow_split_change={flow_split_change:.2e}, val={val}")
 
         return val
 
     event.terminal = True
     event.direction = -1
+
+    def event_outsidesim(self, t, y, *args):
+        """
+        Event function for adaptation that checks if the geometry or flow split change is small.
+        This is used when the adaptation is run without simulating the model.
+        """
+
+        last_y = args[1]
+
+        rel_geom_r = np.mean(np.abs((y[0::2] - last_y[0::2]) / last_y[0::2]))
+        rel_geom_h = np.mean(np.abs((y[1::2] - last_y[1::2]) / last_y[1::2]))
+
+        geom_change = max(rel_geom_r, rel_geom_h)
+
+        return geom_change - 1e-8  # Adjusted tolerance for event
+    
+        event_outsidesim.terminal = True
+        event_outsidesim.direction = -1
 
     # def event(self, t, y, *args, prev_phi=[np.inf], prev_t=-np.inf, step_id=[-1]):
     #     geom_change = max(
