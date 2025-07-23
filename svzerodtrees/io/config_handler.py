@@ -708,7 +708,7 @@ class ConfigHandler():
         else:
             del threed_coupler.bcs["INFLOW"] 
         
-
+        print(f"threed coupler vessel map: {threed_coupler.vessel_map}")
         # create the coupling blocks
         for i, bc in enumerate(threed_coupler.bcs.values()):
             if 'inflow' not in bc.name.lower():

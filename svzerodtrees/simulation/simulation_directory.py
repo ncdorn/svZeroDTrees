@@ -72,7 +72,7 @@ class SimulationDirectory:
         self.convert_to_cm = convert_to_cm
 
     @classmethod
-    def from_directory(cls, path='.', zerod_config: str =None, mesh_complete: str ='mesh-complete', results_dir: str =None, convert_to_cm: bool =True, is_pulmonary=True):
+    def from_directory(cls, path='.', zerod_config: str =None, mesh_complete: str ='mesh-complete', threed_coupler=None, results_dir: str =None, convert_to_cm: bool =True, is_pulmonary=True):
         '''
         create a simulation directory object from the path to the simulation directory
         and search for the necessary files within the path'''
@@ -114,7 +114,7 @@ class SimulationDirectory:
 
         # check for svzerod_3Dcoupling.json
         svzerod_3Dcoupling = os.path.join(path, 'svzerod_3Dcoupling.json')
-        if zerod_config is not None and mesh_complete is not None:
+        if threed_coupler is not None and zerod_config is not None and mesh_complete is not None:
             print('generating svzerod_3Dcoupling.json from zerod model...')
             svzerod_3Dcoupling, coupling_blocks = zerod_config.generate_threed_coupler(path, 
                                                                                         inflow_from_0d=True, 
