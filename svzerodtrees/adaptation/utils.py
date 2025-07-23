@@ -20,6 +20,77 @@ import os
 
 def plot_adaptation_histories(sol_y, lpa_idx, figures_path=None):
     """
+    Create 2x2 log-scale plots of radius and thickness distributions for LPA and RPA over time.
+    Each subplot contains translucent histograms and smoothed KDE curves for 4 time points.
+
+    Parameters:
+    - sol_y: solution array from solve_ivp, shape (2N, M)
+    - lpa_idx: number of LPA vessels
+    - figures_path: optional path to save the figure
+
+    Returns:
+    - fig: matplotlib Figure object
+    """
+
+    sol_y = np.array(sol_y)
+    time_indices = np.linspace(0, sol_y.shape[1] - 1, 4, dtype=int)
+
+    colors = ['blue', 'orange', 'green', 'red']
+    labels = ['Start', '1/3', '2/3', 'End']
+
+    r_all = sol_y[0::2, :]
+    h_all = sol_y[1::2, :]
+
+    lpa_r = r_all[:lpa_idx, :]
+    lpa_h = h_all[:lpa_idx, :]
+    rpa_r = r_all[lpa_idx:, :]
+    rpa_h = h_all[lpa_idx:, :]
+
+    fig, axs = plt.subplots(2, 2, figsize=(14, 10))
+    axs = axs.flatten()
+
+    def plot_kde_hist(ax, data_matrix, title, x_label):
+        x_min = np.min(data_matrix[data_matrix > 0])
+        x_max = np.max(data_matrix)
+        log_x = np.logspace(np.log10(x_min * 0.9), np.log10(x_max * 1.1), 500)
+
+        for i, idx in enumerate(time_indices):
+            values = data_matrix[:, idx]
+            values = values[values > 0]
+            if len(values) < 2:
+                continue
+
+            # Plot histogram
+            ax.hist(values, bins=20, color=colors[i], alpha=0.2, label=None)
+
+            # Plot KDE
+            kde = gaussian_kde(values)
+            y = kde(log_x)
+            ax.plot(log_x, y, color=colors[i], lw=2, alpha=0.8, label=labels[i])
+
+        ax.set_xscale('log')
+        ax.set_title(title)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel("Density")
+        ax.legend()
+
+    plot_kde_hist(axs[0], lpa_r, "LPA Radius Distribution", "Radius")
+    plot_kde_hist(axs[1], lpa_h, "LPA Thickness Distribution", "Thickness")
+    plot_kde_hist(axs[2], rpa_r, "RPA Radius Distribution", "Radius")
+    plot_kde_hist(axs[3], rpa_h, "RPA Thickness Distribution", "Thickness")
+
+    fig.tight_layout()
+
+    if figures_path is not None:
+        os.makedirs(figures_path, exist_ok=True)
+        out_path = os.path.join(figures_path, "adaptation_kde_hist_overlay.png")
+        fig.savefig(out_path, dpi=300)
+        print(f"Saved figure to {out_path}")
+
+    return fig
+
+def plot_adaptation_histories_nohist(sol_y, lpa_idx, figures_path=None):
+    """
     Create 2x2 smoothed KDE plots (on log scale) of radius and thickness distributions
     for LPA and RPA over time from solve_ivp output.
 

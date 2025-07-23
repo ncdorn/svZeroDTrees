@@ -73,7 +73,9 @@ def construct_impedance_trees(config_handler, mesh_surfaces_path, wedge_pressure
 
             k1_r, k2_r, k3_r, lrr_r = tree_params['rpa']
 
-        lpa_tree = StructuredTree(name='LPA', time=config_handler.bcs['INFLOW'].t, simparams=config_handler.simparams)
+        time_array = config_handler.inflows[next(iter(config_handler.inflows))].t
+
+        lpa_tree = StructuredTree(name='LPA', time=time_array, simparams=config_handler.simparams)
         print(f'building LPA tree with lpa parameters: {tree_params["lpa"]}')
         
 
@@ -84,7 +86,7 @@ def construct_impedance_trees(config_handler, mesh_surfaces_path, wedge_pressure
         # add tree to config handler
         config_handler.tree_params[lpa_tree.name] = lpa_tree.to_dict()
 
-        rpa_tree = StructuredTree(name='RPA', time=config_handler.bcs['INFLOW'].t, simparams=config_handler.simparams)
+        rpa_tree = StructuredTree(name='RPA', time=time_array, simparams=config_handler.simparams)
         print(f'building RPA tree with rpa parameters: {tree_params["rpa"]}')
 
         rpa_tree.build_tree(initial_d=rpa_mean_dia, d_min=d_min, lrr=lrr_r)
