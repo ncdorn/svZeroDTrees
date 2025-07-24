@@ -21,7 +21,7 @@ class SolverRunscript(SimulationFile):
         pass
 
     def write(self, 
-              nodes=4, 
+              nodes=3, 
               procs_per_node=24, 
               hours=6, 
               memory=16,
