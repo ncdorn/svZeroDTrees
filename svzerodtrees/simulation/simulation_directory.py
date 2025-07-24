@@ -723,13 +723,13 @@ class SimulationDirectory:
             print(f"Current nonlinear resistances: LPA = {nonlinear_resistance[0]}, RPA = {nonlinear_resistance[1]}, Loss = {loss}")
             
             return loss
-        
+
         # initial_guess = self.compute_pressure_drop(steady=False)  # get the initial guess for nonlinear resistance
         print(f"Starting optimization with initial guess for nonlinear resistances: LPA = {initial_guess[0]}, RPA = {initial_guess[1]}")
         bounds = Bounds(lb=[0, 0])  # set bounds for the nonlinear resistances to be positive and non-zero
         result = minimize(loss_function, initial_guess, args=(targets, nonlinear_config),
                           method='Nelder-Mead', options={'disp': True}, bounds=bounds)
-        
+
         print("Optimization complete.")
         optimized_resistances = result.x
         print(f"Optimized LPA nonlinear resistance: {optimized_resistances[0]}")
@@ -741,6 +741,9 @@ class SimulationDirectory:
         nonlinear_config.vessel_map[2].stenosis_coefficient = optimized_resistances[0] / 4
         nonlinear_config.vessel_map[3].stenosis_coefficient = optimized_resistances[1] / 4
         nonlinear_config.vessel_map[4].stenosis_coefficient = optimized_resistances[1] / 4
+
+        # rescale inflow back to 500 tsteps
+        nonlinear_config.inflows['INFLOW'].rescale(tsteps=500)
 
         nonlinear_config.to_json(os.path.join(self.path, 'simplified_zerod_tuned.json'))
 
