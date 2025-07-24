@@ -263,7 +263,7 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
         
         print(f'\n***PRESSURE LOSS: {pressure_loss}, FS LOSS: {flowsplit_loss}, TOTAL LOSS: {loss} ***\n')
 
-        return loss
+        return pressure_loss, flowsplit_loss, loss
 
 
     # bounds = Bounds(lb=[0.0, 0.0, -np.inf,-np.inf, 10.0, 10.0], ub= [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf])
@@ -279,10 +279,10 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
     min_loss = 1e5
     k2_opt = 0
     for k2 in k2_search:
-        loss = tree_tuning_objective([k2, k2, lpa_mean_dia, rpa_mean_dia, l_rr_guess], clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs)
+        pressure_loss, flowsplit_loss, loss = tree_tuning_objective([k2, k2, lpa_mean_dia, rpa_mean_dia, l_rr_guess], clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs)
         print(f'k2: {k2}, loss: {loss}')
-        if loss < min_loss:
-            min_loss = loss
+        if pressure_loss < min_loss:
+            min_loss = pressure_loss
             k2_opt = k2
 
     # print(f'optimal k2: {k2_opt} with loss {min_loss}')
