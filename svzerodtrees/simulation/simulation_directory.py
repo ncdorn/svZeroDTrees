@@ -72,7 +72,7 @@ class SimulationDirectory:
         self.convert_to_cm = convert_to_cm
 
     @classmethod
-    def from_directory(cls, path='.', zerod_config: str =None, mesh_complete: str ='mesh-complete', threed_coupler=None, results_dir: str =None, convert_to_cm: bool =True, is_pulmonary=True):
+    def from_directory(cls, path='.', zerod_config: str =None, mesh_complete: str ='mesh-complete', threed_coupler=None, results_dir: str =None, convert_to_cm: bool =False, is_pulmonary=True):
         '''
         create a simulation directory object from the path to the simulation directory
         and search for the necessary files within the path'''
@@ -664,7 +664,7 @@ class SimulationDirectory:
         '''
         if self.svzerod_data is None:
             raise ValueError("svZeroD_data not found. Please run the simulation first.")
-        
+
         # get the MPA pressure
         time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
         time = time[time > time.max() - 1.0]
@@ -741,6 +741,8 @@ class SimulationDirectory:
         nonlinear_config.vessel_map[2].stenosis_coefficient = optimized_resistances[0] / 4
         nonlinear_config.vessel_map[3].stenosis_coefficient = optimized_resistances[1] / 4
         nonlinear_config.vessel_map[4].stenosis_coefficient = optimized_resistances[1] / 4
+
+        nonlinear_config.to_json(os.path.join(self.path, 'simplified_zerod_tuned.json'))
 
         return optimized_resistances.tolist()  # return as a list for easier handling
         
