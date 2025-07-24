@@ -510,7 +510,6 @@ class SimulationDirectory:
         '''
         compute the simplified 0D model for a 3D pulmonary model from the steady simulation result'''
 
-
         if optimize:
             print("Optimizing nonlinear resistance coefficients against 3D result...")
             lpa_resistance, rpa_resistance = self.optimize_nonlinear_resistance('simplified_zerod_config.json')
@@ -658,7 +657,7 @@ class SimulationDirectory:
 
         config.to_json(path)
  
-    def optimize_nonlinear_resistance(self, tuned_pa_config):
+    def optimize_nonlinear_resistance(self, tuned_pa_config, initial_guess=[500, 500]):
         '''
         Get the nonlinear resistance coefficients for the LPA and RPA by optimizing against the pressure drop in the unsteady result
         This function assumes that the simulation has been run and the results are available in svZeroD_data
@@ -726,7 +725,6 @@ class SimulationDirectory:
             return loss
         
         # initial_guess = self.compute_pressure_drop(steady=False)  # get the initial guess for nonlinear resistance
-        initial_guess = [500, 500]
         print(f"Starting optimization with initial guess for nonlinear resistances: LPA = {initial_guess[0]}, RPA = {initial_guess[1]}")
         bounds = Bounds(lb=[0, 0])  # set bounds for the nonlinear resistances to be positive and non-zero
         result = minimize(loss_function, initial_guess, args=(targets, nonlinear_config),
