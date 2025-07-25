@@ -136,7 +136,7 @@ def construct_impedance_trees(config_handler, mesh_surfaces_path, wedge_pressure
             config_handler.bcs[bc_name] = tree.create_impedance_bc(bc_name, idx, wedge_pressure * 1333.2)
 
 
-def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets, opt_config_path='optimized_impedance_config.json', n_procs=24, log_file=None, d_min=0.01, tol=0.01, is_pulmonary=True, convert_to_cm=True):
+def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets, opt_config_path='optimized_impedance_config.json', n_procs=24, log_file=None, d_min=0.01, tol=0.01, compliance="olufsen", is_pulmonary=True, convert_to_cm=True):
     '''
     tune the parameters of the impedance trees to match clinical targets
     currently, we tune k2_l, k2_r, lpa_mean_dia, rpa_mean_dia, l_rr'''
@@ -144,6 +144,10 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
     # get mean outlet area
     if is_pulmonary:
         rpa_info, lpa_info, inflow_info = vtp_info(mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=True)
+
+    # check if the model is correct
+    if compliance.lower() not in ['olufsen', 'constant']:
+        raise ValueError(f'Unknown model {compliance}, should be one of ["olufsen", "constant"]')
     
     # rpa_mean_dia = 0.32
     rpa_mean_dia = np.mean([(area / np.pi)**(1/2) * 2 for area in rpa_info.values()])
@@ -172,16 +176,9 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
     # rescale inflow by number of outlets ## TODO: figure out scaling for this
     pa_config.bcs['INFLOW'].Q = [q / ((len(lpa_info.values()) + len(rpa_info.values())) // 2) for q in pa_config.bcs['INFLOW'].Q]
 
-    def tree_tuning_objective(params, clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs):
+    def tree_tuning_objective(params, clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs, compliance="olufsen", grid_search=False):
         '''
         params: [k1_l, k1_r, k2_l, k2_r, lrr_l, lrr_r, alpha]'''
-
-        # k1_l = params[0]
-        # k1_r = params[1]
-        # k2_l = params[2]
-        # k2_r = params[3]
-        # lrr_l = params[4]
-        # lrr_r = params[5]
 
         k1_l = 19992500.0
         k1_r = 19992500.0
@@ -263,7 +260,10 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
         
         print(f'\n***PRESSURE LOSS: {pressure_loss}, FS LOSS: {flowsplit_loss}, TOTAL LOSS: {loss} ***\n')
 
-        return pressure_loss, flowsplit_loss, loss
+        if grid_search:
+            return pressure_loss, flowsplit_loss, loss
+        else:
+            return loss
 
 
     # bounds = Bounds(lb=[0.0, 0.0, -np.inf,-np.inf, 10.0, 10.0], ub= [np.inf, np.inf, np.inf, np.inf, np.inf, np.inf])
@@ -279,7 +279,7 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
     min_loss = 1e5
     k2_opt = 0
     for k2 in k2_search:
-        pressure_loss, flowsplit_loss, loss = tree_tuning_objective([k2, k2, lpa_mean_dia, rpa_mean_dia, l_rr_guess], clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs)
+        pressure_loss, flowsplit_loss, loss = tree_tuning_objective([k2, k2, lpa_mean_dia, rpa_mean_dia, l_rr_guess], clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs, grid_search=True, compliance=compliance)
         print(f'k2: {k2}, loss: {loss}')
         if pressure_loss < min_loss:
             min_loss = pressure_loss
@@ -294,7 +294,8 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
     ### WITH ALPHA
     # result = minimize(tree_tuning_objective, [-30, -30, 66.0, 66.0, 2.7], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, tol=1.0)
     ### WITHOUT ALPHA
-    result = minimize(tree_tuning_objective, [k2_opt, k2_opt, lpa_mean_dia, rpa_mean_dia, l_rr_guess], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs), method='Nelder-Mead', bounds=bounds, options={'maxiter': 100})
+    grid_search = False
+    result = minimize(tree_tuning_objective, [k2_opt, k2_opt, lpa_mean_dia, rpa_mean_dia, l_rr_guess], args=(clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs, compliance, grid_search), method='Nelder-Mead', bounds=bounds, options={'maxiter': 100})
 
     # format of result.x: [k2_l, k2_r, lrr_l, lrr_r]
     print(f'Optimized parameters: {result.x}')
