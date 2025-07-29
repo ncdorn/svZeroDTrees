@@ -737,10 +737,10 @@ class SimulationDirectory:
 
         # save the config with half of the tuned resistances
         print('saving config with 0.5 * the tuned resistances...')
-        nonlinear_config.vessel_map[1].stenosis_coefficient = optimized_resistances[0] / 2
-        nonlinear_config.vessel_map[2].stenosis_coefficient = optimized_resistances[0] / 2
-        nonlinear_config.vessel_map[3].stenosis_coefficient = optimized_resistances[1] / 2
-        nonlinear_config.vessel_map[4].stenosis_coefficient = optimized_resistances[1] / 2
+        nonlinear_config.vessel_map[1].stenosis_coefficient = optimized_resistances[0] / 4
+        nonlinear_config.vessel_map[2].stenosis_coefficient = optimized_resistances[0] / 4
+        nonlinear_config.vessel_map[3].stenosis_coefficient = optimized_resistances[1] / 4
+        nonlinear_config.vessel_map[4].stenosis_coefficient = optimized_resistances[1] / 4
 
         # rescale inflow back to 500 tsteps
         nonlinear_config.inflows['INFLOW'].rescale(tsteps=500)
