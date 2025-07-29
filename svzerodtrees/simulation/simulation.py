@@ -98,9 +98,8 @@ class Simulation:
         if run_steady:
             # run the steady simulations
             self.run_steady_sims()
-
-        # generate the simplified zerod config
-        self.generate_simplified_nonlinear_zerod()
+            # generate the simplified zerod config
+            self.generate_simplified_nonlinear_zerod()
 
         reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
         
