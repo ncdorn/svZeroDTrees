@@ -171,7 +171,8 @@ def assign_rcr_bcs(config_handler,
         for i, name in enumerate(outlet_bc_names):
             # delete the unused bcs
             del config_handler.bcs[name]
-        outlet_bc_names = [f'IMPEDANCE_{i}' for i in range(len(cap_info))]
+        outlet_bc_names = [f'RCR_{i}' for i in range(len(cap_info))]
+        
     cap_to_bc = {list(cap_info.keys())[i]: outlet_bc_names[i] for i in range(len(outlet_bc_names))}
 
     # build a unique tree for each outlet
