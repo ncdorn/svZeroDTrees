@@ -43,6 +43,7 @@ class RCRTuner(BoundaryConditionTuner):
             pa_config.bcs['LPA_BC'].R, pa_config.bcs['LPA_BC'].C, pa_config.bcs['RPA_BC'].R, pa_config.bcs['RPA_BC'].C = params
 
             try:
+                pa_config.to_json(f'pa_config_test_tuning.json')
                 pa_config.simulate()
                 print(f'pa config SIMULATED, rpa split: {pa_config.rpa_split}, p_mpa = {pa_config.P_mpa}\n params: {params}')
                 pa_config.plot_mpa(path='figures/pa_config_plot.png')

@@ -147,7 +147,7 @@ class Simulation:
             if self.bc_type == 'impedance':
                 construct_impedance_trees(self.zerod_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets.wedge_p, d_min=0.01, convert_to_cm=self.convert_to_cm, use_mean=True, specify_diameter=True, tree_params=tree_params)
             elif self.bc_type == 'rcr':
-                assign_rcr_bcs(self.zerod_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets.wedge_p, convert_to_cm=self.convert_to_cm, is_pulmonary=True)
+                assign_rcr_bcs(self.zerod_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets.wedge_p, result.x, convert_to_cm=self.convert_to_cm, is_pulmonary=True)
 
             # if is fontan, add the fontan inflows
             if self.is_fontan:
