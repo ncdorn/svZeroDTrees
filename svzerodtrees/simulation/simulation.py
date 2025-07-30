@@ -104,7 +104,7 @@ class Simulation:
         reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
         
         if optimize_bcs:
-            optimize_impedance_bcs(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, opt_config_path=self.zerod_config_path, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
+            optimize_impedance_bcs(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, rescale_inflow=run_steady, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
             # need to create coupling config and add to preop/postop directories
                 # build trees for LPA/RPA
 

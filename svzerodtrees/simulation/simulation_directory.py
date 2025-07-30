@@ -277,10 +277,10 @@ class SimulationDirectory:
         
         def write_runscript_input_params(user_input=user_input, sim_config=sim_config):
             if user_input:
-                nodes = int(input('number of nodes (default 4): ') or 4)
+                nodes = int(input('number of nodes (default 3): ') or 3)
                 procs_per_node = int(input('number of processors per node ( default 24): ') or 24)
                 memory = int(input('memory per node in GB (default 16): ') or 16)
-                hours = int(input('number of hours (default 6): ') or 6)
+                hours = int(input('number of hours (default 6): ') or 12)
             else:
                 nodes = sim_config['nodes']
                 procs_per_node = sim_config['procs_per_node']

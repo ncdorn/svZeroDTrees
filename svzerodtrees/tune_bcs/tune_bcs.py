@@ -136,7 +136,7 @@ def construct_impedance_trees(config_handler, mesh_surfaces_path, wedge_pressure
             config_handler.bcs[bc_name] = tree.create_impedance_bc(bc_name, idx, wedge_pressure * 1333.2)
 
 
-def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets, opt_config_path='optimized_impedance_config.json', n_procs=24, log_file=None, d_min=0.01, tol=0.01, compliance="olufsen", is_pulmonary=True, convert_to_cm=True):
+def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets, rescale_inflow=True, n_procs=24, log_file=None, d_min=0.01, tol=0.01, compliance="olufsen", is_pulmonary=True, convert_to_cm=True):
     '''
     tune the parameters of the impedance trees to match clinical targets
     currently, we tune k2_l, k2_r, lpa_mean_dia, rpa_mean_dia, l_rr'''
@@ -174,7 +174,8 @@ def optimize_impedance_bcs(config_handler, mesh_surfaces_path, clinical_targets,
         if convert_to_cm:
             pa_config.convert_to_cm()
     # rescale inflow by number of outlets ## TODO: figure out scaling for this
-    pa_config.bcs['INFLOW'].Q = [q / ((len(lpa_info.values()) + len(rpa_info.values())) // 2) for q in pa_config.bcs['INFLOW'].Q]
+    if rescale_inflow:
+        pa_config.bcs['INFLOW'].Q = [q / ((len(lpa_info.values()) + len(rpa_info.values())) // 2) for q in pa_config.bcs['INFLOW'].Q]
 
     def tree_tuning_objective(params, clinical_targets, lpa_mean_dia, rpa_mean_dia, d_min, n_procs, compliance="olufsen", grid_search=False):
         '''
