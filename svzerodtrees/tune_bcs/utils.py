@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from ..utils import write_to_log
 from ..io.utils import get_branch_result
-from ..io import BoundaryCondition
+from ..io.blocks import BoundaryCondition
 
 
 '''
