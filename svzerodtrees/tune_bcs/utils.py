@@ -74,9 +74,9 @@ def generate_outlet_rcr(resistance, capacitance, wedge_p):
                     "bc_name": "RPA_BC",
                     "bc_type": "RCR",
                     "bc_values": {
-                        "Rp": resistance,
+                        "Rp": resistance* 0.1,
                         "C": capacitance,
-                        "Rd": 900.0,
+                        "Rd": resistance * 0.9,
                         "Pd": wedge_p
                     }
                 })
