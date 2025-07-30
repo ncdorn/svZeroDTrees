@@ -172,7 +172,7 @@ def assign_rcr_bcs(config_handler,
             # delete the unused bcs
             del config_handler.bcs[name]
         outlet_bc_names = [f'RCR_{i}' for i in range(len(cap_info))]
-        
+
     cap_to_bc = {list(cap_info.keys())[i]: outlet_bc_names[i] for i in range(len(outlet_bc_names))}
 
     # build a unique tree for each outlet
@@ -183,13 +183,13 @@ def assign_rcr_bcs(config_handler,
             resistance, capacitance = rcr_params[:2]
             adjusted_resistance = resistance * (lpa_total_area / area)
             # create BC object
-            rcr_bc = generate_outlet_rcr(adjusted_resistance, capacitance, wedge_pressure * 1333.2)
+            rcr_bc = generate_outlet_rcr(adjusted_resistance, capacitance, wedge_pressure * 1333.2, f'RCR_{idx}')
         elif 'rpa' in cap_name.lower():
             print(f'creating RCR BC for RPA with parameters: {rcr_params[2:]}')
             resistance, capacitance = rcr_params[2:]
             adjusted_resistance = resistance * (rpa_total_area / area)
             # create BC object
-            rcr_bc = generate_outlet_rcr(adjusted_resistance, capacitance, wedge_pressure * 1333.2)
+            rcr_bc = generate_outlet_rcr(adjusted_resistance, capacitance, wedge_pressure * 1333.2, f'RCR_{idx}')
         else:
             raise ValueError('cap name not recognized')
 

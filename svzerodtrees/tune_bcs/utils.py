@@ -68,10 +68,10 @@ def get_pressure(result_array, branch, convert_to_mmHg=False):
     return pressures, systolic_p, diastolic_p, mean_p
 
 
-def generate_outlet_rcr(resistance, capacitance, wedge_p):
+def generate_outlet_rcr(resistance: float, capacitance: float, wedge_p: float, name: str):
 
     return BoundaryCondition.from_config({
-                    "bc_name": "RPA_BC",
+                    "bc_name": name,
                     "bc_type": "RCR",
                     "bc_values": {
                         "Rp": resistance* 0.1,
