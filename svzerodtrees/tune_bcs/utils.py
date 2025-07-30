@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from ..utils import write_to_log
 from ..io.utils import get_branch_result
+from ..io import BoundaryCondition
 
 
 '''
@@ -66,3 +67,16 @@ def get_pressure(result_array, branch, convert_to_mmHg=False):
 
     return pressures, systolic_p, diastolic_p, mean_p
 
+
+def generate_outlet_rcr(resistance, capacitance, wedge_p):
+
+    return BoundaryCondition.from_config({
+                    "bc_name": "RPA_BC",
+                    "bc_type": "RCR",
+                    "bc_values": {
+                        "Rp": resistance,
+                        "C": capacitance,
+                        "Rd": 900.0,
+                        "Pd": wedge_p
+                    }
+                })

@@ -162,23 +162,23 @@ class PAConfig():
         self.P_mpa = [np.max(self.result[self.result.name=='branch0_seg0']['pressure_in']) / 1333.2, np.min(self.result[self.result.name=='branch0_seg0']['pressure_in']) / 1333.2, np.mean(self.result[self.result.name=='branch0_seg0']['pressure_in']) / 1333.2]
     
 
-    def initialize_resistance_bcs(self, inflow: BoundaryCondition, wedge_p: float):
+    def initialize_resistance_bcs(self):
         '''initialize the boundary conditions for the pa config
         '''
 
         # initialize the inflow
-        if inflow.Q[1] - inflow.Q[0] == 0:
+        if self.inflow.Q[1] - self.inflow.Q[0] == 0:
             print('steady inflow, optimizing resistance BCs')
             # assume steady
             self.bcs = {
-                "INFLOW": inflow,
+                "INFLOW": self.inflow,
 
                 "RPA_BC": BoundaryCondition.from_config({
                     "bc_name": "RPA_BC",
                     "bc_type": "RESISTANCE",
                     "bc_values": {
                         "R": 1000.0,
-                        "Pd": wedge_p
+                        "Pd": self.clinical_targets.wedge_p
                     }
                 }),
 
@@ -187,7 +187,7 @@ class PAConfig():
                     "bc_type": "RESISTANCE",
                     "bc_values": {
                         "R": 1000.0,
-                        "Pd": wedge_p
+                        "Pd": self.clinical_targets.wedge_p
                     }
                 })
             }
@@ -195,16 +195,16 @@ class PAConfig():
             print('unsteady inflow, optimizing RCR BCs')
             # unsteady, need RCR boundary conditions
             self.bcs = {
-                "INFLOW": inflow,
+                "INFLOW": self.inflow,
 
                 "RPA_BC": BoundaryCondition.from_config({
                     "bc_name": "RPA_BC",
                     "bc_type": "RCR",
                     "bc_values": {
-                        "Rp": 1.0,
+                        "Rp": 100.0,
                         "C": 1e-4,
-                        "Rd": 9.0,
-                        "Pd": wedge_p
+                        "Rd": 900.0,
+                        "Pd": self.clinical_targets.wedge_p
                     }
                 }),
 
@@ -212,10 +212,10 @@ class PAConfig():
                     "bc_name": "LPA_BC",
                     "bc_type": "RCR",
                     "bc_values": {
-                        "Rp": 1.0,
+                        "Rp": 100.0,
                         "C": 1e-4,
-                        "Rd": 9.0,
-                        "Pd": wedge_p
+                        "Rd": 900.0,
+                        "Pd": self.clinical_targets.wedge_p
                     }
                 })
             }

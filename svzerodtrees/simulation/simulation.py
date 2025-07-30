@@ -20,6 +20,7 @@ class Simulation:
                  postop_dir='postop',
                  adapted_dir='adapted',
                  steady_dir='steady',
+                 bc_type='impedance',
                  adaptation_config = {
                      "method": "wss-ims",
                      "location": "uniform",
@@ -39,6 +40,12 @@ class Simulation:
         self.postop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, postop_dir), zerod_config=self.zerod_config_path, convert_to_cm=convert_to_cm)
         if adapted_dir is not None:
             self.adapted_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, adapted_dir), mesh_complete=self.postop_dir.mesh_complete.path, convert_to_cm=convert_to_cm)
+
+        available_bc_types = ['impedance', 'rcr']
+        if bc_type not in available_bc_types:
+            raise ValueError(f"Invalid bc_type: {bc_type}. Must be one of {available_bc_types}.")
+        self.bc_type = bc_type
+
         self.adaptation_method = adaptation_config["method"]
         self.adapt_location = adaptation_config["location"]
         self.adaptation_iters = adaptation_config["iterations"]
@@ -49,7 +56,7 @@ class Simulation:
         self.threed_sim_config = {
                 'n_tsteps': 10000,
                 'dt': 0.0005,
-                'nodes': 4,
+                'nodes': 3,
                 'procs_per_node': 24,
                 'memory': 16,
                 'hours': 16
@@ -104,16 +111,26 @@ class Simulation:
         reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
         
         if optimize_bcs:
-            optimize_impedance_bcs(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, rescale_inflow=run_steady, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
+            if self.bc_type == 'impedance':
+                # OLD METHOD, in tune_bcs.py
+                # optimize_impedance_bcs(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, rescale_inflow=run_steady, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
+                
+                # NEW METHOD, in impedance_tuner.py
+                impedance_tuner = ImpedanceTuner(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, rescale_inflow=run_steady, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
+                impedance_tuner.tune()
             # need to create coupling config and add to preop/postop directories
                 # build trees for LPA/RPA
+            elif self.bc_type == 'rcr':
+                rcr_tuner = RCRTuner(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, rescale_inflow=run_steady, convert_to_cm=self.convert_to_cm, n_procs=24)
+                result = rcr_tuner.tune() # r_LPA, c_LPA, r_RPA, c_RPA = result.x
 
-        # construct trees
-        opt_params = pd.read_csv(os.path.join(self.path, 'optimized_params.csv'))
-        tree_params = {
-            'lpa': [opt_params['k1'][opt_params.pa=='lpa'].values[0], opt_params['k2'][opt_params.pa=='lpa'].values[0], opt_params['k3'][opt_params.pa=='lpa'].values[0], opt_params['lrr'][opt_params.pa=='lpa'].values[0], opt_params['diameter'][opt_params.pa=='lpa'].values[0]],
-            'rpa': [opt_params['k1'][opt_params.pa=='rpa'].values[0], opt_params['k2'][opt_params.pa=='rpa'].values[0], opt_params['k3'][opt_params.pa=='rpa'].values[0], opt_params['lrr'][opt_params.pa=='rpa'].values[0], opt_params['diameter'][opt_params.pa=='rpa'].values[0]]
-        }
+        if self.bc_type == 'impedance':
+            # construct trees
+            opt_params = pd.read_csv(os.path.join(self.path, 'optimized_params.csv'))
+            tree_params = {
+                'lpa': [opt_params['k1'][opt_params.pa=='lpa'].values[0], opt_params['k2'][opt_params.pa=='lpa'].values[0], opt_params['k3'][opt_params.pa=='lpa'].values[0], opt_params['lrr'][opt_params.pa=='lpa'].values[0], opt_params['diameter'][opt_params.pa=='lpa'].values[0]],
+                'rpa': [opt_params['k1'][opt_params.pa=='rpa'].values[0], opt_params['k2'][opt_params.pa=='rpa'].values[0], opt_params['k3'][opt_params.pa=='rpa'].values[0], opt_params['lrr'][opt_params.pa=='rpa'].values[0], opt_params['diameter'][opt_params.pa=='rpa'].values[0]]
+            }
 
         # generate blank threed coupler
         # blank_threed_coupler = ConfigHandler.blank_threed_coupler(path=os.path.join(self.path, 'svzerod_3Dcoupling.json'))
@@ -127,7 +144,10 @@ class Simulation:
             self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(tsteps=2000)
 
             # create the trees
-            construct_impedance_trees(self.zerod_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets.wedge_p, d_min=0.01, convert_to_cm=self.convert_to_cm, use_mean=True, specify_diameter=True, tree_params=tree_params)
+            if self.bc_type == 'impedance':
+                construct_impedance_trees(self.zerod_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets.wedge_p, d_min=0.01, convert_to_cm=self.convert_to_cm, use_mean=True, specify_diameter=True, tree_params=tree_params)
+            elif self.bc_type == 'rcr':
+                assign_rcr_bcs(self.zerod_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets.wedge_p, convert_to_cm=self.convert_to_cm, is_pulmonary=True)
 
             # if is fontan, add the fontan inflows
             if self.is_fontan:
