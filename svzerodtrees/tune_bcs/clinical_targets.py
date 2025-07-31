@@ -58,6 +58,8 @@ class ClinicalTargets():
         # get wedge pressure
         wedge_p = float(df.loc[0,"wedge_pressure"])
 
+        wedge_p = wedge_p if wedge_p <= mpa_p[1] else mpa_p[1]  # ensure wedge pressure is not greater than diastolic MPA pressure
+
         # get RPA flow split
         rpa_split = float(df.loc[0,"rpa_split"])
 

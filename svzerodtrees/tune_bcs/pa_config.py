@@ -178,7 +178,7 @@ class PAConfig():
                     "bc_type": "RESISTANCE",
                     "bc_values": {
                         "R": 1000.0,
-                        "Pd": self.clinical_targets.wedge_p
+                        "Pd": self.clinical_targets.wedge_p * 1333.2
                     }
                 }),
 
@@ -187,7 +187,7 @@ class PAConfig():
                     "bc_type": "RESISTANCE",
                     "bc_values": {
                         "R": 1000.0,
-                        "Pd": self.clinical_targets.wedge_p
+                        "Pd": self.clinical_targets.wedge_p * 1333.2
                     }
                 })
             }
@@ -204,7 +204,7 @@ class PAConfig():
                         "Rp": 100.0,
                         "C": 1e-4,
                         "Rd": 900.0,
-                        "Pd": self.clinical_targets.wedge_p
+                        "Pd": self.clinical_targets.wedge_p * 1333.2
                     }
                 }),
 
@@ -215,7 +215,7 @@ class PAConfig():
                         "Rp": 100.0,
                         "C": 1e-4,
                         "Rd": 900.0,
-                        "Pd": self.clinical_targets.wedge_p
+                        "Pd": self.clinical_targets.wedge_p * 1333.2
                     }
                 })
             }

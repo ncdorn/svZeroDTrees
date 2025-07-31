@@ -2,214 +2,162 @@ import numpy as np
 from scipy.optimize import minimize, Bounds, LinearConstraint
 from .treevessel import TreeVessel
 from ..utils import *
-from .utils import assign_flow_to_root
-from ..io import ConfigHandler
+from .utils import *
 from ..io.blocks import *
+from .compliance import *
 from multiprocessing import Pool
 import json
 import pickle
 from functools import partial
 import time
 
-class StructuredTree():
+class StructuredTree:
     """
-    Structured tree which represents microvascular adaptation at the outlets of a 0D Windkessel model.
-    utilizes the TreeVessel class which is recursive by nature to handle recursive tasks
+    Structured tree representing microvascular adaptation at the outlet of a 0D model.
+    Can be initialized from primitive inputs or from a pre-defined config tree.
+
+    Required inputs:
+    - name: a unique identifier for the structured tree
+    - time: time vector (list or np.ndarray) used for pressure and flow inputs
+    - simparams: simulation parameter object containing physical constants
     """
-    def __init__(self, params: dict = None, 
-                 diameter: float = 0.5, # default value that should be optimized later
+
+    def __init__(self,
+                 name: str,
+                 time: list[float],
+                 simparams: SimParams,
+                 diameter: float = 0.5,
+                 compliance_model: ComplianceModel = None,
                  R: float = None,
                  C: float = None,
-                 P_in: list = None,
-                 Q_in: list = None,
-                 time: list = None,
                  Pd: float = 0.0,
-                 name: str = None, tree_config: dict = None, simparams: SimParams = None, root: TreeVessel = None):
-        """
-        Create a new StructuredTree instance
-        
-        :param params: dict of 0D Windkessel parameters for the StructuredTree class. 
-            contains length, R, C, L, stenosis coeff, viscosity, inlet pressure and flow, bc values
-        :param name: name of the StructuredTree instance, e.g. OutletTree3
-        :param tree_config: optional tree config dict, used to create a StructuredTree instance from a pre-existing tree which has
-            been saved in the model 0D config dict
-        :param simparams: simulation parameters from the 0D model config file
-        :param root: TreeVessel instance, required if the StructuredTree instance is built from a pre-existing tree
-
-        :return: None
-        """
-        # parameter attributes
-        self.params = params # TODO: remove this attribute such that all parameters are indiividual class attributes since these are fixed
-        self.diameter = diameter
-
-        # windkessel parameters 
-        self._R = R
-        self.C = C
-
-        # simulation parameters
-        self.viscosity = 0.049
-        self.density = 1.055
+                 P_in: list[float] = None,
+                 Q_in: list[float] = None,
+                 tree_config: dict = None,
+                 root: TreeVessel = None):
+        # --- Required core parameters ---
+        self.name = name
+        self.time = time
         self.simparams = simparams
 
-        # flow and pressure attributes
+        # --- Physical constants ---
+        self.viscosity = simparams.viscosity
+        self.density = 1.055  # fixed unless overridden in vessel-level params
+
+        # --- Geometry and hemodynamics ---
+        self.diameter = diameter
+        self._R = R
+        self.C = C
+        self.Pd = Pd
         self.P_in = P_in
         self.Q_in = Q_in
-        self.time = time
-        self.Pd = Pd
 
-        ### non-diensional parameters ###
-        self.q = 10.0 # characteristic flow rate, cm3/s
-        self.Lr = 1.0 # characteristic length scale, cm
-        self.g = 981.0 # acceleration due to gravity
+        # --- Dimensionless reference values ---
+        self.q = 10.0    # reference flow [cm³/s]
+        self.Lr = 1.0    # reference length [cm]
+        self.g = 981.0   # gravity [cm/s²]
 
-        #number of generations
+        # --- Tree structure ---
         self.generations = 0
+        self.root = None
 
-        # set up empty block dict if not generated from pre-existing tree
-        if tree_config is None:
-            self.name = name
-            self.block_dict = {'name': name, 
-                               'initial_d': diameter, 
-                               'P_in': P_in,
-                               'Q_in': Q_in,
-                               'boundary_conditions': [],
-                               'simulation_parameters': simparams.to_dict() if simparams is not None else None,
-                               'vessels': [], 
-                               'junctions': [], 
-                               'adaptations': 0}
-            # initialize the root of the structured tree
-            self.root = None
-        else:
-            # set up parameters from pre-existing tree config
-            self.name = tree_config["name"]
-            self.block_dict = tree_config
-            # initialize the root of the structured tree
+        # --- Compliance model ---
+        self.compliance_model = compliance_model if compliance_model else ConstantCompliance(1e5)
+
+        if tree_config:
             if root is None:
-                # if no TreeVessel instance is provided to create the new tree
-                raise Exception('No root TreeVessel instance provided!')
-            # add the root instance to the StructuredTree
+                raise ValueError("tree_config provided but no root TreeVessel instance passed.")
             self.root = root
+            self.block_dict = tree_config
+        else:
+            self.block_dict = {
+                "name": name,
+                "initial_d": diameter,
+                "P_in": P_in,
+                "Q_in": Q_in,
+                "boundary_conditions": [],
+                "simulation_parameters": simparams.to_dict(),
+                "vessels": [],
+                "junctions": [],
+                "adaptations": 0
+            }
 
 
     @classmethod
-    def from_outlet_vessel(cls, 
-                           vessel: Vessel, 
-                           simparams: SimParams,
-                           bc: BoundaryCondition,
-                           tree_exists=False, 
-                           root: TreeVessel = None, 
-                           P_outlet: list=[0.0], 
-                           Q_outlet: list=[0.0],
-                           time: list=[0.0]) -> "StructuredTree":
+    def from_outlet_vessel(cls,
+                        vessel: Vessel,
+                        simparams: SimParams,
+                        bc: BoundaryCondition,
+                        tree_exists: bool = False,
+                        root: TreeVessel = None,
+                        P_outlet=0.0,
+                        Q_outlet=0.0,
+                        time: list = None) -> "StructuredTree":
         """
-        Class method to creat an instance from the config dictionary of an outlet vessel
-
-        :param config: config file of outlet vessel
-        :param simparams: config file of simulation parameters to get viscosity
-        :param bc_config: config file of the outlet boundary condition
-        :param tree_exists: True if the StructuredTree is being created from a pre-existing tree (applicable in the adaptation 
-            and postop steps of the simulation pipeline)
-        :param root: TreeVessel instance, required if tree_exists = True
-        :param P_outlet: pressure at the outlet of the 0D model, which is the inlet of this StructuredTree instance
-        :param Q_outlet: flow at the outlet of the 0D model, which is the inlet of this StructuredTree instance
-
-        :return: StructuredTree instance
+        Create StructuredTree from a 0D outlet vessel and boundary condition.
         """
-        # if steady state, make the Q_outlet and P_outlet into a list of length two for svzerodplus config BC compatibility
-        if type(Q_outlet) is not list:
-            # steady flow
-            Q_outlet = [Q_outlet,] * 2
-            time = [0.0, 1.0]
-        
-        if type(P_outlet) is not list:
-            # steady pressure
-            P_outlet = [P_outlet,] * 2
-            time = [0.0, 1.0]
-        
+        P_outlet, _ = _ensure_list_signal(P_outlet)
+        Q_outlet, time = _ensure_list_signal(Q_outlet, time or [0.0, 1.0])
 
-        params = dict(
-            # need vessel length to determine vessel diameter
-            diameter = vessel.diameter,
-            eta=simparams.viscosity,
-            P_in = P_outlet,
-            Q_in = Q_outlet,
-            bc_values = bc.values
+        if "Rp" in bc.values:
+            R = bc.values["Rp"] + bc.values["Rd"]
+            C = bc.values.get("C", 0.0)
+        else:
+            R = bc.values["R"]
+            C = None
+
+        name = f"OutletTree{vessel.branch}"
+        Pd = bc.values.get("Pd", 0.0)
+
+        return cls(
+            name=name,
+            diameter=vessel.diameter,
+            R=R,
+            C=C,
+            Pd=Pd,
+            P_in=P_outlet,
+            Q_in=Q_outlet,
+            time=time,
+            simparams=simparams,
+            tree_config=vessel if tree_exists else None,
+            root=root if tree_exists else None
         )
-
-        # convert bc_values to class parameters
-        if "Rp" in bc.values.keys():
-            R_bc = bc.values["Rp"] + bc.values["Rd"]
-            C_bc = bc.values["C"]
-        else:
-            R_bc = bc.values["R"]
-            C_bc = None
-        
-
-        if tree_exists:
-            print("tree exists")
-            # not sure if this works, probably need to change to a tree config parameter
-            return cls(params=params, 
-                       diameter = vessel.diameter,
-                       R = R_bc,
-                       C = C_bc,
-                       P_in = P_outlet,
-                       Q_in = Q_outlet, 
-                       Pd = bc.values["Pd"],
-                       viscosity = simparams.viscosity, 
-                       config = vessel, simparams=simparams, root=root)
-        
-        else:
-            # this works
-            return cls(params=params, 
-                       diameter = vessel.diameter,
-                       R = R_bc,
-                       C = C_bc,
-                       P_in = P_outlet,
-                       Q_in = Q_outlet, 
-                       time=time,
-                       Pd = bc.values["Pd"],
-                       name="OutletTree" + str(vessel.branch), simparams=simparams)
-
 
     @classmethod
     def from_bc_config(cls,
-                       bc: BoundaryCondition,
-                       simparams: SimParams,
-                       diameter: float,
-                       P_outlet: list=[0.0], 
-                       Q_outlet: list=[0.0],
-                       time: list=[0.0]) -> "StructuredTree":
-        '''
-        Class method to create an instance from the config dictionary of an outlet boundary condition
-        '''
+                    bc: BoundaryCondition,
+                    simparams: SimParams,
+                    diameter: float,
+                    P_outlet=0.0,
+                    Q_outlet=0.0,
+                    time: list = None) -> "StructuredTree":
+        """
+        Create StructuredTree from a boundary condition only (no vessel metadata).
+        """
+        P_outlet, _ = _ensure_list_signal(P_outlet)
+        Q_outlet, time = _ensure_list_signal(Q_outlet, time or [0.0, 1.0])
 
-        # if steady state, make the Q_outlet and P_outlet into a list of length two for svzerodplus config BC compatibility
-        if type(Q_outlet) is not list:
-            # steady flow
-            Q_outlet = [Q_outlet,] * 2
-            time = [0.0, 1.0]
-        
-        if type(P_outlet) is not list:
-            # steady pressure
-            P_outlet = [P_outlet,] * 2
-            time = [0.0, 1.0]
+        if "Rp" in bc.values:
+            R = bc.values["Rp"] + bc.values["Rd"]
+            C = bc.values.get("C", 0.0)
+        else:
+            R = bc.values["R"]
+            C = None
 
-        params = dict(
-            # need vessel length to determine vessel diameter
-            diameter = diameter,
-            eta=simparams.viscosity,
-            P_in = P_outlet,
-            Q_in = Q_outlet,
-            bc_values = bc.values
+        name = f"OutletTree_{bc.name}"
+        Pd = bc.values.get("Pd", 0.0)
+
+        return cls(
+            name=name,
+            diameter=diameter,
+            R=R,
+            C=C,
+            Pd=Pd,
+            P_in=P_outlet,
+            Q_in=Q_outlet,
+            time=time,
+            simparams=simparams
         )
-        
-        return cls(params=params, 
-                   diameter = diameter,
-                   viscosity=simparams.viscosity,
-                   P_in = P_outlet,
-                   Q_in = Q_outlet, 
-                   time=time,
-                   name="OutletTree" + str(bc.name), simparams=simparams)
 
 # **** I/O METHODS ****
 
@@ -361,7 +309,7 @@ class StructuredTree():
                 left_dia = alpha * current_vessel.d
                 # assume pressure is conserved at the junction. 
                 # Could later replace this with a function to account for pressure loss
-                current_vessel.left = TreeVessel.create_vessel(vessel_id, next_gen, left_dia, density=1.055, lrr=lrr)
+                current_vessel.left = TreeVessel.create_vessel(vessel_id, next_gen, left_dia, density=1.055, lrr=lrr, compliance_model=self.compliance_model)
                 if left_dia < d_min:
                     current_vessel.left.collapsed = True
                     if current_vessel.left.gen > self.generations:
@@ -374,7 +322,7 @@ class StructuredTree():
                 # create right vessel
                 vessel_id += 1
                 right_dia = beta * current_vessel.d
-                current_vessel.right = TreeVessel.create_vessel(vessel_id, next_gen, right_dia, density=1.055, lrr=lrr)
+                current_vessel.right = TreeVessel.create_vessel(vessel_id, next_gen, right_dia, density=1.055, lrr=lrr, compliance_model=self.compliance_model)
                 if right_dia < d_min:
                     current_vessel.right.collapsed = True
                     if current_vessel.right.gen > self.generations:
@@ -410,9 +358,9 @@ class StructuredTree():
         '''
 
         # initialize class params
-        self.k1 = k1
-        self.k2 = k2
-        self.k3 = k3
+        # self.k1 = k1
+        # self.k2 = k2
+        # self.k3 = k3
         self.n_procs = n_procs
 
         if tsteps is None:
@@ -443,7 +391,7 @@ class StructuredTree():
         if n_procs is not None:
             start = time.time()
             # make the partial function
-            z0_w_stiffness = partial(self.root.z0_olufsen, k1=k1, k2=k2, k3=k3)
+            z0_w_stiffness = partial(self.root.z0_olufsen)
             # parallelize the computation of the impedance
             with Pool(n_procs) as p:
                 Z_om[:tsteps//2+1] = np.conjugate(p.map(z0_w_stiffness, [abs(w) for w in omega[:tsteps//2+1]]))
@@ -458,12 +406,8 @@ class StructuredTree():
                 # print(f'computing root impedance for timestep {k} of {tsteps//2}')
                 # compute impedance at the root vessel
                 # we cannot have a negative number here so we take positive frequency and then conjugate
-                Z_om[k] = np.conjugate(self.root.z0_olufsen(abs(omega[k]),
-                                                            k1 = k1,
-                                                            k2 = k2,
-                                                            k3 = k3
-                                                            ))
-            
+                Z_om[k] = np.conjugate(self.root.z0_olufsen(abs(omega[k])))
+
             end = time.time()
             # print(f'this UNparallelized process took {end - start} seconds')
 
@@ -834,7 +778,8 @@ class StructuredTree():
         write_to_log(log_file, "     the number of vessels is " + str(len(self.block_dict["vessels"])) + "\n")
 
         if pries_secomb:
-            self.pries_n_secomb = PriesnSecomb(self)
+            # self.pries_n_secomb = PriesnSecomb(self)
+            pass
 
 
         return d_final.x, R_final
@@ -1080,3 +1025,9 @@ class StructuredTree():
         _dfs(self.root)
         return vessel_order
 
+
+def _ensure_list_signal(signal, fallback_time=[0.0, 1.0]):
+    """Ensure signal is a list; return default time vector if needed."""
+    if not isinstance(signal, list):
+        return [signal] * 2, fallback_time
+    return signal, fallback_time if len(signal) == 1 else None

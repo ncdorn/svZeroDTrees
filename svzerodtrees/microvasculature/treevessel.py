@@ -2,118 +2,111 @@ import numpy as np
 import math
 from scipy.special import jv
 from numba import jit
+from .compliance import *
 
 # class for recursive generation of a structured tree
 
 class TreeVessel:
-    # blood vessel class for binary tree recusion operations
-    def __init__(self, params: dict, name: str = None, lrr=50.0):
-        '''
-        :param params: dictionary of TreeVessel class parameters
-        :param name: name of the vessel, which follows the svzerodplus naming convention
-        '''
-        self.name = name # name of the, tree only has a str in the root node
-        self.params = params # vessel params dict
-        self._d = self.params["vessel_D"] # diameter in cm
-        self._r = self._d / 2 # radius in cm
-        self.l = self.params["vessel_length"] # length in cm
-        self.id = self.params["vessel_id"]
-        self.gen = self.params["generation"]
-        self.eta = self.params["viscosity"]
-        self.density = self.params["density"]
-        self._R = self.params["zero_d_element_values"].get("R_poiseuille")
-        self._R_eq = self._R # this is the initial value, not dependent on left and right
-        self.C = self.params["zero_d_element_values"].get("C")
-        self.L = self.params["zero_d_element_values"].get("L")
-        self.a = np.pi * self._d ** 2 / 4 # cross sectional area
+    """
+    A class representing a single vessel in a binary tree of blood vessels for structured tree models.
+    """
 
-        self.h = self._r / 10 # currently assume thin wall, could be higher with remodelling!
+    def __init__(
+        self,
+        params: dict,
+        name: str = None,
+        lrr: float = 50.0,
+        compliance_model: ComplianceModel = None
+    ):
+        self.name = name
+        self.params = params
 
-        ### *** PARAMETERS FOR ADAPTATION *** ###
-        # diameter gain parameters for remodeling
-        self.K_tau_r = 1e-6
-        self.K_sig_r = 1e-6
-        # thickness gain parameters
-        self.K_tau_h = 1e-5
-        self.K_sig_h = 1e-5
+        # Geometry and identity
+        self.id = params["vessel_id"]
+        self.gen = params["generation"]
+        self._d = params["vessel_D"]
+        self._r = self._d / 2
+        self.l = params["vessel_length"]
+        self.a = np.pi * self._d**2 / 4
+        self.h = self._r / 10  # assumed initial wall thickness
 
-        # homeostatic values
-        self.wss_h = None # homeostatic wall shear stress
-        self.ims_h = None # homeostatic intramural stress
+        # Hemodynamics
+        self.eta = params["viscosity"]
+        self.density = params["density"]
 
-        # global array idk
-        self.idx = None # index in the flattened array of vessels, to be set later
+        # 0D model parameters
+        z_vals = params["zero_d_element_values"]
+        self._R = z_vals.get("R_poiseuille")
+        self._R_eq = self._R
+        self.C = z_vals.get("C")
+        self.L = z_vals.get("L")
 
-        # adaptation parameters
+        # Compliance model
+        self.compliance_model = compliance_model or ConstantCompliance(1e5)  # dyn/cm²
+
+        # Adaptation parameters
         self.r_adapt = self._r
         self.h_adapt = self.h
-        self.dt = 1e-5 # timestep for integration
+        self.k_tau_r = 1e-6
+        self.k_sig_r = 1e-6
+        self.k_tau_h = 1e-5
+        self.k_sig_h = 1e-5
+        self.dt = 1e-5
+        self.wss_h = None
+        self.ims_h = None
 
-
-        self.lrr = lrr
-
-        # flow values, based on Poiseulle assumption
+        # Flow quantities
         self.P_in = 0.0
         self.Q = 0.0
         self.P_out = 0.0
 
-        # daughter segments for recursion
+        # Structure and recursion
+        self.lrr = lrr
         self._left = None
         self._right = None
-
-        # if vessel is collapsed, no daughters
         self._collapsed = False
-
+        self.idx = None  # global indexing for vectorized adaptation
 
     @classmethod
-    def create_vessel(cls, id, gen, diameter, density, lrr=None):
-        '''
-        class method to create a TreeVessel instance
+    def create_vessel(
+        cls,
+        id: int,
+        gen: int,
+        diameter: float,
+        density: float,
+        lrr: float = None,
+        compliance_model: ComplianceModel = None
+    ):
+        """
+        Factory method to construct a TreeVessel from primitive parameters.
+        """
 
-        :param id: int describing the vessel id
-        :param gen: int describing the generation of the tree in which the TreeVessel exists
-        :param diameter: diameter of the vessel
-        :param density: density of the blood within the vessel
-
-        :return: TreeVessel instance
-        '''
-
-        # Viscosity is always governed by fahraeus lindqvist effect
-        # viscosity = cls.fl_visc(cls, diameter, H_d=H_d)
-
-        viscosity = 0.049 # poise, cm2/s
-        
-        # initialize the 0D parameters of the tree
+        viscosity = 0.049  # poise
         r = diameter / 2
-        if lrr is None:
-            l = 12.4 * r ** 1.1  # from ingrid's paper - does this remain constant throughout adaptation?
-        else:
-            l = lrr * r
-        R = 8 * viscosity * l / (np.pi * r ** 4)
-        C = 0.0  # to implement later
-        L = 0.0  # to implement later
 
-        # create name to match svzerodplus naming convention
-        name = "branch" + str(id) + "_seg0" 
+        length = (12.4 * r**1.1) if lrr is None else (lrr * r)
+        resistance = 8 * viscosity * length / (np.pi * r**4)
 
-        # generate a config file to run svzerodplus on the TreeVessel instances
-        vessel_params = {"vessel_id": id,  # mimic input json file
-                       "vessel_length": l,
-                       "vessel_name": name,
-                       "zero_d_element_type": "BloodVessel",
-                       "zero_d_element_values": {
-                           "R_poiseuille": R,
-                           "C": C,
-                           "L": L,
-                           "stenosis_coefficient": 0.0
-                       },
-                       "vessel_D": diameter,
-                       "generation": gen,
-                       "viscosity": viscosity,
-                       "density": density,
-                       }
+        vessel_name = f"branch{id}_seg0"
 
-        return cls(params=vessel_params, lrr=lrr)
+        params = {
+            "vessel_id": id,
+            "vessel_length": length,
+            "vessel_name": vessel_name,
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "R_poiseuille": resistance,
+                "C": 0.0,
+                "L": 0.0,
+                "stenosis_coefficient": 0.0
+            },
+            "vessel_D": diameter,
+            "generation": gen,
+            "viscosity": viscosity,
+            "density": density,
+        }
+
+        return cls(params=params, name=vessel_name, lrr=lrr, compliance_model=compliance_model)
 
 
     ####### beginning of property setters to dynamically update various class properties #######
@@ -252,8 +245,8 @@ class TreeVessel:
             ims_new = self.intramural_stress(P=P_new)
 
             # calculate change in diameter and thickness
-            dr = (k_tau_r * (wss_new - wss_h) + k_sig_r * (ims_new - ims_h)) * self.dt # * self.r 
-            dh = (-k_tau_h * (wss_new - wss_h) + k_sig_h * (ims_new - ims_h)) * self.dt # * self.h
+            dr = (self.k_tau_r * (wss_new - wss_h) + self.k_sig_r * (ims_new - ims_h)) * self.dt # * self.r
+            dh = (-self.k_tau_h * (wss_new - wss_h) + self.k_sig_h * (ims_new - ims_h)) * self.dt # * self.h
 
             # update radius and thickness
             self.r += dr
@@ -283,21 +276,6 @@ class TreeVessel:
             print(f"Q_old={np.mean(self.Q)}, Q_new={np.mean(Q_new)}, P_old={np.mean(self.P_in)}, P_new={np.mean(P_new)}")
             print(f"initial radius: {r_initial}, adapted radius: {self.r}. initial thickness: {h_initial}, adapted thickness: {self.h}")
             print(f"final dr: {dr}, final dh: {dh}\n")
-
-        # Approach 1: treat each individual vessel in isolation and adapt each vessel until it converges
-        # update wss and ims with each new radius
-        
-
-        # Approach 2: update the flow in the network with every timestep. treat the flow from the outlet of hte model but you redistribute based on how vessels are adapting
-
-        # Approach 3: rerun the 3D model every time
-
-        
-
-        # return dr, dh
-    
-
-
 
 
     def calc_zero_d_values(self, diameter, mu):
@@ -453,60 +431,6 @@ class TreeVessel:
         return viscosity
 
 
-    def z0(self, omega):
-        '''
-        calculate the characteristic impedance of the vessel
-        '''
-
-        ## computing z_L (impedance at the end of the vessel)
-        if self.collapsed:
-            # Z_L is terminal resistance
-            z_L = 0.0
-
-        else:
-            # z_0_left = self.left.z0
-            # z_0_right = self.right.z0
-            z_L = 1 / (self.left.z0(omega) ** -1 + self.right.z0(omega) ** -1)
-        
-
-        if omega == 0.0:
-            # if frequency=0, just equivalent resistance with no contribution from compliance
-            z_0 = self.R_eq 
-        else:
-            # compute impedance
-        
-            ## computing z_0 (impedance at the beginning of the vessel)
-            # first, compute Eh/r using empirical relationship from Olufsen et al. (1999)
-            Eh_r = self.k1 * np.exp(self.k2 * self.d / 2) + self.k3 # update with new h and r
-            # compute compliance using Eh/r relationship
-            self.C = 3 * self.a / 2 / Eh_r
-
-            # OTHER PARAMS FROM OLUFSEN MATLAB CODE
-            E = 3800
-            h = 0.12
-
-            # womersley number
-            wom2 = omega * self.density * self.d ** 2 / 4 / self.eta
-            wom = self.d / 2 * np.sqrt(omega * self.density / self.eta)
-            w_0 = np.sqrt(1j ** 3 * wom2)
-
-            # f_j, bessel function factor
-            f_j = 2 * jv(1, w_0) / w_0 / jv(0, w_0)
-
-            # wave propagation velocity
-            c = np.sqrt(self.a * (1 - f_j) / (self.density * self.C))
-
-            # scalar value for equation simplification
-            g = c * self.C
-
-            z_0 = (1j * g ** -1 * np.sin(omega * self.l / c) + z_L * np.cos(omega * self.l / c)) / \
-            (np.cos(omega * self.l / c) + 1j * g * z_L * np.sin(omega * self.l / c))
-
-        # if math.isnan(z_0):
-        #     raise Exception('z0 is nan')
-
-        return z_0
-
     # @jit(forceobj=True)
     def z0_olufsen(self, omega,
                    k1 = 19992500, # g/cm/s^2
@@ -545,7 +469,7 @@ class TreeVessel:
         
             ## computing z_0 (impedance at the beginning of the vessel)
             # first, compute Eh/r using empirical relationship from Olufsen et al. (1999)
-            Eh_r = k1 * np.exp(k2 * self.d / 2) + k3
+            Eh_r = self.compliance_model.evaluate(self.d / 2)
             # compute compliance using Eh/r relationship
             self.C = 3 * self.a / 2 / Eh_r # compliance / distensibility
             wom = self.d / 2 * np.sqrt(omega * self.density / self.eta) # womersley parameter
