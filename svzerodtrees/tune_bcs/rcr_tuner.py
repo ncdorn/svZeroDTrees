@@ -72,7 +72,7 @@ class RCRTuner(BoundaryConditionTuner):
         # --- Optimization ---
         initial_guess = [1000.0, 1e-5, 1000.0, 1e-5]  # Initial guess for R and C values
         bounds = Bounds([0.0, 1e-10, 0.0, 1e-10], [np.inf, 1.0, np.inf, 1.0])  # Bounds for R and C values
-        result = minimize(loss_fn, initial_guess, method='Nelder-Mead', bounds=bounds, options={'maxiter': 100}, constraints=constraints)
+        result = minimize(loss_fn, initial_guess, method='SLSQP', bounds=bounds, options={'maxiter': 100}, constraints=constraints)
 
         print(f"Optimized parameters: {result.x}")
         pa_config.simulate()
