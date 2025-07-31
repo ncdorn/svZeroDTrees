@@ -54,7 +54,8 @@ class RCRTuner(BoundaryConditionTuner):
             weights = np.array([1.5, 1, 1.2]) if self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p else np.array([1, 0, 1])
             pressure_loss = np.sum(np.dot(np.abs(np.array(pa_config.P_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p, weights))**2 * 100
             flowsplit_loss = ((pa_config.rpa_split - self.clinical_targets.rpa_split) / self.clinical_targets.rpa_split)**2 * 100
-            total_loss = pressure_loss + flowsplit_loss
+            capacitance_loss = self.capacitance_penalty(params[1], params[3])
+            total_loss = pressure_loss + flowsplit_loss + capacitance_loss
 
             with open('optimized_params.csv', 'w') as f:
                 f.write(f"R_LPA,C_LPA,R_RPA,C_RPA,Pressure_Loss,Flow_Split_Loss,Total_Loss\n")
@@ -72,10 +73,30 @@ class RCRTuner(BoundaryConditionTuner):
         # --- Optimization ---
         initial_guess = [1000.0, 1e-5, 1000.0, 1e-5]  # Initial guess for R and C values
         bounds = Bounds([0.0, 1e-10, 0.0, 1e-10], [np.inf, 1.0, np.inf, 1.0])  # Bounds for R and C values
-        result = minimize(loss_fn, initial_guess, method='trust-constr', bounds=bounds, options={'maxiter': 200}, constraints=constraints)
+        result = minimize(loss_fn, initial_guess, method='Nelder-Mead', bounds=bounds, options={'maxiter': 200}, constraints=constraints)
 
         print(f"Optimized parameters: {result.x}")
         pa_config.simulate()
         pa_config.plot_mpa()
 
         return result
+    
+    def capacitance_penalty(C_lpa: float, C_rpa: float, ratio_max: float = 2.0, penalty_scale: float = 1e3) -> float:
+        """
+        Penalizes imbalance between LPA and RPA capacitance values if either exceeds ratio_max of the other.
+
+        Args:
+            C_lpa (float): LPA capacitance
+            C_rpa (float): RPA capacitance
+            ratio_max (float): Maximum allowed ratio between C_lpa and C_rpa
+            penalty_scale (float): Scale of penalty applied
+
+        Returns:
+            float: Penalty to be added to the loss
+        """
+        ratio = C_lpa / C_rpa
+        if ratio > ratio_max:
+            return penalty_scale * (ratio - ratio_max)**2
+        elif ratio < 1 / ratio_max:
+            return penalty_scale * (1 / ratio - ratio_max)**2
+        return 0.0
