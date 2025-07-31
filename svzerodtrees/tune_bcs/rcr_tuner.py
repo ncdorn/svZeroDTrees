@@ -81,7 +81,7 @@ class RCRTuner(BoundaryConditionTuner):
 
         return result
     
-    def capacitance_penalty(C_lpa: float, C_rpa: float, ratio_max: float = 2.0, penalty_scale: float = 1e3) -> float:
+    def capacitance_penalty(self, C_lpa: float, C_rpa: float, ratio_max: float = 2.0, penalty_scale: float = 1e3) -> float:
         """
         Penalizes imbalance between LPA and RPA capacitance values if either exceeds ratio_max of the other.
 
