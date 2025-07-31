@@ -25,7 +25,7 @@ class SolverRunscript(SimulationFile):
               procs_per_node=24, 
               hours=6, 
               memory=16,
-              svfsiplus_path='/home/users/ndorn/svMP-procfix/svMP-build/svMultiPhysics-build/bin/svmultiphysics'):
+              svfsiplus_path='/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics'):
         '''
         write the solver runscript file'''
 
