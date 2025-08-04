@@ -110,8 +110,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
             rpa_compliance = compliance.OlufsenCompliance(k1=k1_r, k2=params[1], k3=k3_r)
         
         elif self.compliance_model.lower() == 'constant': # NEED TO MOVE THIS TO CONSTANT COMPLIANCE LOSS
-            lpa_compliance = compliance.ConstantCompliance(compliance=params[0])
-            rpa_compliance = compliance.ConstantCompliance(compliance=params[1])
+            lpa_compliance = compliance.ConstantCompliance(params[0])
+            rpa_compliance = compliance.ConstantCompliance(params[1])
 
         else:
             raise ValueError(f'Unknown compliance model: {self.compliance_model}')
