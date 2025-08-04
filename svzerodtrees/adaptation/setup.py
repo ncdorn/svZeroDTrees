@@ -20,8 +20,8 @@ def load_optimized_params(path: csv) -> TreeParameters:
 
     opt_params = pd.read_csv(path)
 
-    lpa_params = TreeParameters("lpa", opt_params[opt_params["pa"] == "lpa"])
-    rpa_params = TreeParameters("rpa", opt_params[opt_params["pa"] == "rpa"])
+    lpa_params = TreeParameters.from_row("lpa", opt_params[opt_params["pa"] == "lpa"])
+    rpa_params = TreeParameters.from_row("rpa", opt_params[opt_params["pa"] == "rpa"])
 
     return lpa_params, rpa_params
 

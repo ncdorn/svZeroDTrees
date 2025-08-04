@@ -26,6 +26,7 @@ class Simulation:
                      "location": "uniform",
                      "iterations": 100,
                  },
+                 compliance_model: str = 'constant',
                  zerod_config='zerod_config.json',
                  convert_to_cm=False,
                  optimized=False):
@@ -50,6 +51,7 @@ class Simulation:
         self.adapt_location = adaptation_config["location"]
         self.adaptation_iters = adaptation_config["iterations"]
         self.steady_dir = os.path.join(self.path, steady_dir)
+        self.compliance_model = compliance_model.lower()
 
         # simulation parameters
         self.n_tsteps = 2000
@@ -116,7 +118,14 @@ class Simulation:
                 # optimize_impedance_bcs(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, rescale_inflow=run_steady, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
                 
                 # NEW METHOD, in impedance_tuner.py
-                impedance_tuner = ImpedanceTuner(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, rescale_inflow=run_steady, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
+                impedance_tuner = ImpedanceTuner(reduced_config, 
+                                                 self.preop_dir.mesh_complete.mesh_surfaces_dir, 
+                                                 self.clinical_targets, 
+                                                 rescale_inflow=run_steady, 
+                                                 d_min=0.01, 
+                                                 convert_to_cm=self.convert_to_cm, 
+                                                 compliance_model=self.compliance_model,
+                                                 n_procs=24)
                 impedance_tuner.tune()
             # need to create coupling config and add to preop/postop directories
                 # build trees for LPA/RPA

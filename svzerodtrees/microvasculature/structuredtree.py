@@ -280,7 +280,7 @@ class StructuredTree:
         vessel_id = 0
         junc_id = 0
         # initialize the root vessel of the tree
-        self.root = TreeVessel.create_vessel(0, 0, initial_d, density=1.055, lrr=lrr)
+        self.root = TreeVessel.create_vessel(0, 0, initial_d, density=1.055, lrr=lrr, compliance_model=self.compliance_model)
         self.root.name = self.name
         # add inflow boundary condition
         self.root.params["boundary_conditions"] = {"inlet": "INFLOW"}

@@ -11,9 +11,10 @@ import matplotlib.pyplot as plt
 # svzerodtrees imports
 from ..io.blocks import Vessel, BoundaryCondition, SimParams
 from .clinical_targets import ClinicalTargets
-from ..microvasculature import StructuredTree
+from ..microvasculature import StructuredTree, TreeParameters
 from ..io.blocks import Junction
 from ..io.utils import get_branch_result
+from ..microvasculature.compliance import *
 class PAConfig():
     '''
     a class to handle the reduced pa config for boundary condition optimization
@@ -29,7 +30,8 @@ class PAConfig():
                  inflow: BoundaryCondition, 
                  wedge_p: float,
                  clinical_targets: ClinicalTargets,
-                 steady: bool):
+                 steady: bool,
+                 compliance_model: ComplianceModel = None):
         '''
         initialize the PAConfig object
         
@@ -62,6 +64,8 @@ class PAConfig():
 
         self.steady = steady
 
+        self.compliance_model = compliance_model
+
         self._config = {}
         self.junctions = {}
         self.vessel_map = {}
@@ -72,7 +76,7 @@ class PAConfig():
 
 
     @classmethod
-    def from_config_handler(cls, config_handler, clinical_targets: ClinicalTargets, steady: bool=True):
+    def from_config_handler(cls, config_handler, clinical_targets: ClinicalTargets, compliance_model: ComplianceModel = None, steady: bool=True):
         '''
         initialize from a general config handler
         '''
@@ -122,10 +126,11 @@ class PAConfig():
                    config_handler.bcs["INFLOW"], 
                    config_handler.bcs[list(config_handler.bcs.keys())[1]].values["Pd"],
                    clinical_targets,
-                   steady)
+                   steady,
+                   compliance_model)
 
     @classmethod
-    def from_pa_config(cls, pa_config_handler, clinical_targets: ClinicalTargets):
+    def from_pa_config(cls, pa_config_handler, clinical_targets: ClinicalTargets, compliance_model: ComplianceModel = None):
         '''
         initialize from a pre-existing pa config handler'''
 
@@ -138,7 +143,8 @@ class PAConfig():
                      pa_config_handler.bcs["INFLOW"],
                      clinical_targets.wedge_p,
                      clinical_targets,
-                     steady=False)
+                     steady=False,
+                     compliance_model=compliance_model)
 
 
     def to_json(self, output_file):
@@ -221,7 +227,7 @@ class PAConfig():
             }
 
 
-    def create_impedance_trees(self, lpa_d, rpa_d, d_min, tree_params, n_procs):
+    def create_impedance_trees(self, lpa_params: TreeParameters, rpa_params: TreeParameters, n_procs):
         '''
         create impedance trees for the LPA and RPA distal vessels
 
@@ -236,26 +242,40 @@ class PAConfig():
             "inlet": "INFLOW"
         }
 
-        self.lpa_tree = StructuredTree(name='lpa_tree', time=self.inflow.t, simparams=self.simparams)
+        self.lpa_tree = StructuredTree(name='lpa_tree', 
+                                       time=self.inflow.t, 
+                                       simparams=self.simparams, 
+                                       compliance_model=lpa_params.compliance_model)
 
-        self.lpa_tree.build_tree(initial_d=lpa_d, d_min=d_min[0], lrr=tree_params['lpa'][3], alpha=tree_params['lpa'][4], beta=tree_params['lpa'][5])
+        self.lpa_tree.build_tree(initial_d=lpa_params.diameter, 
+                                 d_min=lpa_params.d_min, 
+                                 lrr=lpa_params.lrr, 
+                                 alpha=lpa_params.alpha, 
+                                 beta=lpa_params.beta)
 
-        # compute the impedance in frequency domain
-        self.lpa_tree.compute_olufsen_impedance(k1=tree_params['lpa'][0], k2=tree_params['lpa'][1], k3=tree_params['lpa'][2], n_procs=n_procs)
+        # compute the impedance in frequency domain NEED TO SUB IN COMPLIANCE MODEL
+        self.lpa_tree.compute_olufsen_impedance(n_procs=n_procs)
 
         self.bcs["LPA_BC"] = self.lpa_tree.create_impedance_bc("LPA_BC", 0, self.clinical_targets.wedge_p * 1333.2)
 
-        self.rpa_tree = StructuredTree(name='rpa_tree', time=self.inflow.t, simparams=self.simparams)
+        self.rpa_tree = StructuredTree(name='rpa_tree', 
+                                       time=self.inflow.t, 
+                                       simparams=self.simparams,
+                                       compliance_model=rpa_params.compliance_model)
 
-        self.rpa_tree.build_tree(initial_d=rpa_d, d_min=d_min[1], lrr=tree_params['rpa'][3], alpha=tree_params['rpa'][4], beta=tree_params['rpa'][5])
+        self.rpa_tree.build_tree(initial_d=rpa_params.diameter, 
+                                 d_min=rpa_params.d_min, 
+                                 lrr=rpa_params.lrr, 
+                                 alpha=rpa_params.alpha, 
+                                 beta=rpa_params.beta)
 
         # compute the impedance in frequency domain
-        self.rpa_tree.compute_olufsen_impedance(k1=tree_params['rpa'][0], k2=tree_params['rpa'][1], k3=tree_params['rpa'][2], n_procs=n_procs)
+        self.rpa_tree.compute_olufsen_impedance(n_procs=n_procs)
 
         self.bcs["RPA_BC"] = self.rpa_tree.create_impedance_bc("RPA_BC", 1, self.clinical_targets.wedge_p * 1333.2)
 
 
-    def create_steady_trees(self, lpa_params, rpa_params):
+    def create_steady_trees(self, lpa_params: TreeParameters, rpa_params: TreeParameters):
         '''
         create trees for steady simulation where we just take the tree resistance
         '''
