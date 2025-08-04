@@ -74,7 +74,7 @@ class TreeParameters:
         '''
         row = {
             "pa": self.name,
-            "compliance model": self.compliance_model.__class__.__name__,
+            "compliance model": self.compliance_model.description(),
             "lrr": self.lrr,
             "diameter": self.diameter,
             "loss": loss,
@@ -90,7 +90,7 @@ class TreeParameters:
         elif isinstance(self.compliance_model, ConstantCompliance):
             row["Eh/r"] = self.compliance_model.compliance
         else:
-            raise ValueError(f"Unsupported compliance model: {self.compliance_model.__class__.__name__}")
+            raise ValueError(f"Unsupported compliance model: {self.compliance_model.description()}")
 
         return row
 
