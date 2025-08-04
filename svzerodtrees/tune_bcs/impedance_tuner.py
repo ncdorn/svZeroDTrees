@@ -64,7 +64,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
             min_loss = 1e5
             k2_guess = 0
             for k2 in [-10, -25, -50, -75]:
-                p_loss, _, loss = self.loss_fn([k2, k2, lpa_mean_dia, rpa_mean_dia, 10.0], grid_search=True)
+                p_loss, _, loss = self.loss_fn([k2, k2, lpa_mean_dia, rpa_mean_dia, 10.0], pa_config, grid_search=True)
                 if p_loss < min_loss:
                     min_loss = p_loss
                     k2_guess = k2
@@ -76,7 +76,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
             min_loss = 1e5
             compliance = 0
             for compliance in [3.3e4, 6.6e4, 1e5, 1.3e5]: # 25, 50, 75, 100 mmHg
-                p_loss, _, loss = self.loss_fn([compliance, compliance, lpa_mean_dia, rpa_mean_dia, 10.0], grid_search=True)
+                p_loss, _, loss = self.loss_fn([compliance, compliance, lpa_mean_dia, rpa_mean_dia, 10.0], pa_config, grid_search=True)
                 if p_loss < min_loss:
                     min_loss = p_loss
                     compliance_guess = compliance
@@ -84,7 +84,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
             initial_guess = [compliance_guess, compliance_guess, lpa_mean_dia, rpa_mean_dia, 10.0]
             bounds = Bounds([0.0, 0.0, 0.01, 0.01, 1.0], [np.inf]*5)
 
-        result = minimize(self.loss_fn, initial_guess, method='Nelder-Mead', bounds=bounds, options={'maxiter': 100})
+        result = minimize(self.loss_fn, initial_guess, args=(pa_config, False), method='Nelder-Mead', bounds=bounds, options={'maxiter': 100})
 
         print(f"Optimized impedance parameters: {result.x}")
         pa_config.simulate()
