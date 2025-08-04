@@ -88,7 +88,7 @@ class TreeParameters:
             row["k2"] = self.compliance_model.k2
             row["k3"] = self.compliance_model.k3
         elif isinstance(self.compliance_model, ConstantCompliance):
-            row["Eh/r"] = self.compliance_model.compliance
+            row["Eh/r"] = self.compliance_model.value
         else:
             raise ValueError(f"Unsupported compliance model: {self.compliance_model.description()}")
 
