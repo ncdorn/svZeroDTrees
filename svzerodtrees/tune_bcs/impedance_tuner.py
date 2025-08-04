@@ -32,7 +32,6 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self.is_pulmonary = is_pulmonary
         self.convert_to_cm = convert_to_cm
         self.log_file = log_file
-        self.loss_fn = self._select_loss_fn()
 
 
     def tune(self):
