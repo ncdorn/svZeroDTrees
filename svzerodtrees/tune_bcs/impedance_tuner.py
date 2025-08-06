@@ -109,11 +109,6 @@ class ImpedanceTuner(BoundaryConditionTuner):
         rpa_mean_dia = params[-2]
         lrr = params[-1]
 
-        # tree_params = {
-        #     'lpa': [k1_l, k2_l, k3_l, lrr, alpha, beta],
-        #     'rpa': [k1_r, k2_r, k3_r, lrr, alpha, beta]
-        # }
-
         if self.compliance_model.lower() == 'olufsen':
             k1_l = k1_r = 19992500.0
             k3_l = k3_r = 0.0

@@ -137,10 +137,10 @@ class Simulation:
         if self.bc_type == 'impedance':
             # construct trees
             opt_params = pd.read_csv(os.path.join(self.path, 'optimized_params.csv'))
-            tree_params = {
-                'lpa': [opt_params['k1'][opt_params.pa=='lpa'].values[0], opt_params['k2'][opt_params.pa=='lpa'].values[0], opt_params['k3'][opt_params.pa=='lpa'].values[0], opt_params['lrr'][opt_params.pa=='lpa'].values[0], opt_params['diameter'][opt_params.pa=='lpa'].values[0]],
-                'rpa': [opt_params['k1'][opt_params.pa=='rpa'].values[0], opt_params['k2'][opt_params.pa=='rpa'].values[0], opt_params['k3'][opt_params.pa=='rpa'].values[0], opt_params['lrr'][opt_params.pa=='rpa'].values[0], opt_params['diameter'][opt_params.pa=='rpa'].values[0]]
-            }
+            # tree_params = {
+            #     'lpa': [opt_params['k1'][opt_params.pa=='lpa'].values[0], opt_params['k2'][opt_params.pa=='lpa'].values[0], opt_params['k3'][opt_params.pa=='lpa'].values[0], opt_params['lrr'][opt_params.pa=='lpa'].values[0], opt_params['diameter'][opt_params.pa=='lpa'].values[0]],
+            #     'rpa': [opt_params['k1'][opt_params.pa=='rpa'].values[0], opt_params['k2'][opt_params.pa=='rpa'].values[0], opt_params['k3'][opt_params.pa=='rpa'].values[0], opt_params['lrr'][opt_params.pa=='rpa'].values[0], opt_params['diameter'][opt_params.pa=='rpa'].values[0]]
+            # }
 
             lpa_params = TreeParameters.from_row_new(opt_params[opt_params.pa == 'lpa'])
             rpa_params = TreeParameters.from_row_new(opt_params[opt_params.pa == 'rpa'])
@@ -158,9 +158,23 @@ class Simulation:
 
             # create the trees
             if self.bc_type == 'impedance':
-                construct_impedance_trees(self.zerod_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets.wedge_p, d_min=0.01, convert_to_cm=self.convert_to_cm, use_mean=True, specify_diameter=True, tree_params=tree_params) # NEED TO IMPLEMENT LPA/RPA PARAMS
+                construct_impedance_trees(self.zerod_config, 
+                                          self.preop_dir.mesh_complete.mesh_surfaces_dir, 
+                                          self.clinical_targets.wedge_p, 
+                                          lpa_params, 
+                                          rpa_params, 
+                                          d_min=0.01, 
+                                          convert_to_cm=self.convert_to_cm, 
+                                          use_mean=True, 
+                                          specify_diameter=True) # NEED TO IMPLEMENT LPA/RPA PARAMS
+                
             elif self.bc_type == 'rcr':
-                assign_rcr_bcs(self.zerod_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets.wedge_p, result.x, convert_to_cm=self.convert_to_cm, is_pulmonary=True)
+                assign_rcr_bcs(self.zerod_config, 
+                               self.preop_dir.mesh_complete.mesh_surfaces_dir, 
+                               self.clinical_targets.wedge_p, 
+                               result.x, 
+                               convert_to_cm=self.convert_to_cm, 
+                               is_pulmonary=True)
 
             # if is fontan, add the fontan inflows
             if self.is_fontan:
