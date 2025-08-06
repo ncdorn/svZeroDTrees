@@ -53,6 +53,31 @@ class TreeParameters:
         compliance_model = ComplianceModel(k1=k1, k2=k2, k3=k3) if k1 is not None else None
 
         return cls(pa, lrr, diameter, d_min, alpha, beta, compliance_model)
+    
+    @classmethod
+    def from_row_new(cls, row: pd.Series):
+        """
+        Create a TreeParameters instance from a DataFrame row with new compliance model.
+
+        :param row: DataFrame row containing tree parameters
+        """
+        name = row["pa"].values[0]
+        lrr = row["lrr"].values[0]
+        diameter = row["diameter"].values[0]
+        d_min = row["d_min"].values[0]
+        alpha = row["alpha"].values[0]
+        beta = row["beta"].values[0]
+
+        if row["compliance model"].values[0] == "ConstantCompliance":
+            compliance_model = ConstantCompliance(row["Eh/r"].values[0])
+        elif row["compliance model"].values[0] == "OlufsenCompliance":
+            compliance_model = OlufsenCompliance(k1=row["k1"].values[0],
+                                                 k2=row["k2"].values[0],
+                                                 k3=row["k3"].values[0])
+        else:
+            raise ValueError(f"Unknown compliance model: {row['compliance model'].values[0]}")
+
+        return cls(name, lrr, diameter, d_min, alpha, beta, compliance_model)
 
     def as_list(self) -> list:
         return [self.k1, self.k2, self.k3, self.lrr, self.alpha, self.beta]
@@ -63,6 +88,15 @@ class TreeParameters:
             f"k1={self.k1:.3g}, k2={self.k2:.3g}, k3={self.k3:.3g}, "
             f"lrr={self.lrr:.3g}, alpha={self.alpha}, beta={self.beta}, "
             f"diameter={self.diameter:.3f})"
+        )
+    
+    def summary(self):
+        """
+        return a string of important paramters for the tree
+        """
+
+        return (
+            f"{self.compliance_model.description()} with params {self.compliance_model.params}, diameter: {self.diameter:.3f}, d_min: {self.d_min:.3f}, l_rr: {self.lrr:.3f}, alpha: {self.alpha:.3f}, beta: {self.beta:.3f}"
         )
     
     def to_csv_row(self, loss, flow_split, p_mpa):

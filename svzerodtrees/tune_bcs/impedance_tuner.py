@@ -46,6 +46,17 @@ class ImpedanceTuner(BoundaryConditionTuner):
         lpa_mean_dia = np.mean([(area / np.pi)**0.5 * 2 for area in lpa_info.values()])
         print(f'RPA mean diameter: {rpa_mean_dia:.3f}, LPA mean diameter: {lpa_mean_dia:.3f}')
 
+
+        if lpa_mean_dia > 0.4:
+            print(f'LPA mean diameter: {lpa_mean_dia:.3f} too large, rescaling to 0.4 cm')
+            lpa_mean_dia = 0.4
+
+        if rpa_mean_dia > 0.4:
+            print(f'RPA mean diameter: {rpa_mean_dia:.3f} too large, rescaling to 0.4 cm')
+            rpa_mean_dia = 0.4
+        
+
+
         # --- Configuration Setup ---
         if len(self.config_handler.vessel_map.values()) == 5:
             pa_config = PAConfig.from_pa_config(self.config_handler, self.clinical_targets, self.compliance_model)

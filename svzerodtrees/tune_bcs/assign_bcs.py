@@ -2,7 +2,7 @@
 import numpy as np
 from ..io import *
 from ..utils import *
-from ..microvasculature import StructuredTree
+from ..microvasculature import StructuredTree, TreeParameters
 from ..simulation.threedutils import vtp_info
 from .utils import *
 
@@ -11,11 +11,11 @@ from .utils import *
 def construct_impedance_trees(config_handler, 
                               mesh_surfaces_path, 
                               wedge_pressure, 
-                              d_min = 0.1, 
+                              lpa_params: TreeParameters,
+                              rpa_params: TreeParameters,
+                              d_min, 
                               convert_to_cm=False, 
                               is_pulmonary=True, 
-                              tree_params={'lpa': [19992500, -35, 0.0, 50.0], 
-                                           'rpa': [19992500, -35, 0.0, 50.0]},
                               n_procs=24,
                               use_mean=False,
                               specify_diameter=False):
@@ -51,8 +51,8 @@ def construct_impedance_trees(config_handler,
     if use_mean:
         '''use the mean diameter of the cap surfaces to construct the lpa and rpa trees and use these trees for all outlets'''
         if specify_diameter:
-            k1_l, k2_l, k3_l, lrr_l, lpa_mean_dia = tree_params['lpa']
-            k1_r, k2_r, k3_r, lrr_r, rpa_mean_dia = tree_params['rpa']
+            lpa_mean_dia = lpa_params.diameter
+            rpa_mean_dia = rpa_params.diameter
 
         else:
             lpa_mean_dia = np.mean([(area / np.pi)**(1/2) * 2 for area in lpa_info.values()])
@@ -66,28 +66,24 @@ def construct_impedance_trees(config_handler,
             print(f'LPA std diameter: {lpa_std_dia}')
             print(f'RPA std diameter: {rpa_std_dia}')
 
-            k1_l, k2_l, k3_l, lrr_l = tree_params['lpa']
-
-            k1_r, k2_r, k3_r, lrr_r = tree_params['rpa']
 
         time_array = config_handler.inflows[next(iter(config_handler.inflows))].t
 
-        lpa_tree = StructuredTree(name='LPA', time=time_array, simparams=config_handler.simparams)
-        print(f'building LPA tree with lpa parameters: {tree_params["lpa"]}')
-        
+        lpa_tree = StructuredTree(name='LPA', time=time_array, simparams=config_handler.simparams, compliance_model=lpa_params.compliance_model)
+        print(f'building LPA tree with lpa parameters: {lpa_params.summary()}')
 
-        lpa_tree.build_tree(initial_d=lpa_mean_dia, d_min=d_min, lrr=lrr_l)
-        lpa_tree.compute_olufsen_impedance(k2=k2_l, k3=k3_l, n_procs=n_procs)
+        lpa_tree.build_tree(initial_d=lpa_mean_dia, d_min=lpa_params.d_min, lrr=lpa_params.lrr)
+        lpa_tree.compute_olufsen_impedance(n_procs=n_procs)
         lpa_tree.plot_stiffness(path='lpa_stiffness_plot.png')
 
         # add tree to config handler
         config_handler.tree_params[lpa_tree.name] = lpa_tree.to_dict()
 
-        rpa_tree = StructuredTree(name='RPA', time=time_array, simparams=config_handler.simparams)
-        print(f'building RPA tree with rpa parameters: {tree_params["rpa"]}')
+        rpa_tree = StructuredTree(name='RPA', time=time_array, simparams=config_handler.simparams, compliance_model=rpa_params.compliance_model)
+        print(f'building RPA tree with rpa parameters: {rpa_params.summary()}')
 
-        rpa_tree.build_tree(initial_d=rpa_mean_dia, d_min=d_min, lrr=lrr_r)
-        rpa_tree.compute_olufsen_impedance(k2=k2_r, k3=k3_r, n_procs=n_procs)
+        rpa_tree.build_tree(initial_d=rpa_mean_dia, d_min=rpa_params.d_min, lrr=rpa_params.lrr)
+        rpa_tree.compute_olufsen_impedance(n_procs=n_procs)
         rpa_tree.plot_stiffness(path='rpa_stiffness_plot.png')
 
         # add tree to config handler
@@ -110,20 +106,21 @@ def construct_impedance_trees(config_handler,
 
             print(f'generating tree {idx} of {len(cap_info)} for cap {cap_name}...')
             cap_d = (area / np.pi)**(1/2) * 2
-
-            tree = StructuredTree(name=cap_name, time=config_handler.bcs['INFLOW'].t, simparams=config_handler.simparams)
             if 'lpa' in cap_name.lower():
-                print(f'building tree with lpa parameters: {tree_params["lpa"]}')
-                k1, k2, k3, lrr = tree_params['lpa']
+                print(f'building tree with lpa parameters: {lpa_params.summary()}')
+                params = lpa_params
             elif 'rpa' in cap_name.lower():
-                print(f'building tree with rpa parameters: {tree_params["rpa"]}')
-                k1, k2, k3, lrr = tree_params['rpa']
+                print(f'building tree with rpa parameters: {rpa_params.summary()}')
+                params = rpa_params
             else:
                 raise ValueError('cap name not recognized')
-            tree.build_tree(initial_d=cap_d, d_min=d_min, lrr=lrr)
+            
+            tree = StructuredTree(name=cap_name, time=config_handler.bcs['INFLOW'].t, simparams=config_handler.simparams, compliance_model=params.compliance_model)
+            
+            tree.build_tree(initial_d=params.diameter, d_min=params.d_min, lrr=params.lrr)
 
             # compute the impedance in frequency domain
-            tree.compute_olufsen_impedance(k2=k2, k3=k3, n_procs=n_procs)
+            tree.compute_olufsen_impedance(n_procs=n_procs)
 
             # add tree to config handler
             config_handler.tree_params[tree.name] = tree.to_dict()
