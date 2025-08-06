@@ -914,7 +914,7 @@ class StructuredTree:
 
         # compute Eh/r for each d
         for i in range(len(d)):
-            Eh_r[i] = (self.k1 * np.exp(self.k2 * d[i] / 2) + self.k3) / 1333.2
+            Eh_r[i] = self.compliance_model.evaluate(d[i] / 2)
 
         if path is None:
             return d, Eh_r
