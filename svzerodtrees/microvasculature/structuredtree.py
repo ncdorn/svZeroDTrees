@@ -171,11 +171,11 @@ class StructuredTree:
             "initial_d": self.initial_d,
             "d_min": self.d_min,
             "lrr": self.lrr,
-            "k1": self.k1,
-            "k2": self.k2,
-            "k3": self.k3,
             "n_procs": self.n_procs,
-
+            "compliance": {
+                "model": self.compliance_model.description(),
+                "params": self.compliance_model.params,
+            }
         }
         return params
 
