@@ -57,7 +57,7 @@ class Simulation:
         # simulation parameters
         self.n_tsteps = 2000
         self.threed_sim_config = {
-                'n_tsteps': 10000,
+                'n_tsteps': 6000,
                 'dt': 0.0005,
                 'nodes': 3,
                 'procs_per_node': 24,
