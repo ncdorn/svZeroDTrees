@@ -23,6 +23,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
                  convert_to_cm=True,
                  log_file=None):
         super().__init__(config_handler, mesh_surfaces_path, clinical_targets)
+        self.initial_guess = initial_guess
         self.rescale_inflow = rescale_inflow
         self.n_procs = n_procs
         self.d_min = d_min
@@ -71,8 +72,9 @@ class ImpedanceTuner(BoundaryConditionTuner):
             pa_config.bcs['INFLOW'].Q = [q / scale for q in pa_config.bcs['INFLOW'].Q]
 
         
-        if initial_guess:
-            print(f'Using initial guess: {initial_guess}')
+        if self.initial_guess:
+            print(f'Using initial guess: {self.initial_guess}')
+            initial_guess = self.initial_guess
         else:
             # --- Grid Search for Initial K2 for olufsen compliance ---
             if self.compliance_model.lower() == 'olufsen':
