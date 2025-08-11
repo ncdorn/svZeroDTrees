@@ -101,7 +101,7 @@ class Simulation:
         ## TO BE IMPLEMENTED LATER
         return cls(**config)
     
-    def run_pipeline(self, run_steady=True, optimize_bcs=False, run_threed=True, adapt=True):
+    def run_pipeline(self, run_steady=True, continue_optimization=False, optimize_bcs=True, run_threed=True, adapt=True):
         '''
         run the entire pipeline
         '''
@@ -117,11 +117,20 @@ class Simulation:
             if self.bc_type == 'impedance':
                 # OLD METHOD, in tune_bcs.py
                 # optimize_impedance_bcs(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, rescale_inflow=run_steady, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
-                
+                if continue_optimization:
+                    print("Continuing optimization from previous run...")
+                    # load the previous optimization results
+                    opt_params = pd.read_csv(os.path.join(self.path, 'optimized_params.csv'))
+                    lpa_params = TreeParameters.from_row_new(opt_params[opt_params.pa == 'lpa'])
+                    rpa_params = TreeParameters.from_row_new(opt_params[opt_params.pa == 'rpa'])
+                    initial_guess = [lpa_params.compliance_model.value, rpa_params.compliance_model.value, lpa_params.diameter, rpa_params.diameter, lpa_params.lrr]
+                else:
+                    initial_guess = None
                 # NEW METHOD, in impedance_tuner.py
                 impedance_tuner = ImpedanceTuner(reduced_config, 
                                                  self.preop_dir.mesh_complete.mesh_surfaces_dir, 
                                                  self.clinical_targets, 
+                                                 initial_guess=initial_guess,
                                                  rescale_inflow=run_steady, 
                                                  d_min=0.01, 
                                                  convert_to_cm=self.convert_to_cm, 

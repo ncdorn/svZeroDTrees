@@ -11,6 +11,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
                  config_handler, 
                  mesh_surfaces_path, 
                  clinical_targets,
+                 initial_guess=None,
                  rescale_inflow=True, 
                  n_procs=24, 
                  d_min=0.01, 
@@ -69,31 +70,34 @@ class ImpedanceTuner(BoundaryConditionTuner):
             scale = ((len(lpa_info.values()) + len(rpa_info.values())) // 2)
             pa_config.bcs['INFLOW'].Q = [q / scale for q in pa_config.bcs['INFLOW'].Q]
 
-
-        # --- Grid Search for Initial K2 for olufsen compliance ---
-        if self.compliance_model.lower() == 'olufsen':
-            min_loss = 1e5
-            k2_guess = 0
-            for k2 in [-10, -25, -50, -75]:
-                p_loss, _, loss = self.loss_fn([k2, k2, lpa_mean_dia, rpa_mean_dia, 10.0], pa_config, grid_search=True)
-                if p_loss < min_loss:
-                    min_loss = p_loss
-                    k2_guess = k2
-            
-            initial_guess = [k2_guess, k2_guess, lpa_mean_dia, rpa_mean_dia, 10.0]
-            bounds = Bounds([-np.inf, -np.inf, 0.01, 0.01, 1.0], [np.inf]*5)
         
-        elif self.compliance_model.lower() == 'constant':
-            min_loss = 1e5
-            compliance = 0
-            for compliance in [3.3e4, 6.6e4, 1e5, 1.3e5]: # 25, 50, 75, 100 mmHg
-                p_loss, _, loss = self.loss_fn([compliance, compliance, lpa_mean_dia, rpa_mean_dia, 10.0], pa_config, grid_search=True)
-                if p_loss < min_loss:
-                    min_loss = p_loss
-                    compliance_guess = compliance
+        if initial_guess:
+            print(f'Using initial guess: {initial_guess}')
+        else:
+            # --- Grid Search for Initial K2 for olufsen compliance ---
+            if self.compliance_model.lower() == 'olufsen':
+                min_loss = 1e5
+                k2_guess = 0
+                for k2 in [-10, -25, -50, -75]:
+                    p_loss, _, loss = self.loss_fn([k2, k2, lpa_mean_dia, rpa_mean_dia, 10.0], pa_config, grid_search=True)
+                    if p_loss < min_loss:
+                        min_loss = p_loss
+                        k2_guess = k2
+                
+                initial_guess = [k2_guess, k2_guess, lpa_mean_dia, rpa_mean_dia, 10.0]
+                bounds = Bounds([-np.inf, -np.inf, 0.01, 0.01, 1.0], [np.inf]*5)
+            
+            elif self.compliance_model.lower() == 'constant':
+                min_loss = 1e5
+                compliance = 0
+                for compliance in [3.3e4, 6.6e4, 1e5, 1.3e5]: # 25, 50, 75, 100 mmHg
+                    p_loss, _, loss = self.loss_fn([compliance, compliance, lpa_mean_dia, rpa_mean_dia, 10.0], pa_config, grid_search=True)
+                    if p_loss < min_loss:
+                        min_loss = p_loss
+                        compliance_guess = compliance
 
-            initial_guess = [compliance_guess, compliance_guess, lpa_mean_dia, rpa_mean_dia, 10.0]
-            bounds = Bounds([0.0, 0.0, 0.01, 0.01, 1.0], [np.inf]*5)
+                initial_guess = [compliance_guess, compliance_guess, lpa_mean_dia, rpa_mean_dia, 10.0]
+                bounds = Bounds([0.0, 0.0, 0.01, 0.01, 1.0], [np.inf]*5)
 
         result = minimize(self.loss_fn, initial_guess, args=(pa_config, False), method='Nelder-Mead', bounds=bounds, options={'maxiter': 100})
 
