@@ -141,15 +141,18 @@ class ImpedanceTuner(BoundaryConditionTuner):
         try:
             pa_config.create_impedance_trees(lpa_params, rpa_params, self.n_procs)
             pa_config.to_json(f'pa_config_test_tuning.json')
-            pa_config.simulate()
+            # check for NaNs
+            if np.isnan(pa_config.bcs['LPA_BC'].Z[0]) or np.isnan(pa_config.bcs['RPA_BC'].Z[0]):
+                print("NaN detected in boundary conditions, returning high loss")
+                return (5e5, 5e5, 1e6) if grid_search else 1e6
+            else:
+                pa_config.simulate()
             print(f'pa config SIMULATED, rpa split: {pa_config.rpa_split}, p_mpa = {pa_config.P_mpa}\n params: {params}')
             pa_config.plot_mpa(path='figures/pa_config_plot.png')
         except:
             return (5e5, 5e5, 1e6) if grid_search else 1e6
 
-        # check for NaNs
-        if np.isnan(pa_config.bcs['LPA_BC'].Z[0]) or np.isnan(pa_config.bcs['RPA_BC'].Z[0]):
-            return (5e5, 5e5, 1e6) if grid_search else 1e6
+        
 
         weights = np.array([1.5, 1, 1.2]) if self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p else np.array([1, 0, 1])
         pressure_loss = np.sum(np.dot(np.abs(np.array(pa_config.P_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p, weights))**2 * 100
