@@ -73,8 +73,12 @@ class ImpedanceTuner(BoundaryConditionTuner):
 
         
         if self.initial_guess:
+            # only supports constant compliance
+            if self.compliance_model.lower() != 'constant':
+                raise ValueError(f'Initial guess is only supported for constant compliance, got {self.compliance_model}')
             print(f'Using initial guess: {self.initial_guess}')
             initial_guess = self.initial_guess
+            bounds = Bounds([0.0, 0.0, 0.01, 0.01, 1.0], [np.inf]*5)
         else:
             # --- Grid Search for Initial K2 for olufsen compliance ---
             if self.compliance_model.lower() == 'olufsen':
