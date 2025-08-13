@@ -358,7 +358,7 @@ class SimulationDirectory:
         self.svzerod_3Dcoupling, coupling_blocks = self.svzerod_3Dcoupling.generate_threed_coupler(self.path, inflow_from_0d=True, mesh_complete=self.mesh_complete)
 
         sim_config = {
-            'n_tsteps': 100,
+            'n_tsteps': 200,
             'dt': 0.0005,
             'nodes': 1,
             'procs_per_node': 24,
@@ -709,7 +709,7 @@ class SimulationDirectory:
             rpa_split = np.trapz(rpa_flow, rpa_result.time) / np.trapz(flow, mpa_result.time)
 
             # compute loss
-            lamb = 1e-8  # small constant to penalize large resistances
+            lamb = 1e-10  # small constant to penalize large resistances
             loss = (abs((mean_pressure - targets['mean'])/targets['mean']) ** 2 +
                     abs((sys_pressure - targets['sys'])/targets['sys']) ** 2 +
                     abs((dia_pressure - targets['dia'])/targets['dia']) ** 2 +
