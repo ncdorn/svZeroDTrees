@@ -709,15 +709,13 @@ class SimulationDirectory:
             rpa_split = np.trapz(rpa_flow, rpa_result.time) / np.trapz(flow, mpa_result.time)
 
             # compute loss
+            lamb = 0.00001  # small constant to penalize large resistances
             loss = (abs((mean_pressure - targets['mean'])/targets['mean']) ** 2 +
                     abs((sys_pressure - targets['sys'])/targets['sys']) ** 2 +
                     abs((dia_pressure - targets['dia'])/targets['dia']) ** 2 +
                     abs((rpa_split - targets['rpa_split'])/targets['rpa_split'] * 1) ** 2 + 
-                    nonlinear_resistance[0] * 0.00001 +  # penalize large resistances
-                    nonlinear_resistance[1] * 0.00001 + 
-                    (1 / (nonlinear_resistance[0] + 1e-6)) +  # penalize small resistances
-                    (1 / (nonlinear_resistance[1] + 1e-6))
-                    )
+                    lamb * (nonlinear_resistance[0]**2 +  # L2 regularization
+                    nonlinear_resistance[1]**2))
             print(f"pressures: {int(sys_pressure * 100) / 100} / {int(dia_pressure * 100) / 100}/{int(mean_pressure * 100) / 100} mmHg, target: {int(targets['sys'] * 100) / 100}/{int(targets['dia'] * 100) / 100}/{int(targets['mean'] * 100) / 100} mmHg")
             print(f"RPA split: {rpa_split}, target: {targets['rpa_split']}")
             print(f"Current nonlinear resistances: LPA = {nonlinear_resistance[0]}, RPA = {nonlinear_resistance[1]}, Loss = {loss}")

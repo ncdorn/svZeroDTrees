@@ -171,7 +171,7 @@ class MeshComplete(SimulationFile):
         '''
         convert surface names from cap_l_pa_n_x.vtp (Derrick's naming convention) to cap_lpa_n.vtp
         '''
-
+ 
         for filename in os.listdir(self.mesh_surfaces_dir):
             if '_pa_' in filename:
                 tag, vtp = filename.split('.')
