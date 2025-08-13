@@ -709,7 +709,7 @@ class SimulationDirectory:
             rpa_split = np.trapz(rpa_flow, rpa_result.time) / np.trapz(flow, mpa_result.time)
 
             # compute loss
-            lamb = 0.00001  # small constant to penalize large resistances
+            lamb = 1e-8  # small constant to penalize large resistances
             loss = (abs((mean_pressure - targets['mean'])/targets['mean']) ** 2 +
                     abs((sys_pressure - targets['sys'])/targets['sys']) ** 2 +
                     abs((dia_pressure - targets['dia'])/targets['dia']) ** 2 +
