@@ -657,7 +657,7 @@ class SimulationDirectory:
 
         config.to_json(path)
  
-    def optimize_nonlinear_resistance(self, tuned_pa_config, initial_guess=[500, 500]):
+    def optimize_nonlinear_resistance(self, tuned_pa_config, initial_guess=[500, 500], tuning_iter=1):
         '''
         Get the nonlinear resistance coefficients for the LPA and RPA by optimizing against the pressure drop in the unsteady result
         This function assumes that the simulation has been run and the results are available in svZeroD_data
@@ -734,11 +734,11 @@ class SimulationDirectory:
         print(f"Optimized RPA nonlinear resistance: {optimized_resistances[1]}")
 
         # save the config with half of the tuned resistances
-        print('saving config with 0.5 * the tuned resistances...')
-        nonlinear_config.vessel_map[1].stenosis_coefficient = optimized_resistances[0] / 4
-        nonlinear_config.vessel_map[2].stenosis_coefficient = optimized_resistances[0] / 4
-        nonlinear_config.vessel_map[3].stenosis_coefficient = optimized_resistances[1] / 4
-        nonlinear_config.vessel_map[4].stenosis_coefficient = optimized_resistances[1] / 4
+        print('saving config with 0.25 * the tuned resistances...')
+        nonlinear_config.vessel_map[1].stenosis_coefficient = optimized_resistances[0] / 8
+        nonlinear_config.vessel_map[2].stenosis_coefficient = optimized_resistances[0] / 8
+        nonlinear_config.vessel_map[3].stenosis_coefficient = optimized_resistances[1] / 8
+        nonlinear_config.vessel_map[4].stenosis_coefficient = optimized_resistances[1] / 8
 
         # rescale inflow back to 500 tsteps
         nonlinear_config.inflows['INFLOW'].rescale(tsteps=500)
