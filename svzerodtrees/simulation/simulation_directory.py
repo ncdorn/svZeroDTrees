@@ -733,12 +733,17 @@ class SimulationDirectory:
         print(f"Optimized LPA nonlinear resistance: {optimized_resistances[0]}")
         print(f"Optimized RPA nonlinear resistance: {optimized_resistances[1]}")
 
-        # save the config with half of the tuned resistances
-        print('saving config with 0.25 * the tuned resistances...')
-        nonlinear_config.vessel_map[1].stenosis_coefficient = optimized_resistances[0] / 8
-        nonlinear_config.vessel_map[2].stenosis_coefficient = optimized_resistances[0] / 8
-        nonlinear_config.vessel_map[3].stenosis_coefficient = optimized_resistances[1] / 8
-        nonlinear_config.vessel_map[4].stenosis_coefficient = optimized_resistances[1] / 8
+        if tuning_iter > 1:
+            print(f"Saving config with tuned resistances for tuning iteration {tuning_iter}...")
+            scaling_factor = 2
+        else:
+            # save the config with a quarter of the tuned resistances
+            print('saving config with 0.25 * the tuned resistances...')
+            scaling_factor = 8
+        nonlinear_config.vessel_map[1].stenosis_coefficient = optimized_resistances[0] / scaling_factor
+        nonlinear_config.vessel_map[2].stenosis_coefficient = optimized_resistances[0] / scaling_factor
+        nonlinear_config.vessel_map[3].stenosis_coefficient = optimized_resistances[1] / scaling_factor
+        nonlinear_config.vessel_map[4].stenosis_coefficient = optimized_resistances[1] / scaling_factor
 
         # rescale inflow back to 500 tsteps
         nonlinear_config.inflows['INFLOW'].rescale(tsteps=500)
