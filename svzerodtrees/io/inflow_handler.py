@@ -697,6 +697,13 @@ class Inflow():
         inflow_df.to_csv(path, index=False, sep='\t')
         
         print(f'Inflow saved to {path}')
+    
+    def cardiac_output(self):
+        '''
+        return the cardiac output of the flow waveform'''
+
+        return trapz(self.period()[0], self.period()[1])
+
         
 
 

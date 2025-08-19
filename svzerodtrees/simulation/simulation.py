@@ -188,6 +188,9 @@ class Simulation:
             # if is fontan, add the fontan inflows
             if self.is_fontan:
                 self.make_fontan_inflows()
+            else:
+                # ensure inflow is the currect magnitude
+                self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(cardiac_output=self.clinical_targets.q)
 
             impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(self.preop_dir.path, mesh_complete=self.preop_dir.mesh_complete)
 
