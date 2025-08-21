@@ -169,7 +169,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
         weights = np.array([1.5, 1, 1.2]) if self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p else np.array([1, 0, 1])
         pressure_loss = np.sum(np.dot(np.abs(np.array(pa_config.P_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p, weights))**2 * 100
         flowsplit_loss = ((pa_config.rpa_split - self.clinical_targets.rpa_split) / self.clinical_targets.rpa_split)**2 * 100
-        L2_reg = lamb * (lpa_compliance ** 2 + rpa_compliance ** 2)
+        L2_reg = lamb * (params[0] ** 2 + params[1] ** 2)
         total_loss = pressure_loss + flowsplit_loss + L2_reg
 
         output_params_rows = [
