@@ -124,10 +124,12 @@ class ImpedanceTuner(BoundaryConditionTuner):
             k3_l = k3_r = 0.0
             lpa_compliance = compliance.OlufsenCompliance(k1=k1_l, k2=params[0], k3=k3_l)
             rpa_compliance = compliance.OlufsenCompliance(k1=k1_r, k2=params[1], k3=k3_r)
+            lamb = 1e-3 # L2 regularization weight
         
-        elif self.compliance_model.lower() == 'constant': # NEED TO MOVE THIS TO CONSTANT COMPLIANCE LOSS
+        elif self.compliance_model.lower() == 'constant':
             lpa_compliance = compliance.ConstantCompliance(params[0])
             rpa_compliance = compliance.ConstantCompliance(params[1])
+            lamb = 1e-5 # L2 regularization weight
 
         else:
             raise ValueError(f'Unknown compliance model: {self.compliance_model}')
@@ -167,7 +169,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
         weights = np.array([1.5, 1, 1.2]) if self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p else np.array([1, 0, 1])
         pressure_loss = np.sum(np.dot(np.abs(np.array(pa_config.P_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p, weights))**2 * 100
         flowsplit_loss = ((pa_config.rpa_split - self.clinical_targets.rpa_split) / self.clinical_targets.rpa_split)**2 * 100
-        total_loss = pressure_loss + flowsplit_loss
+        L2_reg = lamb * (lpa_compliance ** 2 + rpa_compliance ** 2)
+        total_loss = pressure_loss + flowsplit_loss + L2_reg
 
         output_params_rows = [
             lpa_params.to_csv_row(loss=total_loss, flow_split=1 - pa_config.rpa_split, p_mpa=pa_config.P_mpa),
