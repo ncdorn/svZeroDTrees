@@ -74,12 +74,14 @@ class Simulation:
 
         if inflow_path is not None:
             if os.path.exists(inflow_path):
+                self.inflow_from_file = True
                 print(f'loading inflow from {inflow_path}...')
                 self.inflow = Inflow.periodic(path=inflow_path)
                 self.inflow.rescale(tsteps=self.n_tsteps)
             else:
                 raise FileNotFoundError(f'Inflow file {inflow_path} not found.')
         else:
+            self.inflow_from_file = False
             # use a generic inflow profile
             if self.clinical_targets.rvot_flow is not None:
                 print("Using fontan inflow profile for simulation")
@@ -199,7 +201,8 @@ class Simulation:
                 self.make_fontan_inflows()
             else:
                 # ensure inflow is the currect magnitude
-                self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(cardiac_output=self.clinical_targets.q)
+                if not self.inflow_from_file:
+                    self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(cardiac_output=self.clinical_targets.q)
 
             impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(self.preop_dir.path, mesh_complete=self.preop_dir.mesh_complete)
 
