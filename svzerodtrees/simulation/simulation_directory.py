@@ -96,10 +96,12 @@ class SimulationDirectory:
         # check for mesh complete
 
         if os.path.exists(os.path.join(path, mesh_complete)):
-            mesh_complete = MeshComplete(mesh_complete)
+            # relative path is specified
+            mesh_complete = MeshComplete(os.path.join(path, mesh_complete))
             mesh_complete.rename_vtps()
             print('mesh-complete found and loaded')
         elif os.path.exists(mesh_complete):
+            # absolute path is specified
             mesh_complete = MeshComplete(mesh_complete)
             mesh_complete.rename_vtps()
             print('mesh-complete found and loaded')
