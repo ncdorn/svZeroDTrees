@@ -75,7 +75,7 @@ class Simulation:
         if inflow_path is not None:
             if os.path.exists(inflow_path):
                 print(f'loading inflow from {inflow_path}...')
-                self.inflow = Inflow.from_csv(inflow_path)
+                self.inflow = Inflow.periodic(path=inflow_path)
                 self.inflow.rescale(tsteps=self.n_tsteps)
             else:
                 raise FileNotFoundError(f'Inflow file {inflow_path} not found.')
