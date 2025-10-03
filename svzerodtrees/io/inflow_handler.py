@@ -606,16 +606,18 @@ class Inflow():
             self.q = [q * scale_factor for q in self.q]
 
         if tsteps is not None:
+
+            # cubic spline interpolation
+            interp_function = scipy.interpolate.interp1d(self.t, self.q, kind='cubic')
+
             self.n_tsteps = tsteps
             if t_per is not None:
                 self.t = np.linspace(0, t_per, tsteps)
             else:
                 self.t = np.linspace(0, self.t[-1], tsteps)
-                
-            # cubic spline interpolation
-            interp_function = scipy.interpolate.interp1d(self.t, self.q, kind='cubic')
+
             self.q = interp_function(self.t)
-            self.q = scipy.signal.resample(self.q, tsteps)
+            # self.q = scipy.signal.resample(self.q, tsteps)
 
         if t_per is not None:
             self.t_per = t_per
