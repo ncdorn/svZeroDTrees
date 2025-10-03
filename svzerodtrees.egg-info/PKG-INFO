@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-Metadata-Version: 2.2
-=======
 Metadata-Version: 2.4
->>>>>>> df708ea10367d68545fcd9a78cf75f6bd43561a2
 Name: svzerodtrees
 Version: 0.1.0
 Summary: Structured tree boundary condition modeling for svZeroD cardiovascular simulations

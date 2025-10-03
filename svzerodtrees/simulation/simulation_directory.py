@@ -94,11 +94,15 @@ class SimulationDirectory:
             zerod_config = None
 
         # check for mesh complete
-        mesh_complete = os.path.join(path, mesh_complete)
-        if os.path.exists(mesh_complete):
-            print('mesh-complete found')
+
+        if os.path.exists(os.path.join(path, mesh_complete)):
             mesh_complete = MeshComplete(mesh_complete)
             mesh_complete.rename_vtps()
+            print('mesh-complete found and loaded')
+        elif os.path.exists(mesh_complete):
+            mesh_complete = MeshComplete(mesh_complete)
+            mesh_complete.rename_vtps()
+            print('mesh-complete found and loaded')
         else:
             print('mesh-complete not found')
             mesh_complete = None
@@ -367,7 +371,82 @@ class SimulationDirectory:
         }
 
         self.write_files(simname='Steady Simulation', user_input=False, sim_config=sim_config)
-    
+
+    def _compute_pressure_drops(self, get_mean=False):
+        lpa_flow, rpa_flow = self.flow_split(get_mean=False)
+
+        # get the MPA mean, systolic, diastolic pressure
+        time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
+        time = time[time > time.max() - 1.0]
+        pressure = pressure[time.index]
+        sys_p = np.max(pressure)
+        dia_p = pressure.iloc[0]
+        mean_p = np.mean(pressure)
+
+        lpa_outlet_pressures = {'sys': [], 'dia': [], 'mean': []}
+        rpa_outlet_pressures = {'sys': [], 'dia': [], 'mean': []}
+        for block in self.svzerod_3Dcoupling.coupling_blocks.values():
+            if 'lpa' in block.surface.lower():
+                time, flow, pressure = self.svzerod_data.get_result(block)
+                time = time[time > time.max() - 1.0]
+                pressure = pressure[time.index]
+                lpa_outlet_pressures['sys'].append(np.max(pressure))
+                lpa_outlet_pressures['dia'].append(pressure.iloc[0])
+                lpa_outlet_pressures['mean'].append(np.mean(pressure))
+            if 'rpa' in block.surface.lower():
+                time, flow, pressure = self.svzerod_data.get_result(block)
+                time = time[time > time.max() - 1.0]
+                pressure = pressure[time.index]
+                rpa_outlet_pressures['sys'].append(np.max(pressure))
+                rpa_outlet_pressures['dia'].append(pressure.iloc[0])
+                rpa_outlet_pressures['mean'].append(np.mean(pressure))
+
+        lpa_pressure_drops = {
+            'sys': sys_p - np.mean(lpa_outlet_pressures['sys']),
+            'dia': dia_p - np.mean(lpa_outlet_pressures['dia']),
+            'mean': mean_p - np.mean(lpa_outlet_pressures['mean'])
+        }
+        rpa_pressure_drops = {
+            'sys': sys_p - np.mean(rpa_outlet_pressures['sys']),
+            'dia': dia_p - np.mean(rpa_outlet_pressures['dia']),
+            'mean': mean_p - np.mean(rpa_outlet_pressures['mean'])
+        }
+
+        Q_sys_lpa = sum(lpa_flow['sys'].values())
+        Q_dia_lpa = sum(lpa_flow['dia'].values())
+        Q_mean_lpa = sum(lpa_flow['mean'].values())
+        Q_sys_rpa = sum(rpa_flow['sys'].values())
+        Q_dia_rpa = sum(rpa_flow['dia'].values())
+        Q_mean_rpa = sum(rpa_flow['mean'].values())
+
+        lpa_resistance = {
+            'sys': lpa_pressure_drops['sys'] / Q_sys_lpa,
+            'dia': lpa_pressure_drops['dia'] / Q_dia_lpa,
+            'mean': lpa_pressure_drops['mean'] / Q_mean_lpa
+        }
+        rpa_resistance = {
+            'sys': rpa_pressure_drops['sys'] / Q_sys_rpa,
+            'dia': rpa_pressure_drops['dia'] / Q_dia_rpa,
+            'mean': rpa_pressure_drops['mean'] / Q_mean_rpa
+        }
+
+        print(f'\nLPA pressure drop: {lpa_pressure_drops["sys"] / 1333.2} mmHg, {lpa_pressure_drops["dia"] / 1333.2} mmHg, {lpa_pressure_drops["mean"] / 1333.2} mmHg')
+        print(f'RPA pressure drop: {rpa_pressure_drops["sys"] / 1333.2} mmHg, {rpa_pressure_drops["dia"] / 1333.2} mmHg, {rpa_pressure_drops["mean"] / 1333.2} mmHg')
+
+        print(f'\nLPA resistance:  sys {lpa_resistance["sys"]} dyn/cm5/s, dia {lpa_resistance["dia"]} dyn/cm5/s, mean {lpa_resistance["mean"]} dyn/cm5/s')
+        print(f'RPA resistance: sys {rpa_resistance["sys"]} dyn/cm5/s, dia {rpa_resistance["dia"]} dyn/cm5/s, mean {rpa_resistance["mean"]} dyn/cm5/s')
+
+        print(f'\nLPA PVR: {lpa_resistance["mean"] / 80.0} Wood units')
+        print(f'RPA PVR: {rpa_resistance["mean"] / 80.0} Wood units')
+
+        print(f'\nLPA flow: {Q_sys_lpa} dyn/cm5/s, {Q_dia_lpa} dyn/cm5/s, {Q_mean_lpa} dyn/cm5/s')
+        print(f'RPA flow: {Q_sys_rpa} dyn/cm5/s, {Q_dia_rpa} dyn/cm5/s, {Q_mean_rpa} dyn/cm5/s')
+
+        if get_mean:
+            return mean_p, Q_mean_lpa, Q_mean_rpa, lpa_resistance['mean'], rpa_resistance['mean']
+        else:
+            return Q_sys_lpa, Q_dia_lpa, Q_mean_lpa, Q_sys_rpa, Q_dia_rpa, Q_mean_rpa, lpa_resistance, rpa_resistance
+
     def compute_pressure_drop(self, steady=True):
         '''
         compute the pressure drop across the LPA and RPA based on the simulation results'''
@@ -404,75 +483,8 @@ class SimulationDirectory:
         
         else:
             print("computing systolic/diastolic/mean pressure drop...")
-            lpa_flow, rpa_flow = self.flow_split(get_mean=False)
+            Q_sys_lpa, Q_dia_lpa, Q_mean_lpa, Q_sys_rpa, Q_dia_rpa, Q_mean_rpa, lpa_resistance, rpa_resistance = self._compute_pressure_drops(get_mean=False)
 
-            # get the MPA mean, systolic, diastolic pressure
-            time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
-            time = time[time > time.max() - 1.0]
-            pressure = pressure[time.index]
-            sys_p = np.max(pressure)
-            dia_p = pressure.iloc[0]
-            mean_p = np.mean(pressure)
-
-            lpa_outlet_pressures = {'sys': [], 'dia': [], 'mean': []}
-            rpa_outlet_pressures = {'sys': [], 'dia': [], 'mean': []}
-            for block in self.svzerod_3Dcoupling.coupling_blocks.values():
-                if 'lpa' in block.surface.lower():
-                    time, flow, pressure = self.svzerod_data.get_result(block)
-                    time = time[time > time.max() - 1.0]
-                    pressure = pressure[time.index]
-                    lpa_outlet_pressures['sys'].append(np.max(pressure))
-                    lpa_outlet_pressures['dia'].append(pressure.iloc[0])
-                    lpa_outlet_pressures['mean'].append(np.mean(pressure))
-                if 'rpa' in block.surface.lower():
-                    time, flow, pressure = self.svzerod_data.get_result(block)
-                    time = time[time > time.max() - 1.0]
-                    pressure = pressure[time.index]
-                    rpa_outlet_pressures['sys'].append(np.max(pressure))
-                    rpa_outlet_pressures['dia'].append(pressure.iloc[0])
-                    rpa_outlet_pressures['mean'].append(np.mean(pressure))
-
-            lpa_pressure_drops = {
-                'sys': sys_p - np.mean(lpa_outlet_pressures['sys']),
-                'dia': dia_p - np.mean(lpa_outlet_pressures['dia']),
-                'mean': mean_p - np.mean(lpa_outlet_pressures['mean'])
-            }
-            rpa_pressure_drops = {
-                'sys': sys_p - np.mean(rpa_outlet_pressures['sys']),
-                'dia': dia_p - np.mean(rpa_outlet_pressures['dia']),
-                'mean': mean_p - np.mean(rpa_outlet_pressures['mean'])
-            }
-
-            Q_sys_lpa = sum(lpa_flow['sys'].values())
-            Q_dia_lpa = sum(lpa_flow['dia'].values())
-            Q_mean_lpa = sum(lpa_flow['mean'].values())
-            Q_sys_rpa = sum(rpa_flow['sys'].values())
-            Q_dia_rpa = sum(rpa_flow['dia'].values())
-            Q_mean_rpa = sum(rpa_flow['mean'].values())
-
-            lpa_resistance = {
-                'sys': lpa_pressure_drops['sys'] / Q_sys_lpa,
-                'dia': lpa_pressure_drops['dia'] / Q_dia_lpa,
-                'mean': lpa_pressure_drops['mean'] / Q_mean_lpa
-            }
-            rpa_resistance = {
-                'sys': rpa_pressure_drops['sys'] / Q_sys_rpa,
-                'dia': rpa_pressure_drops['dia'] / Q_dia_rpa,
-                'mean': rpa_pressure_drops['mean'] / Q_mean_rpa
-            }
-
-            print(f'\nLPA pressure drop: {lpa_pressure_drops["sys"] / 1333.2} mmHg, {lpa_pressure_drops["dia"] / 1333.2} mmHg, {lpa_pressure_drops["mean"] / 1333.2} mmHg')
-            print(f'RPA pressure drop: {rpa_pressure_drops["sys"] / 1333.2} mmHg, {rpa_pressure_drops["dia"] / 1333.2} mmHg, {rpa_pressure_drops["mean"] / 1333.2} mmHg')
-
-            print(f'\nLPA resistance:  sys {lpa_resistance["sys"]} dyn/cm5/s, dia {lpa_resistance["dia"]} dyn/cm5/s, mean {lpa_resistance["mean"]} dyn/cm5/s')
-            print(f'RPA resistance: sys {rpa_resistance["sys"]} dyn/cm5/s, dia {rpa_resistance["dia"]} dyn/cm5/s, mean {rpa_resistance["mean"]} dyn/cm5/s')
-
-            print(f'\nLPA PVR: {lpa_resistance["mean"] / 80.0} Wood units')
-            print(f'RPA PVR: {rpa_resistance["mean"] / 80.0} Wood units')
-
-            print(f'\nLPA flow: {Q_sys_lpa} dyn/cm5/s, {Q_dia_lpa} dyn/cm5/s, {Q_mean_lpa} dyn/cm5/s')
-            print(f'RPA flow: {Q_sys_rpa} dyn/cm5/s, {Q_dia_rpa} dyn/cm5/s, {Q_mean_rpa} dyn/cm5/s')
-            
             # compute nonlinear resistance coefficient by fitting resistance vs flows
             S_lpa = np.polyfit([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], [lpa_resistance["sys"], lpa_resistance["dia"], lpa_resistance["mean"]], 1)
             S_rpa = np.polyfit([Q_sys_lpa, Q_dia_rpa, Q_mean_rpa], [rpa_resistance["sys"], rpa_resistance["dia"], rpa_resistance["mean"]], 1)

@@ -30,7 +30,8 @@ class Simulation:
                  compliance_model: str = 'constant',
                  zerod_config='zerod_config.json',
                  convert_to_cm=False,
-                 optimized=False):
+                 optimized=False, 
+                 inflow_path=None):
         
         self.path = os.path.abspath(path)
 
@@ -71,20 +72,27 @@ class Simulation:
 
         self.clinical_targets = ClinicalTargets.from_csv(clinical_targets)
 
-        # use a generic inflow profile
-
-        if self.clinical_targets.rvot_flow is not None:
-            print("Using fontan inflow profile for simulation")
-            self.is_fontan = True
-            # fontan inflow
-            self.inflow = Inflow.periodic()
-            self.inflow.rescale(cardiac_output=self.clinical_targets.rvot_flow, tsteps=self.n_tsteps)
-            self.inflow.add_steady_flow(self.clinical_targets.ivc_flow)
-            self.inflow.add_steady_flow(self.clinical_targets.svc_flow)
+        if inflow_path is not None:
+            if os.path.exists(inflow_path):
+                print(f'loading inflow from {inflow_path}...')
+                self.inflow = Inflow.from_csv(inflow_path)
+                self.inflow.rescale(tsteps=self.n_tsteps)
+            else:
+                raise FileNotFoundError(f'Inflow file {inflow_path} not found.')
         else:
-            self.is_fontan = False
-            self.inflow = Inflow.periodic()
-            self.inflow.rescale(cardiac_output=self.clinical_targets.q, tsteps=self.n_tsteps)
+            # use a generic inflow profile
+            if self.clinical_targets.rvot_flow is not None:
+                print("Using fontan inflow profile for simulation")
+                self.is_fontan = True
+                # fontan inflow
+                self.inflow = Inflow.periodic()
+                self.inflow.rescale(cardiac_output=self.clinical_targets.rvot_flow, tsteps=self.n_tsteps)
+                self.inflow.add_steady_flow(self.clinical_targets.ivc_flow)
+                self.inflow.add_steady_flow(self.clinical_targets.svc_flow)
+            else:
+                self.is_fontan = False
+                self.inflow = Inflow.periodic()
+                self.inflow.rescale(cardiac_output=self.clinical_targets.q, tsteps=self.n_tsteps)
 
         # make a figures directory
         self.figures_dir = os.path.join(self.path, 'figures')
@@ -105,6 +113,7 @@ class Simulation:
         '''
         run the entire pipeline
         '''
+        
         if run_steady:
             # run the steady simulations
             self.run_steady_sims()
@@ -138,7 +147,7 @@ class Simulation:
                                                  n_procs=24)
                 impedance_tuner.tune()
             # need to create coupling config and add to preop/postop directories
-                # build trees for LPA/RPA
+            # build trees for LPA/RPA
             elif self.bc_type == 'rcr':
                 rcr_tuner = RCRTuner(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, rescale_inflow=run_steady, convert_to_cm=self.convert_to_cm, n_procs=24)
                 result = rcr_tuner.tune() # r_LPA, c_LPA, r_RPA, c_RPA = result.x

@@ -108,47 +108,6 @@ class MeshComplete(SimulationFile):
         for surface in self.mesh_surfaces:
             surface.scale(scale_factor=scale_factor)
 
-    def assign_lobe_old(self):
-        '''
-        assign upper, middle or lower lobe location to left and right outlets, except the inlet, based on the center of mass y coourdinate'''
-
-        # get the y coord of lpa and rpa outlets
-        lpa_locs = [vtp.get_location()[1] for vtp in self.mesh_surfaces.values() if vtp.lpa]
-        rpa_locs = [vtp.get_location()[1] for vtp in self.mesh_surfaces.values() if vtp.rpa]
-        
-        # get the lobe size (1/3 of the y range)
-        lpa_lobe_size = (max(lpa_locs) - min(lpa_locs)) / 3
-        rpa_lobe_size = (max(rpa_locs) - min(rpa_locs)) / 3
-
-        # assign outlet lobe location
-        for vtp in self.mesh_surfaces.values():
-            if vtp.lpa:
-                if vtp.get_location()[1] < min(lpa_locs) + lpa_lobe_size:
-                    vtp.lobe = 'lower'
-                elif vtp.get_location()[1] > max(lpa_locs) - lpa_lobe_size:
-                    vtp.lobe = 'upper'
-                else:
-                    vtp.lobe = 'middle'
-            elif vtp.rpa:
-                if vtp.get_location()[1] < min(rpa_locs) + rpa_lobe_size:
-                    vtp.lobe = 'lower'
-                elif vtp.get_location()[1] > max(rpa_locs) - rpa_lobe_size:
-                    vtp.lobe = 'upper'
-                else:
-                    vtp.lobe = 'middle'
-        
-        # count the number of outlets in each lobe
-        lpa_upper = len([vtp for vtp in self.mesh_surfaces.values() if vtp.lpa and vtp.lobe == 'upper'])
-        lpa_middle = len([vtp for vtp in self.mesh_surfaces.values() if vtp.lpa and vtp.lobe == 'middle'])
-        lpa_lower = len([vtp for vtp in self.mesh_surfaces.values() if vtp.lpa and vtp.lobe == 'lower'])
-
-        rpa_upper = len([vtp for vtp in self.mesh_surfaces.values() if vtp.rpa and vtp.lobe == 'upper'])
-        rpa_middle = len([vtp for vtp in self.mesh_surfaces.values() if vtp.rpa and vtp.lobe == 'middle'])
-        rpa_lower = len([vtp for vtp in self.mesh_surfaces.values() if vtp.rpa and vtp.lobe == 'lower'])
-
-        print(f'outlets by lobe: LPA upper: {lpa_upper}, middle: {lpa_middle}, lower: {lpa_lower}')
-        print(f'outlets by lobe: RPA upper: {rpa_upper}, middle: {rpa_middle}, lower: {rpa_lower}\n')
-
     def swap_lpa_rpa(self):
         '''
         swap the lpa and rpa outlets
@@ -223,3 +182,45 @@ class MeshComplete(SimulationFile):
         print(f'outlets by lobe: RPA upper: {rpa_upper}, middle: {rpa_middle}, lower: {rpa_lower}\n')
 
         self.n_outlets = lpa_upper + lpa_middle + lpa_lower + rpa_upper + rpa_middle + rpa_lower
+
+
+    # def assign_lobe_old(self):
+    #     '''
+    #     assign upper, middle or lower lobe location to left and right outlets, except the inlet, based on the center of mass y coourdinate'''
+
+    #     # get the y coord of lpa and rpa outlets
+    #     lpa_locs = [vtp.get_location()[1] for vtp in self.mesh_surfaces.values() if vtp.lpa]
+    #     rpa_locs = [vtp.get_location()[1] for vtp in self.mesh_surfaces.values() if vtp.rpa]
+        
+    #     # get the lobe size (1/3 of the y range)
+    #     lpa_lobe_size = (max(lpa_locs) - min(lpa_locs)) / 3
+    #     rpa_lobe_size = (max(rpa_locs) - min(rpa_locs)) / 3
+
+    #     # assign outlet lobe location
+    #     for vtp in self.mesh_surfaces.values():
+    #         if vtp.lpa:
+    #             if vtp.get_location()[1] < min(lpa_locs) + lpa_lobe_size:
+    #                 vtp.lobe = 'lower'
+    #             elif vtp.get_location()[1] > max(lpa_locs) - lpa_lobe_size:
+    #                 vtp.lobe = 'upper'
+    #             else:
+    #                 vtp.lobe = 'middle'
+    #         elif vtp.rpa:
+    #             if vtp.get_location()[1] < min(rpa_locs) + rpa_lobe_size:
+    #                 vtp.lobe = 'lower'
+    #             elif vtp.get_location()[1] > max(rpa_locs) - rpa_lobe_size:
+    #                 vtp.lobe = 'upper'
+    #             else:
+    #                 vtp.lobe = 'middle'
+        
+    #     # count the number of outlets in each lobe
+    #     lpa_upper = len([vtp for vtp in self.mesh_surfaces.values() if vtp.lpa and vtp.lobe == 'upper'])
+    #     lpa_middle = len([vtp for vtp in self.mesh_surfaces.values() if vtp.lpa and vtp.lobe == 'middle'])
+    #     lpa_lower = len([vtp for vtp in self.mesh_surfaces.values() if vtp.lpa and vtp.lobe == 'lower'])
+
+    #     rpa_upper = len([vtp for vtp in self.mesh_surfaces.values() if vtp.rpa and vtp.lobe == 'upper'])
+    #     rpa_middle = len([vtp for vtp in self.mesh_surfaces.values() if vtp.rpa and vtp.lobe == 'middle'])
+    #     rpa_lower = len([vtp for vtp in self.mesh_surfaces.values() if vtp.rpa and vtp.lobe == 'lower'])
+
+    #     print(f'outlets by lobe: LPA upper: {lpa_upper}, middle: {lpa_middle}, lower: {lpa_lower}')
+    #     print(f'outlets by lobe: RPA upper: {rpa_upper}, middle: {rpa_middle}, lower: {rpa_lower}\n')
