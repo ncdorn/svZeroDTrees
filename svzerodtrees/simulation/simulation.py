@@ -262,8 +262,6 @@ class Simulation:
         '''
         run steady state simulations
         '''
-
-        print('setting up and running steady simulations...')
         # create the steady directory if it doesn't exist
         if not os.path.exists(self.steady_dir):
             os.makedirs(self.steady_dir)
@@ -274,6 +272,7 @@ class Simulation:
             'dia': max(2.0, min(self.inflow.q)),
             'mean': np.mean(self.inflow.q)
         }
+        print(f'setting up and running steady simulations for flow rates: sys = {flow_dict["sys"]}, dia = {flow_dict["dia"]}, mean = {flow_dict["mean"]}')
         steady_sims = {}
         for label, q in flow_dict.items():
             dir_path = os.path.join(self.steady_dir, label)
