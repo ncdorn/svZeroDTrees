@@ -365,7 +365,7 @@ class SimulationDirectory:
         sim_config = {
             'n_tsteps': 200,
             'dt': 0.0005,
-            'nodes': 1,
+            'nodes': 2,
             'procs_per_node': 24,
             'memory': 16,
             'hours': 6
