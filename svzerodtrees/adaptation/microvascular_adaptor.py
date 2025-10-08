@@ -26,6 +26,7 @@ class MicrovascularAdaptor:
                  clinical_targets: ClinicalTargets,
                  method: str = 'cwss', 
                  location: str = 'uniform',
+                 bc_type: str = 'impedance',
                  n_iter: int = 100,
                  convert_to_cm: bool = False):
         '''
@@ -59,11 +60,15 @@ class MicrovascularAdaptor:
             print(f"using adaptation method {method}")
         self.method = method
         self.location = location
+        if bc_type not in ['impedance', 'resistance']:
+            raise ValueError(f"bc_type {bc_type} not recognized, please use 'impedance' or 'resistance'")
+        else:
+            self.bc_type = bc_type
 
         self.convert_to_cm = convert_to_cm
 
         # construct lpa and rpa trees
-        self.lpa_tree, self.rpa_tree = self.constructTrees()
+        self.lpa_tree, self.rpa_tree = self.construct_impedance_trees()
 
     def adapt(self, fig_dir: str = None):
         '''
@@ -130,7 +135,7 @@ class MicrovascularAdaptor:
         print("saving adapted config to " + self.adapted_simdir.svzerod_3Dcoupling.path)
         self.adapted_simdir.svzerod_3Dcoupling.to_json(self.adapted_simdir.svzerod_3Dcoupling.path)
 
-    def constructTrees(self):
+    def construct_impedance_trees(self):
         '''
         construct the trees for the preop and postop simulations
         '''
@@ -149,6 +154,48 @@ class MicrovascularAdaptor:
         rpa_tree.build_tree(initial_d=d_r, d_min=0.01, lrr=lrr_r)
 
         return lpa_tree, rpa_tree
+    
+    def construct_resistance_trees(self, n_iter: int = 1):
+        '''
+        construct the trees for the preop and postop simulations from resistance values
+        '''
+
+        preop_svzerod_coupler = self.preop_simdir.svzerod_3Dcoupling
+        preop_svzerod_data = self.preop_simdir.svzerod_data
+        postop_svzerod_data = self.postop_simdir.svzerod_data
+        adapted_svzerod_coupler = copy.deepcopy(preop_svzerod_coupler)
+
+        for bc_name, coupling_block in preop_svzerod_coupler.coupling_blocks.items():
+            if 'inflow' not in bc_name.lower():
+                # get the resistance from the preop simulation
+                R_preop  = preop_svzerod_coupler.bcs[bc_name].R
+                # build tree for preop resistance
+                print(f'building structured tree for resistance {R_preop}...')
+                tree = StructuredTree(name=bc_name, time=coupling_block.values['t'], simparams=None)
+                tree.optimize_tree_diameter(resistance=R_preop)
+                # get the flow from the preop, postop simulation
+                preop_flow = preop_svzerod_data.get_flow(coupling_block)
+                postop_flow = postop_svzerod_data.get_flow(coupling_block)
+
+                # adapt the tree based on the flow change
+                tree.adapt_constant_wss(preop_flow, postop_flow, n_iter=n_iter)
+
+                # update the bc with the new resistance
+                R_adapt = tree.root.R_eq
+                print(f'updating resistance for {bc_name} from {R_preop} to {R_adapt}')
+                adapted_svzerod_coupler.bcs[bc_name].R = R_adapt
+
+        
+        self.adapted_simdir.svzerod_3Dcoupling = adapted_svzerod_coupler
+        # change path
+        self.adapted_simdir.svzerod_3Dcoupling.path = os.path.join(self.adapted_simdir.path, 'svzerod_3Dcoupling.json')
+        print("saving adapted config to " + self.adapted_simdir.svzerod_3Dcoupling.path)
+        self.adapted_simdir.svzerod_3Dcoupling.to_json(self.adapted_simdir.svzerod_3Dcoupling.path)
+
+
+
+
+
 
     def constructTreesFromConfig(self):
         

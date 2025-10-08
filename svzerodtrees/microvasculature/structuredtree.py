@@ -712,11 +712,7 @@ class StructuredTree:
         assign_flow_to_root(adapted_result, self.root)
 
 
-
-
-
-
-    def optimize_tree_diameter(self, resistance=None, log_file=None, d_min=0.0049, pries_secomb=False):
+    def optimize_tree_diameter(self, resistance=None, log_file=None, d_min=0.01, pries_secomb=False):
         """ 
         Use Nelder-Mead to optimize the diameter and number of vessels with respect to the desired resistance
         

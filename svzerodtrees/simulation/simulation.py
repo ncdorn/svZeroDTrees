@@ -135,6 +135,7 @@ class Simulation:
                     lpa_params = TreeParameters.from_row_new(opt_params[opt_params.pa == 'lpa'])
                     rpa_params = TreeParameters.from_row_new(opt_params[opt_params.pa == 'rpa'])
                     initial_guess = [lpa_params.compliance_model.value, rpa_params.compliance_model.value, lpa_params.diameter, rpa_params.diameter, lpa_params.lrr]
+                    reduced_config = ConfigHandler.from_json(os.path.join(self.path, "pa_config_test_tuning.json"), is_pulmonary=True)
                 else:
                     initial_guess = None
                 # NEW METHOD, in impedance_tuner.py
