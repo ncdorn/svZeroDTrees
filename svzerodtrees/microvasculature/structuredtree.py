@@ -977,6 +977,8 @@ class StructuredTree:
         :param number_of_cardiac_cycles: number of cardiac cycles to simulate
         :param number_of_time_pts_per_cardiac_cycle: number of time points per cardiac cycle
         :param viscosity: viscosity of the blood [g/cm/s]
+
+        :return result: result dictionary from svzerodsolver
         '''
 
         if self.simparams is None:

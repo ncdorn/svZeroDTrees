@@ -176,6 +176,8 @@ class ConfigHandler():
 
         :param result_handler: result handler instance to add the result to
         :param label: label for the result e.g. preop, postop, adapted
+
+        :return result_df: result dataframe from the simulation
         '''
 
         # assemble the config

@@ -38,11 +38,14 @@ class TreeVessel:
         z_vals = params["zero_d_element_values"]
         self._R = z_vals.get("R_poiseuille")
         self._R_eq = self._R
-        self.C = z_vals.get("C")
-        self.L = z_vals.get("L")
+        # self.C = z_vals.get("C")
+        # self.L = z_vals.get("L")
 
         # Compliance model
         self.compliance_model = compliance_model or ConstantCompliance(1e5)  # dyn/cm²
+        self.C = 3 * self.a / 2 / self.compliance_model.evaluate(self._r)  # update compliance based on initial radius
+        self.L = self.density * self.l / self.a  # inertance
+
 
         # Adaptation parameters
         self.r_adapt = self._r

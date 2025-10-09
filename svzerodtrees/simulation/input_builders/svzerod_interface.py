@@ -45,7 +45,7 @@ class SvZeroDInterface(SimulationFile):
               initialize_flows=0,
               initial_flow=0.0,
               initialize_pressures=1,
-              initial_pressure=60.0):
+              initial_pressure=0.0):
         '''
         write the svZeroD_interface.dat file'''
         
