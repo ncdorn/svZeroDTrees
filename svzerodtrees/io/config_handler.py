@@ -616,9 +616,9 @@ class ConfigHandler():
             return [self.vessel_map[id] for id in self.branch_map[branch].ids]
         if dtype == 'dict':
             return [self.vessel_map[id].to_dict() for id in self.branch_map[branch].ids]
-        
-    
-    def generate_threed_coupler(self, simdir, inflow_from_0d=True, mesh_complete=None):
+
+
+    def  generate_threed_coupler(self, simdir, inflow_from_0d=True, mesh_complete=None):
         '''
         create a 3D-0D coupling blocks config from the boundary conditions and save it to a json
 
@@ -656,7 +656,7 @@ class ConfigHandler():
         threed_coupler.bcs = self.bcs
         if inflow_from_0d:
             # need to add a vessel between the inflwo bc and coupling block to allow effective coupling
-            inflow_idx = 0
+            self.n_inflows = 0
             for bc_name, bc in self.bcs.items():
                 if 'inflow' in bc_name.lower():
                     # adjust inflow name such that the coupling block name is the same as the bc name
@@ -666,14 +666,14 @@ class ConfigHandler():
                         block_name = bc_name.lower()
                     else:
                         block_name = bc_name.lower()
-                    threed_coupler.vessel_map[inflow_idx] = Vessel.from_config(
+                    threed_coupler.vessel_map[self.n_inflows] = Vessel.from_config(
                         {
                         "boundary_conditions": {
                                 "inlet": bc_name
                             },
-                            "vessel_id": inflow_idx,
+                            "vessel_id": self.n_inflows,
                             "vessel_length": 10.0,
-                            "vessel_name": f"branch{inflow_idx}_seg0",
+                            "vessel_name": f"branch{self.n_inflows}_seg0",
                             "zero_d_element_type": "BloodVessel",
                             "zero_d_element_values": {
                                 "C": 0.0000001,
@@ -689,7 +689,7 @@ class ConfigHandler():
                             "name": block_name,
                             "type": "FLOW",
                             "location": "outlet",
-                            "connected_block": f"branch{inflow_idx}_seg0",
+                            "connected_block": f"branch{self.n_inflows}_seg0",
                             "periodic": False,
                             "values": {
                                     "t": [
@@ -705,17 +705,20 @@ class ConfigHandler():
                         }
                     )
 
-                    inflow_idx += 1
+                    self.n_inflows += 1
 
         else:
+            self.n_inflows = 0
             del threed_coupler.bcs["INFLOW"] 
         
         print(f"threed coupler vessel map: {threed_coupler.vessel_map}")
         # create the coupling blocks
+        bc_count = 0
         for i, bc in enumerate(threed_coupler.bcs.values()):
             if 'inflow' not in bc.name.lower():
                 block_name = bc.name.replace('_', '')
-                threed_coupler.coupling_blocks[block_name] = CouplingBlock.from_bc(bc, surface=list(mesh_complete.mesh_surfaces.values())[i].filename)
+                threed_coupler.coupling_blocks[bc.name] = CouplingBlock.from_bc(bc, surface=list(mesh_complete.mesh_surfaces.values())[bc_count + self.n_inflows].filename)
+                bc_count += 1
 
         # copy the trees over
         threed_coupler.tree_params = self.tree_params

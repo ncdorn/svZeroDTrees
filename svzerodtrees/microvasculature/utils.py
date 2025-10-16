@@ -14,6 +14,7 @@ def assign_flow_to_root(result_array, root, steady=False):
             vessel_name = f"branch{vessel.id}_seg0"
             vessel.Q = get_branch_result(result_array, 'flow_in', vessel_name, steady=steady)
             vessel.P_in = get_branch_result(result_array, 'pressure_in', vessel_name, steady=steady)
+            vessel.t = get_branch_result(result_array, 'time', vessel_name, steady=steady)
 
             # print(f"vessel {vessel.id} Q: {vessel.Q}, P_in: {vessel.P_in}, t_w: {vessel.wall_shear_stress()}, sigma_theta: {vessel.intramural_stress()}")
             # recursive step

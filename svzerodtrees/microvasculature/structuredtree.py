@@ -887,7 +887,7 @@ class StructuredTree:
                         "bc_type": "PRESSURE",
                         "bc_values": {
                             "P": [self.Pd,] * 2,
-                            "t": np.linspace(0.0, 1.0, num=timesteps).tolist()
+                            "t": [0.0, 1.0]
                             }
                         }
                     )
@@ -966,7 +966,9 @@ class StructuredTree:
                  density = 1.06,
                  number_of_cardiac_cycles=1,
                  number_of_time_pts_per_cardiac_cycle = 10,
-                 viscosity = 0.04):
+                 viscosity = 0.04,
+                 json_path=None
+                 ):
         '''
         simulate the structured tree
 
@@ -1000,7 +1002,14 @@ class StructuredTree:
 
         # result = run_svzerodplus(self.block_dict)
 
+        if json_path is not None:
+            self.to_json(json_path)
+
         result = pysvzerod.simulate(self.block_dict)
+
+        # assigning flow values to the TreeVessel instances
+        print("assigning flow and pressure values to vessels...")
+        assign_flow_to_root(result, self.root)
 
         # assign flow result to TreeVessel instances to allow for visualization, adaptation, etc.
         # currently this conflicts with adaptation computation, where we do not want to assign flow to root every time we simulate

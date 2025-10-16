@@ -43,8 +43,8 @@ class TreeVessel:
 
         # Compliance model
         self.compliance_model = compliance_model or ConstantCompliance(1e5)  # dyn/cm²
-        self.C = 3 * self.a / 2 / self.compliance_model.evaluate(self._r)  # update compliance based on initial radius
-        self.L = self.density * self.l / self.a  # inertance
+        # self.C = 3 * self.a / 2 / self.compliance_model.evaluate(self._r)  # update compliance based on initial radius
+        # self.L = self.density * self.l / self.a  # inertance
 
 
         # Adaptation parameters
@@ -62,6 +62,7 @@ class TreeVessel:
         self.P_in = 0.0
         self.Q = 0.0
         self.P_out = 0.0
+        self.t = []
 
         # Structure and recursion
         self.lrr = lrr
@@ -86,9 +87,12 @@ class TreeVessel:
 
         viscosity = 0.049  # poise
         r = diameter / 2
+        a = np.pi * r**2
 
         length = (12.4 * r**1.1) if lrr is None else (lrr * r)
         resistance = 8 * viscosity * length / (np.pi * r**4)
+        capacitance = 3 * a / 2 / compliance_model.evaluate(r)
+        inductance = density * length / a
 
         vessel_name = f"branch{id}_seg0"
 
@@ -99,8 +103,8 @@ class TreeVessel:
             "zero_d_element_type": "BloodVessel",
             "zero_d_element_values": {
                 "R_poiseuille": resistance,
-                "C": 0.0,
-                "L": 0.0,
+                "C": capacitance,
+                "L": inductance,
                 "stenosis_coefficient": 0.0
             },
             "vessel_D": diameter,
@@ -111,7 +115,29 @@ class TreeVessel:
 
         return cls(params=params, name=vessel_name, lrr=lrr, compliance_model=compliance_model)
 
+    def to_dict(self):
+        """
+        Convert the vessel to a dictionary format for use in svZeroD simulations.
+        """
 
+        vessel_dict = {
+            "vessel_id": self.id,
+            "vessel_name": self.name,
+            "vessel_length": self.l,
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "R_poiseuille": self._R,
+                "C": self.C,
+                "L": self.L,
+                "stenosis_coefficient": 0.0
+            },
+            "vessel_D": self._d,
+            "generation": self.gen,
+            "viscosity": self.eta,
+            "density": self.density,
+        }
+
+        return vessel_dict
     ####### beginning of property setters to dynamically update various class properties #######
 
     @property

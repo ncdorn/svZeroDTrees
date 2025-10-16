@@ -79,7 +79,7 @@ class SimulationDirectory:
 
         path = os.path.abspath(path)
 
-        print(f'\n\n *** INITIALIZING SIMULATION DIRECTORY: {os.path.basename(path)} *** \n\n')
+        print(f'\n\n *** INITIALIZING SIMULATION DIRECTORY: {path} *** \n\n')
 
         # check for zerod model
         if zerod_config is not None and os.path.exists(zerod_config):
