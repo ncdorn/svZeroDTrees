@@ -1,194 +1,228 @@
 from .base import BoundaryConditionTuner
 import numpy as np
-from scipy.optimize import minimize, Bounds
+from scipy.optimize import minimize
 from ..simulation.threedutils import vtp_info
-from ..tune_bcs.pa_config import PAConfig  # assuming your project structure
-from ..microvasculature import TreeParameters, compliance
-import csv
+from ..tune_bcs.pa_config import PAConfig
+from ..microvasculature import TreeParameters, compliance as comp_mod
+from ..tune_bcs.tune_space import TuneSpace
+import csv, math
 
 class ImpedanceTuner(BoundaryConditionTuner):
-    def __init__(self, 
-                 config_handler, 
-                 mesh_surfaces_path, 
+    def __init__(self,
+                 config_handler,
+                 mesh_surfaces_path,
                  clinical_targets,
-                 initial_guess=None,
-                 rescale_inflow=True, 
-                 n_procs=24, 
-                 d_min=0.01, 
-                 alpha=0.9,
-                 beta=0.6,
+                 tune_space: TuneSpace,             # <— NEW
+                 compliance_model: str = "constant",
+                 grid_search_init: bool = True,
+                 grid_candidates_constant = (3.3e4, 6.6e4, 1.0e5, 1.3e5),
+                 grid_candidates_olufsen = (-10.0, -25.0, -50.0, -75.0),
+                 rescale_inflow=True,
+                 n_procs=24,
                  tol=0.01,
-                 compliance_model: str = None, 
-                 is_pulmonary=True, 
+                 is_pulmonary=True,
                  convert_to_cm=True,
-                 log_file=None):
+                 log_file=None,
+                 maxiter=200,
+                 solver="Nelder-Mead"):
         super().__init__(config_handler, mesh_surfaces_path, clinical_targets)
-        self.initial_guess = initial_guess
+        self.tune_space = tune_space
+        self.compliance_model = (compliance_model or "").lower()
+        if self.compliance_model not in ("olufsen", "constant"):
+            raise ValueError(f"Unknown compliance model: {self.compliance_model}")
+
         self.rescale_inflow = rescale_inflow
         self.n_procs = n_procs
-        self.d_min = d_min
-        self.alpha = alpha
-        self.beta = beta
         self.tol = tol
-        self.compliance_model = compliance_model
         self.is_pulmonary = is_pulmonary
         self.convert_to_cm = convert_to_cm
         self.log_file = log_file
+        self.maxiter = maxiter
+        self.solver = solver
+
+        # grid search params
+        self.grid_search_init = grid_search_init
+        self.grid_candidates_constant = tuple(grid_candidates_constant)
+        self.grid_candidates_olufsen = tuple(grid_candidates_olufsen)
+
+        # will be filled in tune()
+        self._geom_defaults = {}
 
 
-    def tune(self):
-        # --- Geometry and Model Checks ---
-        if self.is_pulmonary:
-            rpa_info, lpa_info, inflow_info = vtp_info(self.mesh_surfaces_path, convert_to_cm=self.convert_to_cm, pulmonary=True)
+    # ---- Internal helpers ---- #
 
-        if self.compliance_model.lower() not in ['olufsen', 'constant']:
-            raise ValueError(f'Unknown compliance model: {self.compliance}')
+    def _find_free(self, name: str):
+        for i, p in enumerate(self.tune_space.free):
+            if p.name == name:
+                return i, p
+        return None, None
+    
+    def _set_free_native(self, x, name: str, native_value: float):
+        idx, p = self._find_free(name)
+        if p is None:
+            return x  # silently ignore if that knob isn't free
+        x = np.array(x, dtype=float, copy=True)
+        x[idx] = p.from_native(native_value)
+        return x
 
-        rpa_mean_dia = np.mean([(area / np.pi)**0.5 * 2 for area in rpa_info.values()])
-        lpa_mean_dia = np.mean([(area / np.pi)**0.5 * 2 for area in lpa_info.values()])
-        print(f'RPA mean diameter: {rpa_mean_dia:.3f}, LPA mean diameter: {lpa_mean_dia:.3f}')
-
-
-        if lpa_mean_dia > 0.4:
-            print(f'LPA mean diameter: {lpa_mean_dia:.3f} too large, rescaling to 0.4 cm')
-            lpa_mean_dia = 0.4
-
-        if rpa_mean_dia > 0.4:
-            print(f'RPA mean diameter: {rpa_mean_dia:.3f} too large, rescaling to 0.4 cm')
-            rpa_mean_dia = 0.4
-        
-
-
-        # --- Configuration Setup ---
+    def _make_pa_config(self):
         if len(self.config_handler.vessel_map.values()) == 5:
             pa_config = PAConfig.from_pa_config(self.config_handler, self.clinical_targets, self.compliance_model)
         else:
             pa_config = PAConfig.from_config_handler(self.config_handler, self.clinical_targets, self.compliance_model)
             if self.convert_to_cm:
                 pa_config.convert_to_cm()
+        return pa_config
+
+    def _prepare_geometry_defaults(self):
+        rpa_info, lpa_info, _ = vtp_info(self.mesh_surfaces_path, convert_to_cm=self.convert_to_cm, pulmonary=True)
+        rpa_mean_d = np.mean([(area / np.pi) ** 0.5 * 2 for area in rpa_info.values()])
+        lpa_mean_d = np.mean([(area / np.pi) ** 0.5 * 2 for area in lpa_info.values()])
+        # clamp for safety
+        rpa_mean_d = min(rpa_mean_d, 0.4)
+        lpa_mean_d = min(lpa_mean_d, 0.4)
+        self._geom_defaults = {
+            "rpa.default_diameter": rpa_mean_d,
+            "lpa.default_diameter": lpa_mean_d,
+            "n_outlets_scale": float((len(lpa_info) + len(rpa_info)))/2.0
+        }
+
+    def _build_compliance(self, side: str, params: dict[str, float]):
+        if self.compliance_model == "olufsen":
+            k1 = 19992500.0
+            k2 = params[f"comp.{side}.k2"]
+            k3 = 0.0
+            return comp_mod.OlufsenCompliance(k1=k1, k2=k2, k3=k3)
+        else:
+            cval = params[f"comp.{side}.C"]
+            return comp_mod.ConstantCompliance(cval)
+
+    def _build_tree_params(self, params: dict[str, float]) -> tuple[TreeParameters, TreeParameters]:
+        # fall back to geometry defaults if diameter not in params
+        lpa_d = params.get("lpa.diameter", self._geom_defaults["lpa.default_diameter"])
+        rpa_d = params.get("rpa.diameter", self._geom_defaults["rpa.default_diameter"])
+        lrr   = params.get("lrr", 10.0)
+        alpha_l = params.get("lpa.alpha", 0.9)
+        alpha_r = params.get("rpa.alpha", 0.9)
+        beta_l  = params.get("lpa.beta", 0.6)
+        beta_r  = params.get("rpa.beta", 0.6)
+        d_min   = params.get("d_min", 0.01)
+
+        lpa_comp = self._build_compliance("lpa", params)
+        rpa_comp = self._build_compliance("rpa", params)
+
+        lpa_params = TreeParameters(name="lpa", lrr=lrr, diameter=lpa_d, d_min=d_min,
+                                    alpha=alpha_l, beta=beta_l, compliance_model=lpa_comp)
+        rpa_params = TreeParameters(name="rpa", lrr=lrr, diameter=rpa_d, d_min=d_min,
+                                    alpha=alpha_r, beta=beta_r, compliance_model=rpa_comp)
+        return lpa_params, rpa_params
+    
+    def _grid_search_init(self, pa_config, x0: np.ndarray) -> np.ndarray:
+        # detect which compliance knobs exist
+        if self.compliance_model == "constant":
+            lname, rname = "comp.lpa.C", "comp.rpa.C"
+            candidates = self.grid_candidates_constant
+        else:
+            lname, rname = "comp.lpa.k2", "comp.rpa.k2"
+            candidates = self.grid_candidates_olufsen
+
+        l_idx, l_p = self._find_free(lname)
+        r_idx, r_p = self._find_free(rname)
+        if l_p is None and r_p is None:
+            # no compliance knobs are free -> nothing to grid-search
+            return x0
+
+        best_x = x0
+        best_f = np.inf
+
+        # probe candidates
+        print(f"[grid] probing {len(candidates)} candidates for {lname} and {rname}")
+        for c in candidates:
+            trial = x0
+            
+            # set both (if present) to same candidate
+            trial = self._set_free_native(trial, lname, c)
+            trial = self._set_free_native(trial, rname, c)
+            f = self.loss_fn(trial, pa_config)
+            if f < best_f:
+                best_f, best_x = f, trial
+
+        print(f"[grid] best init loss={best_f:.3f} from candidates={candidates}")
+        return best_x
+    
+
+    # ---- Main tuning routine ---- #
+
+    def tune(self):
+        self._prepare_geometry_defaults()
+        pa_config = self._make_pa_config()
 
         if self.rescale_inflow:
-            scale = ((len(lpa_info.values()) + len(rpa_info.values())) // 2)
-            pa_config.bcs['INFLOW'].Q = [q / scale for q in pa_config.bcs['INFLOW'].Q]
+            scale = self._geom_defaults["n_outlets_scale"]
+            if scale and scale > 0:
+                pa_config.bcs['INFLOW'].Q = [q / scale for q in pa_config.bcs['INFLOW'].Q]
 
-        
-        if self.initial_guess:
-            # only supports constant compliance
-            if self.compliance_model.lower() != 'constant':
-                raise ValueError(f'Initial guess is only supported for constant compliance, got {self.compliance_model}')
-            print(f'Using initial guess: {self.initial_guess}')
-            initial_guess = self.initial_guess
-            bounds = Bounds([0.0, 0.0, 0.01, 0.01, 1.0], [np.inf]*5)
-        else:
-            # --- Grid Search for Initial K2 for olufsen compliance ---
-            if self.compliance_model.lower() == 'olufsen':
-                min_loss = 1e5
-                k2_guess = 0
-                for k2 in [-10, -25, -50, -75]:
-                    p_loss, _, loss = self.loss_fn([k2, k2, lpa_mean_dia, rpa_mean_dia, 10.0], pa_config, grid_search=True)
-                    if p_loss < min_loss:
-                        min_loss = p_loss
-                        k2_guess = k2
-                
-                initial_guess = [k2_guess, k2_guess, lpa_mean_dia, rpa_mean_dia, 10.0]
-                bounds = Bounds([-np.inf, -np.inf, 0.01, 0.01, 1.0], [np.inf]*5)
-            
-            elif self.compliance_model.lower() == 'constant':
-                min_loss = 1e5
-                compliance = 0
-                for compliance in [3.3e4, 6.6e4, 1e5, 1.3e5]: # 25, 50, 75, 100 mmHg
-                    p_loss, _, loss = self.loss_fn([compliance, compliance, lpa_mean_dia, rpa_mean_dia, 10.0], pa_config, grid_search=True)
-                    if p_loss < min_loss:
-                        min_loss = p_loss
-                        compliance_guess = compliance
+        x0, bounds = self.tune_space.pack_init_and_bounds()
 
-                initial_guess = [compliance_guess, compliance_guess, lpa_mean_dia, rpa_mean_dia, 10.0]
-                bounds = Bounds([0.0, 0.0, 0.01, 0.01, 1.0], [np.inf]*5)
+        # ——— Grid search init on compliance ———
+        if self.grid_search_init:
+            x0 = self._grid_search_init(pa_config, x0)
 
-        result = minimize(self.loss_fn, initial_guess, args=(pa_config, False), method='Nelder-Mead', bounds=bounds, options={'maxiter': 100})
 
-        print(f"Optimized impedance parameters: {result.x}")
-        pa_config.simulate()
+        result = minimize(
+            fun=lambda x: self.loss_fn(x, pa_config),
+            x0=x0,
+            method=self.solver,
+            bounds=bounds if self.solver in ("Nelder-Mead", "L-BFGS-B", "Powell", "TNC", "SLSQP", "trust-constr") else None,
+            options={"maxiter": self.maxiter, "ftol": self.tol}
+        )
+
+        print(f"[ImpedanceTuner] Optimized: {result.x}  f={result.fun:.3f}")
+        # final simulate & plot
+        _ = self.loss_fn(result.x, pa_config, finalize=True)
         pa_config.plot_mpa()
-
         return result
+    
 
-    def loss_fn(self, params, pa_config, grid_search=False):
-        # params should take the form [compliance_lpa, compliance_rpa, lpa_mean_dia, rpa_mean_dia, lrr]
-        lpa_mean_dia = params[-3]
-        rpa_mean_dia = params[-2]
-        lrr = params[-1]
+    # ---- Loss function ---- #
 
-        if self.compliance_model.lower() == 'olufsen':
-            k1_l = k1_r = 19992500.0
-            k3_l = k3_r = 0.0
-            lpa_compliance = compliance.OlufsenCompliance(k1=k1_l, k2=params[0], k3=k3_l)
-            rpa_compliance = compliance.OlufsenCompliance(k1=k1_r, k2=params[1], k3=k3_r)
-            lamb = 1e-3 # L2 regularization weight
-        
-        elif self.compliance_model.lower() == 'constant':
-            lpa_compliance = compliance.ConstantCompliance(params[0])
-            rpa_compliance = compliance.ConstantCompliance(params[1])
-            lamb = 1e-5 # L2 regularization weight
-
-        else:
-            raise ValueError(f'Unknown compliance model: {self.compliance_model}')
-
-        lpa_params = TreeParameters(name='lpa',
-                                    lrr=lrr,
-                                    diameter=lpa_mean_dia,
-                                    d_min=self.d_min,
-                                    alpha=self.alpha,
-                                    beta=self.beta,
-                                    compliance_model=lpa_compliance)
-
-        rpa_params = TreeParameters(name='rpa',
-                                    lrr=lrr,
-                                    diameter=rpa_mean_dia,
-                                    d_min=self.d_min,
-                                    alpha=self.alpha,
-                                    beta=self.beta,
-                                    compliance_model=rpa_compliance)
+    def loss_fn(self, x: np.ndarray, pa_config, finalize: bool=False) -> float:
+        params = self.tune_space.vector_to_param_dict(x)
 
         try:
+            lpa_params, rpa_params = self._build_tree_params(params)
             pa_config.create_impedance_trees(lpa_params, rpa_params, self.n_procs)
-            pa_config.to_json(f'pa_config_test_tuning.json')
-            # check for NaNs
-            if np.isnan(pa_config.bcs['LPA_BC'].Z[0]) or np.isnan(pa_config.bcs['RPA_BC'].Z[0]):
-                print("NaN detected in boundary conditions, returning high loss")
-                return (5e5, 5e5, 1e6) if grid_search else 1e6
-            else:
-                pa_config.simulate()
+            pa_config.to_json('pa_config_tuning_snapshot.json')
+            # sanity check
+            if (np.isnan(pa_config.bcs['LPA_BC'].Z[0]) or
+                np.isnan(pa_config.bcs['RPA_BC'].Z[0])):
+                return 1e9
+            pa_config.simulate()
             print(f'pa config SIMULATED, rpa split: {pa_config.rpa_split}, p_mpa = {pa_config.P_mpa}\n params: {params}')
-            pa_config.plot_mpa(path='figures/pa_config_plot.png')
-        except:
-            return (5e5, 5e5, 1e6) if grid_search else 1e6
+        except Exception as e:
+            print(f"[loss_fn] simulation error: {e} params={params}")
+            return 1e9
 
-        
+        # ---- Loss: weighted MPA pressure + flow split + mild L2 on compliance ----
+        weights = np.array([1.5, 1.0, 1.2]) if (self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p) else np.array([1.0, 0.0, 1.0])
+        pressure_loss = np.sum(np.dot(np.abs(np.array(pa_config.P_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p, weights))**2 * 100.0
+        flowsplit_loss = ((pa_config.rpa_split - self.clinical_targets.rpa_split) / self.clinical_targets.rpa_split)**2 * 100.0
 
-        weights = np.array([1.5, 1, 1.2]) if self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p else np.array([1, 0, 1])
-        pressure_loss = np.sum(np.dot(np.abs(np.array(pa_config.P_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p, weights))**2 * 100
-        flowsplit_loss = ((pa_config.rpa_split - self.clinical_targets.rpa_split) / self.clinical_targets.rpa_split)**2 * 100
-        L2_reg = lamb * (params[0] ** 2 + params[1] ** 2)
-        total_loss = pressure_loss + flowsplit_loss + L2_reg
+        if self.compliance_model == "olufsen":
+            l2 = 1e-3 * (params["comp.lpa.k2"]**2 + params["comp.rpa.k2"]**2)
+        else:
+            l2 = 1e-5 * (params["comp.lpa.C"]**2 + params["comp.rpa.C"]**2)
 
-        output_params_rows = [
-            lpa_params.to_csv_row(loss=total_loss, flow_split=1 - pa_config.rpa_split, p_mpa=pa_config.P_mpa),
-            rpa_params.to_csv_row(loss=total_loss, flow_split=pa_config.rpa_split, p_mpa=pa_config.P_mpa)
-        ]
+        total = float(pressure_loss + flowsplit_loss + l2)
 
-        # Determine all keys across all rows
-        all_keys = sorted({key for row in output_params_rows for key in row})
+        if finalize:
+            # Write once on final call
+            rows = [
+                lpa_params.to_csv_row(loss=total, flow_split=1 - pa_config.rpa_split, p_mpa=pa_config.P_mpa),
+                rpa_params.to_csv_row(loss=total, flow_split=pa_config.rpa_split, p_mpa=pa_config.P_mpa)
+            ]
+            keys = sorted({k for r in rows for k in r})
+            with open("optimized_params.csv", "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=keys); w.writeheader(); w.writerows(rows)
 
-        with open("optimized_params.csv", "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=all_keys)
-            writer.writeheader()
-            for row in output_params_rows:
-                writer.writerow(row)
-
-        print(f'\n***PRESSURE LOSS: {pressure_loss}, FS LOSS: {flowsplit_loss}, TOTAL LOSS: {total_loss} ***\n')
-
-        if grid_search:
-            return pressure_loss, flowsplit_loss, total_loss
-        return total_loss
-
+        return total

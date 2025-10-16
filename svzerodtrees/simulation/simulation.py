@@ -27,6 +27,21 @@ class Simulation:
                      "location": "uniform",
                      "iterations": 100,
                  },
+                 tune_space: TuneSpace = TuneSpace(
+                    free=[
+                        FreeParam("lpa.alpha", init=0.9, lb=0.1, ub=0.95),
+                        FreeParam("lpa.beta",  init=0.6, lb=0.1, ub=0.65),
+                        FreeParam("rpa.alpha", init=0.9, lb=0.7, ub=0.99),
+                        FreeParam("rpa.beta",  init=0.6, lb=0.3, ub=0.9),
+                        FreeParam("comp.lpa.C",   init=6.6e4, lb=1.0e4, ub=2.0e5, to_native=positive, from_native=np.log),
+                        FreeParam("comp.rpa.C",   init=6.6e4, lb=1.0e4, ub=2.0e5, to_native=positive, from_native=np.log),
+                    ],
+                    fixed=[
+                        FixedParam("lrr", 10.0),
+                        FixedParam("d_min", 0.01),
+                    ],
+                    tied=[]
+                ),
                  compliance_model: str = 'constant',
                  zerod_config='zerod_config.json',
                  convert_to_cm=False,
@@ -43,6 +58,8 @@ class Simulation:
         self.postop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, postop_dir), zerod_config=self.zerod_config_path, convert_to_cm=convert_to_cm)
         if adapted_dir is not None:
             self.adapted_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, adapted_dir), mesh_complete=self.postop_dir.mesh_complete.path, convert_to_cm=convert_to_cm)
+
+        self.tune_space = tune_space
 
         available_bc_types = ['impedance', 'rcr']
         if bc_type not in available_bc_types:
@@ -134,15 +151,14 @@ class Simulation:
                     opt_params = pd.read_csv(os.path.join(self.path, 'optimized_params.csv'))
                     lpa_params = TreeParameters.from_row_new(opt_params[opt_params.pa == 'lpa'])
                     rpa_params = TreeParameters.from_row_new(opt_params[opt_params.pa == 'rpa'])
-                    initial_guess = [lpa_params.compliance_model.value, rpa_params.compliance_model.value, lpa_params.diameter, rpa_params.diameter, lpa_params.lrr]
                     reduced_config = ConfigHandler.from_json(os.path.join(self.path, "pa_config_test_tuning.json"), is_pulmonary=True)
                 else:
                     initial_guess = None
-                # NEW METHOD, in impedance_tuner.py
+
                 impedance_tuner = ImpedanceTuner(reduced_config, 
                                                  self.preop_dir.mesh_complete.mesh_surfaces_dir, 
                                                  self.clinical_targets, 
-                                                 initial_guess=initial_guess,
+                                                 self.tune_space,
                                                  rescale_inflow=run_steady, 
                                                  d_min=0.01, 
                                                  convert_to_cm=self.convert_to_cm, 
