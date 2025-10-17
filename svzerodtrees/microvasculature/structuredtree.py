@@ -38,10 +38,18 @@ class StructuredTree:
         # --- Required core parameters ---
         self.name = name
         self.time = time
-        self.simparams = simparams
+        if simparams is None:
+            self.simparams = SimParams(
+                {
+                    "density": 1.055,
+                    "viscosity": 0.04,
+                }
+            )
+        else:
+            self.simparams = simparams
 
         # --- Physical constants ---
-        self.viscosity = simparams.viscosity
+        self.viscosity = self.simparams.viscosity
         self.density = 1.055  # fixed unless overridden in vessel-level params
 
         # --- Geometry and hemodynamics ---
@@ -76,7 +84,7 @@ class StructuredTree:
                 "P_in": P_in,
                 "Q_in": Q_in,
                 "boundary_conditions": [],
-                "simulation_parameters": simparams.to_dict(),
+                "simulation_parameters": self.simparams.to_dict(),
                 "vessels": [],
                 "junctions": [],
                 "adaptations": 0
@@ -238,7 +246,7 @@ class StructuredTree:
                 self.block_dict["vessels"].append(current_vessel.right.params)
 
 
-    def build_tree(self, initial_d=None, d_min=0.0049, optimizing=False, asym=0.4048, xi=2.7, alpha=None, beta=None, lrr=50.0):
+    def build_tree(self, initial_d=None, d_min=0.01, optimizing=False, asym=0.4048, xi=2.7, alpha=None, beta=None, lrr=50.0):
         '''
         recursively build the structured tree
 
@@ -267,7 +275,7 @@ class StructuredTree:
         if alpha is None and beta is None:
             alpha = (1 + asym**(xi/2))**(-1/xi)
             beta = asym**(1/2) * alpha
-            print(f"alpha: {alpha}, beta: {beta}")
+            # print(f"alpha: {alpha}, beta: {beta}")
 
         # make self params
         self.initial_d = initial_d
@@ -754,6 +762,9 @@ class StructuredTree:
 
             # calculate squared relative difference
             loss = ((R0 - R) / R0) ** 2
+
+            print(f"d = {diameter[0]}, R = {R}, loss = {loss}")
+            
             return loss
 
         # define optimization bound (lower bound = r_min, which is the termination diameter)

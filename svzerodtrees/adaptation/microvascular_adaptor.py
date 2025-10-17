@@ -12,6 +12,34 @@ from ..tune_bcs.clinical_targets import ClinicalTargets
 from .setup import *
 from .integrator import run_adaptation
 from .models import CWSSIMSAdaptation
+
+# ---- at module top-level (same .py file), not inside a class ----
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import os
+import copy
+from typing import Tuple
+
+def _adapt_single_bc_worker(
+        bc_name: str,
+        R_preop: float,
+        t,                     # 1D array-like
+        preop_flow,            # 1D array-like
+        postop_flow,           # 1D array-like
+        n_iter: int,
+        d_min: float
+    ) -> Tuple[str, float]:
+        """
+        Top-level, picklable worker: builds & adapts a StructuredTree and returns (bc_name, R_adapt).
+        """
+        # Import here to avoid pickling large modules on executor startup if not needed elsewhere
+        # from .structured_tree import StructuredTree  # adjust import to your project structure
+
+        tree = StructuredTree(name=bc_name, time=t, simparams=None)
+        tree.optimize_tree_diameter(resistance=R_preop, d_min=d_min)
+        tree.adapt_constant_wss(preop_flow, postop_flow, n_iter=n_iter)
+        R_adapt = tree.root.R_eq
+        return bc_name, R_adapt
+
 class MicrovascularAdaptor: 
     '''
     class for computing microvascular adaptation from a preop and postop result
@@ -21,9 +49,9 @@ class MicrovascularAdaptor:
                  preop_simdir: SimulationDirectory, 
                  postop_simdir: SimulationDirectory, 
                  adapted_simdir: SimulationDirectory,
-                 reduced_order_pa: json,
-                 tree_params: csv, 
                  clinical_targets: ClinicalTargets,
+                 reduced_order_pa: json = None,
+                 tree_params: csv = None, 
                  method: str = 'cwss', 
                  location: str = 'uniform',
                  bc_type: str = 'impedance',
@@ -42,15 +70,11 @@ class MicrovascularAdaptor:
         self.preop_simdir = preop_simdir
         self.postop_simdir = postop_simdir
         self.adapted_simdir = adapted_simdir
-
-        self.simple_pa = ConfigHandler.from_json(reduced_order_pa, is_pulmonary=True)
+            
 
         # grab tree params from csv, of form [k1, k2, k3, lrr, diameter]
-        opt_params = pd.read_csv(os.path.join(tree_params))
-        self.tree_params = {
-            'lpa': [opt_params['k1'][opt_params.pa=='lpa'].values[0], opt_params['k2'][opt_params.pa=='lpa'].values[0], opt_params['k3'][opt_params.pa=='lpa'].values[0], opt_params['lrr'][opt_params.pa=='lpa'].values[0], opt_params['diameter'][opt_params.pa=='lpa'].values[0]],
-            'rpa': [opt_params['k1'][opt_params.pa=='rpa'].values[0], opt_params['k2'][opt_params.pa=='rpa'].values[0], opt_params['k3'][opt_params.pa=='rpa'].values[0], opt_params['lrr'][opt_params.pa=='rpa'].values[0], opt_params['diameter'][opt_params.pa=='rpa'].values[0]]
-        }
+
+        self.convert_to_cm = convert_to_cm
 
         self.clinical_targets = clinical_targets
 
@@ -60,15 +84,33 @@ class MicrovascularAdaptor:
             print(f"using adaptation method {method}")
         self.method = method
         self.location = location
-        if bc_type not in ['impedance', 'resistance']:
-            raise ValueError(f"bc_type {bc_type} not recognized, please use 'impedance' or 'resistance'")
+        self.bc_type = bc_type
+
+        if self.bc_type == 'impedance':
+            print("adaptating impedance boundary conditions")
+            self.simple_pa = ConfigHandler.from_json(reduced_order_pa, is_pulmonary=True)
+            opt_params = pd.read_csv(os.path.join(tree_params))
+            self.tree_params = {
+                'lpa': [opt_params['k1'][opt_params.pa=='lpa'].values[0], opt_params['k2'][opt_params.pa=='lpa'].values[0], opt_params['k3'][opt_params.pa=='lpa'].values[0], opt_params['lrr'][opt_params.pa=='lpa'].values[0], opt_params['diameter'][opt_params.pa=='lpa'].values[0]],
+                'rpa': [opt_params['k1'][opt_params.pa=='rpa'].values[0], opt_params['k2'][opt_params.pa=='rpa'].values[0], opt_params['k3'][opt_params.pa=='rpa'].values[0], opt_params['lrr'][opt_params.pa=='rpa'].values[0], opt_params['diameter'][opt_params.pa=='rpa'].values[0]]
+            }
+            # construct lpa and rpa trees
+            self.lpa_tree, self.rpa_tree = self.construct_impedance_trees()
+        elif self.bc_type == 'resistance':
+            print("adapting resistance boundary conditions")
+            if tree_params is not None:
+                opt_params = pd.read_csv(os.path.join(tree_params))
+                self.tree_params = {
+                    'lpa': [opt_params['k1'][opt_params.pa=='lpa'].values[0], opt_params['k2'][opt_params.pa=='lpa'].values[0], opt_params['k3'][opt_params.pa=='lpa'].values[0], opt_params['lrr'][opt_params.pa=='lpa'].values[0], opt_params['diameter'][opt_params.pa=='lpa'].values[0]],
+                    'rpa': [opt_params['k1'][opt_params.pa=='rpa'].values[0], opt_params['k2'][opt_params.pa=='rpa'].values[0], opt_params['k3'][opt_params.pa=='rpa'].values[0], opt_params['lrr'][opt_params.pa=='rpa'].values[0], opt_params['diameter'][opt_params.pa=='rpa'].values[0]]
+                }
         else:
-            self.bc_type = bc_type
+            raise ValueError(f"bc_type {bc_type} not recognized, please use 'impedance' or 'resistance'")
+            
 
-        self.convert_to_cm = convert_to_cm
+        
 
-        # construct lpa and rpa trees
-        self.lpa_tree, self.rpa_tree = self.construct_impedance_trees()
+        
 
     def adapt(self, fig_dir: str = None):
         '''
@@ -155,9 +197,98 @@ class MicrovascularAdaptor:
 
         return lpa_tree, rpa_tree
     
-    def construct_resistance_trees(self, n_iter: int = 1):
+    def adapt_resistance(
+        self,
+        n_iter: int = 1,
+        d_min: float = 0.01,
+        coupler_path: str = 'svzerod_3Dcoupling.json',
+        max_workers: int | None = None,
+        parallel: bool = True,
+    ) -> None:
+        """
+        Construct structured trees for preop/postop, adapt resistances based on flow changes,
+        and write an updated 3D coupling file.
+
+        Parameters
+        ----------
+        n_iter : int
+            Iterations for tree adaptation.
+        d_min : float
+            Minimum terminal diameter passed into StructuredTree.optimize_tree_diameter.
+        coupler_path : str
+            Where to write the adapted coupling JSON (relative to adapted_simdir.path).
+        max_workers : int | None
+            Number of worker processes. Defaults to os.cpu_count() if None.
+        parallel : bool
+            Toggle parallel execution (useful for debugging).
+        """
+        preop_svzerod_coupler = self.preop_simdir.svzerod_3Dcoupling
+        preop_svzerod_data = self.preop_simdir.svzerod_data
+        postop_svzerod_data = self.postop_simdir.svzerod_data
+
+        adapted_svzerod_coupler = copy.deepcopy(preop_svzerod_coupler)
+
+        # 1) Gather tasks (avoid sending big objects—extract only arrays and scalars)
+        tasks = []
+        for bc_name, coupling_block in preop_svzerod_coupler.coupling_blocks.items():
+            if 'branch' in bc_name.lower():
+                continue
+
+            R_preop = preop_svzerod_coupler.bcs[bc_name].R
+            t = coupling_block.values['t']  # assume 1D array-like
+            # Extract flows now (arrays), so workers don't need access to the data managers
+            preop_flow = preop_svzerod_data.get_flow(coupling_block)
+            postop_flow = postop_svzerod_data.get_flow(coupling_block)
+
+            # Optional: small log message here if you like
+            print(f'building structured tree for resistance {R_preop} at BC "{bc_name}"...')
+
+            tasks.append((bc_name, R_preop, t, preop_flow, postop_flow, n_iter, d_min))
+
+        # 2) Execute (parallel or sequential)
+        results: dict[str, float] = {}
+
+        if parallel and len(tasks) > 1:
+            if max_workers is None:
+                max_workers = os.cpu_count() or 1
+
+            # Mac/Windows note:
+            # Ensure this code runs under if __name__ == "__main__": when called from a script to avoid spawn issues.
+            with ProcessPoolExecutor(max_workers=max_workers) as ex:
+                future_map = {
+                    ex.submit(_adapt_single_bc_worker, *args): args[0]  # bc_name
+                    for args in tasks
+                }
+                for fut in as_completed(future_map):
+                    bc = future_map[fut]
+                    try:
+                        bc_name, R_adapt = fut.result()
+                    except Exception as e:
+                        # Fail fast with context; you could also choose to continue on error
+                        raise RuntimeError(f'Adaptation failed for BC "{bc}": {e}') from e
+                    results[bc_name] = R_adapt
+        else:
+            # Sequential fallback (useful for debugging/pdb)
+            for args in tasks:
+                bc_name, R_adapt = _adapt_single_bc_worker(*args)
+                results[bc_name] = R_adapt
+
+        # 3) Apply results back to the (deep-copied) coupler in the main process
+        for bc_name, R_adapt in results.items():
+            R_preop = adapted_svzerod_coupler.bcs[bc_name].R
+            print(f'updating resistance for {bc_name} from {R_preop} to {R_adapt}')
+            adapted_svzerod_coupler.bcs[bc_name].R = R_adapt
+
+        # 4) Persist to disk
+        self.adapted_simdir.svzerod_3Dcoupling = adapted_svzerod_coupler
+        self.adapted_simdir.svzerod_3Dcoupling.path = os.path.join(self.adapted_simdir.path, coupler_path)
+        print("saving adapted config to " + self.adapted_simdir.svzerod_3Dcoupling.path)
+        self.adapted_simdir.svzerod_3Dcoupling.to_json(self.adapted_simdir.svzerod_3Dcoupling.path)
+    
+    def adapt_resistance_nonparallel(self, n_iter: int = 1, d_min=0.01, coupler_path='svzerod_3Dcoupling.json'):
         '''
         construct the trees for the preop and postop simulations from resistance values
+
         '''
 
         preop_svzerod_coupler = self.preop_simdir.svzerod_3Dcoupling
@@ -166,13 +297,13 @@ class MicrovascularAdaptor:
         adapted_svzerod_coupler = copy.deepcopy(preop_svzerod_coupler)
 
         for bc_name, coupling_block in preop_svzerod_coupler.coupling_blocks.items():
-            if 'inflow' not in bc_name.lower():
+            if 'branch' not in bc_name.lower():
                 # get the resistance from the preop simulation
                 R_preop  = preop_svzerod_coupler.bcs[bc_name].R
                 # build tree for preop resistance
                 print(f'building structured tree for resistance {R_preop}...')
                 tree = StructuredTree(name=bc_name, time=coupling_block.values['t'], simparams=None)
-                tree.optimize_tree_diameter(resistance=R_preop)
+                tree.optimize_tree_diameter(resistance=R_preop, d_min=d_min)
                 # get the flow from the preop, postop simulation
                 preop_flow = preop_svzerod_data.get_flow(coupling_block)
                 postop_flow = postop_svzerod_data.get_flow(coupling_block)
@@ -188,13 +319,9 @@ class MicrovascularAdaptor:
         
         self.adapted_simdir.svzerod_3Dcoupling = adapted_svzerod_coupler
         # change path
-        self.adapted_simdir.svzerod_3Dcoupling.path = os.path.join(self.adapted_simdir.path, 'svzerod_3Dcoupling.json')
+        self.adapted_simdir.svzerod_3Dcoupling.path = os.path.join(self.adapted_simdir.path, coupler_path)
         print("saving adapted config to " + self.adapted_simdir.svzerod_3Dcoupling.path)
         self.adapted_simdir.svzerod_3Dcoupling.to_json(self.adapted_simdir.svzerod_3Dcoupling.path)
-
-
-
-
 
 
     def constructTreesFromConfig(self):
