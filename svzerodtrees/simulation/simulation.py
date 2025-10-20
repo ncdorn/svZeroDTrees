@@ -156,8 +156,8 @@ class Simulation:
                     initial_guess = None
 
                 print("Optimizing impedance boundary conditions... with tune space:")
-                for param, values in self.tune_space.items():
-                    print(f" - {param}: {values}")
+                for freeparam in self.tune_space.free:
+                    print(f" - {freeparam.name}: init={freeparam.init}, lb={freeparam.lb}, ub={freeparam.ub}")
 
                 impedance_tuner = ImpedanceTuner(reduced_config, 
                                                  self.preop_dir.mesh_complete.mesh_surfaces_dir, 
