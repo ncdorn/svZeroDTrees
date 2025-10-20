@@ -251,6 +251,8 @@ class MicrovascularAdaptor:
         if parallel and len(tasks) > 1:
             if max_workers is None:
                 max_workers = os.cpu_count() or 1
+            
+            print(f'Adapting resistances in parallel using {max_workers} workers...')
 
             # Mac/Windows note:
             # Ensure this code runs under if __name__ == "__main__": when called from a script to avoid spawn issues.
