@@ -164,7 +164,6 @@ class Simulation:
                                                  self.clinical_targets, 
                                                  self.tune_space,
                                                  rescale_inflow=run_steady, 
-                                                 d_min=0.01, 
                                                  convert_to_cm=self.convert_to_cm, 
                                                  compliance_model=self.compliance_model,
                                                  n_procs=24)
