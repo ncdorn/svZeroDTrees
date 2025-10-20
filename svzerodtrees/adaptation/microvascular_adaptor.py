@@ -202,7 +202,7 @@ class MicrovascularAdaptor:
         n_iter: int = 1,
         d_min: float = 0.01,
         coupler_path: str = 'svzerod_3Dcoupling.json',
-        max_workers: int | None = None,
+        max_workers: int = None,
         parallel: bool = True,
     ) -> None:
         """
