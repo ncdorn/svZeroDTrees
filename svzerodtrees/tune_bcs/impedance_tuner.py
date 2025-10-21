@@ -174,7 +174,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
             x0=x0,
             method=self.solver,
             bounds=bounds if self.solver in ("Nelder-Mead", "L-BFGS-B", "Powell", "TNC", "SLSQP", "trust-constr") else None,
-            options={"maxiter": self.maxiter, "ftol": self.tol}
+            options={"maxiter": self.maxiter}
         )
 
         print(f"[ImpedanceTuner] Optimized: {result.x}  f={result.fun:.3f}")
