@@ -433,6 +433,8 @@ class StructuredTree:
 
         print(f'Z(w=0) = {Z_om[0]}')
 
+        print(Z_om)
+
         Z_t = np.fft.ifft(Z_om)
 
         self.Z_t = np.real(Z_t)
