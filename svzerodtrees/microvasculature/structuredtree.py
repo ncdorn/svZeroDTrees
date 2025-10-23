@@ -7,7 +7,7 @@ from .utils import *
 from ..io.blocks import *
 from .compliance import *
 from multiprocessing import Pool
-from typing import Optional
+from typing import Optional, Literal
 import json
 import pickle
 from functools import partial
@@ -353,21 +353,31 @@ class StructuredTree:
         Z0 = (rho * c) / A
         return Z0.astype(np.float32)
 
-
-    def compute_olufsen_impedance(self,
-                                n_procs: Optional[int] = None,  # kept for API compatibility
-                                tsteps: Optional[int] = None,
-                                chunk_size: int = 512):
+    def compute_olufsen_impedance(
+        self,
+        k1: float = 19_992_500.0,          # g/cm/s^2
+        k2: float = -25.5267,              # 1/cm
+        k3: float = 1_104_531.490909,      # g/cm/s^2
+        n_procs: Optional[int] = None,     # kept for API compatibility (unused)
+        tsteps: Optional[int] = None,
+        chunk_size: int = 512,
+        *,
+        # ---- the 3 switches ----
+        dc_mode: Literal["segment_only","poiseuille_network"] = "segment_only",
+        fft_layout: Literal["legacy_shift","hermitian"] = "legacy_shift",
+        leaf_termination: Literal["zero","reflectionless"] = "zero",
+    ):
         """
-        Fast, NaN-safe, vectorized Olufsen structured-tree impedance using SoA storage.
+        Vectorized, NaN-safe Olufsen structured-tree impedance with toggles to
+        match legacy behavior or use more physical alternatives.
 
         Requires:
-        - self.store  with arrays: d, gen, left, right, collapsed, lrr, density, compliance_model
-        - self.time   (monotonic). If nondimensional, optionally set self.q and self.Lr (we apply q/Lr^3).
-        - self.eta    (dynamic viscosity, g/(cm·s)).
+        - self.store: SoA with d, gen, left, right, collapsed, lrr, density, compliance_model
+        - self.time (monotonic)
+        - self.eta  (dynamic viscosity, g/(cm·s))
 
         Returns:
-        self.Z_t (real IFFT of Z(ω)), self.time
+        self.Z_t (real time-domain kernel via IFFT), self.time
         """
         st = self.store
         if not hasattr(self, "viscosity"):
@@ -375,12 +385,8 @@ class StructuredTree:
 
         # ---------------- time & frequency grid ----------------
         time = np.asarray(self.time, dtype=np.float64)
-        if tsteps is None:
-            tsteps = int(time.size)
-        else:
-            tsteps = int(tsteps)
-        if tsteps < 2:
-            raise ValueError("Need at least two time samples")
+        if tsteps is None: tsteps = int(time.size)
+        if tsteps < 2:     raise ValueError("Need at least two time samples")
 
         dt_nominal = float(np.mean(np.diff(time)))
         scale_t = float(self.q) / (float(self.Lr) ** 3) if hasattr(self, "q") and hasattr(self, "Lr") else 1.0
@@ -388,43 +394,37 @@ class StructuredTree:
         if not np.isfinite(dt) or dt <= 0:
             raise ValueError(f"Computed dt must be positive/finite, got {dt}")
 
-        # Frequencies for IFFT (Hermitian spectrum for real time signal)
-        omega = 2.0 * np.pi * np.fft.fftfreq(tsteps, d=dt)  # [F], can be ±
-        F = omega.size
-        dc_idx = int(np.where(omega == 0.0)[0][0])
-        pos_stop = F // 2 + 1                      # 0..F//2 inclusive
-        Z_pos = np.empty(pos_stop, dtype=np.complex64)
+        # Standard frequency grid (+/-) and its legacy-shifted version
+        omega_std   = 2.0 * np.pi * np.fft.fftfreq(tsteps, d=dt)      # ifft expects this order
+        omega_legacy = np.fft.fftshift(omega_std)                      # old code built ω this way
+        F = tsteps
+        pos_stop = F//2 + 1               # number of nonnegative freqs (DC..Nyquist)
+        dc_std_idx = int(np.where(omega_std == 0.0)[0][0])             # index of DC in std order (usually 0)
 
         # ---------------- geometry & material (vectorized) ----------------
-        # Keep geometry in float32 to save memory; compute physics in float64/complex128
-        d = st.d.astype(np.float32)                # diameter [cm], shape [n]
+        d = st.d.astype(np.float32)
         r = 0.5 * d
-        A = (np.pi * r * r).astype(np.float32)     # area [cm^2]
+        A = (np.pi * r * r).astype(np.float32)
         L = (np.float32(st.lrr) * r).astype(np.float32)
 
         rho64 = float(st.density)
         eta64 = float(self.viscosity)
-        if rho64 <= 0 or not np.isfinite(rho64):
-            raise ValueError(f"rho must be positive/finite, got {rho64}")
-        if eta64 <= 0 or not np.isfinite(eta64):
-            raise ValueError(f"eta must be positive/finite, got {eta64}")
+        if rho64 <= 0 or not np.isfinite(rho64): raise ValueError(f"rho must be positive/finite, got {rho64}")
+        if eta64 <= 0 or not np.isfinite(eta64): raise ValueError(f"eta must be positive/finite, got {eta64}")
 
-        # Eh/r from compliance model (vectorized preferred; safe fallback if not)
+        # compliance model Eh/r (vectorized if possible)
         r64 = r.astype(np.float64)
         try:
             Eh_over_r = np.asarray(st.compliance_model.evaluate(r64), dtype=np.float64)
-            if Eh_over_r.shape != r64.shape:
-                raise ValueError
+            if Eh_over_r.shape != r64.shape: raise ValueError
         except Exception:
             Eh_over_r = np.asarray([st.compliance_model.evaluate(float(ri)) for ri in r64], dtype=np.float64)
 
-        # Distensibility / compliance-like coefficient used in your scalar code:
-        # C = 3*A / (2 * (Eh/r))
         A64 = A.astype(np.float64)
         L64 = L.astype(np.float64)
-        C64 = (3.0 * A64) / (2.0 * Eh_over_r)      # [n]
-        pref_g = np.sqrt((C64 * A64) / rho64)      # [n], float64
-        pref_c = np.sqrt((A64 / (C64 * rho64)))    # [n], float64
+        C64  = (3.0 * A64) / (2.0 * Eh_over_r)       # your scalar code’s definition
+        pref_g = np.sqrt((C64 * A64) / rho64)        # appears in g_omega
+        pref_c = np.sqrt((A64 / (C64 * rho64)))      # appears in c_omega
 
         # topology
         gens = st.gen.astype(np.int32)
@@ -433,213 +433,233 @@ class StructuredTree:
         left_idx  = st.left.astype(np.int32)
         right_idx = st.right.astype(np.int32)
 
-        # group nodes by generation, excluding collapsed from spectral loops
+        # nodes by generation (exclude collapsed in spectral path)
         idx_by_gen = [np.where((gens == g) & (~collapsed))[0] for g in range(max_gen + 1)]
-        # maps: absolute node id -> row index within that generation block
+        # absolute index -> row-in-gen map
         n_nodes = d.size
         pos_map_by_gen = []
         for g in range(max_gen + 1):
             idx = idx_by_gen[g]
-            pos_map = np.full(n_nodes, -1, dtype=np.int32)
-            if idx.size:
-                pos_map[idx] = np.arange(idx.size, dtype=np.int32)
-            pos_map_by_gen.append(pos_map)
+            mp = np.full(n_nodes, -1, dtype=np.int32)
+            if idx.size: mp[idx] = np.arange(idx.size, dtype=np.int32)
+            pos_map_by_gen.append(mp)
 
-        EPS = 1e-14  # epsilon for numerical guards
+        EPS = 1e-14
 
-        # ---------------- DC solution (Poiseuille network) ----------------
-        # R_seg = 8*η*L / (π r^4)
+        # ---------------- DC handling (switch) ----------------
+        # Poiseuille segment resistance
         r64_safe = np.maximum(r64, np.finfo(np.float64).tiny)
         R_seg = (8.0 * eta64 * L64) / (np.pi * (r64_safe ** 4))
-        # bottom-up: Z_dc[parent] = R_seg[parent] + (Z_dc[left] || Z_dc[right])
-        Z_dc_next = None
-        next_idx = None
-        for g in range(max_gen, -1, -1):
-            idx = idx_by_gen[g]
-            if idx.size == 0:
-                Z_dc = None
-                Z_dc_next = Z_dc
-                next_idx = idx
-                continue
 
-            li = left_idx[idx]; ri = right_idx[idx]
-            hasL = (li >= 0) & (~collapsed[li])
-            hasR = (ri >= 0) & (~collapsed[ri])
-
-            if g == max_gen or Z_dc_next is None or next_idx.size == 0:
-                Z_load = np.zeros(idx.size, dtype=np.float64)
+        def dc_root_value() -> float:
+            if dc_mode == "segment_only":
+                # Match OLD behavior: z(0) = R_eq of the ROOT SEGMENT ONLY
+                return float(R_seg[0])
+            elif dc_mode == "poiseuille_network":
+                # Physically correct network DC: series (add) + parallel (combine) bottom-up
+                Z_dc_next, next_idx = None, None
+                for g in range(max_gen, -1, -1):
+                    idx = idx_by_gen[g]
+                    if idx.size == 0:
+                        Z_dc_next, next_idx = None, idx
+                        continue
+                    li = left_idx[idx];  ri = right_idx[idx]
+                    hasL = (li >= 0) & (~collapsed[li]);  hasR = (ri >= 0) & (~collapsed[ri])
+                    if g == max_gen or Z_dc_next is None or next_idx.size == 0:
+                        Z_load = np.zeros(idx.size, dtype=np.float64)
+                    else:
+                        pos_child = pos_map_by_gen[g + 1]
+                        Z1 = np.zeros(idx.size, dtype=np.float64)
+                        Z2 = np.zeros(idx.size, dtype=np.float64)
+                        if np.any(hasL): Z1[hasL] = Z_dc_next[pos_child[li[hasL]]]
+                        if np.any(hasR): Z2[hasR] = Z_dc_next[pos_child[ri[hasR]]]
+                        Zsum = Z1 + Z2
+                        Z_load = np.zeros_like(Z1)
+                        onlyL = hasL & (~hasR); onlyR = hasR & (~hasL); both = hasL & hasR
+                        if np.any(onlyL): Z_load[onlyL] = Z1[onlyL]
+                        if np.any(onlyR): Z_load[onlyR] = Z2[onlyR]
+                        if np.any(both):
+                            num = (Z1[both] * Z2[both]); den = Zsum[both]
+                            zero = (np.abs(den) < EPS) & (np.abs(num) < EPS)
+                            safe = ~zero
+                            Zb = np.zeros_like(num); Zb[safe] = num[safe] / den[safe]
+                            Z_load[both] = Zb
+                    Z_dc_next = R_seg[idx] + Z_load
+                    next_idx = idx
+                root_row = 0 if next_idx.size == 1 else int(np.where(next_idx == 0)[0][0])
+                return float(Z_dc_next[root_row])
             else:
-                pos_next = pos_map_by_gen[g + 1]
-                Z1 = np.zeros(idx.size, dtype=np.float64)
-                Z2 = np.zeros(idx.size, dtype=np.float64)
-                if np.any(hasL): Z1[hasL] = Z_dc_next[pos_next[li[hasL]]]
-                if np.any(hasR): Z2[hasR] = Z_dc_next[pos_next[ri[hasR]]]
-                Zsum = Z1 + Z2
-                Z_load = np.zeros_like(Z1)
-                onlyL = hasL & (~hasR); onlyR = hasR & (~hasL); both = hasL & hasR
-                if np.any(onlyL): Z_load[onlyL] = Z1[onlyL]
-                if np.any(onlyR): Z_load[onlyR] = Z2[onlyR]
-                if np.any(both):
-                    num = (Z1[both] * Z2[both])
-                    den = Zsum[both]
-                    zero = (np.abs(den) < EPS) & (np.abs(num) < EPS)
-                    safe = ~zero
-                    Zb = np.zeros_like(num)
-                    Zb[safe] = num[safe] / den[safe]
-                    Z_load[both] = Zb
+                raise ValueError(f"Unknown dc_mode: {dc_mode}")
 
-            Z_dc = R_seg[idx] + Z_load
-            Z_dc_next = Z_dc
-            next_idx = idx
+        Z_dc_root = dc_root_value()
 
-        root_row = 0 if next_idx.size == 1 else int(np.where(next_idx == 0)[0][0])
-        Z_pos[dc_idx] = np.complex64(Z_dc_next[root_row])
-
-        # ---------------- robust Womersley helper ----------------
+        # ---------------- robust Womersley + term ----------------
         def womersley(r_vec: np.ndarray, w_vec: np.ndarray) -> np.ndarray:
-            """
-            r_vec: [n] radii [cm], real
-            w_vec: [Fc] positive angular frequencies [1/s], real
-            returns: [n, Fc] α (Womersley), real >= 0
-            """
             r_in = np.asarray(r_vec, dtype=np.float64)
             w_in = np.asarray(w_vec, dtype=np.float64)
             arg = (np.abs(w_in)[None, :] * rho64) / eta64
-            arg = np.maximum(arg, 0.0)  # clamp tiny negatives
-            woms = r_in[:, None] * np.sqrt(arg, dtype=np.float64)
-            woms[~np.isfinite(woms)] = 0.0
-            return woms
+            arg = np.maximum(arg, 0.0)
+            out = r_in[:, None] * np.sqrt(arg, dtype=np.float64)
+            out[~np.isfinite(out)] = 0.0
+            return out
 
         inv_sqrt_i = 1.0 / np.sqrt(1j)  # complex128
 
         def form_term(wom: np.ndarray) -> np.ndarray:
-            """
-            Builds complex 'term' so that:
-            g_omega = pref_g[:,None] * term
-            c_omega = pref_c[:,None] * term
-            Implements your piecewise Womersley logic.
-            """
             wom = wom.astype(np.float64)
             term = np.zeros_like(wom, dtype=np.complex128)
-
             m0  = wom == 0.0
             m1  = wom > 3.0
             m23 = (wom > 2.0) & (~m1)
             m2  = (~m1) & (~m23) & (~m0)
-
             if np.any(m1) or np.any(m23):
                 t_inv = (2.0 * inv_sqrt_i) / wom
                 B = 1.0 + (1.0 / (2.0 * wom))
                 S2 = 1.0 - t_inv * B
             if np.any(m2) or np.any(m23):
                 S1 = 1j * (wom ** 2) / 8.0 + (wom ** 4) / 48.0
-
             if np.any(m1):  term[m1]  = np.sqrt(S2[m1])
             if np.any(m2):  term[m2]  = np.sqrt(S1[m2])
-            if np.any(m23): term[m23] = ( (3.0 - wom[m23]) * np.sqrt(S1[m23])
-                                        + (wom[m23] - 2.0) * np.sqrt(S2[m23]) )
-
-            # clamp near-zero magnitude to avoid 1/0 downstream (preserve phase)
-            mag = np.abs(term)
-            tiny = (mag < EPS)
-            if np.any(tiny):
-                term[tiny] = (term[tiny] / (mag[tiny] + 0.0)) * EPS
+            if np.any(m23): term[m23] = ((3.0 - wom[m23]) * np.sqrt(S1[m23])
+                                    + (wom[m23] - 2.0) * np.sqrt(S2[m23]))
+            mag = np.abs(term); tiny = mag < EPS
+            if np.any(tiny): term[tiny] = (term[tiny] / (mag[tiny] + 0.0)) * EPS
             return term
 
-        # ---------------- frequency-dependent (ω>0), chunked ----------------
-        pos_freqs = np.arange(1, pos_stop, dtype=np.int32)  # 1..F//2
-        for start in range(0, pos_freqs.size, chunk_size):
-            stop = min(start + chunk_size, pos_freqs.size)
-            idx_chunk = pos_freqs[start:stop]
-            w = omega[idx_chunk].astype(np.float64)  # strictly > 0
-            Fc = w.size
+        # ---------------- inner solver for arbitrary positive ω vector ----------------
+        def solve_root_for_pos_omegas(w_pos: np.ndarray) -> np.ndarray:
+            """Return Z_root(ω) for ω in w_pos (ω>=0). Shape [len(w_pos)]."""
+            if w_pos.size == 0:
+                return np.empty(0, dtype=np.complex64)
 
-            wom = womersley(r64, w)                         # [n,Fc] real
-            term = form_term(wom)                           # [n,Fc] complex128
-            g_omega = (pref_g[:, None] * term).astype(np.complex128)  # [n,Fc]
-            c_omega = (pref_c[:, None] * term).astype(np.complex128)  # [n,Fc]
+            out = np.empty(w_pos.size, dtype=np.complex64)
+            # chunk to cap memory
+            for s in range(0, w_pos.size, chunk_size):
+                e = min(s + chunk_size, w_pos.size)
+                w = w_pos[s:e].astype(np.float64)     # >0
+                Fc = w.size
 
-            # epsilon clamp to avoid |g| or |c| ~ 0
-            g_mag = np.abs(g_omega); mask = g_mag < EPS
-            if np.any(mask): g_omega[mask] *= (EPS / (g_mag[mask] + 0.0))
-            c_mag = np.abs(c_omega); mask = c_mag < EPS
-            if np.any(mask): c_omega[mask] *= (EPS / (c_mag[mask] + 0.0))
+                wom = womersley(r64, w)
+                term = form_term(wom)
+                g_omega = (pref_g[:, None] * term).astype(np.complex128)   # [n,Fc]
+                c_omega = (pref_c[:, None] * term).astype(np.complex128)   # [n,Fc]
+                # clamp tiny |g| & |c|
+                gm = np.abs(g_omega); mask = gm < EPS
+                if np.any(mask): g_omega[mask] *= (EPS / (gm[mask] + 0.0))
+                cm = np.abs(c_omega); mask = cm < EPS
+                if np.any(mask): c_omega[mask] *= (EPS / (cm[mask] + 0.0))
 
-            kappa = (w[None, :] * L64[:, None]) / c_omega   # [n,Fc] complex128
+                kappa = (w[None, :] * L64[:, None]) / c_omega              # [n,Fc]
 
-            # bottom-up impedance with z_L propagation (z_L = 0 at leaves)
-            Z_next = None
-            next_idx = None
-            for g in range(max_gen, -1, -1):
-                idx = idx_by_gen[g]  # (collapsed nodes excluded)
-                if idx.size == 0:
-                    Z_cur = None
-                    Z_next = Z_cur; next_idx = idx
-                    continue
+                Z_next, next_idx = None, None
+                for g in range(max_gen, -1, -1):
+                    idx = idx_by_gen[g]
+                    if idx.size == 0:
+                        Z_next, next_idx = None, idx
+                        continue
 
-                li = left_idx[idx]; ri = right_idx[idx]
-                hasL = (li >= 0) & (~collapsed[li])
-                hasR = (ri >= 0) & (~collapsed[ri])
+                    li = left_idx[idx];  ri = right_idx[idx]
+                    hasL = (li >= 0) & (~collapsed[li])
+                    hasR = (ri >= 0) & (~collapsed[ri])
 
-                if g == max_gen or Z_next is None or next_idx.size == 0:
-                    ZL = np.zeros((idx.size, Fc), dtype=np.complex128)
-                else:
-                    pos_child = pos_map_by_gen[g + 1]
-                    Z1 = np.zeros((idx.size, Fc), dtype=np.complex128)
-                    Z2 = np.zeros((idx.size, Fc), dtype=np.complex128)
-                    if np.any(hasL): Z1[hasL, :] = Z_next[pos_child[li[hasL]], :]
-                    if np.any(hasR): Z2[hasR, :] = Z_next[pos_child[ri[hasR]], :]
+                    if g == max_gen or Z_next is None or next_idx.size == 0:
+                        if leaf_termination == "zero":
+                            ZL = np.zeros((idx.size, Fc), dtype=np.complex128)
+                        elif leaf_termination == "reflectionless":
+                            # reflectionless continuation: Z_char = 1/g
+                            gk_leaf = g_omega[idx, :]
+                            ZL = 1.0 / gk_leaf
+                        else:
+                            raise ValueError(f"Unknown leaf_termination: {leaf_termination}")
+                    else:
+                        pos_child = pos_map_by_gen[g + 1]
+                        Z1 = np.zeros((idx.size, Fc), dtype=np.complex128)
+                        Z2 = np.zeros((idx.size, Fc), dtype=np.complex128)
+                        if np.any(hasL): Z1[hasL, :] = Z_next[pos_child[li[hasL]], :]
+                        if np.any(hasR): Z2[hasR, :] = Z_next[pos_child[ri[hasR]], :]
 
-                    Zsum = Z1 + Z2
-                    ZL = np.zeros_like(Z1)
-                    onlyL = hasL & (~hasR); onlyR = hasR & (~hasL); both = hasL & hasR
-                    if np.any(onlyL): ZL[onlyL, :] = Z1[onlyL, :]
-                    if np.any(onlyR): ZL[onlyR, :] = Z2[onlyR, :]
-                    if np.any(both):
-                        num = (Z1[both, :] * Z2[both, :])
-                        den = Zsum[both, :]
-                        zero = (np.abs(den) < EPS) & (np.abs(num) < EPS)  # 0/0 -> 0
-                        safe = ~zero
-                        Zb = np.zeros_like(num)
-                        Zb[safe] = num[safe] / den[safe]
-                        ZL[both, :] = Zb
+                        Zsum = Z1 + Z2
+                        ZL = np.zeros_like(Z1)
+                        onlyL = hasL & (~hasR); onlyR = hasR & (~hasL); both = hasL & hasR
+                        if np.any(onlyL): ZL[onlyL, :] = Z1[onlyL, :]
+                        if np.any(onlyR): ZL[onlyR, :] = Z2[onlyR, :]
+                        if np.any(both):
+                            num = (Z1[both, :] * Z2[both, :]); den = Zsum[both, :]
+                            zero = (np.abs(den) < EPS) & (np.abs(num) < EPS)
+                            safe = ~zero
+                            Zb = np.zeros_like(num); Zb[safe] = num[safe] / den[safe]
+                            ZL[both, :] = Zb
 
-                # segment input impedance (your single-vessel formula with z_L)
-                sin_k = np.sin(kappa[idx, :])
-                cos_k = np.cos(kappa[idx, :])
-                gk = g_omega[idx, :]
+                    sin_k = np.sin(kappa[idx, :])
+                    cos_k = np.cos(kappa[idx, :])
+                    gk = g_omega[idx, :]
 
-                den = (cos_k + 1j * gk * ZL * sin_k)
-                num = (1j * sin_k / gk + cos_k * ZL)
+                    den = (cos_k + 1j * gk * ZL * sin_k)
+                    num = (1j * sin_k / gk + cos_k * ZL)
 
-                small_den = (np.abs(den) < EPS)
-                Z_seg = np.empty_like(den)
-                Z_seg[~small_den] = num[~small_den] / den[~small_den]
-                # fallback limit when denominator ~ 0
-                Z_seg[small_den] = (1j * np.tan(kappa[idx, :][small_den]) / gk[small_den])
+                    small_den = (np.abs(den) < EPS)
+                    Z_seg = np.empty_like(den)
+                    Z_seg[~small_den] = num[~small_den] / den[~small_den]
+                    Z_seg[small_den] = (1j * np.tan(kappa[idx, :][small_den]) / gk[small_den])
 
-                Z_next = Z_seg
-                next_idx = idx
+                    Z_next = Z_seg
+                    next_idx = idx
 
-            root_row = 0 if next_idx.size == 1 else int(np.where(next_idx == 0)[0][0])
-            Z_pos[idx_chunk] = Z_next[root_row, :].astype(np.complex64)
+                root_row = 0 if next_idx.size == 1 else int(np.where(next_idx == 0)[0][0])
+                out[s:e] = Z_next[root_row, :].astype(np.complex64)
 
-        # ---------------- assemble Hermitian spectrum + IFFT ----------------
-        Z_full = np.empty(F, dtype=np.complex64)
-        Z_full[:pos_stop] = Z_pos
-        if F > 2:
-            Z_full[pos_stop:] = np.conjugate(Z_pos[1:pos_stop-1][::-1])
+            return out
 
-        # sanity check before IFFT
+        # ---------------- assemble spectrum according to fft_layout (switch) ----------------
+        if fft_layout == "hermitian":
+            # Positive nonnegative ω in std order: [0 .. Nyquist]
+            w_pos = omega_std[:pos_stop]
+            Z_pos = np.empty(pos_stop, dtype=np.complex64)
+            # DC
+            Z_pos[0] = np.complex64(Z_dc_root)
+            # ω>0
+            if pos_stop > 1:
+                Z_pos[1:] = solve_root_for_pos_omegas(w_pos[1:])
+            # Build full Hermitian spectrum for a real ifft
+            Z_full = np.empty(F, dtype=np.complex64)
+            Z_full[:pos_stop] = Z_pos
+            if F > 2:
+                Z_full[pos_stop:] = np.conjugate(Z_pos[1:pos_stop-1][::-1])
+
+        elif fft_layout == "legacy_shift":
+            # Match OLD placement: compute on the first half of fftshifted ω (which runs from -fs/2..0)
+            # and then fill the tail with conjugate flipped values, followed by ifftshift before IFFT.
+            w_first_half = np.abs(omega_legacy[:pos_stop])  # high→low→DC (order doesn't matter)
+            Z_first = np.empty(pos_stop, dtype=np.complex64)
+            # DC is the last element of w_first_half (index pos_stop-1) but old code put DC at index 0..N//2?
+            # They assigned DC via the same loop; we explicitly set it:
+            Z_first[-1] = np.complex64(Z_dc_root)  # DC corresponds to ω=0 entry in this half
+
+            if pos_stop > 1:
+                # compute all ω>0 entries in this half (including highest frequency)
+                Z_first[:-1] = solve_root_for_pos_omegas(w_first_half[:-1])
+            # Old code stored conj of positives into the "first half"
+            Z_legacy = np.zeros(F, dtype=np.complex64)
+            Z_legacy[:pos_stop] = np.conjugate(Z_first)
+            # Fill negative side from flipped copy of first half (excluding its last item)
+            if F > 2:
+                Z_legacy[pos_stop:] = np.conjugate(Z_legacy[:pos_stop-1][::-1])
+            # Shift back to standard order for ifft
+            Z_full = np.fft.ifftshift(Z_legacy)
+
+        else:
+            raise ValueError(f"Unknown fft_layout: {fft_layout}")
+
+        # ---------------- sanity check + IFFT ----------------
         if not np.all(np.isfinite(Z_full)):
             bad = ~np.isfinite(Z_full)
             first_bad = int(np.argmax(bad))
             raise FloatingPointError(
-                f"Non-finite Z_full at index {first_bad}, ω={omega[first_bad]:.3e}. "
+                f"Non-finite Z_full at index {first_bad}, ω={omega_std[first_bad]:.3e}. "
                 f"min|Z|={np.nanmin(np.abs(Z_full)):.3e}, max|Z|={np.nanmax(np.abs(Z_full)):.3e}"
             )
 
-        print(f"Z(w=0) = {Z_full[dc_idx]}")
+        print(f"Z(w=0) = {Z_full[dc_std_idx]}")
         self.Z_t = np.fft.ifft(Z_full).real.astype(np.float64)
         return self.Z_t, self.time
 
