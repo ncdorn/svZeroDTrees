@@ -246,7 +246,7 @@ class StructuredTree:
                 self.block_dict["vessels"].append(current_vessel.right.params)
 
 
-    def build_tree(self, initial_d=None, d_min=0.01, optimizing=False, asym=0.4048, xi=2.7, alpha=None, beta=None, lrr=50.0):
+    def build(self, initial_d=None, d_min=0.01, optimizing=False, asym=0.4048, xi=2.7, alpha=None, beta=None, lrr=50.0):
         '''
         recursively build the structured tree
 
