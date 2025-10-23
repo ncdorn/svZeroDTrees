@@ -338,21 +338,6 @@ class StructuredTree:
         self.block_dict["vessels"] = vessels
         self.block_dict["junctions"] = junctions
 
-    def z0_characteristic_all(d: np.ndarray,
-                          rho: float,
-                          c0: float | None = None,
-                          **params) -> np.ndarray:
-        """
-        Vectorized characteristic impedance for all vessels.
-        Replace with your Olufsen-based formulas. Use float32 inputs/outputs.
-        """
-        # Example placeholder: Z0 = rho * c / A
-        # If c depends on d via a model, compute c(d, params) vectorized here.
-        A = 0.25 * np.pi * (d * d)  # area from diameter
-        c = compute_wave_speed_all(d, **params) if c0 is None else np.full_like(d, c0, dtype=np.float32)
-        Z0 = (rho * c) / A
-        return Z0.astype(np.float32)
-
     def compute_olufsen_impedance(
         self,
         k1: float = 19_992_500.0,          # g/cm/s^2
@@ -363,9 +348,9 @@ class StructuredTree:
         chunk_size: int = 512,
         *,
         # ---- the 3 switches ----
-        dc_mode: Literal["segment_only","poiseuille_network"] = "segment_only",
+        dc_mode: Literal["segment_only","poiseuille_network"] = "poiseuille_network",
         fft_layout: Literal["legacy_shift","hermitian"] = "legacy_shift",
-        leaf_termination: Literal["zero","reflectionless"] = "zero",
+        leaf_termination: Literal["zero","reflectionless"] = "reflectionless",
     ):
         """
         Vectorized, NaN-safe Olufsen structured-tree impedance with toggles to
@@ -627,24 +612,33 @@ class StructuredTree:
                 Z_full[pos_stop:] = np.conjugate(Z_pos[1:pos_stop-1][::-1])
 
         elif fft_layout == "legacy_shift":
-            # Match OLD placement: compute on the first half of fftshifted ω (which runs from -fs/2..0)
-            # and then fill the tail with conjugate flipped values, followed by ifftshift before IFFT.
-            w_first_half = np.abs(omega_legacy[:pos_stop])  # high→low→DC (order doesn't matter)
+            # Build on fftshifted frequencies: first half is [-fs/2, ..., -df, 0] (length pos_stop)
+            w_first_half = np.abs(omega_legacy[:pos_stop])
             Z_first = np.empty(pos_stop, dtype=np.complex64)
-            # DC is the last element of w_first_half (index pos_stop-1) but old code put DC at index 0..N//2?
-            # They assigned DC via the same loop; we explicitly set it:
-            Z_first[-1] = np.complex64(Z_dc_root)  # DC corresponds to ω=0 entry in this half
 
+            # DC at the last slot of the first half
+            Z_first[-1] = np.complex64(Z_dc_root)
+
+            # ω>0 entries for the rest of the first half
             if pos_stop > 1:
-                # compute all ω>0 entries in this half (including highest frequency)
                 Z_first[:-1] = solve_root_for_pos_omegas(w_first_half[:-1])
-            # Old code stored conj of positives into the "first half"
+
+            # Fill the shifted spectrum:
+            #   first half (negative freqs + DC) is the conjugate of the positives we just computed
             Z_legacy = np.zeros(F, dtype=np.complex64)
             Z_legacy[:pos_stop] = np.conjugate(Z_first)
-            # Fill negative side from flipped copy of first half (excluding its last item)
-            if F > 2:
-                Z_legacy[pos_stop:] = np.conjugate(Z_legacy[:pos_stop-1][::-1])
-            # Shift back to standard order for ifft
+
+            # Second half (positive freqs) is the conjugate mirror of the interior of the first half
+            if F % 2 == 0:
+                # even N: exclude Nyquist (index 0 of first half) AND DC (last index)
+                mirror_src = Z_legacy[1:pos_stop-1]
+            else:
+                # odd N: exclude DC only (no Nyquist bin)
+                mirror_src = Z_legacy[:pos_stop-1]
+
+            Z_legacy[pos_stop:] = np.conjugate(mirror_src[::-1])
+
+            # Shift back to standard order for IFFT
             Z_full = np.fft.ifftshift(Z_legacy)
 
         else:
