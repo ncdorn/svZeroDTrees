@@ -38,7 +38,8 @@ def _adapt_single_bc_worker(
         tree.optimize_tree_diameter(resistance=R_preop, d_min=d_min)
         tree.adapt_constant_wss(preop_flow, postop_flow, n_iter=n_iter)
         R_adapt = tree.root.R_eq
-        return bc_name, R_adapt
+        optimized_root_diameter = tree.root.d
+        return bc_name, R_adapt, optimized_root_diameter
 
 class MicrovascularAdaptor: 
     '''
@@ -264,7 +265,7 @@ class MicrovascularAdaptor:
                 for fut in as_completed(future_map):
                     bc = future_map[fut]
                     try:
-                        bc_name, R_adapt = fut.result()
+                        bc_name, R_adapt, optimized_root_diameter = fut.result()
                     except Exception as e:
                         # Fail fast with context; you could also choose to continue on error
                         raise RuntimeError(f'Adaptation failed for BC "{bc}": {e}') from e

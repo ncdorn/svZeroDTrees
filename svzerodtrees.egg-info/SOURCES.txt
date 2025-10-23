@@ -59,6 +59,8 @@ svzerodtrees/post_processing/project_to_centerline.py
 svzerodtrees/post_processing/stree_visualization.py
 svzerodtrees/post_processing/threed_postprocess.py
 svzerodtrees/post_processing/utils.py
+svzerodtrees/post_processing/tree_figures/__init__.py
+svzerodtrees/post_processing/tree_figures/visualize_hemodynamics.py
 svzerodtrees/simulation/__init__.py
 svzerodtrees/simulation/simulation.py
 svzerodtrees/simulation/simulation_directory.py
@@ -74,6 +76,7 @@ svzerodtrees/simulation/input_builders/vtp_file.py
 svzerodtrees/stent_optimization/__init__.py
 svzerodtrees/stent_optimization/operation.py
 svzerodtrees/stent_optimization/optimization.py
+svzerodtrees/tune_bcs/OLD_impedance_tuner.py
 svzerodtrees/tune_bcs/__init__.py
 svzerodtrees/tune_bcs/assign_bcs.py
 svzerodtrees/tune_bcs/base.py
@@ -82,6 +85,7 @@ svzerodtrees/tune_bcs/impedance_tuner.py
 svzerodtrees/tune_bcs/pa_config.py
 svzerodtrees/tune_bcs/rcr_tuner.py
 svzerodtrees/tune_bcs/tune_bcs.py
+svzerodtrees/tune_bcs/tune_space.py
 svzerodtrees/tune_bcs/utils.py
 workflows/AS1_vessel_analysis.py
 workflows/LPA_RPA_adapt.py

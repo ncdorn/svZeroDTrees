@@ -247,7 +247,7 @@ class PAConfig():
                                        simparams=self.simparams, 
                                        compliance_model=lpa_params.compliance_model)
 
-        self.lpa_tree.build_tree(initial_d=lpa_params.diameter, 
+        self.lpa_tree.build(initial_d=lpa_params.diameter, 
                                  d_min=lpa_params.d_min, 
                                  lrr=lpa_params.lrr, 
                                  alpha=lpa_params.alpha, 
@@ -263,7 +263,7 @@ class PAConfig():
                                        simparams=self.simparams,
                                        compliance_model=rpa_params.compliance_model)
 
-        self.rpa_tree.build_tree(initial_d=rpa_params.diameter, 
+        self.rpa_tree.build(initial_d=rpa_params.diameter, 
                                  d_min=rpa_params.d_min, 
                                  lrr=rpa_params.lrr, 
                                  alpha=rpa_params.alpha, 

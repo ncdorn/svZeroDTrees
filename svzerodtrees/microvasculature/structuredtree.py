@@ -1,15 +1,18 @@
 import numpy as np
 from scipy.optimize import minimize, Bounds, LinearConstraint
+from .fast_tree import *
 from .treevessel import TreeVessel
 from ..utils import *
 from .utils import *
 from ..io.blocks import *
 from .compliance import *
 from multiprocessing import Pool
+from typing import Optional
 import json
 import pickle
 from functools import partial
 import time
+from collections import deque
 
 class StructuredTree:
     """
@@ -196,7 +199,6 @@ class StructuredTree:
         with open(filename, 'w') as f:
             json.dump(self.block_dict, f, indent=4)
 
-
     def to_pickle(self, filename):
         '''
         write the structured tree to a pickle file
@@ -206,8 +208,15 @@ class StructuredTree:
         with open(filename, 'wb') as f:
             pickle.dump(self, f)
 
+    def to_block_dict(self):
+        return to_block_dict(self.store)
 
 # **** END OF I/O METHODS ****
+
+    def build(self, **build_kwargs):
+        # explicit, side-effectful convenience method
+        self.store = build_tree_soa(**build_kwargs, density=self.density, compliance_model=self.compliance_model, name=self.name)
+        return self.store
 
 
     def reset_tree(self, keep_root=False):
@@ -246,197 +255,358 @@ class StructuredTree:
                 self.block_dict["vessels"].append(current_vessel.right.params)
 
 
-    def build_tree(self, initial_d=None, d_min=0.01, optimizing=False, asym=0.4048, xi=2.7, alpha=None, beta=None, lrr=50.0):
-        '''
-        recursively build the structured tree
+    def build_tree_arrays(self, initial_d, d_min, alpha, beta, lrr):
+        # arrays we fill
+        ids = []
+        gens = []
+        diams = []
+        collapsed = []
 
-        :param initial_d: root vessel diameter
-        :param d_min: diameter at which the vessel is considered "collapsed" and the tree terminates [cm]. default is 100 um
-        :param optimizing: True if the tree is being built as part of an optimization scheme, so the block_dict will be
-            reset for each optimization iteration
-        :param asym: asymmetry ratio, used in the place of alpha and beta
-        :param xi: junction scaling coefficient
-        :param alpha: left vessel scaling factor (see Olufsen et al. 2012)
-        :param beta: right vessel scaling factor
-        '''
+        inlet = set()
+        inlet.add(0)
 
-        if optimizing:
-            self.reset_tree() # reset block dict if making the tree many times
+        # edges for junctions
+        inlets = []
+        outlets_l = []
+        outlets_r = []
 
-        if initial_d is None: # set default value of initial_r
-            initial_d = self.initialD
+        q = deque([(0, 0, float(initial_d))])
+        next_vid = 0
+        ids.append(0); gens.append(0); diams.append(initial_d); collapsed.append(False)
 
-        if d_min <= 0:
-            raise ValueError("The min diameter must be greater than 0.")
+        while q:
+            pid, gen, d = q.popleft()
+            if d * max(alpha, beta) < d_min:
+                continue
 
-        if initial_d <= 0:
-            raise Exception("initial_d is invalid, " + str(initial_d))
-        
-        if alpha is None and beta is None:
-            alpha = (1 + asym**(xi/2))**(-1/xi)
-            beta = asym**(1/2) * alpha
-            # print(f"alpha: {alpha}, beta: {beta}")
+            next_gen = gen + 1
 
-        # make self params
-        self.initial_d = initial_d
-        self.alpha = alpha
-        self.beta = beta
-        self.lrr = lrr
-        # add r_min into the block dict
-        self.d_min = d_min
-        # initialize counting values
-        vessel_id = 0
-        junc_id = 0
-        # initialize the root vessel of the tree
-        self.root = TreeVessel.create_vessel(0, 0, initial_d, density=1.055, lrr=lrr, compliance_model=self.compliance_model)
-        self.root.name = self.name
-        # add inflow boundary condition
-        self.root.params["boundary_conditions"] = {"inlet": "INFLOW"}
-        self.block_dict["vessels"].append(self.root.params)
-        queue = [self.root]
+            # left
+            next_vid += 1
+            left_id = next_vid
+            left_d = alpha * d
+            left_c = left_d < d_min
+            ids.append(left_id); gens.append(next_gen); diams.append(left_d); collapsed.append(left_c)
+            if not left_c:
+                q.append((left_id, next_gen, left_d))
 
-        while len(queue) > 0:
-            q_id = 0
-            current_vessel = queue.pop(q_id)
-            creating_vessels = True
-            while current_vessel.collapsed:
-                # remove the collapsed vessels without creating new ones
-                if len(queue) == 0:
-                    creating_vessels = False
-                    break
-                current_vessel = queue.pop(q_id)
-            if not creating_vessels:
-                # end the loop
-                break
+            # right
+            next_vid += 1
+            right_id = next_vid
+            right_d = beta * d
+            right_c = right_d < d_min
+            ids.append(right_id); gens.append(next_gen); diams.append(right_d); collapsed.append(right_c)
+            if not right_c:
+                q.append((right_id, next_gen, right_d))
 
-            if not current_vessel.collapsed:
-                # create new left and right vessels
-                next_gen = current_vessel.gen + 1
-                # create left vessel
-                vessel_id += 1
-                left_dia = alpha * current_vessel.d
-                # assume pressure is conserved at the junction. 
-                # Could later replace this with a function to account for pressure loss
-                current_vessel.left = TreeVessel.create_vessel(vessel_id, next_gen, left_dia, density=1.055, lrr=lrr, compliance_model=self.compliance_model)
-                if left_dia < d_min:
-                    current_vessel.left.collapsed = True
-                    if current_vessel.left.gen > self.generations:
-                        self.generations = current_vessel.left.gen
-                else:
-                    queue.append(current_vessel.left)
-                self.block_dict["vessels"].append(current_vessel.left.params)
-                
+            if not (left_c and right_c):
+                inlets.append(pid); outlets_l.append(left_id); outlets_r.append(right_id)
 
-                # create right vessel
-                vessel_id += 1
-                right_dia = beta * current_vessel.d
-                current_vessel.right = TreeVessel.create_vessel(vessel_id, next_gen, right_dia, density=1.055, lrr=lrr, compliance_model=self.compliance_model)
-                if right_dia < d_min:
-                    current_vessel.right.collapsed = True
-                    if current_vessel.right.gen > self.generations:
-                        self.generations = current_vessel.right.gen
-                else:
-                    queue.append(current_vessel.right)
-                self.block_dict["vessels"].append(current_vessel.right.params)
-                
+        # Convert to compact numpy
+        ids = np.asarray(ids, dtype=np.int32)
+        gens = np.asarray(gens, dtype=np.int16)
+        diams = np.asarray(diams, dtype=np.float32)
+        collapsed = np.asarray(collapsed, dtype=np.bool_)
 
-                # add a junction
-                junction_config = {"junction_name": "J" + str(junc_id),
-                                 "junction_type": "NORMAL_JUNCTION",
-                                 "inlet_vessels": [current_vessel.id],
-                                 "outlet_vessels": [current_vessel.left.id, current_vessel.right.id]
-                                #  "junction_values": {"C": [0, 0, 0],  
-                                #                      "L": [0, 0, 0],      MAYBE THIS WILL BE FOR ANOTHER TIME
-                                #                      "R_poiseuille": [0, 0, 0], 
-                                #                      "stenosis_coefficient": [0, 0, 0]},
-                                 }
-                self.block_dict["junctions"].append(junction_config)
-                junc_id += 1
+        # Final pack to block_dict only once
+        vessels = []
+        for i in range(ids.size):
+            vp = {
+                "id": int(ids[i]),
+                "gen": int(gens[i]),
+                "d": float(diams[i]),
+                "lrr": float(lrr),
+                "density": 1.055,
+                "compliance_model": self.compliance_model,
+            }
+            if i == 0:  # root
+                vp["name"] = self.name
+                vp["boundary_conditions"] = {"inlet": "INFLOW"}
+            if collapsed[i]:
+                vp["collapsed"] = True
+            vessels.append(vp)
 
-    # @jit
+        junctions = []
+        for j, (inn, ol, orr) in enumerate(zip(inlets, outlets_l, outlets_r)):
+            junctions.append({
+                "junction_name": f"J{j}",
+                "junction_type": "NORMAL_JUNCTION",
+                "inlet_vessels": [int(inn)],
+                "outlet_vessels": [int(ol), int(orr)],
+            })
+
+        self.block_dict["vessels"] = vessels
+        self.block_dict["junctions"] = junctions
+
+    def z0_characteristic_all(d: np.ndarray,
+                          rho: float,
+                          c0: float | None = None,
+                          **params) -> np.ndarray:
+        """
+        Vectorized characteristic impedance for all vessels.
+        Replace with your Olufsen-based formulas. Use float32 inputs/outputs.
+        """
+        # Example placeholder: Z0 = rho * c / A
+        # If c depends on d via a model, compute c(d, params) vectorized here.
+        A = 0.25 * np.pi * (d * d)  # area from diameter
+        c = compute_wave_speed_all(d, **params) if c0 is None else np.full_like(d, c0, dtype=np.float32)
+        Z0 = (rho * c) / A
+        return Z0.astype(np.float32)
+
     def compute_olufsen_impedance(self,
-                                  k1 = 19992500, # g/cm/s^2
-                                  k2 = -25.5267, # 1/cm 
-                                  k3 = 1104531.4909089999, # g/cm/s^2
-                                  n_procs=None,
-                                  tsteps=None
-                                  ):
-        '''
-        compute the impedance of the structured tree accordin to Olufsen et al. (2000)
-        '''
+                                n_procs: Optional[int] = None,  # kept for API compatibility
+                                tsteps: Optional[int] = None,
+                                chunk_size: int = 512):
+        """
+        Fast vectorized Olufsen structured-tree impedance using SoA storage.
 
-        # initialize class params
-        # self.k1 = k1
-        # self.k2 = k2
-        # self.k3 = k3
-        self.n_procs = n_procs
+        Requires:
+        - self.store with arrays: d, gen, left, right, collapsed, lrr, density
+        - self.time (monotonic). If nondimensional, set self.q and self.Lr (we apply q/Lr^3).
+        - self.eta (dynamic viscosity, g/(cm·s)).
 
+        Returns:
+        self.Z_t (real IFFT of Z(ω)), self.time
+        """
+        st = self.store
+        if not hasattr(self, "viscosity"):
+            raise AttributeError("self.viscosity is required")
+        eta = np.float32(self.viscosity)
+        rho = np.float32(st.density)
+
+        # ---------------- time & frequency grid ----------------
+        time = np.asarray(self.time, dtype=np.float64)
         if tsteps is None:
-            tsteps = len(self.time)
+            tsteps = int(time.size)
         else:
             tsteps = int(tsteps)
+        if tsteps < 2:
+            raise ValueError("Need at least two time samples")
 
-        period = max(self.time) * self.q / self.Lr**3
+        dt_nominal = float(np.mean(np.diff(time)))
+        scale_t = float(self.q) / (float(self.Lr) ** 3) if hasattr(self, "q") and hasattr(self, "Lr") else 1.0
+        dt = dt_nominal * scale_t
+        if dt <= 0:
+            raise ValueError("Computed dt must be positive")
 
-        df = 1 / period
+        # FFT angular frequencies (np.fft.ifft expects this order)
+        omega = 2.0 * np.pi * np.fft.fftfreq(tsteps, d=dt)      # [F]
+        F = omega.size
+        dc_idx = int(np.where(omega == 0.0)[0][0])
+        # positive freq indices (including DC and Nyquist if even)
+        pos_start = 0
+        pos_stop  = F // 2 + 1
+        # we will fill Z_pos[0..N//2]
+        Z_pos = np.empty(pos_stop, dtype=np.complex64)
 
-        omega = [i * df * 2 * np.pi for i in range(-tsteps//2, tsteps//2)] # angular frequency vector
+        # ---------------- vessel geometry & material (vectorized) ----------------
+        d = st.d.astype(np.float32)                              # diameter [cm]
+        r = 0.5 * d                                              # radius [cm]
+        A = (np.pi * r * r).astype(np.float32)                   # area [cm^2]
+        L = (np.float32(st.lrr) * r).astype(np.float32)          # length [cm]
 
+        # Eh/r from compliance model (vectorized if available, else fallback)
+        try:
+            Eh_over_r = np.asarray(st.compliance_model.evaluate(r), dtype=np.float32)
+            if Eh_over_r.shape != r.shape:
+                raise ValueError
+        except Exception:
+            Eh_over_r = np.asarray([st.compliance_model.evaluate(float(ri)) for ri in r], dtype=np.float32)
 
-        # we need to remove the zero frequency, because we will insert that later at the first index
+        # Distensibility / compliance coefficient used in your scalar code:
+        # C = 3*a/(2*Eh/r)
+        C = (3.0 * A) / (2.0 * Eh_over_r)                        # [1/(g/cm/s^2)]·cm^2 => compliance-like factor
+        # pre-factors that do not depend on ω
+        # sqrt(C*A/ρ) and sqrt(A/(C*ρ)) appear repeatedly
+        pref_g = np.sqrt((C * A) / rho).astype(np.float32)       # [n]
+        pref_c = np.sqrt((A / (C * rho))).astype(np.float32)     # [n]
 
+        gens = st.gen.astype(np.int32)
+        max_gen = int(gens.max(initial=0))
+        idx_by_gen = [np.where(gens == g)[0] for g in range(max_gen + 1)]
+        # map child absolute index -> row within next generation block
+        pos_map_by_gen = []
+        n = d.size
+        for g in range(max_gen + 1):
+            idx = idx_by_gen[g]
+            pos = np.full(n, -1, dtype=np.int32)
+            if idx.size:
+                pos[idx] = np.arange(idx.size, dtype=np.int32)
+            pos_map_by_gen.append(pos)
 
-        # initialize the impedance
-        Z_om = np.zeros(len(omega), dtype=complex)
-        # loop through POSITIVE frequencies and calculate impedance
-        
-        ## PARALLELIZED ##
-        # with Pool(24) as p:       
-        #     Z_om = p.map(self.root.z0, omega)
+        left_idx  = st.left.astype(np.int32)
+        right_idx = st.right.astype(np.int32)
+        hasL_all  = left_idx  >= 0
+        hasR_all  = right_idx >= 0
 
-        
-        
-        if n_procs is not None:
-            start = time.time()
-            # make the partial function
-            z0_w_stiffness = partial(self.root.z0_olufsen)
-            # parallelize the computation of the impedance
-            with Pool(n_procs) as p:
-                Z_om[:tsteps//2+1] = np.conjugate(p.map(z0_w_stiffness, [abs(w) for w in omega[:tsteps//2+1]]))
-            
-            end = time.time()
-            print(f'this parallelized process took {end - start} seconds for d_root = {self.initial_d} and d_min = {self.d_min}')
-        else:
-            ## UNPARALLELIZED ##
-            start = time.time()
-            for k in range(0, tsteps//2+1):
-                # if (k) % 100 == 0:
-                # print(f'computing root impedance for timestep {k} of {tsteps//2}')
-                # compute impedance at the root vessel
-                # we cannot have a negative number here so we take positive frequency and then conjugate
-                Z_om[k] = np.conjugate(self.root.z0_olufsen(abs(omega[k])))
+        # ---------------- DC solution (pure Poiseuille network) ----------------
+        # R_eq = 8*η*L / (π r^4)
+        R_seg = (8.0 * eta * L) / (np.pi * (r ** 4))
+        # bottom-up combine: Z_dc[parent] = R_seg[parent] + parallel(Z_dc[left], Z_dc[right])
+        Z_dc_next = None
+        next_idx = None
+        for g in range(max_gen, -1, -1):
+            idx = idx_by_gen[g]
+            if idx.size == 0:
+                Z_dc = None
+                Z_dc_next = Z_dc
+                next_idx = idx
+                continue
 
-            end = time.time()
-            # print(f'this UNparallelized process took {end - start} seconds')
+            li = left_idx[idx];  ri = right_idx[idx]
+            hasL = li >= 0;       hasR = ri >= 0
 
-            
-        # apply self-adjoint property of the impedance
-        Z_om_half = Z_om[:tsteps//2]
-        # add negative frequencies
-        Z_om[tsteps//2+1:] = np.conjugate(np.flipud(Z_om_half[:-1]))
+            # children loads at DC
+            if g == max_gen or Z_dc_next is None or next_idx.size == 0:
+                Z_load = np.zeros(idx.size, dtype=np.float32)
+            else:
+                pos_next = pos_map_by_gen[g + 1]
+                Z1 = np.zeros(idx.size, dtype=np.float32)
+                Z2 = np.zeros(idx.size, dtype=np.float32)
+                if np.any(hasL):
+                    Z1[hasL] = Z_dc_next[pos_next[li[hasL]]]
+                if np.any(hasR):
+                    Z2[hasR] = Z_dc_next[pos_next[ri[hasR]]]
+                # parallel combine with masks
+                Z_load = np.zeros(idx.size, dtype=np.float32)
+                both = hasL & hasR
+                onlyL = hasL & (~hasR)
+                onlyR = hasR & (~hasL)
+                if np.any(onlyL): Z_load[onlyL] = Z1[onlyL]
+                if np.any(onlyR): Z_load[onlyR] = Z2[onlyR]
+                if np.any(both):  Z_load[both]  = (Z1[both] * Z2[both]) / (Z1[both] + Z2[both])
 
+            Z_dc = R_seg[idx] + Z_load
+            Z_dc_next = Z_dc
+            next_idx = idx
 
-        # dimensionalize omega
-        omega = [w * self.q / self.Lr**3 for w in omega]
+        # root DC
+        root_row = 0 if next_idx.size == 1 else int(np.where(next_idx == 0)[0][0])
+        Z_pos[dc_idx] = np.complex64(Z_dc_next[root_row])
 
-        Z_om = np.fft.ifftshift(Z_om)
+        # ---------------- frequency-dependent solution (ω > 0), chunked ----------------
+        inv_sqrt_i = 1.0 / np.sqrt(1j)  # = e^{-iπ/4} = (1 - i)/√2, complex64
 
-        print(f'Z(w=0) = {Z_om[0]}')
+        def womersley(r_: np.ndarray, w_: np.ndarray) -> np.ndarray:
+            # r_: [n], w_: [Fc]
+            return r_[:, None].astype(np.float32) * np.sqrt((w_[None, :].astype(np.float32) * rho) / eta)
 
-        Z_t = np.fft.ifft(Z_om)
+        def form_term(wom: np.ndarray) -> np.ndarray:
+            """
+            Builds the complex 'term' such that:
+            g_omega = pref_g[:,None] * term
+            c_omega = pref_c[:,None] * term
+            Implements your piecewise logic:
+            >3: sqrt(1 - 2/√i * (1 + 1/(2wom)) / wom)
+            2..3: (3-wom)*sqrt( i*wom^2/8 + wom^4/48 ) + (wom-2)*sqrt(1 - 2/√i * (1 + 1/(2wom)) / wom)
+            <2 (and >0): sqrt( i*wom^2/8 + wom^4/48 )
+            ==0: 0
+            """
+            term = np.zeros_like(wom, dtype=np.complex64)
 
-        self.Z_t = np.real(Z_t)
+            # masks
+            m0  = wom == 0.0
+            m1  = wom > 3.0
+            m23 = (wom > 2.0) & (~m1)   # (2,3]
+            m2  = (~m1) & (~m23) & (~m0)  # (0,2]
 
+            # helper pieces
+            if np.any(m1) or np.any(m23):
+                t_inv = (2.0 * inv_sqrt_i) / wom  # [n,Fc]
+                B = 1.0 + (1.0 / (2.0 * wom))
+                S2 = 1.0 - t_inv * B              # complex
+            if np.any(m2) or np.any(m23):
+                S1 = 1j * (wom ** 2) / 8.0 + (wom ** 4) / 48.0  # complex
+
+            if np.any(m1):
+                term[m1] = np.sqrt(S2[m1])
+            if np.any(m2):
+                term[m2] = np.sqrt(S1[m2])
+            if np.any(m23):
+                term[m23] = ( (3.0 - wom[m23]) * np.sqrt(S1[m23])
+                            + (wom[m23] - 2.0) * np.sqrt(S2[m23]) )
+
+            # m0 already zero
+            return term
+
+        # iterate positive freqs excluding DC
+        pos_freqs = np.arange(1, pos_stop, dtype=np.int32)  # 1..N//2
+        for start in range(0, pos_freqs.size, chunk_size):
+            stop = min(start + chunk_size, pos_freqs.size)
+            idx_chunk = pos_freqs[start:stop]
+            w = omega[idx_chunk].astype(np.float32)  # strictly > 0
+            Fc = w.size
+
+            wom = womersley(r, w)                    # [n,Fc]
+            term = form_term(wom)                    # [n,Fc]
+            g_omega = (pref_g[:, None] * term).astype(np.complex64)  # [n,Fc]
+            c_omega = (pref_c[:, None] * term).astype(np.complex64)  # [n,Fc]
+            # κ = ω L / c(ω)
+            kappa = (w[None, :] * L[:, None]) / c_omega              # [n,Fc], complex
+
+            # bottom-up propagation: compute Z_in at each generation
+            Z_next = None           # [n_{g+1}, Fc]
+            next_idx = None
+            for g in range(max_gen, -1, -1):
+                idx = idx_by_gen[g]
+                if idx.size == 0:
+                    Z_cur = None
+                    Z_next = Z_cur
+                    next_idx = idx
+                    continue
+
+                li = left_idx[idx];  ri = right_idx[idx]
+                hasL = li >= 0;       hasR = ri >= 0
+
+                # distal load z_L for this gen
+                if g == max_gen or Z_next is None or next_idx.size == 0:
+                    ZL = np.zeros((idx.size, Fc), dtype=np.complex64)  # no children -> z_L = 0 (your collapsed rule)
+                else:
+                    pos_child = pos_map_by_gen[g + 1]
+                    Z1 = np.zeros((idx.size, Fc), dtype=np.complex64)
+                    Z2 = np.zeros((idx.size, Fc), dtype=np.complex64)
+                    if np.any(hasL):
+                        Z1[hasL, :] = Z_next[pos_child[li[hasL]], :]
+                    if np.any(hasR):
+                        Z2[hasR, :] = Z_next[pos_child[ri[hasR]], :]
+
+                    # parallel: if both -> (Z1*Z2)/(Z1+Z2); if only one -> that; if none -> 0
+                    ZL = np.zeros_like(Z1)
+                    both = hasL & hasR
+                    onlyL = hasL & (~hasR)
+                    onlyR = hasR & (~hasL)
+                    if np.any(onlyL): ZL[onlyL, :] = Z1[onlyL, :]
+                    if np.any(onlyR): ZL[onlyR, :] = Z2[onlyR, :]
+                    if np.any(both):  ZL[both, :]  = (Z1[both, :] * Z2[both, :]) / (Z1[both, :] + Z2[both, :])
+
+                # segment input impedance using your exact formula:
+                # z0 = ( j*sin(κ)/g + cos(κ)*ZL ) / ( cos(κ) + j*g*ZL*sin(κ) )
+                sin_k = np.sin(kappa[idx, :])
+                cos_k = np.cos(kappa[idx, :])
+                gk = g_omega[idx, :]
+                num = 1j * sin_k / gk + cos_k * ZL
+                den = cos_k + 1j * gk * ZL * sin_k
+                Z_cur = (num / den).astype(np.complex64)
+
+                Z_next = Z_cur
+                next_idx = idx
+
+            # root row at gen 0
+            root_row = 0 if next_idx.size == 1 else int(np.where(next_idx == 0)[0][0])
+            Z_pos[idx_chunk] = Z_next[root_row, :]
+
+        # ---------------- assemble full spectrum, IFFT ----------------
+        Z_full = np.empty(F, dtype=np.complex64)
+        Z_full[:pos_stop] = Z_pos
+        # negative freqs: Hermitian symmetry for real time-domain kernel
+        if F > 2:
+            Z_full[pos_stop:] = np.conjugate(Z_pos[1:pos_stop-1][::-1])
+
+        print(f"Z(w=0) = {Z_full[dc_idx]}")
+
+        print(f"{Z_full}")
+
+        self.Z_t = np.fft.ifft(Z_full).real.astype(np.float64)
         return self.Z_t, self.time
 
 
@@ -1004,6 +1174,8 @@ class StructuredTree:
             })
             self.block_dict["simulation_parameters"] = self.simparams.to_dict()
 
+        self.block_dict["initial_d"] = self.root.d
+
         self.Q_in = Q_in
 
         self.Pd = Pd
@@ -1049,3 +1221,45 @@ def _ensure_list_signal(signal, fallback_time=[0.0, 1.0]):
     if not isinstance(signal, list):
         return [signal] * 2, fallback_time
     return signal, fallback_time if len(signal) == 1 else None
+
+
+from dataclasses import dataclass
+
+@dataclass(slots=True)
+class TreeVesselView:
+    store: StructuredTreeStorage
+    i: int
+
+    # read-only-ish properties (writes are just array assignments)
+    @property
+    def id(self): return int(self.store.ids[self.i])
+
+    @property
+    def gen(self): return int(self.store.gen[self.i])
+
+    @property
+    def d(self): return float(self.store.d[self.i])
+
+    @d.setter
+    def d(self, val: float):
+        self.store.d[self.i] = val  # updates SoA in-place
+
+    @property
+    def collapsed(self): return bool(self.store.collapsed[self.i])
+
+    @property
+    def left(self):
+        j = int(self.store.left[self.i])
+        return None if j < 0 else TreeVesselView(self.store, j)
+
+    @property
+    def right(self):
+        j = int(self.store.right[self.i])
+        return None if j < 0 else TreeVesselView(self.store, j)
+
+    @property
+    def parent(self):
+        j = int(self.store.parent[self.i])
+        return None if j < 0 else TreeVesselView(self.store, j)
+    
+
