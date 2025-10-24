@@ -1,25 +1,7 @@
-from dataclasses import dataclass
+from .storage import StructuredTreeStorage
 import numpy as np
 from collections import deque
 
-@dataclass(slots=True)
-class StructuredTreeStorage:
-    # node fields (SoA)
-    ids: np.ndarray         # int32
-    gen: np.ndarray         # int16
-    d: np.ndarray           # float32
-    parent: np.ndarray      # int32, -1 for root
-    left: np.ndarray        # int32, -1 if none/collapsed
-    right: np.ndarray       # int32, -1 if none/collapsed
-    collapsed: np.ndarray   # bool
-    # tree-level scalars/defaults
-    lrr: float
-    density: float
-    compliance_model: str | int | object  # whatever you use
-    name: str
-
-    def n_nodes(self) -> int:
-        return self.ids.size
 
 def build_tree_soa(initial_d: float,
                     d_min: float,
@@ -27,6 +9,7 @@ def build_tree_soa(initial_d: float,
                     beta: float,
                     lrr: float,
                     density: float,
+                    eta: float,
                     compliance_model,
                     name: str) -> StructuredTreeStorage:
         # Upper bound on nodes (loose): worst case full binary until collapse.
@@ -49,9 +32,6 @@ def build_tree_soa(initial_d: float,
             di = d[i]
             gi = gen[i]
 
-            # If both children guarantee collapse, prune here
-            if di * max(alpha, beta) < d_min:
-                continue
 
             # left
             ld = alpha * di
@@ -88,40 +68,7 @@ def build_tree_soa(initial_d: float,
             collapsed=np.asarray(collapsed, dtype=np.bool_),
             lrr=float(lrr),
             density=float(density),
+            eta=float(eta),
             compliance_model=compliance_model,
             name=name,
         )
-
-
-def to_block_dict(store: StructuredTreeStorage) -> dict:
-    vessels = []
-    for i in range(store.n_nodes()):
-        v = {
-            "id": int(store.ids[i]),
-            "gen": int(store.gen[i]),
-            "d": float(store.d[i]),
-            "lrr": float(store.lrr),
-            "density": float(store.density),
-            "compliance_model": store.compliance_model,
-        }
-        if i == 0:
-            v["name"] = store.name
-            v["boundary_conditions"] = {"inlet": "INFLOW"}
-        if store.collapsed[i]:
-            v["collapsed"] = True
-        vessels.append(v)
-
-    junctions = []
-    j = 0
-    for i in range(store.n_nodes()):
-        li = int(store.left[i]); ri = int(store.right[i])
-        if li >= 0 or ri >= 0:
-            junctions.append({
-                "junction_name": f"J{j}",
-                "junction_type": "NORMAL_JUNCTION",
-                "inlet_vessels": [int(store.ids[i])],
-                "outlet_vessels": [x for x in (li, ri) if x >= 0],
-            })
-            j += 1
-
-    return {"vessels": vessels, "junctions": junctions}

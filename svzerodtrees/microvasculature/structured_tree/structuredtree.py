@@ -1,15 +1,18 @@
 import numpy as np
 from scipy.optimize import minimize, Bounds, LinearConstraint
-from .fast_tree import *
-from .treevessel import TreeVessel
+from .builder import *
+from ..treevessel import TreeVessel
+from ...utils import *
 from ..utils import *
-from .utils import *
-from ..io.blocks import *
-from .compliance import *
+from ...io.blocks import *
+from .io import _json_sanitize, to_block_dict
+from .results import StructuredTreeResults
+from ..compliance import *
 from multiprocessing import Pool
 from typing import Optional, Literal
 import json
 import pickle
+import math
 from functools import partial
 import time
 from collections import deque
@@ -190,14 +193,25 @@ class StructuredTree:
         }
         return params
 
-    def to_json(self, filename):
-        '''
-        write the structured tree to a json file
 
-        :param filename: name of the json file
-        '''
-        with open(filename, 'w') as f:
-            json.dump(self.block_dict, f, indent=4)
+    def to_json(self, filename, *, strict=True, nonfinite_as=None):
+        """
+        Write the structured tree to a JSON file with a fully serializable block_dict.
+
+        Parameters
+        ----------
+        filename : str
+            Output path.
+        strict : bool
+            If True (default), disallow NaN/Inf by converting them to `nonfinite_as`.
+        nonfinite_as : Any
+            Replacement for NaN/Inf when strict=True (default: None).
+            Set to 0.0 if you prefer numeric placeholders.
+        """
+        sanitized = _json_sanitize(self.block_dict, strict=strict, nonfinite_as=nonfinite_as)
+        with open(filename, "w") as f:
+            # allow_nan=False enforces strict RFC 8259 JSON (no NaN/Inf literals)
+            json.dump(sanitized, f, indent=4, ensure_ascii=False, allow_nan=not strict)
 
     def to_pickle(self, filename):
         '''
@@ -215,7 +229,7 @@ class StructuredTree:
 
     def build(self, **build_kwargs):
         # explicit, side-effectful convenience method
-        self.store = build_tree_soa(**build_kwargs, density=self.density, compliance_model=self.compliance_model, name=self.name)
+        self.store = build_tree_soa(**build_kwargs, density=self.density, eta=self.viscosity, compliance_model=self.compliance_model, name=self.name)
         return self.store
 
 
@@ -255,89 +269,6 @@ class StructuredTree:
                 self.block_dict["vessels"].append(current_vessel.right.params)
 
 
-    def build_tree_arrays(self, initial_d, d_min, alpha, beta, lrr):
-        # arrays we fill
-        ids = []
-        gens = []
-        diams = []
-        collapsed = []
-
-        inlet = set()
-        inlet.add(0)
-
-        # edges for junctions
-        inlets = []
-        outlets_l = []
-        outlets_r = []
-
-        q = deque([(0, 0, float(initial_d))])
-        next_vid = 0
-        ids.append(0); gens.append(0); diams.append(initial_d); collapsed.append(False)
-
-        while q:
-            pid, gen, d = q.popleft()
-            if d * max(alpha, beta) < d_min:
-                continue
-
-            next_gen = gen + 1
-
-            # left
-            next_vid += 1
-            left_id = next_vid
-            left_d = alpha * d
-            left_c = left_d < d_min
-            ids.append(left_id); gens.append(next_gen); diams.append(left_d); collapsed.append(left_c)
-            if not left_c:
-                q.append((left_id, next_gen, left_d))
-
-            # right
-            next_vid += 1
-            right_id = next_vid
-            right_d = beta * d
-            right_c = right_d < d_min
-            ids.append(right_id); gens.append(next_gen); diams.append(right_d); collapsed.append(right_c)
-            if not right_c:
-                q.append((right_id, next_gen, right_d))
-
-            if not (left_c and right_c):
-                inlets.append(pid); outlets_l.append(left_id); outlets_r.append(right_id)
-
-        # Convert to compact numpy
-        ids = np.asarray(ids, dtype=np.int32)
-        gens = np.asarray(gens, dtype=np.int16)
-        diams = np.asarray(diams, dtype=np.float32)
-        collapsed = np.asarray(collapsed, dtype=np.bool_)
-
-        # Final pack to block_dict only once
-        vessels = []
-        for i in range(ids.size):
-            vp = {
-                "id": int(ids[i]),
-                "gen": int(gens[i]),
-                "d": float(diams[i]),
-                "lrr": float(lrr),
-                "density": 1.055,
-                "compliance_model": self.compliance_model,
-            }
-            if i == 0:  # root
-                vp["name"] = self.name
-                vp["boundary_conditions"] = {"inlet": "INFLOW"}
-            if collapsed[i]:
-                vp["collapsed"] = True
-            vessels.append(vp)
-
-        junctions = []
-        for j, (inn, ol, orr) in enumerate(zip(inlets, outlets_l, outlets_r)):
-            junctions.append({
-                "junction_name": f"J{j}",
-                "junction_type": "NORMAL_JUNCTION",
-                "inlet_vessels": [int(inn)],
-                "outlet_vessels": [int(ol), int(orr)],
-            })
-
-        self.block_dict["vessels"] = vessels
-        self.block_dict["junctions"] = junctions
-
     def compute_olufsen_impedance(
         self,
         k1: float = 19_992_500.0,          # g/cm/s^2
@@ -365,8 +296,6 @@ class StructuredTree:
         self.Z_t (real time-domain kernel via IFFT), self.time
         """
         st = self.store
-        if not hasattr(self, "viscosity"):
-            raise AttributeError("self.viscosity (dynamic viscosity) is required")
 
         # ---------------- time & frequency grid ----------------
         time = np.asarray(self.time, dtype=np.float64)
@@ -393,7 +322,7 @@ class StructuredTree:
         L = (np.float32(st.lrr) * r).astype(np.float32)
 
         rho64 = float(st.density)
-        eta64 = float(self.viscosity)
+        eta64 = float(st.eta)
         if rho64 <= 0 or not np.isfinite(rho64): raise ValueError(f"rho must be positive/finite, got {rho64}")
         if eta64 <= 0 or not np.isfinite(eta64): raise ValueError(f"eta must be positive/finite, got {eta64}")
 
@@ -938,7 +867,7 @@ class StructuredTree:
         assign_flow_to_root(adapted_result, self.root)
 
 
-    def optimize_tree_diameter(self, resistance=None, log_file=None, d_min=0.01, pries_secomb=False):
+    def optimize_tree_diameter(self, resistance=None, d_min=0.01, alpha=0.9, beta=0.6, lrr=10.0):
         """ 
         Use Nelder-Mead to optimize the diameter and number of vessels with respect to the desired resistance
         
@@ -963,7 +892,7 @@ class StructuredTree:
             R0 = resistance
 
         # define the objective function to be minimized
-        def r_min_objective(diameter, d_min, R0):
+        def r_min_objective(diameter, d_min, R0, alpha, beta, lrr):
             '''
             objective function for optimization
 
@@ -972,7 +901,11 @@ class StructuredTree:
             :return: squared difference between target resistance and built tree resistance
             '''
             # build tree
-            self.build_tree(diameter[0], d_min=d_min, optimizing=True)
+            self.build(initial_d = diameter[0],
+                        d_min = d_min,
+                        alpha = alpha,
+                        beta = beta,
+                        lrr = lrr)
 
 
             # get equivalent resistance
@@ -991,20 +924,14 @@ class StructuredTree:
         # perform Nelder-Mead optimization
         d_final = minimize(r_min_objective,
                            d_guess,
-                           args=(d_min, R0),
+                           args=(d_min, R0, alpha, beta, lrr),
                            options={"disp": True},
                            method='Nelder-Mead',
                            bounds=bounds)
         
         R_final = self.root.R_eq
 
-        # write_to_log(log_file, "     Resistance after optimization is " + str(R_final))
-        # write_to_log(log_file, "     the optimized diameter is " + str(d_final.x[0]))
-        write_to_log(log_file, "     the number of vessels is " + str(len(self.block_dict["vessels"])) + "\n")
-
-        if pries_secomb:
-            # self.pries_n_secomb = PriesnSecomb(self)
-            pass
+        print(f"There are {self.store.n_nodes()} vessels in the tree")
 
 
         return d_final.x, R_final
@@ -1165,30 +1092,6 @@ class StructuredTree:
         return self._R
     
 
-    def adapt_pries_secomb(self):
-        '''
-        integrate pries and secomb diff eq by Euler integration for the tree until dD reaches some tolerance (default 10^-5)
-
-        :param ps_params: pries and secomb empirical parameters. in the form [k_p, k_m, k_c, k_s, L (cm), S_0, tau_ref, Q_ref]
-            units:
-                k_p, k_m, k_c, k_s [=] dimensionless
-                L [=] cm
-                J0 [=] dimensionless
-                tau_ref [=] dyn/cm2
-                Q_ref [=] cm3/s
-        :param dt: time step for explicit euler integration
-        :param tol: tolerance (relative difference in function value) for euler integration convergence
-        :param time_avg_q: True if the flow in the vessels is assumed to be steady
-
-        :return: equivalent resistance of the tree
-        '''
-
-
-
-
-        return self.root.R_eq
-
-
     def simulate(self, 
                  Q_in: list = [1.0, 1.0],
                  Pd: float = 1.0,
@@ -1212,6 +1115,8 @@ class StructuredTree:
         :return result: result dictionary from svzerodsolver
         '''
 
+        self.block_dict = self.to_block_dict()
+
         if self.simparams is None:
             self.simparams = SimParams({
                 "density": density,
@@ -1220,9 +1125,10 @@ class StructuredTree:
                 "number_of_time_pts_per_cardiac_cycle": number_of_time_pts_per_cardiac_cycle,
                 "viscosity": viscosity
             })
-            self.block_dict["simulation_parameters"] = self.simparams.to_dict()
+            
+        self.block_dict["simulation_parameters"] = self.simparams.to_dict()
 
-        self.block_dict["initial_d"] = self.root.d
+        self.block_dict["initial_d"] = float(max(self.store.d))
 
         self.Q_in = Q_in
 
@@ -1239,14 +1145,71 @@ class StructuredTree:
         result = pysvzerod.simulate(self.block_dict)
 
         # assigning flow values to the TreeVessel instances
-        print("assigning flow and pressure values to vessels...")
-        assign_flow_to_root(result, self.root)
+        print("attaching result to tree")
+        self.attach_results_from_solver(result)
 
         # assign flow result to TreeVessel instances to allow for visualization, adaptation, etc.
         # currently this conflicts with adaptation computation, where we do not want to assign flow to root every time we simulate
         # assign_flow_to_root(result, self.root)
 
         return result
+    
+    def attach_results_from_solver(self, df_like):
+        """
+        `df_like` is the table you showed: columns name,time,flow_in,flow_out,pressure_in,pressure_out
+        """
+        # build index maps
+        names = {}                       # vessel_id -> name
+        for i in range(self.store.n_nodes()):
+            vid = int(self.store.ids[i])
+            names[vid] = self.store.name if i == 0 else f"{self.store.name}_seg{vid}"
+
+        # sort vessels by ids to get stable (N,T) layout
+        vids = np.array(sorted(names.keys()), dtype=np.int32)
+        ordered_names = [names[int(v)] for v in vids]
+
+        # collect solver signals in one pass
+        if df_like.empty:
+            raise ValueError("Structured tree solver results are empty.")
+
+        fields = ("flow_in", "flow_out", "pressure_in", "pressure_out")
+        df_sorted = df_like.sort_values(["name", "time"])
+        wide = df_sorted.set_index(["name", "time"])[list(fields)].unstack(level="time")
+        wide = wide.sort_index(axis=1, level=1)
+
+        missing = [name for name in ordered_names if name not in wide.index]
+        if missing:
+            raise ValueError(f"Missing solver results for vessels: {missing[:5]}")
+        wide = wide.loc[ordered_names]
+
+        time_index = wide.columns.levels[1]
+        t = time_index.to_numpy(dtype=np.float64)
+
+        def extract(field: str) -> np.ndarray:
+            frame = wide[field]
+            frame = frame.reindex(columns=time_index, copy=False)
+            return frame.to_numpy(dtype=np.float64)
+
+        store_ids = np.asarray(self.store.ids, dtype=np.int32)
+        idx_lookup = {int(vid): idx for idx, vid in enumerate(store_ids)}
+        order = [idx_lookup[int(v)] for v in vids]
+        gen = np.asarray(self.store.gen, dtype=np.int32)[order]
+        d = np.asarray(self.store.d, dtype=np.float64)[order]
+
+        res = StructuredTreeResults(
+            time=t,
+            vessel_ids=vids,
+            names=names,
+            gen=gen,
+            d=d,
+            eta=float(self.store.eta),
+            rho=float(self.store.density),
+            flow_in=extract("flow_in"),
+            flow_out=extract("flow_out"),
+            pressure_in=extract("pressure_in"),
+            pressure_out=extract("pressure_out"),
+        )
+        self.results = res
 
     def enumerate_vessels(self, start_idx=0):
         """Return a deterministic DFS ordering and stamp each vessel with .idx."""
@@ -1262,13 +1225,6 @@ class StructuredTree:
         
         _dfs(self.root)
         return vessel_order
-
-
-def _ensure_list_signal(signal, fallback_time=[0.0, 1.0]):
-    """Ensure signal is a list; return default time vector if needed."""
-    if not isinstance(signal, list):
-        return [signal] * 2, fallback_time
-    return signal, fallback_time if len(signal) == 1 else None
 
 
 from dataclasses import dataclass
@@ -1310,4 +1266,3 @@ class TreeVesselView:
         j = int(self.store.parent[self.i])
         return None if j < 0 else TreeVesselView(self.store, j)
     
-
