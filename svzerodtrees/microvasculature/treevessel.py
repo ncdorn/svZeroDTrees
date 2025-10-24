@@ -85,7 +85,7 @@ class TreeVessel:
         Factory method to construct a TreeVessel from primitive parameters.
         """
 
-        viscosity = 0.049  # poise
+        viscosity = 0.04  # poise
         r = diameter / 2
         a = np.pi * r**2
 
@@ -338,7 +338,7 @@ class TreeVessel:
         # self.eta = self.fl_visc(self.d)
         # self.params["viscosity"] = self.eta
 
-        self.eta = 0.049
+        self.eta = 0.04
         
         R, C, L, l = self.calc_zero_d_values(self.d, self.eta)
         self.params["vessel_length"] = l
