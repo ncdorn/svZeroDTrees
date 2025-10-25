@@ -172,14 +172,14 @@ class Vessel():
     def L(self, new_L):
         self._L = new_L
 
-    @property
-    def L_eq(self):
-        if len(self.children) != 0:
-            self._update_L_eq()
-        return self._L_eq
+    # @property
+    # def L_eq(self):
+    #     if len(self.children) != 0:
+    #         self._update_L_eq()
+    #     return self._L_eq
 
-    def _update_L_eq(self):
-        self._L_eq = self._L + (1 / sum([1 / child.L_eq for child in self.children]))
+    # def _update_L_eq(self):
+    #     self._L_eq = self._L + (1 / sum([1 / child.L_eq for child in self.children]))
 
     @property
     def stenosis_coefficient(self):
