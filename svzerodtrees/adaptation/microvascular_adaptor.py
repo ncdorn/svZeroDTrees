@@ -1,23 +1,155 @@
 import json
 import csv
+import copy
+import os
+from typing import Dict, Tuple
+
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.optimize import minimize_scalar
 
 from ..io import ConfigHandler
-import matplotlib.pyplot as plt
-import os
 from ..microvasculature import StructuredTree
-from ..utils import *
-from ..simulation.threedutils import vtp_info
 from ..simulation.simulation_directory import SimulationDirectory
+from ..simulation.threedutils import vtp_info
 from ..tune_bcs.clinical_targets import ClinicalTargets
-from .setup import *
+from ..utils import *
 from .integrator import run_adaptation
 from .models import CWSSIMSAdaptation
+from .setup import *
 
-# ---- at module top-level (same .py file), not inside a class ----
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import os
-import copy
-from typing import Tuple
+
+_DEFAULT_ALPHA = 0.9
+_DEFAULT_BETA = 0.6
+_DEFAULT_LRR = 10.0
+_MIN_FLOW_EPS = 1e-8
+
+
+def _compute_segment_resistances(store) -> np.ndarray:
+    """
+    Poiseuille segment resistance for each vessel in the structured tree storage.
+    """
+    r = 0.5 * np.asarray(store.d, dtype=np.float64)
+    L = float(store.lrr) * r
+    eta = float(store.eta)
+
+    eps = np.finfo(np.float64).tiny
+    r4 = np.maximum(r**4, eps)
+    return 8.0 * eta * L / (np.pi * r4)
+
+
+def _equivalent_resistance_from_store(store) -> float:
+    """
+    Combine per-segment resistances bottom-up to obtain the root equivalent resistance.
+    """
+    R_seg = _compute_segment_resistances(store)
+    left = np.asarray(store.left, dtype=np.int32)
+    right = np.asarray(store.right, dtype=np.int32)
+    gen = np.asarray(store.gen, dtype=np.int32)
+
+    order = np.argsort(gen)[::-1]  # process deepest generation first
+    R_eq = np.array(R_seg, dtype=np.float64)
+
+    for idx in order:
+        children = []
+        li = int(left[idx])
+        ri = int(right[idx])
+        if li >= 0:
+            children.append(li)
+        if ri >= 0:
+            children.append(ri)
+
+        if not children:
+            continue
+
+        inv_sum = 0.0
+        for child_idx in children:
+            child_R = float(R_eq[child_idx])
+            if child_R <= 0.0:
+                continue
+            inv_sum += 1.0 / child_R
+
+        if inv_sum > 0.0:
+            R_eq[idx] = float(R_seg[idx]) + 1.0 / inv_sum
+        else:
+            R_eq[idx] = float(R_seg[idx])
+
+    return float(R_eq[0])
+
+
+def _optimize_tree_for_resistance(
+    tree: StructuredTree,
+    R_target: float,
+    d_min: float,
+    *,
+    alpha: float = _DEFAULT_ALPHA,
+    beta: float = _DEFAULT_BETA,
+    lrr: float = _DEFAULT_LRR,
+) -> Tuple[float, float]:
+    """
+    Tune the root diameter so that the structured tree matches the target resistance.
+    Returns (optimized_root_diameter, matched_resistance).
+    """
+    if R_target <= 0.0:
+        raise ValueError(f"Target resistance must be positive, got {R_target}")
+
+    print(f'[{tree.name}] optimizing root diameter to match R={R_target:.6g}')
+
+    lower = max(d_min * 1.02, 1e-4)
+    upper = max(tree.diameter, lower * 2.0)
+    upper_cap = max(upper, lower) * 1e3
+
+    eval_counter = {"count": 0}
+
+    def objective(diameter: float) -> float:
+        tree.build(initial_d=float(diameter), d_min=d_min, alpha=alpha, beta=beta, lrr=lrr)
+        current_R = _equivalent_resistance_from_store(tree.store)
+        eval_counter["count"] += 1
+        print(f'[{tree.name}]   eval {eval_counter["count"]:02d}: d={float(diameter):.6f} cm → R={current_R:.6g}')
+        return abs(current_R - R_target)
+
+    # Expand upper bound until resistance is below target or limit reached
+    for _ in range(12):
+        tree.build(initial_d=upper, d_min=d_min, alpha=alpha, beta=beta, lrr=lrr)
+        current_R = _equivalent_resistance_from_store(tree.store)
+        print(f'[{tree.name}]   bound check: d={upper:.6f} cm → R={current_R:.6g}')
+        if current_R <= R_target or upper >= upper_cap:
+            break
+        upper *= 1.5
+
+    result = minimize_scalar(objective, bounds=(lower, upper), method="bounded", options={"xatol": 1e-5})
+    if not result.success:
+        raise RuntimeError(f"Failed to match resistance {R_target} for tree {tree.name}: {result.message}")
+
+    optimized_diameter = float(result.x)
+    tree.build(initial_d=optimized_diameter, d_min=d_min, alpha=alpha, beta=beta, lrr=lrr)
+    matched_resistance = _equivalent_resistance_from_store(tree.store)
+    print(f'[{tree.name}] optimized diameter={optimized_diameter:.6f} cm, matched R={matched_resistance:.6g}')
+    return optimized_diameter, matched_resistance
+
+
+def _apply_constant_wss_scaling(store, preop_flow: float, postop_flow: float, n_iter: int) -> None:
+    """
+    Uniformly scale diameters to enforce constant wall shear stress assumption.
+    """
+    if n_iter <= 0:
+        return
+
+    Q_old = float(preop_flow)
+    Q_new = float(postop_flow)
+
+    if not np.isfinite(Q_old) or abs(Q_old) < _MIN_FLOW_EPS:
+        return
+
+    ratio = abs(Q_new) / max(abs(Q_old), _MIN_FLOW_EPS)
+    if ratio <= 0.0:
+        return
+
+    scale = ratio ** (1.0 / 3.0)
+    total_scale = scale ** n_iter
+    orig_dtype = np.asarray(store.d).dtype
+    scaled = np.asarray(store.d, dtype=np.float64) * total_scale
+    store.d = scaled.astype(orig_dtype, copy=False)
 
 def _adapt_single_bc_worker(
         bc_name: str,
@@ -27,19 +159,23 @@ def _adapt_single_bc_worker(
         postop_flow,           # 1D array-like
         n_iter: int,
         d_min: float
-    ) -> Tuple[str, float]:
+    ) -> Tuple[str, float, float]:
         """
-        Top-level, picklable worker: builds & adapts a StructuredTree and returns (bc_name, R_adapt).
+        Top-level, picklable worker: builds & adapts a StructuredTree and returns
+        (bc_name, R_adapt, optimized_root_diameter).
         """
-        # Import here to avoid pickling large modules on executor startup if not needed elsewhere
-        # from .structured_tree import StructuredTree  # adjust import to your project structure
-
         tree = StructuredTree(name=bc_name, time=t, simparams=None)
-        tree.optimize_tree_diameter(resistance=R_preop, d_min=d_min)
-        tree.adapt_constant_wss(preop_flow, postop_flow, n_iter=n_iter)
-        R_adapt = tree.root.R_eq
-        optimized_root_diameter = tree.root.d
-        return bc_name, R_adapt, optimized_root_diameter
+
+        optimized_root_diameter, _ = _optimize_tree_for_resistance(
+            tree,
+            R_target=float(R_preop),
+            d_min=d_min,
+        )
+
+        _apply_constant_wss_scaling(tree.store, preop_flow=float(preop_flow), postop_flow=float(postop_flow), n_iter=n_iter)
+        R_adapt = _equivalent_resistance_from_store(tree.store)
+        adapted_root_diameter = float(tree.store.d[0]) if tree.store.n_nodes() else optimized_root_diameter
+        return bc_name, R_adapt, adapted_root_diameter
 
 class MicrovascularAdaptor: 
     '''
@@ -208,20 +344,8 @@ class MicrovascularAdaptor:
     ) -> None:
         """
         Construct structured trees for preop/postop, adapt resistances based on flow changes,
-        and write an updated 3D coupling file.
-
-        Parameters
-        ----------
-        n_iter : int
-            Iterations for tree adaptation.
-        d_min : float
-            Minimum terminal diameter passed into StructuredTree.optimize_tree_diameter.
-        coupler_path : str
-            Where to write the adapted coupling JSON (relative to adapted_simdir.path).
-        max_workers : int | None
-            Number of worker processes. Defaults to os.cpu_count() if None.
-        parallel : bool
-            Toggle parallel execution (useful for debugging).
+        and write an updated 3D coupling file. Execution now proceeds sequentially for easier
+        debugging; `parallel` and `max_workers` are accepted for backward compatibility but ignored.
         """
         preop_svzerod_coupler = self.preop_simdir.svzerod_3Dcoupling
         preop_svzerod_data = self.preop_simdir.svzerod_data
@@ -246,40 +370,24 @@ class MicrovascularAdaptor:
 
             tasks.append((bc_name, R_preop, t, preop_flow, postop_flow, n_iter, d_min))
 
-        # 2) Execute (parallel or sequential)
-        results: dict[str, float] = {}
+        if parallel:
+            print("Parallel execution disabled; proceeding sequentially for all outlets.")
+        if max_workers is not None:
+            print("max_workers ignored: adaptation runs sequentially.")
 
-        if parallel and len(tasks) > 1:
-            if max_workers is None:
-                max_workers = os.cpu_count() or 1
-            
-            print(f'Adapting resistances in parallel using {max_workers} workers...')
-
-            # Mac/Windows note:
-            # Ensure this code runs under if __name__ == "__main__": when called from a script to avoid spawn issues.
-            with ProcessPoolExecutor(max_workers=max_workers) as ex:
-                future_map = {
-                    ex.submit(_adapt_single_bc_worker, *args): args[0]  # bc_name
-                    for args in tasks
-                }
-                for fut in as_completed(future_map):
-                    bc = future_map[fut]
-                    try:
-                        bc_name, R_adapt, optimized_root_diameter = fut.result()
-                    except Exception as e:
-                        # Fail fast with context; you could also choose to continue on error
-                        raise RuntimeError(f'Adaptation failed for BC "{bc}": {e}') from e
-                    results[bc_name] = R_adapt
-        else:
-            # Sequential fallback (useful for debugging/pdb)
-            for args in tasks:
-                bc_name, R_adapt = _adapt_single_bc_worker(*args)
-                results[bc_name] = R_adapt
+        # Sequential execution
+        results: Dict[str, Tuple[float, float]] = {}
+        for args in tasks:
+            bc_name, R_adapt, adapted_root_diameter = _adapt_single_bc_worker(*args)
+            results[bc_name] = (R_adapt, adapted_root_diameter)
 
         # 3) Apply results back to the (deep-copied) coupler in the main process
-        for bc_name, R_adapt in results.items():
+        for bc_name, (R_adapt, root_diameter) in results.items():
             R_preop = adapted_svzerod_coupler.bcs[bc_name].R
-            print(f'updating resistance for {bc_name} from {R_preop} to {R_adapt}')
+            if root_diameter is not None:
+                print(f'updating resistance for {bc_name} from {R_preop} to {R_adapt} (root d = {root_diameter:.4f} cm)')
+            else:
+                print(f'updating resistance for {bc_name} from {R_preop} to {R_adapt}')
             adapted_svzerod_coupler.bcs[bc_name].R = R_adapt
 
         # 4) Persist to disk
@@ -300,25 +408,30 @@ class MicrovascularAdaptor:
         adapted_svzerod_coupler = copy.deepcopy(preop_svzerod_coupler)
 
         for bc_name, coupling_block in preop_svzerod_coupler.coupling_blocks.items():
-            if 'branch' not in bc_name.lower():
-                # get the resistance from the preop simulation
-                R_preop  = preop_svzerod_coupler.bcs[bc_name].R
-                # build tree for preop resistance
-                print(f'building structured tree for resistance {R_preop}...')
-                tree = StructuredTree(name=bc_name, time=coupling_block.values['t'], simparams=None)
-                tree.optimize_tree_diameter(resistance=R_preop, d_min=d_min)
-                # get the flow from the preop, postop simulation
-                preop_flow = preop_svzerod_data.get_flow(coupling_block)
-                postop_flow = postop_svzerod_data.get_flow(coupling_block)
+            if 'branch' in bc_name.lower():
+                continue
 
-                # adapt the tree based on the flow change
-                tree.adapt_constant_wss(preop_flow, postop_flow, n_iter=n_iter)
+            R_preop = preop_svzerod_coupler.bcs[bc_name].R
+            print(f'building structured tree for resistance {R_preop}...')
+            t = coupling_block.values['t']
+            preop_flow = preop_svzerod_data.get_flow(coupling_block)
+            postop_flow = postop_svzerod_data.get_flow(coupling_block)
 
-                # update the bc with the new resistance
-                R_adapt = tree.root.R_eq
+            _, R_adapt, root_diameter = _adapt_single_bc_worker(
+                bc_name,
+                R_preop,
+                t,
+                preop_flow,
+                postop_flow,
+                n_iter,
+                d_min,
+            )
+
+            if root_diameter is not None:
+                print(f'updating resistance for {bc_name} from {R_preop} to {R_adapt} (root d = {root_diameter:.4f} cm)')
+            else:
                 print(f'updating resistance for {bc_name} from {R_preop} to {R_adapt}')
-                adapted_svzerod_coupler.bcs[bc_name].R = R_adapt
-
+            adapted_svzerod_coupler.bcs[bc_name].R = R_adapt
         
         self.adapted_simdir.svzerod_3Dcoupling = adapted_svzerod_coupler
         # change path
@@ -424,4 +537,3 @@ class MicrovascularAdaptor:
 
         print("saving adapted config to " + self.adapted_simdir.svzerod_3Dcoupling.path)
         self.adapted_simdir.svzerod_3Dcoupling.to_json(self.adapted_simdir.svzerod_3Dcoupling.path)
-

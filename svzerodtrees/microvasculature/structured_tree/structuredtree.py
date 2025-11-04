@@ -271,9 +271,6 @@ class StructuredTree:
 
     def compute_olufsen_impedance(
         self,
-        k1: float = 19_992_500.0,          # g/cm/s^2
-        k2: float = -25.5267,              # 1/cm
-        k3: float = 1_104_531.490909,      # g/cm/s^2
         n_procs: Optional[int] = None,     # kept for API compatibility (unused)
         tsteps: Optional[int] = None,
         chunk_size: int = 512,
