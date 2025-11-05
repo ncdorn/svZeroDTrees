@@ -78,6 +78,12 @@ class StructuredTree:
         # --- Compliance model ---
         self.compliance_model = compliance_model if compliance_model else ConstantCompliance(1e5)
 
+        # --- Homeostatic references (populated after compute_homeostatic_state) ---
+        self.homeostatic_wss = None
+        self.homeostatic_ims = None
+        self._homeostatic_wss_map = None
+        self._homeostatic_ims_map = None
+
         if tree_config:
             if root is None:
                 raise ValueError("tree_config provided but no root TreeVessel instance passed.")
@@ -230,7 +236,72 @@ class StructuredTree:
     def build(self, **build_kwargs):
         # explicit, side-effectful convenience method
         self.store = build_tree_soa(**build_kwargs, density=self.density, eta=self.viscosity, compliance_model=self.compliance_model, name=self.name)
+        self.homeostatic_wss = None
+        self.homeostatic_ims = None
+        self._homeostatic_wss_map = None
+        self._homeostatic_ims_map = None
         return self.store
+
+    def segment_resistances(self) -> np.ndarray:
+        """
+        Return Poiseuille segment resistances for every vessel currently stored.
+        """
+        if not hasattr(self, "store") or self.store is None:
+            raise RuntimeError("StructuredTree.segment_resistances() requires a built store.")
+
+        st = self.store
+        r = 0.5 * np.asarray(st.d, dtype=np.float64)
+        L = float(st.lrr) * r
+        eta = float(st.eta)
+
+        eps = np.finfo(np.float64).tiny
+        r4 = np.maximum(r ** 4, eps)
+        return 8.0 * eta * L / (np.pi * r4)
+
+    def equivalent_resistance(self) -> float:
+        """
+        Compute the equivalent resistance seen at the root of the structured tree.
+        """
+        if not hasattr(self, "store") or self.store is None:
+            raise RuntimeError("StructuredTree.equivalent_resistance() requires a built storage object.")
+
+        st = self.store
+        R_seg = self.segment_resistances()
+        if R_seg.size == 0:
+            return 0.0
+
+        left = np.asarray(st.left, dtype=np.int32)
+        right = np.asarray(st.right, dtype=np.int32)
+        gen = np.asarray(st.gen, dtype=np.int32)
+
+        order = np.argsort(gen)[::-1]  # deepest generation first
+        R_eq = np.array(R_seg, dtype=np.float64)
+
+        for idx in order:
+            children = []
+            li = int(left[idx])
+            ri = int(right[idx])
+            if li >= 0:
+                children.append(li)
+            if ri >= 0:
+                children.append(ri)
+
+            if not children:
+                continue
+
+            inv_sum = 0.0
+            for child_idx in children:
+                child_R = float(R_eq[child_idx])
+                if child_R <= 0.0:
+                    continue
+                inv_sum += 1.0 / child_R
+
+            if inv_sum > 0.0:
+                R_eq[idx] = float(R_seg[idx]) + 1.0 / inv_sum
+            else:
+                R_eq[idx] = float(R_seg[idx])
+
+        return float(R_eq[0])
 
 
     def reset_tree(self, keep_root=False):
@@ -617,7 +688,7 @@ class StructuredTree:
             "bc_name": f"{name}",
             "bc_type": "RESISTANCE",
             "bc_values": {
-                "R": self.root.R_eq,
+                "R": self.equivalent_resistance(),
                 "Pd": Pd,
             }
         })
@@ -625,33 +696,42 @@ class StructuredTree:
         return resistance_bc
     
     def compute_homeostatic_state(self, Q):
-        '''
-        compute the homeostatic state of the structured tree by adapting the diameter of the vessels to a given flow rate Q
-        '''
-    
+        """
+        Simulate the structured tree under a reference flow Q and cache
+        the corresponding wall shear stress and intramural stress profiles.
+        """
+
+        if not hasattr(self, "store") or self.store is None:
+            raise RuntimeError("StructuredTree must be built before computing the homeostatic state.")
+
+        if Q is None:
+            raise ValueError("Flow Q must be provided to compute the homeostatic state.")
+
         print("computing homeostatic state for structured tree...")
-        # simulation with initial flow
-        preop_result = self.simulate(Q_in=[Q, Q], Pd=self.Pd)
+        q_val = float(Q)
+        Pd_val = float(self.Pd) if self.Pd is not None else 0.0
+        result_df = self.simulate(Q_in=[q_val, q_val], Pd=Pd_val)
 
-        # assign homeostatic wss and ims
-        def assign_homeostatic_wss_ims(vessel):
-            '''
-            recursive step to assign homeostatic wss and ims to the vessel
-            '''
+        if not hasattr(self, "results") or self.results is None:
+            raise RuntimeError("StructuredTree simulation did not populate results; cannot compute homeostatic state.")
 
-            if vessel:
-                # get flow from postop result
-                vessel_name = f"branch{vessel.id}_seg0"
-                Q = get_branch_result(preop_result, 'flow_in', vessel_name)
-                P = get_branch_result(preop_result, 'pressure_in', vessel_name)
-                # adapt the diameter based on the flow
-                vessel.wss_h = vessel.wall_shear_stress(Q)
-                vessel.ims_h = vessel.intramural_stress(P)
+        tau_ts = self.results.wss_timeseries()
+        tau_mean = np.mean(tau_ts, axis=1)
 
-                assign_homeostatic_wss_ims(vessel.left)
-                assign_homeostatic_wss_ims(vessel.right)
+        pressure_mean = np.mean(self.results.pressure_in, axis=1)
+        radii = 0.5 * np.asarray(self.store.d, dtype=np.float64)
+        # Legacy TreeVessel models assume wall thickness is r/10.
+        thickness = np.maximum(radii / 10.0, 1e-9)
+        ims_mean = pressure_mean * radii / thickness
 
-        assign_homeostatic_wss_ims(self.root)
+        self.homeostatic_wss = tau_mean
+        self.homeostatic_ims = ims_mean
+
+        ids = np.asarray(self.store.ids, dtype=np.int32)
+        self._homeostatic_wss_map = {int(vid): float(tau_mean[idx]) for idx, vid in enumerate(ids)}
+        self._homeostatic_ims_map = {int(vid): float(ims_mean[idx]) for idx, vid in enumerate(ids)}
+
+        return result_df
 
     def match_RCR_to_impedance(self):
         '''

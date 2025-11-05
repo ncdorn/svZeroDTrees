@@ -7,9 +7,10 @@ from typing import Dict, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.optimize import minimize_scalar
+import pandas as pd
 
 from ..io import ConfigHandler
-from ..microvasculature import StructuredTree
+from ..microvasculature import StructuredTree, TreeParameters
 from ..simulation.simulation_directory import SimulationDirectory
 from ..simulation.threedutils import vtp_info
 from ..tune_bcs.clinical_targets import ClinicalTargets
@@ -23,58 +24,6 @@ _DEFAULT_ALPHA = 0.9
 _DEFAULT_BETA = 0.6
 _DEFAULT_LRR = 10.0
 _MIN_FLOW_EPS = 1e-8
-
-
-def _compute_segment_resistances(store) -> np.ndarray:
-    """
-    Poiseuille segment resistance for each vessel in the structured tree storage.
-    """
-    r = 0.5 * np.asarray(store.d, dtype=np.float64)
-    L = float(store.lrr) * r
-    eta = float(store.eta)
-
-    eps = np.finfo(np.float64).tiny
-    r4 = np.maximum(r**4, eps)
-    return 8.0 * eta * L / (np.pi * r4)
-
-
-def _equivalent_resistance_from_store(store) -> float:
-    """
-    Combine per-segment resistances bottom-up to obtain the root equivalent resistance.
-    """
-    R_seg = _compute_segment_resistances(store)
-    left = np.asarray(store.left, dtype=np.int32)
-    right = np.asarray(store.right, dtype=np.int32)
-    gen = np.asarray(store.gen, dtype=np.int32)
-
-    order = np.argsort(gen)[::-1]  # process deepest generation first
-    R_eq = np.array(R_seg, dtype=np.float64)
-
-    for idx in order:
-        children = []
-        li = int(left[idx])
-        ri = int(right[idx])
-        if li >= 0:
-            children.append(li)
-        if ri >= 0:
-            children.append(ri)
-
-        if not children:
-            continue
-
-        inv_sum = 0.0
-        for child_idx in children:
-            child_R = float(R_eq[child_idx])
-            if child_R <= 0.0:
-                continue
-            inv_sum += 1.0 / child_R
-
-        if inv_sum > 0.0:
-            R_eq[idx] = float(R_seg[idx]) + 1.0 / inv_sum
-        else:
-            R_eq[idx] = float(R_seg[idx])
-
-    return float(R_eq[0])
 
 
 def _optimize_tree_for_resistance(
@@ -103,7 +52,7 @@ def _optimize_tree_for_resistance(
 
     def objective(diameter: float) -> float:
         tree.build(initial_d=float(diameter), d_min=d_min, alpha=alpha, beta=beta, lrr=lrr)
-        current_R = _equivalent_resistance_from_store(tree.store)
+        current_R = tree.equivalent_resistance()
         eval_counter["count"] += 1
         print(f'[{tree.name}]   eval {eval_counter["count"]:02d}: d={float(diameter):.6f} cm → R={current_R:.6g}')
         return abs(current_R - R_target)
@@ -111,7 +60,7 @@ def _optimize_tree_for_resistance(
     # Expand upper bound until resistance is below target or limit reached
     for _ in range(12):
         tree.build(initial_d=upper, d_min=d_min, alpha=alpha, beta=beta, lrr=lrr)
-        current_R = _equivalent_resistance_from_store(tree.store)
+        current_R = tree.equivalent_resistance()
         print(f'[{tree.name}]   bound check: d={upper:.6f} cm → R={current_R:.6g}')
         if current_R <= R_target or upper >= upper_cap:
             break
@@ -123,7 +72,7 @@ def _optimize_tree_for_resistance(
 
     optimized_diameter = float(result.x)
     tree.build(initial_d=optimized_diameter, d_min=d_min, alpha=alpha, beta=beta, lrr=lrr)
-    matched_resistance = _equivalent_resistance_from_store(tree.store)
+    matched_resistance = tree.equivalent_resistance()
     print(f'[{tree.name}] optimized diameter={optimized_diameter:.6f} cm, matched R={matched_resistance:.6g}')
     return optimized_diameter, matched_resistance
 
@@ -173,7 +122,7 @@ def _adapt_single_bc_worker(
         )
 
         _apply_constant_wss_scaling(tree.store, preop_flow=float(preop_flow), postop_flow=float(postop_flow), n_iter=n_iter)
-        R_adapt = _equivalent_resistance_from_store(tree.store)
+        R_adapt = tree.equivalent_resistance()
         adapted_root_diameter = float(tree.store.d[0]) if tree.store.n_nodes() else optimized_root_diameter
         return bc_name, R_adapt, adapted_root_diameter
 
@@ -222,25 +171,34 @@ class MicrovascularAdaptor:
         self.method = method
         self.location = location
         self.bc_type = bc_type
+        self.tree_params: Dict[str, TreeParameters] = {}
+        self.lpa_tree = None
+        self.rpa_tree = None
+
+        def _load_tree_parameters(df, side: str) -> TreeParameters:
+            subset = df[df["pa"].str.lower() == side.lower()]
+            if subset.empty:
+                raise ValueError(f"Could not find tree parameters for '{side}' in {tree_params}.")
+            cols_lower = {col.lower() for col in subset.columns}
+            if {"compliance model", "alpha", "beta"}.issubset(cols_lower):
+                return TreeParameters.from_row(subset)
+            else:
+                raise ValueError(f"Tree parameters for '{side}' are missing required columns alpha, beta, compliance model in {tree_params}.")
 
         if self.bc_type == 'impedance':
             print("adaptating impedance boundary conditions")
             self.simple_pa = ConfigHandler.from_json(reduced_order_pa, is_pulmonary=True)
-            opt_params = pd.read_csv(os.path.join(tree_params))
-            self.tree_params = {
-                'lpa': [opt_params['k1'][opt_params.pa=='lpa'].values[0], opt_params['k2'][opt_params.pa=='lpa'].values[0], opt_params['k3'][opt_params.pa=='lpa'].values[0], opt_params['lrr'][opt_params.pa=='lpa'].values[0], opt_params['diameter'][opt_params.pa=='lpa'].values[0]],
-                'rpa': [opt_params['k1'][opt_params.pa=='rpa'].values[0], opt_params['k2'][opt_params.pa=='rpa'].values[0], opt_params['k3'][opt_params.pa=='rpa'].values[0], opt_params['lrr'][opt_params.pa=='rpa'].values[0], opt_params['diameter'][opt_params.pa=='rpa'].values[0]]
-            }
+            opt_params = pd.read_csv(tree_params)
+            self.tree_params['lpa'] = _load_tree_parameters(opt_params, 'lpa')
+            self.tree_params['rpa'] = _load_tree_parameters(opt_params, 'rpa')
             # construct lpa and rpa trees
             self.lpa_tree, self.rpa_tree = self.construct_impedance_trees()
         elif self.bc_type == 'resistance':
             print("adapting resistance boundary conditions")
             if tree_params is not None:
-                opt_params = pd.read_csv(os.path.join(tree_params))
-                self.tree_params = {
-                    'lpa': [opt_params['k1'][opt_params.pa=='lpa'].values[0], opt_params['k2'][opt_params.pa=='lpa'].values[0], opt_params['k3'][opt_params.pa=='lpa'].values[0], opt_params['lrr'][opt_params.pa=='lpa'].values[0], opt_params['diameter'][opt_params.pa=='lpa'].values[0]],
-                    'rpa': [opt_params['k1'][opt_params.pa=='rpa'].values[0], opt_params['k2'][opt_params.pa=='rpa'].values[0], opt_params['k3'][opt_params.pa=='rpa'].values[0], opt_params['lrr'][opt_params.pa=='rpa'].values[0], opt_params['diameter'][opt_params.pa=='rpa'].values[0]]
-                }
+                opt_params = pd.read_csv(tree_params)
+                self.tree_params['lpa'] = _load_tree_parameters(opt_params, 'lpa')
+                self.tree_params['rpa'] = _load_tree_parameters(opt_params, 'rpa')
         else:
             raise ValueError(f"bc_type {bc_type} not recognized, please use 'impedance' or 'resistance'")
             
@@ -258,8 +216,8 @@ class MicrovascularAdaptor:
 
         if fig_dir is not None:
             print("computing preop impedance! \n")
-            Z_t_l_pre, time = self.lpa_tree.compute_olufsen_impedance(self.tree_params['lpa'][0], self.tree_params['lpa'][1], self.tree_params['lpa'][2], n_procs=24)
-            Z_t_r_pre, time = self.rpa_tree.compute_olufsen_impedance(self.tree_params['rpa'][0], self.tree_params['rpa'][1], self.tree_params['rpa'][2],n_procs=24)
+            Z_t_l_pre, time = self.lpa_tree.compute_olufsen_impedance(n_procs=24)
+            Z_t_r_pre, time = self.rpa_tree.compute_olufsen_impedance(n_procs=24)
             self.lpa_tree.plot_stiffness(path=os.path.join(fig_dir, 'lpa_stiffness_preop.png'))
             self.rpa_tree.plot_stiffness(path=os.path.join(fig_dir, 'rpa_stiffness_preop.png'))
 
@@ -276,8 +234,8 @@ class MicrovascularAdaptor:
             self.rpa_tree.adapt_wss_ims(Q=preop_rpa_flow, Q_new=postop_rpa_flow, n_iter=self.n_iter)
 
         print("computing adapted impedance! \n")
-        Z_t_l_adapt, time = self.lpa_tree.compute_olufsen_impedance(self.tree_params['lpa'][0], self.tree_params['lpa'][1], self.tree_params['lpa'][2], n_procs=24)
-        Z_t_r_adapt, time = self.rpa_tree.compute_olufsen_impedance(self.tree_params['rpa'][0], self.tree_params['rpa'][1], self.tree_params['rpa'][2],n_procs=24)
+        Z_t_l_adapt, time = self.lpa_tree.compute_olufsen_impedance(n_procs=24)
+        Z_t_r_adapt, time = self.rpa_tree.compute_olufsen_impedance(n_procs=24)
 
         if fig_dir is not None:
             # plot the preop and postop impedance
@@ -319,18 +277,44 @@ class MicrovascularAdaptor:
         construct the trees for the preop and postop simulations
         '''
 
-        k1_l, k2_l, k3_l, lrr_l, d_l = self.tree_params['lpa']
-        k1_r, k2_r, k3_r, lrr_r, d_r = self.tree_params['rpa']
+        lpa_params = self.tree_params.get('lpa')
+        rpa_params = self.tree_params.get('rpa')
+        if lpa_params is None or rpa_params is None:
+            raise RuntimeError("Tree parameters must be loaded before constructing impedance trees.")
 
         time_array = self.preop_simdir.svzerod_3Dcoupling.bcs['INFLOW'].t
         
-        lpa_tree = StructuredTree(name='LPA', time=time_array, simparams=None)
-        print(f'building LPA tree with lpa parameters: {self.tree_params["lpa"]}')
-        lpa_tree.build_tree(initial_d=d_l, d_min=0.01, lrr=lrr_l)
+        lpa_tree = StructuredTree(
+            name='LPA',
+            time=time_array,
+            simparams=None,
+            compliance_model=lpa_params.compliance_model,
+        )
+        lpa_summary = lpa_params.summary() if hasattr(lpa_params.compliance_model, "description") else lpa_params.name
+        print(f'building LPA tree with parameters: {lpa_summary}')
+        lpa_tree.build(
+            initial_d=lpa_params.diameter,
+            d_min=lpa_params.d_min,
+            lrr=lpa_params.lrr,
+            alpha=lpa_params.alpha,
+            beta=lpa_params.beta,
+        )
 
-        rpa_tree = StructuredTree(name='RPA', time=time_array, simparams=None)
-        print(f'building RPA tree with rpa parameters: {self.tree_params["rpa"]}')
-        rpa_tree.build_tree(initial_d=d_r, d_min=0.01, lrr=lrr_r)
+        rpa_tree = StructuredTree(
+            name='RPA',
+            time=time_array,
+            simparams=None,
+            compliance_model=rpa_params.compliance_model,
+        )
+        rpa_summary = rpa_params.summary() if hasattr(rpa_params.compliance_model, "description") else rpa_params.name
+        print(f'building RPA tree with parameters: {rpa_summary}')
+        rpa_tree.build(
+            initial_d=rpa_params.diameter,
+            d_min=rpa_params.d_min,
+            lrr=rpa_params.lrr,
+            alpha=rpa_params.alpha,
+            beta=rpa_params.beta,
+        )
 
         return lpa_tree, rpa_tree
     
@@ -455,8 +439,8 @@ class MicrovascularAdaptor:
         '''
         # if self.location == 'uniform':
 
-        Z_t_l_adapt, time = self.lpa_tree.compute_olufsen_impedance(self.tree_params['lpa'][0], self.tree_params['lpa'][1], self.tree_params['lpa'][2], n_procs=24, tsteps=2000)
-        Z_t_r_adapt, time = self.rpa_tree.compute_olufsen_impedance(self.tree_params['rpa'][0], self.tree_params['rpa'][1], self.tree_params['rpa'][2], n_procs=24, tsteps=2000)
+        Z_t_l_adapt, time = self.lpa_tree.compute_olufsen_impedance(n_procs=24, tsteps=2000)
+        Z_t_r_adapt, time = self.rpa_tree.compute_olufsen_impedance(n_procs=24, tsteps=2000)
 
         cap_info = vtp_info(self.postop_simdir.mesh_complete.mesh_surfaces_dir, convert_to_cm=self.convert_to_cm, pulmonary=False)
 
@@ -489,8 +473,13 @@ class MicrovascularAdaptor:
         # preop_pa.inflows["INFLOW"].q = [q / (self.postop_simdir.mesh_complete.n_outlets // 2) for q in preop_pa.inflows["INFLOW"].q]
 
         # compute difference in pressure drop to get postop nonlinear resistance
-        S_lpa_preop, S_rpa_preop = self.preop_simdir.compute_pressure_drop(steady=False)
-        S_lpa_postop, S_rpa_postop = self.postop_simdir.compute_pressure_drop(steady=False)
+        # TODO: use optimize nonlinear resistance instead as this is what I previously did
+        S_lpa_preop, S_rpa_preop = self.preop_simdir.optimize_nonlinear_resistance()
+        S_lpa_postop, S_rpa_postop = self.postop_simdir.optimize_nonlinear_resistance()
+        # S_lpa_preop, S_rpa_preop = self.preop_simdir.compute_pressure_drop(steady=False)
+        # S_lpa_postop, S_rpa_postop = self.postop_simdir.compute_pressure_drop(steady=False)
+
+
 
         postop_pa = copy.deepcopy(preop_pa)
 

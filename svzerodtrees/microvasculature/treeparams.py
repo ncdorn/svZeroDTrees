@@ -32,30 +32,9 @@ class TreeParameters:
         self.k1 = k1
         self.k2 = k2
         self.k3 = k3
-    
+
     @classmethod
-    def from_row(cls, pa: str, row: pd.Series):
-        """
-        Create a TreeParameters instance from a DataFrame row. basically a backwards compatible function.
-
-        :param pa: 'lpa' or 'rpa'
-        :param row: DataFrame row containing tree parameters
-        """
-
-        k1 = row["k1"].values[0]
-        k2 = row["k2"].values[0]
-        k3 = row["k3"].values[0]
-        lrr = row["lrr"].values[0]
-        diameter = row["diameter"].values[0]
-        alpha = 0.9
-        beta = 0.6
-        d_min = row["d_min"].values[0]
-        compliance_model = ComplianceModel(k1=k1, k2=k2, k3=k3) if k1 is not None else None
-
-        return cls(pa, lrr, diameter, d_min, alpha, beta, compliance_model)
-    
-    @classmethod
-    def from_row_new(cls, row: pd.Series):
+    def from_row(cls, row: pd.Series):
         """
         Create a TreeParameters instance from a DataFrame row with new compliance model.
 

@@ -261,10 +261,8 @@ def simulate_outlet_trees(simple_pa):
     '''
     lpa_flow = np.mean(simple_pa.result[simple_pa.result.name=='branch2_seg0']['flow_out'])
     rpa_flow = np.mean(simple_pa.result[simple_pa.result.name=='branch4_seg0']['flow_out'])
-    lpa_tree_result = simple_pa.lpa_tree.simulate([lpa_flow, lpa_flow])
-    assign_flow_to_root(lpa_tree_result, simple_pa.lpa_tree.root)
-    rpa_tree_result = simple_pa.rpa_tree.simulate([rpa_flow, rpa_flow])
-    assign_flow_to_root(rpa_tree_result, simple_pa.rpa_tree.root)
+    simple_pa.lpa_tree.simulate([lpa_flow, lpa_flow])
+    simple_pa.rpa_tree.simulate([rpa_flow, rpa_flow])
 
 
 def rel_change(y, y_ref):

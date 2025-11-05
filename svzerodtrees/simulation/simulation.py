@@ -149,8 +149,8 @@ class Simulation:
                     print("Continuing optimization from previous run...")
                     # load the previous optimization results
                     opt_params = pd.read_csv(os.path.join(self.path, 'optimized_params.csv'))
-                    lpa_params = TreeParameters.from_row_new(opt_params[opt_params.pa == 'lpa'])
-                    rpa_params = TreeParameters.from_row_new(opt_params[opt_params.pa == 'rpa'])
+                    lpa_params = TreeParameters.from_row(opt_params[opt_params.pa == 'lpa'])
+                    rpa_params = TreeParameters.from_row(opt_params[opt_params.pa == 'rpa'])
                     reduced_config = ConfigHandler.from_json(os.path.join(self.path, "pa_config_test_tuning.json"), is_pulmonary=True)
                 else:
                     initial_guess = None
@@ -182,8 +182,8 @@ class Simulation:
             #     'rpa': [opt_params['k1'][opt_params.pa=='rpa'].values[0], opt_params['k2'][opt_params.pa=='rpa'].values[0], opt_params['k3'][opt_params.pa=='rpa'].values[0], opt_params['lrr'][opt_params.pa=='rpa'].values[0], opt_params['diameter'][opt_params.pa=='rpa'].values[0]]
             # }
 
-            lpa_params = TreeParameters.from_row_new(opt_params[opt_params.pa == 'lpa'])
-            rpa_params = TreeParameters.from_row_new(opt_params[opt_params.pa == 'rpa'])
+            lpa_params = TreeParameters.from_row(opt_params[opt_params.pa == 'lpa'])
+            rpa_params = TreeParameters.from_row(opt_params[opt_params.pa == 'rpa'])
 
         # generate blank threed coupler
         # blank_threed_coupler = ConfigHandler.blank_threed_coupler(path=os.path.join(self.path, 'svzerod_3Dcoupling.json'))

@@ -378,29 +378,48 @@ class SimulationDirectory:
 
         # get the MPA mean, systolic, diastolic pressure
         time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
-        time = time[time > time.max() - 1.0]
-        pressure = pressure[time.index]
-        sys_p = np.max(pressure)
-        dia_p = pressure.iloc[0]
-        mean_p = np.mean(pressure)
+        if time.size == 0:
+            raise RuntimeError("No MPA data available to compute pressure drops.")
+
+        mask_last_period = time > time.max() - 1.0
+        time_last_period = time[mask_last_period]
+        pressure_last_period = pressure[mask_last_period]
+
+        if time_last_period.size == 0:
+            time_last_period = time
+            pressure_last_period = pressure
+
+        if pressure_last_period.size == 0:
+            raise RuntimeError("Pressure array is empty after masking for the last period.")
+
+        sys_p = float(np.max(pressure_last_period))
+        dia_p = float(pressure_last_period[0])
+        mean_p = float(np.mean(pressure_last_period))
 
         lpa_outlet_pressures = {'sys': [], 'dia': [], 'mean': []}
         rpa_outlet_pressures = {'sys': [], 'dia': [], 'mean': []}
         for block in self.svzerod_3Dcoupling.coupling_blocks.values():
+            time, flow, pressure = self.svzerod_data.get_result(block)
+            if time.size == 0:
+                continue
+
+            mask_last_period = time > time.max() - 1.0
+            pressure_last_period = pressure[mask_last_period]
+            if pressure_last_period.size == 0:
+                pressure_last_period = pressure
+
+            sys_val = float(np.max(pressure_last_period))
+            dia_val = float(pressure_last_period[0])
+            mean_val = float(np.mean(pressure_last_period))
+
             if 'lpa' in block.surface.lower():
-                time, flow, pressure = self.svzerod_data.get_result(block)
-                time = time[time > time.max() - 1.0]
-                pressure = pressure[time.index]
-                lpa_outlet_pressures['sys'].append(np.max(pressure))
-                lpa_outlet_pressures['dia'].append(pressure.iloc[0])
-                lpa_outlet_pressures['mean'].append(np.mean(pressure))
-            if 'rpa' in block.surface.lower():
-                time, flow, pressure = self.svzerod_data.get_result(block)
-                time = time[time > time.max() - 1.0]
-                pressure = pressure[time.index]
-                rpa_outlet_pressures['sys'].append(np.max(pressure))
-                rpa_outlet_pressures['dia'].append(pressure.iloc[0])
-                rpa_outlet_pressures['mean'].append(np.mean(pressure))
+                lpa_outlet_pressures['sys'].append(sys_val)
+                lpa_outlet_pressures['dia'].append(dia_val)
+                lpa_outlet_pressures['mean'].append(mean_val)
+            elif 'rpa' in block.surface.lower():
+                rpa_outlet_pressures['sys'].append(sys_val)
+                rpa_outlet_pressures['dia'].append(dia_val)
+                rpa_outlet_pressures['mean'].append(mean_val)
 
         lpa_pressure_drops = {
             'sys': sys_p - np.mean(lpa_outlet_pressures['sys']),
@@ -680,15 +699,30 @@ class SimulationDirectory:
 
         # get the MPA pressure
         time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
-        time = time[time > time.max() - 1.0]
-        pressure = pressure[time.index]
-        flow = flow[time.index]
+        if time.size == 0:
+            raise RuntimeError("No svZeroD results available for nonlinear resistance optimization.")
+
+        mask_last_period = time > time.max() - 1.0
+        time_last_period = time[mask_last_period]
+        pressure_last_period = pressure[mask_last_period]
+        flow_last_period = flow[mask_last_period]
+
+        if time_last_period.size == 0:
+            time_last_period = time
+            pressure_last_period = pressure
+            flow_last_period = flow
 
         # get rpa split
         lpa_flow, rpa_flow = self.flow_split()
         rpa_split = sum(rpa_flow['mean'].values()) / (sum(lpa_flow['mean'].values()) + sum(rpa_flow['mean'].values()))
 
-        targets = {'mean': np.mean(pressure) / 1333.2, 'sys': np.max(pressure) / 1333.2, 'dia': np.min(pressure) / 1333.2, 'rpa_split': rpa_split}
+        pressure_window = pressure_last_period
+        targets = {
+            'mean': float(np.mean(pressure_window)) / 1333.2,
+            'sys': float(np.max(pressure_window)) / 1333.2,
+            'dia': float(np.min(pressure_window)) / 1333.2,
+            'rpa_split': rpa_split
+        }
         # targets = {'mean': 34, 'sys': 68, 'dia': 8, 'rpa_split': targets['rpa_split']}
 
         # compute a loss function of a nonlinear resistance model with impedance boundary conditions
@@ -906,17 +940,33 @@ class SimulationDirectory:
                     continue
                 outlet = self.mesh_complete.mesh_surfaces[block.surface]
                 time, flow, pressure = self.svzerod_data.get_result(block)
-                time = time[time > time.max() - 1.0]
-                last_half_time = time[time > time.max() - 0.5]
-                # use the indices of the time to get the flow
+                if time.size == 0:
+                    continue
+
+                mask_last_period = time > time.max() - 1.0
+                time_last_period = time[mask_last_period]
+                flow_last_period = flow[mask_last_period]
+
+                if time_last_period.size == 0:
+                    time_last_period = time
+                    flow_last_period = flow
+
+                flow_window = flow_last_period if flow_last_period.size else flow
+                if flow_window.size == 0:
+                    continue
+
+                peak_flow = float(np.max(flow_window))
+                dia_flow = float(flow_window[0])
+                mean_flow = float(np.mean(flow_window))
+
                 if outlet.lpa:
-                    lpa_flow['sys'][outlet.lobe] += np.max(flow[time.index])
-                    lpa_flow['dia'][outlet.lobe] += flow[time.index].iloc[0]
-                    lpa_flow['mean'][outlet.lobe] += np.mean(flow[time.index])
+                    lpa_flow['sys'][outlet.lobe] += peak_flow
+                    lpa_flow['dia'][outlet.lobe] += dia_flow
+                    lpa_flow['mean'][outlet.lobe] += mean_flow
                 elif outlet.rpa:
-                    rpa_flow['sys'][outlet.lobe] += np.max(flow[time.index])
-                    rpa_flow['dia'][outlet.lobe] += flow[time.index].iloc[0]
-                    rpa_flow['mean'][outlet.lobe] += np.mean(flow[time.index])
+                    rpa_flow['sys'][outlet.lobe] += peak_flow
+                    rpa_flow['dia'][outlet.lobe] += dia_flow
+                    rpa_flow['mean'][outlet.lobe] += mean_flow
         
         return lpa_flow, rpa_flow
     
@@ -1140,4 +1190,3 @@ if __name__ == '__main__':
 
 
     
-
