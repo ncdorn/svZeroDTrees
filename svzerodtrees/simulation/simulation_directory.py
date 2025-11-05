@@ -450,6 +450,9 @@ class SimulationDirectory:
             'mean': rpa_pressure_drops['mean'] / Q_mean_rpa
         }
 
+        print(f'\nLPA flow: {Q_sys_lpa} cm3/s, {Q_dia_lpa} cm3/s, {Q_mean_lpa} cm3/s')
+        print(f'RPA flow: {Q_sys_rpa} cm3/s, {Q_dia_rpa} cm3/s, {Q_mean_rpa} cm3/s')
+
         print(f'\nLPA pressure drop: {lpa_pressure_drops["sys"] / 1333.2} mmHg, {lpa_pressure_drops["dia"] / 1333.2} mmHg, {lpa_pressure_drops["mean"] / 1333.2} mmHg')
         print(f'RPA pressure drop: {rpa_pressure_drops["sys"] / 1333.2} mmHg, {rpa_pressure_drops["dia"] / 1333.2} mmHg, {rpa_pressure_drops["mean"] / 1333.2} mmHg')
 
@@ -458,9 +461,6 @@ class SimulationDirectory:
 
         print(f'\nLPA PVR: {lpa_resistance["mean"] / 80.0} Wood units')
         print(f'RPA PVR: {rpa_resistance["mean"] / 80.0} Wood units')
-
-        print(f'\nLPA flow: {Q_sys_lpa} dyn/cm5/s, {Q_dia_lpa} dyn/cm5/s, {Q_mean_lpa} dyn/cm5/s')
-        print(f'RPA flow: {Q_sys_rpa} dyn/cm5/s, {Q_dia_rpa} dyn/cm5/s, {Q_mean_rpa} dyn/cm5/s')
 
         if get_mean:
             return mean_p, Q_mean_lpa, Q_mean_rpa, lpa_resistance['mean'], rpa_resistance['mean']
