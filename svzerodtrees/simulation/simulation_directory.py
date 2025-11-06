@@ -373,6 +373,43 @@ class SimulationDirectory:
 
         self.write_files(simname='Steady Simulation', user_input=False, sim_config=sim_config)
 
+    @staticmethod
+    def _cycle_statistics(signal, dia_window_fraction: float = 0.05):
+        """
+        Compute systolic (maximum), diastolic (local minimum averaged over a window),
+        and mean values for a periodic waveform.
+
+        Parameters
+        ----------
+        signal : array-like
+            Waveform samples across one cardiac cycle.
+        dia_window_fraction : float
+            Fraction of the cycle length used to average around the minimum; guards
+            against noise from a single sample.
+        """
+        if signal is None:
+            return 0.0, 0.0, 0.0
+
+        arr = np.asarray(signal, dtype=float)
+        arr = arr[np.isfinite(arr)]
+        if arr.size == 0:
+            return 0.0, 0.0, 0.0
+
+        sys_val = float(np.max(arr))
+        mean_val = float(np.mean(arr))
+
+        min_idx = int(np.argmin(arr))
+        window = max(1, int(round(arr.size * dia_window_fraction)))
+        half = window // 2
+        start = max(0, min_idx - half)
+        end = min(arr.size, start + window)
+        if end <= start:
+            dia_val = float(arr[min_idx])
+        else:
+            dia_val = float(np.mean(arr[start:end]))
+
+        return sys_val, dia_val, mean_val
+
     def _compute_pressure_drops(self, get_mean=False):
         lpa_flow, rpa_flow = self.flow_split(get_mean=False)
 
@@ -392,9 +429,7 @@ class SimulationDirectory:
         if pressure_last_period.size == 0:
             raise RuntimeError("Pressure array is empty after masking for the last period.")
 
-        sys_p = float(np.max(pressure_last_period))
-        dia_p = float(pressure_last_period[0])
-        mean_p = float(np.mean(pressure_last_period))
+        sys_p, dia_p, mean_p = self._cycle_statistics(pressure_last_period)
 
         lpa_outlet_pressures = {'sys': [], 'dia': [], 'mean': []}
         rpa_outlet_pressures = {'sys': [], 'dia': [], 'mean': []}
@@ -408,9 +443,7 @@ class SimulationDirectory:
             if pressure_last_period.size == 0:
                 pressure_last_period = pressure
 
-            sys_val = float(np.max(pressure_last_period))
-            dia_val = float(pressure_last_period[0])
-            mean_val = float(np.mean(pressure_last_period))
+            sys_val, dia_val, mean_val = self._cycle_statistics(pressure_last_period)
 
             if 'lpa' in block.surface.lower():
                 lpa_outlet_pressures['sys'].append(sys_val)
@@ -955,9 +988,7 @@ class SimulationDirectory:
                 if flow_window.size == 0:
                     continue
 
-                peak_flow = float(np.max(flow_window))
-                dia_flow = float(flow_window[0])
-                mean_flow = float(np.mean(flow_window))
+                peak_flow, dia_flow, mean_flow = self._cycle_statistics(flow_window)
 
                 if outlet.lpa:
                     lpa_flow['sys'][outlet.lobe] += peak_flow

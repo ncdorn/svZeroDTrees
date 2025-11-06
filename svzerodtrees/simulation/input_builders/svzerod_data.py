@@ -30,6 +30,7 @@ class SvZeroDdata(SimulationFile):
         cycle_duration: float = 1.0,
         last_cycle_only: bool = True,
         n_tsteps: int = 500,
+        output_series: bool = False,
     ):
         """
         Get pressure and flow from svZeroD_data for a given CouplingBlock, with optional
@@ -168,7 +169,10 @@ class SvZeroDdata(SimulationFile):
         q_out = _interp_safe(tau, q_win, t_out)
         p_out = _interp_safe(tau, p_win, t_out)
 
-        return t_out, q_out, p_out
+        if output_series:
+            return pd.Series(t_out), pd.Series(q_out), pd.Series(p_out)
+        else:
+            return t_out, q_out, p_out
 
     def get_flow(self, block):
         '''
