@@ -32,6 +32,8 @@ class StructuredTree:
                  name: str,
                  time: list[float],
                  simparams: SimParams,
+                 density: float = 1.055,
+                 viscosity: float = 0.04,
                  diameter: float = 0.5,
                  compliance_model: ComplianceModel = None,
                  R: float = None,
@@ -44,19 +46,12 @@ class StructuredTree:
         # --- Required core parameters ---
         self.name = name
         self.time = time
-        if simparams is None:
-            self.simparams = SimParams(
-                {
-                    "density": 1.055,
-                    "viscosity": 0.04,
-                }
-            )
-        else:
-            self.simparams = simparams
+
+        self.simparams = simparams
 
         # --- Physical constants ---
-        self.viscosity = self.simparams.viscosity
-        self.density = 1.055  # fixed unless overridden in vessel-level params
+        self.viscosity = viscosity
+        self.density = density
 
         # --- Geometry and hemodynamics ---
         self.diameter = diameter
@@ -96,7 +91,7 @@ class StructuredTree:
                 "P_in": P_in,
                 "Q_in": Q_in,
                 "boundary_conditions": [],
-                "simulation_parameters": self.simparams.to_dict(),
+                "simulation_parameters": {},
                 "vessels": [],
                 "junctions": [],
                 "adaptations": 0
@@ -188,7 +183,7 @@ class StructuredTree:
 
         params = {
             "name": self.name,
-            "initial_d": self.initial_d,
+            "initial_d": self.diameter,
             "d_min": self.d_min,
             "lrr": self.lrr,
             "n_procs": self.n_procs,
@@ -1130,7 +1125,7 @@ class StructuredTree:
         '''
             count the number vessels in the tree
         '''
-        return len(self.block_dict["vessels"])
+        return len(self.store.ids)
 
 
     def plot_stiffness(self, path='stiffness_plot.png'):
@@ -1172,10 +1167,8 @@ class StructuredTree:
     def simulate(self, 
                  Q_in: list = [1.0, 1.0],
                  Pd: float = 1.0,
-                 density = 1.06,
                  number_of_cardiac_cycles=1,
-                 number_of_time_pts_per_cardiac_cycle = 10,
-                 viscosity = 0.04,
+                 number_of_time_pts_per_cardiac_cycle = 100,
                  json_path=None
                  ):
         '''
@@ -1196,11 +1189,11 @@ class StructuredTree:
 
         if self.simparams is None:
             self.simparams = SimParams({
-                "density": density,
+                "density": self.density,
                 "model_name": self.name,
                 "number_of_cardiac_cycles": number_of_cardiac_cycles,
                 "number_of_time_pts_per_cardiac_cycle": number_of_time_pts_per_cardiac_cycle,
-                "viscosity": viscosity
+                "viscosity": self.viscosity
             })
             
         self.block_dict["simulation_parameters"] = self.simparams.to_dict()

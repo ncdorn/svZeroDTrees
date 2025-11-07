@@ -539,8 +539,26 @@ class SimulationDirectory:
             Q_sys_lpa, Q_dia_lpa, Q_mean_lpa, Q_sys_rpa, Q_dia_rpa, Q_mean_rpa, lpa_resistance, rpa_resistance = self._compute_pressure_drops(get_mean=False)
 
             # compute nonlinear resistance coefficient by fitting resistance vs flows
-            S_lpa = np.polyfit([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], [lpa_resistance["sys"], lpa_resistance["dia"], lpa_resistance["mean"]], 1)
-            S_rpa = np.polyfit([Q_sys_lpa, Q_dia_rpa, Q_mean_rpa], [rpa_resistance["sys"], rpa_resistance["dia"], rpa_resistance["mean"]], 1)
+            lpa_flows = np.array([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], dtype=float)
+            lpa_res_vals = np.array([lpa_resistance["sys"], lpa_resistance["dia"], lpa_resistance["mean"]], dtype=float)
+            rpa_flows = np.array([Q_sys_lpa, Q_dia_rpa, Q_mean_rpa], dtype=float)
+            rpa_res_vals = np.array([rpa_resistance["sys"], rpa_resistance["dia"], rpa_resistance["mean"]], dtype=float)
+
+            S_lpa = np.polyfit(lpa_flows, lpa_res_vals, 1)
+            S_rpa = np.polyfit(rpa_flows, rpa_res_vals, 1)
+
+            def _compute_r_squared(x_vals, y_vals, coeffs):
+                y_pred = np.polyval(coeffs, x_vals)
+                ss_res = np.sum((y_vals - y_pred) ** 2)
+                ss_tot = np.sum((y_vals - np.mean(y_vals)) ** 2)
+                if np.isclose(ss_tot, 0.0):
+                    return 1.0 if np.isclose(ss_res, 0.0) else 0.0
+                return 1.0 - ss_res / ss_tot
+
+            lpa_r2 = _compute_r_squared(lpa_flows, lpa_res_vals, S_lpa)
+            rpa_r2 = _compute_r_squared(rpa_flows, rpa_res_vals, S_rpa)
+            print(f"LPA resistance fit R^2: {lpa_r2:.4f}")
+            print(f"RPA resistance fit R^2: {rpa_r2:.4f}")
 
             # plot the resistance fit
             fig, ax = plt.subplots(1, 2, figsize=(10, 10))
@@ -570,6 +588,183 @@ class SimulationDirectory:
 
 
         return lpa_resistance, rpa_resistance
+
+    def compute_nonlinear_resistance_sampled(self, num_samples=50, flow_tolerance=1e-6, plot_name='resistance_fit_sampled.png'):
+        '''
+        Estimate nonlinear resistance coefficients for the LPA and RPA using a dense sampling of the last cardiac cycle.
+
+        Parameters
+        ----------
+        num_samples : int
+            Number of evenly spaced samples to take across the final cardiac cycle (>=3).
+        flow_tolerance : float
+            Minimum absolute flow magnitude (in cm3/s) to include in the regression; points below this are skipped.
+        plot_name : str
+            Filename for the diagnostic plot stored in self.fig_dir.
+        '''
+        if self.svzerod_data is None:
+            raise ValueError("svZeroD_data not found. Please run the simulation first.")
+        if self.svzerod_3Dcoupling is None:
+            raise ValueError("svzerod_3Dcoupling configuration is required to gather outlet data.")
+        if self.mesh_complete is None:
+            raise ValueError("mesh_complete data is required to categorize LPA/RPA outlets.")
+        if num_samples < 3:
+            raise ValueError("num_samples must be at least 3 to perform a linear fit.")
+
+        # pull MPA pressure and restrict to the final period
+        try:
+            mpa_block = self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0']
+        except KeyError as exc:
+            raise KeyError("branch0_seg0 MPA block not found in coupling_blocks.") from exc
+        time, _, pressure = self.svzerod_data.get_result(mpa_block)
+        time = np.asarray(time, dtype=float)
+        pressure = np.asarray(pressure, dtype=float)
+
+        if time.size == 0 or pressure.size == 0:
+            raise RuntimeError("No MPA data available to compute nonlinear resistance.")
+
+        mask_last_period = time > time.max() - 1.0
+        time_last = time[mask_last_period] if mask_last_period.any() else time
+        pressure_last = pressure[mask_last_period] if mask_last_period.any() else pressure
+
+        valid = np.isfinite(time_last) & np.isfinite(pressure_last)
+        time_last = time_last[valid]
+        pressure_last = pressure_last[valid]
+
+        if time_last.size < 2:
+            raise RuntimeError("Insufficient MPA samples in the last cardiac cycle.")
+
+        sort_idx = np.argsort(time_last)
+        time_last = time_last[sort_idx]
+        pressure_last = pressure_last[sort_idx]
+
+        sample_times = np.linspace(time_last.min(), time_last.max(), num_samples)
+        mpa_pressure_samples = np.interp(sample_times, time_last, pressure_last)
+
+        # initialize accumulators for outlet data
+        lpa_flow_samples = np.zeros(num_samples)
+        lpa_pressure_sum = np.zeros(num_samples)
+        lpa_pressure_counts = np.zeros(num_samples)
+
+        rpa_flow_samples = np.zeros(num_samples)
+        rpa_pressure_sum = np.zeros(num_samples)
+        rpa_pressure_counts = np.zeros(num_samples)
+
+        for block in self.svzerod_3Dcoupling.coupling_blocks.values():
+            if 'inflow' in block.surface.lower():
+                continue
+
+            outlet = self.mesh_complete.mesh_surfaces.get(block.surface)
+            if outlet is None:
+                continue
+
+            bt, bf, bp = self.svzerod_data.get_result(block)
+            bt = np.asarray(bt, dtype=float)
+            bf = np.asarray(bf, dtype=float)
+            bp = np.asarray(bp, dtype=float)
+
+            if bt.size == 0 or bf.size == 0 or bp.size == 0:
+                continue
+
+            outlet_mask = bt > bt.max() - 1.0
+            bt_last = bt[outlet_mask] if outlet_mask.any() else bt
+            bf_last = bf[outlet_mask] if outlet_mask.any() else bf
+            bp_last = bp[outlet_mask] if outlet_mask.any() else bp
+
+            outlet_valid = np.isfinite(bt_last) & np.isfinite(bf_last) & np.isfinite(bp_last)
+            bt_last = bt_last[outlet_valid]
+            bf_last = bf_last[outlet_valid]
+            bp_last = bp_last[outlet_valid]
+
+            if bt_last.size < 2:
+                continue
+
+            outlet_sort = np.argsort(bt_last)
+            bt_last = bt_last[outlet_sort]
+            bf_last = bf_last[outlet_sort]
+            bp_last = bp_last[outlet_sort]
+
+            flow_interp = np.interp(sample_times, bt_last, bf_last)
+            pressure_interp = np.interp(sample_times, bt_last, bp_last)
+
+            if getattr(outlet, 'lpa', False):
+                lpa_flow_samples += flow_interp
+                lpa_pressure_sum += pressure_interp
+                lpa_pressure_counts += 1.0
+            elif getattr(outlet, 'rpa', False):
+                rpa_flow_samples += flow_interp
+                rpa_pressure_sum += pressure_interp
+                rpa_pressure_counts += 1.0
+
+        if not np.any(lpa_pressure_counts):
+            raise RuntimeError("No LPA outlet data found to compute resistance.")
+        if not np.any(rpa_pressure_counts):
+            raise RuntimeError("No RPA outlet data found to compute resistance.")
+
+        lpa_outlet_pressure = np.divide(
+            lpa_pressure_sum,
+            lpa_pressure_counts,
+            out=np.full_like(lpa_pressure_sum, np.nan),
+            where=lpa_pressure_counts > 0
+        )
+        rpa_outlet_pressure = np.divide(
+            rpa_pressure_sum,
+            rpa_pressure_counts,
+            out=np.full_like(rpa_pressure_sum, np.nan),
+            where=rpa_pressure_counts > 0
+        )
+
+        lpa_pressure_drop = mpa_pressure_samples - lpa_outlet_pressure
+        rpa_pressure_drop = mpa_pressure_samples - rpa_outlet_pressure
+
+        lpa_valid = (np.abs(lpa_flow_samples) > flow_tolerance) & np.isfinite(lpa_pressure_drop)
+        rpa_valid = (np.abs(rpa_flow_samples) > flow_tolerance) & np.isfinite(rpa_pressure_drop)
+
+        if lpa_valid.sum() < 2:
+            raise RuntimeError("Insufficient valid LPA samples above flow_tolerance for regression.")
+        if rpa_valid.sum() < 2:
+            raise RuntimeError("Insufficient valid RPA samples above flow_tolerance for regression.")
+
+        lpa_resistance_samples = lpa_pressure_drop[lpa_valid] / lpa_flow_samples[lpa_valid]
+        rpa_resistance_samples = rpa_pressure_drop[rpa_valid] / rpa_flow_samples[rpa_valid]
+
+        if np.allclose(lpa_flow_samples[lpa_valid], lpa_flow_samples[lpa_valid][0]):
+            raise RuntimeError("LPA flow samples lack variation; cannot fit a line.")
+        if np.allclose(rpa_flow_samples[rpa_valid], rpa_flow_samples[rpa_valid][0]):
+            raise RuntimeError("RPA flow samples lack variation; cannot fit a line.")
+
+        lpa_fit = np.polyfit(lpa_flow_samples[lpa_valid], lpa_resistance_samples, 1)
+        rpa_fit = np.polyfit(rpa_flow_samples[rpa_valid], rpa_resistance_samples, 1)
+
+        # diagnostic plot
+        fig, axes = plt.subplots(1, 2, figsize=(10, 10))
+
+        def _plot(ax, flows, resistances, fit, title):
+            ax.scatter(flows, resistances, s=25, alpha=0.7, label='samples')
+            q_min, q_max = np.min(flows), np.max(flows)
+            if np.isclose(q_min, q_max):
+                q_min -= 1.0
+                q_max += 1.0
+            q = np.linspace(q_min, q_max, 200)
+            ax.plot(q, np.polyval(fit, q), color='tab:red', label='linear fit')
+            ax.set_xlabel('Flow (cm3/s)')
+            ax.set_ylabel('Resistance (dyn/cm5/s)')
+            ax.set_title(title)
+            ax.legend()
+
+        _plot(axes[0], lpa_flow_samples[lpa_valid], lpa_resistance_samples, lpa_fit, 'LPA flow vs resistance')
+        _plot(axes[1], rpa_flow_samples[rpa_valid], rpa_resistance_samples, rpa_fit, 'RPA flow vs resistance')
+
+        plt.tight_layout()
+        if self.fig_dir is None:
+            raise RuntimeError("fig_dir is not set; cannot save resistance plot.")
+        plt.savefig(os.path.join(self.fig_dir, plot_name))
+        plt.close(fig)
+
+        print(f'LPA nonlinear resistance coefficient: slope={lpa_fit[0]}, intercept={lpa_fit[1]}')
+        print(f'RPA nonlinear resistance coefficient: slope={rpa_fit[0]}, intercept={rpa_fit[1]}')
+
+        return {'slope': lpa_fit[0], 'intercept': lpa_fit[1]}, {'slope': rpa_fit[0], 'intercept': rpa_fit[1]}
 
     def generate_simplified_zerod(self, path='simplified_nonlinear_zerod.json', nonlinear=True, optimize=False):
         '''

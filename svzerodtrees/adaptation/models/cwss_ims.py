@@ -47,6 +47,7 @@ class CWSSIMSAdaptation(AdaptationModel):
         r_all = y[0::2]
         h_all = y[1::2]
 
+
         r_lpa, r_rpa = r_all[:n_lpa], r_all[n_lpa:]
         h_lpa, h_rpa = h_all[:n_lpa], h_all[n_lpa:]
 

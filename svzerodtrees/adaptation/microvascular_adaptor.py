@@ -136,7 +136,7 @@ class MicrovascularAdaptor:
                  postop_simdir: SimulationDirectory, 
                  adapted_simdir: SimulationDirectory,
                  clinical_targets: ClinicalTargets,
-                 reduced_order_pa: json = None,
+                 reduced_order_pa: json,
                  tree_params: csv = None, 
                  method: str = 'cwss', 
                  location: str = 'uniform',
@@ -156,6 +156,7 @@ class MicrovascularAdaptor:
         self.preop_simdir = preop_simdir
         self.postop_simdir = postop_simdir
         self.adapted_simdir = adapted_simdir
+        self.reduced_order_pa_path = reduced_order_pa
             
 
         # grab tree params from csv, of form [k1, k2, k3, lrr, diameter]
@@ -474,20 +475,31 @@ class MicrovascularAdaptor:
 
         # compute difference in pressure drop to get postop nonlinear resistance
         # TODO: use optimize nonlinear resistance instead as this is what I previously did
-        S_lpa_preop, S_rpa_preop = self.preop_simdir.optimize_nonlinear_resistance()
-        S_lpa_postop, S_rpa_postop = self.postop_simdir.optimize_nonlinear_resistance()
-        # S_lpa_preop, S_rpa_preop = self.preop_simdir.compute_pressure_drop(steady=False)
-        # S_lpa_postop, S_rpa_postop = self.postop_simdir.compute_pressure_drop(steady=False)
+        # S_lpa_preop, S_rpa_preop = self.preop_simdir.optimize_nonlinear_resistance(self.reduced_order_pa_path, initial_guess=[100, 100])
+        # S_lpa_postop, S_rpa_postop = self.postop_simdir.optimize_nonlinear_resistance(self.reduced_order_pa_path, initial_guess=[100, 100])
+        S_lpa_preop, S_rpa_preop = self.preop_simdir.compute_pressure_drop(steady=False)
+        S_lpa_postop, S_rpa_postop = self.postop_simdir.compute_pressure_drop(steady=False)
 
+        # fixed values for testing
+        # S_lpa_preop = 225.59599016730704
+        # S_rpa_preop = 2174.5744993285525
+        # S_lpa_postop = 133.44002892612093
+        # S_rpa_postop = 1639.2238005469198
 
 
         postop_pa = copy.deepcopy(preop_pa)
 
         # rescale postop stenosis coefficient
-        postop_pa.lpa.stenosis_coefficient *= S_lpa_postop / S_lpa_preop
-        postop_pa.vessel_map[2].stenosis_coefficient *= S_lpa_postop / S_lpa_preop
-        postop_pa.rpa.stenosis_coefficient *= S_rpa_postop / S_rpa_preop
-        postop_pa.vessel_map[4].stenosis_coefficient *= S_rpa_postop / S_rpa_preop
+        # postop_pa.lpa.stenosis_coefficient *= S_lpa_postop / S_lpa_preop
+        # postop_pa.vessel_map[2].stenosis_coefficient *= S_lpa_postop / S_lpa_preop
+        # postop_pa.rpa.stenosis_coefficient *= S_rpa_postop / S_rpa_preop
+        # postop_pa.vessel_map[4].stenosis_coefficient *= S_rpa_postop / S_rpa_preop
+
+        # fixed values for testing
+        postop_pa.lpa.stenosis_coefficient = 19.7
+        postop_pa.vessel_map[2].stenosis_coefficient = 19.7
+        postop_pa.rpa.stenosis_coefficient = 7.6
+        postop_pa.vessel_map[4].stenosis_coefficient = 7.6
 
         print("rescaled postop lpa stenosis coefficient to " + str(postop_pa.lpa.stenosis_coefficient))
         print("rescaled postop rpa stenosis coefficient to " + str(postop_pa.rpa.stenosis_coefficient))
@@ -504,7 +516,7 @@ class MicrovascularAdaptor:
             os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv'
         )
         # run adaptation
-        result, flow_log, sol, postop_pa = run_adaptation(preop_pa, postop_pa, CWSSIMSAdaptation, K_arr)
+        result, flow_log, sol, postop_pa, hists = run_adaptation(preop_pa, postop_pa, CWSSIMSAdaptation, K_arr)
 
         print(f"Adaptation result: {result}")
 

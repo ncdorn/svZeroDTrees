@@ -236,23 +236,99 @@ def append_result_to_csv(df: pd.DataFrame, output_path: str):
         df.to_csv(output_path, mode='a', header=not file_exists, index=False)
 
 # packing/unpacking helper functions
-def pack_state(vessels):
-    """Flatten radii and thicknesses into y0."""
-    y0 = np.empty(2*len(vessels))
-    for v in vessels:
-        base = 2*v.idx
-        if v.r < 0.0001 or v.h < 0.0001:
-            raise Exception(f"vessel {v.name} has invalid radius or thickness: r={v.r}, h={v.h}")
-        y0[base]   = v.r
-        y0[base+1] = v.h
-    return y0
+def pack_state(*trees):
+    """
+    Flatten structured-tree radii and wall thicknesses into a 1-D state vector.
 
-def unpack_state(y, vessels):
-    """Write y back into the vessel objects (fast loop, no recursion)."""
-    for v in vessels:
-        base = 2*v.idx
-        v.r     = y[base]
-        v.h  = y[base+1]
+    Accepts individual StructuredTree instances or iterables containing them.
+    Radii are taken directly from the stored diameters; thickness defaults to r/10
+    unless a previous adaptation pass stored ``tree._thickness_state``.
+    """
+    if len(trees) == 1 and isinstance(trees[0], (list, tuple)):
+        trees = tuple(trees[0])
+
+    trees = [tree for tree in trees if tree is not None]
+    if not trees:
+        return np.empty(0, dtype=np.float64)
+
+    radii_blocks = []
+    thickness_blocks = []
+
+    for tree in trees:
+        store = getattr(tree, "store", None)
+        if store is None:
+            raise AttributeError("StructuredTree instance is missing built storage; call build() first.")
+
+        n_nodes = int(store.n_nodes())
+        if n_nodes == 0:
+            continue
+
+        radii = 0.5 * np.asarray(store.d, dtype=np.float64, order="C")
+
+        thickness = getattr(tree, "_thickness_state", None)
+        if thickness is None:
+            thickness = radii / 10.0
+        else:
+            thickness = np.asarray(thickness, dtype=np.float64, order="C")
+            if thickness.size != n_nodes:
+                thickness = radii / 10.0
+
+        thickness = np.maximum(thickness, 1e-9)
+        tree._thickness_state = thickness.copy()
+
+        radii_blocks.append(radii)
+        thickness_blocks.append(thickness)
+
+    if not radii_blocks:
+        return np.empty(0, dtype=np.float64)
+
+    all_radii = np.concatenate(radii_blocks)
+    all_thickness = np.concatenate(thickness_blocks)
+
+    y = np.empty(2 * all_radii.size, dtype=np.float64)
+    y[0::2] = all_radii
+    y[1::2] = all_thickness
+    return y
+
+def unpack_state(y, *trees):
+    """
+    Scatter a flattened state vector back into StructuredTree storage.
+    Updates diameters in-place and caches the thickness per tree.
+    """
+    if len(trees) == 1 and isinstance(trees[0], (list, tuple)):
+        trees = tuple(trees[0])
+
+    trees = [tree for tree in trees if tree is not None]
+    if not trees:
+        return
+
+    y = np.asarray(y, dtype=np.float64)
+
+    expected_nodes = 0
+    for tree in trees:
+        store = getattr(tree, "store", None)
+        if store is None:
+            raise AttributeError("StructuredTree instance is missing built storage; call build() first.")
+        expected_nodes += int(store.n_nodes())
+
+    if y.size != 2 * expected_nodes:
+        raise ValueError(f"State vector length {y.size} does not match {expected_nodes} vessels.")
+
+    offset = 0
+    for tree in trees:
+        store = tree.store
+        n_nodes = int(store.n_nodes())
+        if n_nodes == 0:
+            continue
+
+        segment = y[2 * offset: 2 * (offset + n_nodes)]
+        radii = segment[0::2]
+        thickness = np.maximum(segment[1::2], 1e-9)
+
+        store.d = (2.0 * radii).astype(store.d.dtype, copy=False)
+        tree._thickness_state = thickness.copy()
+
+        offset += n_nodes
 
 
 def simulate_outlet_trees(simple_pa):
