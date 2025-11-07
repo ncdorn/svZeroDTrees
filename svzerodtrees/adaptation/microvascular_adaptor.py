@@ -189,11 +189,11 @@ class MicrovascularAdaptor:
         
         lpa_tree = StructuredTree(name='LPA', time=time_array, simparams=None)
         print(f'building LPA tree with lpa parameters: {self.tree_params["lpa"]}')
-        lpa_tree.build_tree(initial_d=d_l, d_min=0.01, lrr=lrr_l)
+        lpa_tree.build(initial_d=d_l, d_min=0.01, lrr=lrr_l)
 
         rpa_tree = StructuredTree(name='RPA', time=time_array, simparams=None)
         print(f'building RPA tree with rpa parameters: {self.tree_params["rpa"]}')
-        rpa_tree.build_tree(initial_d=d_r, d_min=0.01, lrr=lrr_r)
+        rpa_tree.build(initial_d=d_r, d_min=0.01, lrr=lrr_r)
 
         return lpa_tree, rpa_tree
     

@@ -377,7 +377,7 @@ class SimulationDirectory:
         lpa_flow, rpa_flow = self.flow_split(get_mean=False)
 
         # get the MPA mean, systolic, diastolic pressure
-        time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
+        time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'], get_series=True)
         time = time[time > time.max() - 1.0]
         pressure = pressure[time.index]
         sys_p = np.max(pressure)
@@ -388,14 +388,14 @@ class SimulationDirectory:
         rpa_outlet_pressures = {'sys': [], 'dia': [], 'mean': []}
         for block in self.svzerod_3Dcoupling.coupling_blocks.values():
             if 'lpa' in block.surface.lower():
-                time, flow, pressure = self.svzerod_data.get_result(block)
+                time, flow, pressure = self.svzerod_data.get_result(block, get_series=True)
                 time = time[time > time.max() - 1.0]
                 pressure = pressure[time.index]
                 lpa_outlet_pressures['sys'].append(np.max(pressure))
                 lpa_outlet_pressures['dia'].append(pressure.iloc[0])
                 lpa_outlet_pressures['mean'].append(np.mean(pressure))
             if 'rpa' in block.surface.lower():
-                time, flow, pressure = self.svzerod_data.get_result(block)
+                time, flow, pressure = self.svzerod_data.get_result(block, get_series=True)
                 time = time[time > time.max() - 1.0]
                 pressure = pressure[time.index]
                 rpa_outlet_pressures['sys'].append(np.max(pressure))
@@ -905,7 +905,7 @@ class SimulationDirectory:
                 if 'inflow' in block.surface.lower():
                     continue
                 outlet = self.mesh_complete.mesh_surfaces[block.surface]
-                time, flow, pressure = self.svzerod_data.get_result(block)
+                time, flow, pressure = self.svzerod_data.get_result(block, get_series=True)
                 time = time[time > time.max() - 1.0]
                 last_half_time = time[time > time.max() - 0.5]
                 # use the indices of the time to get the flow
