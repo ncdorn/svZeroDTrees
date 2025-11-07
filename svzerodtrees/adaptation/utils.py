@@ -337,8 +337,8 @@ def simulate_outlet_trees(simple_pa):
     '''
     lpa_flow = np.mean(simple_pa.result[simple_pa.result.name=='branch2_seg0']['flow_out'])
     rpa_flow = np.mean(simple_pa.result[simple_pa.result.name=='branch4_seg0']['flow_out'])
-    simple_pa.lpa_tree.simulate([lpa_flow, lpa_flow])
-    simple_pa.rpa_tree.simulate([rpa_flow, rpa_flow])
+    simple_pa.lpa_tree.simulate([lpa_flow, lpa_flow], Pd=simple_pa.clinical_targets.wedge_p * 1333.2)
+    simple_pa.rpa_tree.simulate([rpa_flow, rpa_flow], Pd=simple_pa.clinical_targets.wedge_p * 1333.2)
 
 
 def rel_change(y, y_ref):
