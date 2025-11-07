@@ -34,7 +34,7 @@ class TreeParameters:
         self.k3 = k3
     
     @classmethod
-    def from_row(cls, pa: str, row: pd.Series):
+    def from_row_old(cls, pa: str, row: pd.Series):
         """
         Create a TreeParameters instance from a DataFrame row. basically a backwards compatible function.
 
@@ -55,7 +55,7 @@ class TreeParameters:
         return cls(pa, lrr, diameter, d_min, alpha, beta, compliance_model)
     
     @classmethod
-    def from_row_new(cls, row: pd.Series):
+    def from_row(cls, row: pd.Series):
         """
         Create a TreeParameters instance from a DataFrame row with new compliance model.
 

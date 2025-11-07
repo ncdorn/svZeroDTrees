@@ -375,16 +375,22 @@ class MicrovascularAdaptor:
         # preop_pa.inflows["INFLOW"].q = [q / (self.postop_simdir.mesh_complete.n_outlets // 2) for q in preop_pa.inflows["INFLOW"].q]
 
         # compute difference in pressure drop to get postop nonlinear resistance
-        S_lpa_preop, S_rpa_preop = self.preop_simdir.compute_pressure_drop(steady=False)
-        S_lpa_postop, S_rpa_postop = self.postop_simdir.compute_pressure_drop(steady=False)
+        # S_lpa_preop, S_rpa_preop = self.preop_simdir.compute_pressure_drop(steady=False)
+        # S_lpa_postop, S_rpa_postop = self.postop_simdir.compute_pressure_drop(steady=False)
 
         postop_pa = copy.deepcopy(preop_pa)
 
         # rescale postop stenosis coefficient
-        postop_pa.lpa.stenosis_coefficient *= S_lpa_postop / S_lpa_preop
-        postop_pa.vessel_map[2].stenosis_coefficient *= S_lpa_postop / S_lpa_preop
-        postop_pa.rpa.stenosis_coefficient *= S_rpa_postop / S_rpa_preop
-        postop_pa.vessel_map[4].stenosis_coefficient *= S_rpa_postop / S_rpa_preop
+        # postop_pa.lpa.stenosis_coefficient *= S_lpa_postop / S_lpa_preop
+        # postop_pa.vessel_map[2].stenosis_coefficient *= S_lpa_postop / S_lpa_preop
+        # postop_pa.rpa.stenosis_coefficient *= S_rpa_postop / S_rpa_preop
+        # postop_pa.vessel_map[4].stenosis_coefficient *= S_rpa_postop / S_rpa_preop
+
+        # fixed values for testing
+        postop_pa.lpa.stenosis_coefficient = 19.7
+        postop_pa.vessel_map[2].stenosis_coefficient = 19.7
+        postop_pa.rpa.stenosis_coefficient = 7.6
+        postop_pa.vessel_map[4].stenosis_coefficient = 7.6
 
         print("rescaled postop lpa stenosis coefficient to " + str(postop_pa.lpa.stenosis_coefficient))
         print("rescaled postop rpa stenosis coefficient to " + str(postop_pa.rpa.stenosis_coefficient))
