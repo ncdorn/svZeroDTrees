@@ -184,9 +184,6 @@ class StructuredTree:
         params = {
             "name": self.name,
             "initial_d": self.diameter,
-            "d_min": self.d_min,
-            "lrr": self.lrr,
-            "n_procs": self.n_procs,
             "compliance": {
                 "model": self.compliance_model.description(),
                 "params": self.compliance_model.params,

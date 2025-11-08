@@ -43,6 +43,7 @@ def run_adaptation(preop_pa, postop_pa, model, K_arr):
 
     y_final = sol.y[:, -1]
     unpack_state(y_final, *trees)
+    postop_pa.update_bcs()
 
     final_rpa_split = postop_pa.rpa_split
     stable          = int(sol.status == 1)          # 1 = event fired / converged
@@ -147,6 +148,7 @@ def run_adaptation_outsidesim(preop_pa, postop_pa, model, K_arr):
         # resimulate postop_pa with updated geometry
         unpack_state(sol.y[:, -1], *trees)
         simulate_outlet_trees(postop_pa)
+        postop_pa.update_bcs()
 
         relative_split_change = abs(postop_pa.rpa_split - last_rpa_split) / last_rpa_split if last_rpa_split != 0 else 1.0
         print(f"relative split change this iteration: {relative_split_change:.3e}")
