@@ -230,6 +230,7 @@ class StructuredTree:
         # explicit, side-effectful convenience method
         xi = build_kwargs.pop("xi", None)
         eta_sym = build_kwargs.pop("eta_sym", None)
+        max_nodes = int(build_kwargs.pop("max_nodes", 200_000))
         alpha, beta = resolve_branch_scaling(
             alpha=build_kwargs.get("alpha"),
             beta=build_kwargs.get("beta"),
@@ -245,7 +246,13 @@ class StructuredTree:
         self.xi = xi
         self.eta_sym = eta_sym if eta_sym is not None else (beta / alpha if alpha else None)
 
-        self.store = build_tree_soa(**build_kwargs, density=self.density, eta=self.viscosity, compliance_model=self.compliance_model, name=self.name)
+        self.max_nodes = max_nodes
+        self.store = build_tree_soa(**build_kwargs,
+                                    density=self.density,
+                                    eta=self.viscosity,
+                                    compliance_model=self.compliance_model,
+                                    name=self.name,
+                                    max_nodes=self.max_nodes)
         self.homeostatic_wss = None
         self.homeostatic_ims = None
         self._homeostatic_wss_map = None

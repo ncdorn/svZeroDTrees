@@ -11,7 +11,8 @@ def build_tree_soa(initial_d: float,
                     density: float,
                     eta: float,
                     compliance_model,
-                    name: str) -> StructuredTreeStorage:
+                    name: str,
+                    max_nodes: int = 200_000) -> StructuredTreeStorage:
         # Upper bound on nodes (loose): worst case full binary until collapse.
         # We grow python lists (amortized O(1)) and pack once.
 
@@ -28,6 +29,12 @@ def build_tree_soa(initial_d: float,
         next_id = 0
 
         while q:
+            if len(ids) + 2 > max_nodes:
+                raise RuntimeError(
+                    f"Structured tree '{name}' exceeded max_nodes={max_nodes} while "
+                    f"building (alpha={alpha}, beta={beta}, d_min={d_min}). "
+                    "Try increasing d_min or lowering the branching ratios."
+                )
             i = q.popleft()
             di = d[i]
             gi = gen[i]
