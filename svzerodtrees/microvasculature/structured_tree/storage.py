@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import numpy as np
 
-@dataclass(slots=True)
+@dataclass
 class StructuredTreeStorage:
     # node fields (SoA)
     ids: np.ndarray         # int32

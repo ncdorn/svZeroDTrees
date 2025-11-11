@@ -1,6 +1,7 @@
 import pandas as pd
 from pathlib import Path
 from .compliance import *
+from .structured_tree.asymmetry import resolve_branch_scaling
 
 class TreeParameters:
     """
@@ -11,20 +12,29 @@ class TreeParameters:
                  lrr: float,
                  diameter: float,
                  d_min: float,
-                 alpha: float,
-                 beta: float,
-                 compliance_model: ComplianceModel,
+                 alpha: float = None,
+                 beta: float = None,
+                 compliance_model: ComplianceModel = None,
                  k1: float = None,
                  k2: float = None,
                  k3: float = None, # want to eventually deprecate k1, k2, k3.
+                 xi: float = None,
+                 eta_sym: float = None,
                  ):
         
+        if compliance_model is None:
+            raise ValueError("TreeParameters requires a compliance_model.")
+
         self.name = name
         self.lrr = lrr
         self.diameter = diameter
         self.d_min = d_min
-        self.alpha = alpha
-        self.beta = beta
+        self.xi = xi
+        self.eta_sym = eta_sym
+        self.alpha, self.beta = resolve_branch_scaling(
+            alpha, beta, xi, eta_sym, default_alpha=None, default_beta=None)
+        if self.eta_sym is None and self.alpha:
+            self.eta_sym = self.beta / self.alpha
         self.compliance_model = compliance_model 
 
 
@@ -44,8 +54,10 @@ class TreeParameters:
         lrr = row["lrr"].values[0]
         diameter = row["diameter"].values[0]
         d_min = row["d_min"].values[0]
-        alpha = row["alpha"].values[0]
-        beta = row["beta"].values[0]
+        alpha = row["alpha"].values[0] if "alpha" in row else None
+        beta = row["beta"].values[0] if "beta" in row else None
+        xi = row["xi"].values[0] if "xi" in row else None
+        eta_sym = row["eta_sym"].values[0] if "eta_sym" in row else None
 
         if row["compliance model"].values[0] == "ConstantCompliance":
             compliance_model = ConstantCompliance(row["Eh/r"].values[0])
@@ -56,7 +68,7 @@ class TreeParameters:
         else:
             raise ValueError(f"Unknown compliance model: {row['compliance model'].values[0]}")
 
-        return cls(name, lrr, diameter, d_min, alpha, beta, compliance_model)
+        return cls(name, lrr, diameter, d_min, alpha, beta, compliance_model, xi=xi, eta_sym=eta_sym)
 
     def as_list(self) -> list:
         return [self.k1, self.k2, self.k3, self.lrr, self.alpha, self.beta]
@@ -74,8 +86,12 @@ class TreeParameters:
         return a string of important paramters for the tree
         """
 
+        xi_str = f"{self.xi:.3f}" if self.xi is not None else "n/a"
+        eta_str = f"{self.eta_sym:.3f}" if self.eta_sym is not None else "n/a"
         return (
-            f"{self.compliance_model.description()} with params {self.compliance_model.params}, diameter: {self.diameter:.3f}, d_min: {self.d_min:.3f}, l_rr: {self.lrr:.3f}, alpha: {self.alpha:.3f}, beta: {self.beta:.3f}"
+            f"{self.compliance_model.description()} with params {self.compliance_model.params}, "
+            f"diameter: {self.diameter:.3f}, d_min: {self.d_min:.3f}, l_rr: {self.lrr:.3f}, "
+            f"alpha: {self.alpha:.3f}, beta: {self.beta:.3f}, xi: {xi_str}, eta_sym: {eta_str}"
         )
     
     def to_csv_row(self, loss, flow_split, p_mpa):
@@ -93,6 +109,8 @@ class TreeParameters:
             "d_min": self.d_min,
             "alpha": self.alpha,
             "beta": self.beta,
+            "xi": self.xi,
+            "eta_sym": self.eta_sym,
             "loss": loss,
             "flow_split": flow_split,
             "p_mpa": f"[{p_mpa[0]} {p_mpa[1]} {p_mpa[2]}]",
@@ -109,4 +127,3 @@ class TreeParameters:
             raise ValueError(f"Unsupported compliance model: {self.compliance_model.description()}")
 
         return row
-

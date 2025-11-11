@@ -23,9 +23,9 @@ class Simulation:
                  steady_dir='steady',
                  bc_type='impedance',
                  adaptation_config = {
-                     "method": "wss-ims",
+                     "method": "cwss",
                      "location": "uniform",
-                     "iterations": 100,
+                     "iterations": 10,
                  },
                  tune_space: TuneSpace = TuneSpace(
                     free=[

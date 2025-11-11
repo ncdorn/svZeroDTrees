@@ -4,6 +4,7 @@ from scipy.optimize import minimize
 from ..simulation.threedutils import vtp_info
 from ..tune_bcs.pa_config import PAConfig
 from ..microvasculature import TreeParameters, compliance as comp_mod
+from ..microvasculature.structured_tree.asymmetry import resolve_branch_scaling
 from ..tune_bcs.tune_space import TuneSpace
 import csv, math
 
@@ -102,19 +103,29 @@ class ImpedanceTuner(BoundaryConditionTuner):
         lpa_d = params.get("lpa.diameter", self._geom_defaults["lpa.default_diameter"])
         rpa_d = params.get("rpa.diameter", self._geom_defaults["rpa.default_diameter"])
         lrr   = params.get("lrr", 10.0)
-        alpha_l = params.get("lpa.alpha", 0.9)
-        alpha_r = params.get("rpa.alpha", 0.9)
-        beta_l  = params.get("lpa.beta", 0.6)
-        beta_r  = params.get("rpa.beta", 0.6)
+        alpha_l, beta_l = resolve_branch_scaling(
+            alpha=params.get("lpa.alpha"),
+            beta=params.get("lpa.beta"),
+            xi=params.get("lpa.xi"),
+            eta_sym=params.get("lpa.eta_sym"),
+        )
+        alpha_r, beta_r = resolve_branch_scaling(
+            alpha=params.get("rpa.alpha"),
+            beta=params.get("rpa.beta"),
+            xi=params.get("rpa.xi"),
+            eta_sym=params.get("rpa.eta_sym"),
+        )
         d_min   = params.get("d_min", 0.01)
 
         lpa_comp = self._build_compliance("lpa", params)
         rpa_comp = self._build_compliance("rpa", params)
 
         lpa_params = TreeParameters(name="lpa", lrr=lrr, diameter=lpa_d, d_min=d_min,
-                                    alpha=alpha_l, beta=beta_l, compliance_model=lpa_comp)
+                                    alpha=alpha_l, beta=beta_l, compliance_model=lpa_comp,
+                                    xi=params.get("lpa.xi"), eta_sym=params.get("lpa.eta_sym"))
         rpa_params = TreeParameters(name="rpa", lrr=lrr, diameter=rpa_d, d_min=d_min,
-                                    alpha=alpha_r, beta=beta_r, compliance_model=rpa_comp)
+                                    alpha=alpha_r, beta=beta_r, compliance_model=rpa_comp,
+                                    xi=params.get("rpa.xi"), eta_sym=params.get("rpa.eta_sym"))
         return lpa_params, rpa_params
     
     def _grid_search_init(self, pa_config, x0: np.ndarray) -> np.ndarray:

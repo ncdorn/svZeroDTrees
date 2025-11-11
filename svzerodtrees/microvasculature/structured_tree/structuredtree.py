@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.optimize import minimize, Bounds, LinearConstraint
 from .builder import *
+from .asymmetry import resolve_branch_scaling
 from ..treevessel import TreeVessel
 from ...utils import *
 from ..utils import *
@@ -227,6 +228,23 @@ class StructuredTree:
 
     def build(self, **build_kwargs):
         # explicit, side-effectful convenience method
+        xi = build_kwargs.pop("xi", None)
+        eta_sym = build_kwargs.pop("eta_sym", None)
+        alpha, beta = resolve_branch_scaling(
+            alpha=build_kwargs.get("alpha"),
+            beta=build_kwargs.get("beta"),
+            xi=xi,
+            eta_sym=eta_sym,
+        )
+        build_kwargs["alpha"] = alpha
+        build_kwargs["beta"] = beta
+
+        # stash the latest scaling inputs for downstream reference
+        self.alpha = alpha
+        self.beta = beta
+        self.xi = xi
+        self.eta_sym = eta_sym if eta_sym is not None else (beta / alpha if alpha else None)
+
         self.store = build_tree_soa(**build_kwargs, density=self.density, eta=self.viscosity, compliance_model=self.compliance_model, name=self.name)
         self.homeostatic_wss = None
         self.homeostatic_ims = None
@@ -1296,7 +1314,7 @@ class StructuredTree:
 
 from dataclasses import dataclass
 
-@dataclass(slots=True)
+@dataclass
 class TreeVesselView:
     store: StructuredTreeStorage
     i: int
