@@ -42,7 +42,6 @@ svzerodtrees/io/blocks/simulation_parameters.py
 svzerodtrees/io/blocks/valve.py
 svzerodtrees/io/blocks/vessel.py
 svzerodtrees/microvasculature/__init__.py
-svzerodtrees/microvasculature/structuredtree.py
 svzerodtrees/microvasculature/treeparams.py
 svzerodtrees/microvasculature/treevessel.py
 svzerodtrees/microvasculature/utils.py
@@ -50,6 +49,14 @@ svzerodtrees/microvasculature/compliance/__init__.py
 svzerodtrees/microvasculature/compliance/base.py
 svzerodtrees/microvasculature/compliance/constant.py
 svzerodtrees/microvasculature/compliance/olufsen.py
+svzerodtrees/microvasculature/structured_tree/__init__.py
+svzerodtrees/microvasculature/structured_tree/asymmetry.py
+svzerodtrees/microvasculature/structured_tree/builder.py
+svzerodtrees/microvasculature/structured_tree/io.py
+svzerodtrees/microvasculature/structured_tree/results.py
+svzerodtrees/microvasculature/structured_tree/storage.py
+svzerodtrees/microvasculature/structured_tree/structuredtree.py
+svzerodtrees/microvasculature/structured_tree/utils.py
 svzerodtrees/post_processing/ParaviewPostProcessor.py
 svzerodtrees/post_processing/__init__.py
 svzerodtrees/post_processing/pa_plotter.py
@@ -60,6 +67,8 @@ svzerodtrees/post_processing/stree_visualization.py
 svzerodtrees/post_processing/threed_postprocess.py
 svzerodtrees/post_processing/utils.py
 svzerodtrees/post_processing/tree_figures/__init__.py
+svzerodtrees/post_processing/tree_figures/generation_metrics.py
+svzerodtrees/post_processing/tree_figures/generation_waveforms.py
 svzerodtrees/post_processing/tree_figures/visualize_hemodynamics.py
 svzerodtrees/simulation/__init__.py
 svzerodtrees/simulation/simulation.py
@@ -87,6 +96,9 @@ svzerodtrees/tune_bcs/rcr_tuner.py
 svzerodtrees/tune_bcs/tune_bcs.py
 svzerodtrees/tune_bcs/tune_space.py
 svzerodtrees/tune_bcs/utils.py
+svzerodtrees/tune_bcs/sensitivity/__init__.py
+svzerodtrees/tune_bcs/sensitivity/structured_tree_sensitivity.py
+tests/test_structured_tree.py
 workflows/AS1_vessel_analysis.py
 workflows/LPA_RPA_adapt.py
 workflows/threed_analysis.py
