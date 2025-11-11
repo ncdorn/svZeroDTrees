@@ -72,7 +72,15 @@ def construct_impedance_trees(config_handler,
         lpa_tree = StructuredTree(name='LPA', time=time_array, simparams=config_handler.simparams, compliance_model=lpa_params.compliance_model)
         print(f'building LPA tree with lpa parameters: {lpa_params.summary()}')
 
-        lpa_tree.build_tree(initial_d=lpa_mean_dia, d_min=lpa_params.d_min, lrr=lpa_params.lrr)
+        lpa_tree.build(
+            initial_d=lpa_mean_dia,
+            d_min=lpa_params.d_min,
+            lrr=lpa_params.lrr,
+            alpha=lpa_params.alpha,
+            beta=lpa_params.beta,
+            xi=lpa_params.xi,
+            eta_sym=lpa_params.eta_sym,
+        )
         lpa_tree.compute_olufsen_impedance(n_procs=n_procs)
         lpa_tree.plot_stiffness(path='lpa_stiffness_plot.png')
 
@@ -82,7 +90,15 @@ def construct_impedance_trees(config_handler,
         rpa_tree = StructuredTree(name='RPA', time=time_array, simparams=config_handler.simparams, compliance_model=rpa_params.compliance_model)
         print(f'building RPA tree with rpa parameters: {rpa_params.summary()}')
 
-        rpa_tree.build_tree(initial_d=rpa_mean_dia, d_min=rpa_params.d_min, lrr=rpa_params.lrr)
+        rpa_tree.build(
+            initial_d=rpa_mean_dia,
+            d_min=rpa_params.d_min,
+            lrr=rpa_params.lrr,
+            alpha=rpa_params.alpha,
+            beta=rpa_params.beta,
+            xi=rpa_params.xi,
+            eta_sym=rpa_params.eta_sym,
+        )
         rpa_tree.compute_olufsen_impedance(n_procs=n_procs)
         rpa_tree.plot_stiffness(path='rpa_stiffness_plot.png')
 
@@ -116,8 +132,16 @@ def construct_impedance_trees(config_handler,
                 raise ValueError('cap name not recognized')
             
             tree = StructuredTree(name=cap_name, time=config_handler.bcs['INFLOW'].t, simparams=config_handler.simparams, compliance_model=params.compliance_model)
-            
-            tree.build_tree(initial_d=params.diameter, d_min=params.d_min, lrr=params.lrr)
+
+            tree.build(
+                initial_d=params.diameter,
+                d_min=params.d_min,
+                lrr=params.lrr,
+                alpha=params.alpha,
+                beta=params.beta,
+                xi=params.xi,
+                eta_sym=params.eta_sym,
+            )
 
             # compute the impedance in frequency domain
             tree.compute_olufsen_impedance(n_procs=n_procs)

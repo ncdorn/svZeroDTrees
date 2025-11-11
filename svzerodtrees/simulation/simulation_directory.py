@@ -14,6 +14,8 @@ from ..tune_bcs import construct_impedance_trees, ClinicalTargets
 from .input_builders.simulation_file import SimulationFile
 from ..microvasculature import StructuredTree
 
+_DEFAULT_TREE_LRR = 10.0
+
 class SimulationDirectory:
     '''
     a class for handling simulation directories of pulmonary artery simulations'''
@@ -1075,7 +1077,7 @@ class SimulationDirectory:
                     print(f'generating tree {bc_idx} for cap {vtp.filename} with diameter {cap_d}...')
                     tree = StructuredTree(name=vtp.filename, time=self.svzerod_3Dcoupling.bcs['INFLOW'].t, simparams=self.svzerod_3Dcoupling.simparams)
 
-                    tree.build_tree(initial_d=cap_d, d_min=d_min)
+                    tree.build(initial_d=cap_d, d_min=d_min, lrr=_DEFAULT_TREE_LRR)
 
                     # compute the impedance in frequency domain
                     tree.compute_olufsen_impedance()

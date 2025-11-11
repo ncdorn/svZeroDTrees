@@ -231,6 +231,9 @@ class StructuredTree:
         xi = build_kwargs.pop("xi", None)
         eta_sym = build_kwargs.pop("eta_sym", None)
         max_nodes = int(build_kwargs.pop("max_nodes", 200_000))
+        initial_d = build_kwargs["initial_d"]
+        d_min = build_kwargs["d_min"]
+        lrr = build_kwargs["lrr"]
         alpha, beta = resolve_branch_scaling(
             alpha=build_kwargs.get("alpha"),
             beta=build_kwargs.get("beta"),
@@ -241,6 +244,10 @@ class StructuredTree:
         build_kwargs["beta"] = beta
 
         # stash the latest scaling inputs for downstream reference
+        self.initial_d = initial_d
+        self.initialD = initial_d  # legacy attribute name
+        self.d_min = d_min
+        self.lrr = lrr
         self.alpha = alpha
         self.beta = beta
         self.xi = xi
@@ -1073,7 +1080,9 @@ class StructuredTree:
             '''
 
             # build structured tree
-            self.build_tree(params[0], optimizing=True, alpha=params[1], beta=params[2])
+            d_min = getattr(self, "d_min", 0.01)
+            lrr = getattr(self, "lrr", 10.0)
+            self.build(initial_d=params[0], d_min=d_min, lrr=lrr, alpha=params[1], beta=params[2])
             
             # get the equivalent resistance
             R = self.root.R_eq
