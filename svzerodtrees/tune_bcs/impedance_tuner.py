@@ -158,7 +158,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
             if f < best_f:
                 best_f, best_x = f, trial
 
-        print(f"[grid] best init loss={best_f:.3f} from candidates={candidates}")
+        print(f"[grid] best init loss={best_f:.3f} for candidate={best_x}")
         return best_x
     
 
