@@ -80,8 +80,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
         rpa_mean_d = np.mean([(area / np.pi) ** 0.5 * 2 for area in rpa_info.values()])
         lpa_mean_d = np.mean([(area / np.pi) ** 0.5 * 2 for area in lpa_info.values()])
         # clamp for safety
-        rpa_mean_d = min(rpa_mean_d, 0.4)
-        lpa_mean_d = min(lpa_mean_d, 0.4)
+        rpa_mean_d = rpa_mean_d
+        lpa_mean_d = lpa_mean_d
         self._geom_defaults = {
             "rpa.default_diameter": rpa_mean_d,
             "lpa.default_diameter": lpa_mean_d,

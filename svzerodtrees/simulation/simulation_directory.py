@@ -768,11 +768,21 @@ class SimulationDirectory:
 
         return {'slope': lpa_fit[0], 'intercept': lpa_fit[1]}, {'slope': rpa_fit[0], 'intercept': rpa_fit[1]}
 
-    def generate_simplified_zerod(self, path='simplified_nonlinear_zerod.json', nonlinear=True, optimize=False):
+    def generate_simplified_zerod(self, path='simplified_nonlinear_zerod.json', nonlinear=True, optimize_nonlin=False, optimize_rri=False):
         '''
-        compute the simplified 0D model for a 3D pulmonary model from the steady simulation result'''
+        compute the simplified 0D model for a 3D pulmonary model'''
 
-        if optimize:
+        lpa_resistance = None
+        rpa_resistance = None
+        lpa_rri_params = None
+        rpa_rri_params = None
+
+        if optimize_rri:
+            print("Optimizing RRI parameters (stenosis, R, L) against 3D result...")
+            rri_result = self.optimize_RRI('simplified_zerod_config.json')
+            lpa_rri_params = rri_result['LPA']
+            rpa_rri_params = rri_result['RPA']
+        elif optimize_nonlin:
             print("Optimizing nonlinear resistance coefficients against 3D result...")
             lpa_resistance, rpa_resistance = self.optimize_nonlinear_resistance('simplified_zerod_config.json')
         else:
@@ -781,6 +791,39 @@ class SimulationDirectory:
         # need to rescale the inflow and make it periodic with a generic shape (see Inflow class)
         inflow = Inflow.periodic(path=None)
         inflow.rescale(cardiac_output=self.svzerod_3Dcoupling.bcs['INFLOW'].Q[0])
+
+        def _segment_values(resistance, inductance, stenosis):
+            return {
+                "R_poiseuille": resistance,
+                "C": 0.0,
+                "L": inductance,
+                "stenosis_coefficient": stenosis
+            }
+
+        vessel_segment_values = {}
+        if optimize_rri and lpa_rri_params is not None and rpa_rri_params is not None:
+            lpa_stenosis, lpa_R, lpa_L = lpa_rri_params
+            rpa_stenosis, rpa_R, rpa_L = rpa_rri_params
+
+            vessel_segment_values[1] = _segment_values(lpa_R / 2, lpa_L, lpa_stenosis / 2)
+            vessel_segment_values[2] = _segment_values(lpa_R / 2, 0.0, lpa_stenosis / 2)
+            vessel_segment_values[3] = _segment_values(rpa_R / 2, rpa_L, rpa_stenosis / 2)
+            vessel_segment_values[4] = _segment_values(rpa_R / 2, 0.0, rpa_stenosis / 2)
+        else:
+            # fallback to legacy behavior using either nonlinear coefficients or steady resistances
+            if lpa_resistance is None or rpa_resistance is None:
+                raise RuntimeError("Unable to determine LPA/RPA resistance values for simplified model.")
+
+            if nonlinear:
+                vessel_segment_values[1] = _segment_values(1.0, 0.0, lpa_resistance / 2)
+                vessel_segment_values[2] = _segment_values(1.0, 0.0, lpa_resistance / 2)
+                vessel_segment_values[3] = _segment_values(1.0, 0.0, rpa_resistance / 2)
+                vessel_segment_values[4] = _segment_values(1.0, 0.0, rpa_resistance / 2)
+            else:
+                vessel_segment_values[1] = _segment_values(lpa_resistance / 2, 0.0, 0.0)
+                vessel_segment_values[2] = _segment_values(lpa_resistance / 2, 0.0, 0.0)
+                vessel_segment_values[3] = _segment_values(rpa_resistance / 2, 0.0, 0.0)
+                vessel_segment_values[4] = _segment_values(rpa_resistance / 2, 0.0, 0.0)
 
         config = ConfigHandler({
             "boundary_conditions": [
@@ -865,12 +908,7 @@ class SimulationDirectory:
                     "vessel_length": 1.0,
                     "vessel_name": "branch1_seg0",
                     "zero_d_element_type": "BloodVessel",
-                    "zero_d_element_values": {
-                        "R_poiseuille": 1.0 if nonlinear else lpa_resistance / 2,
-                        "C": 0.0,
-                        "L": 0.0,
-                        "stenosis_coefficient": lpa_resistance / 2 if nonlinear else 0.0
-                    }
+                    "zero_d_element_values": vessel_segment_values[1]
                 },
                 {
                     "boundary_conditions": {
@@ -880,24 +918,14 @@ class SimulationDirectory:
                     "vessel_length": 1.0,
                     "vessel_name": "branch2_seg0",
                     "zero_d_element_type": "BloodVessel",
-                    "zero_d_element_values": {
-                        "R_poiseuille": 1.0 if nonlinear else lpa_resistance / 2,
-                        "C": 0.0,
-                        "L": 0.0,
-                        "stenosis_coefficient": lpa_resistance / 2 if nonlinear else 0.0
-                    }
+                    "zero_d_element_values": vessel_segment_values[2]
                 },
                 {
                     "vessel_id": 3,
                     "vessel_length": 1.0,
                     "vessel_name": "branch3_seg0",
                     "zero_d_element_type": "BloodVessel",
-                    "zero_d_element_values": {
-                        "R_poiseuille": 1.0 if nonlinear else rpa_resistance / 2,
-                        "C": 0.0,
-                        "L": 0.0,
-                        "stenosis_coefficient": rpa_resistance / 2 if nonlinear else 0.0
-                    }
+                    "zero_d_element_values": vessel_segment_values[3]
                 },
                 {
                     "boundary_conditions": {
@@ -907,12 +935,7 @@ class SimulationDirectory:
                     "vessel_length": 1.0,
                     "vessel_name": "branch4_seg0",
                     "zero_d_element_type": "BloodVessel",
-                    "zero_d_element_values": {
-                        "R_poiseuille": 1.0 if nonlinear else rpa_resistance / 2,
-                        "C": 0.0,
-                        "L": 0.0,
-                        "stenosis_coefficient": rpa_resistance / 2 if nonlinear else 0.0
-                    }
+                    "zero_d_element_values": vessel_segment_values[4]
                 }
             ]
         })

@@ -1,8 +1,26 @@
 import math
-from typing import Iterable, Callable, Any, Tuple
+from typing import Iterable, Callable, Any, Tuple, Optional
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from ...microvasculature.structured_tree.results import StructuredTreeResults
+
+MMHG_PER_BARYE = 1.0 / 1333.22  # dyn/cm^2 -> mmHg conversion
+
+_RESULTS_FIELD_ALIASES = {
+    "q": "flow_in",
+    "flow": "flow_in",
+    "flow_in": "flow_in",
+    "flow_out": "flow_out",
+    "p": "pressure_in",
+    "p_in": "pressure_in",
+    "p_out": "pressure_out",
+    "pressure": "pressure_in",
+    "pressure_in": "pressure_in",
+    "pressure_out": "pressure_out",
+    "d": "d",
+    "diameter": "d",
+}
 
 # =========================
 # Helpers
@@ -60,11 +78,98 @@ def _annotate_n(ax, summary_df: pd.DataFrame, y_frac=0.95):
         ax.text(row["generation"], y, f"n={int(row['n'])}",
                 ha="center", va="top", fontsize=9, alpha=0.75)
 
+
+def _resolve_results_field(name: Optional[str], default: str) -> str:
+    if not name:
+        return default
+    alias = _RESULTS_FIELD_ALIASES.get(name.lower())
+    return alias if alias is not None else name
+
+
+def _time_mask(times: np.ndarray, window: Optional[Tuple[float, float]]) -> slice | np.ndarray:
+    if window is None:
+        return slice(None)
+    if len(window) != 2:
+        raise ValueError("time_window must be a (start, end) tuple.")
+    t0, t1 = window
+    if t1 < t0:
+        t0, t1 = t1, t0
+    mask = (times >= t0) & (times <= t1)
+    if not np.any(mask):
+        raise ValueError(f"time_window {window} selects no samples in StructuredTreeResults.")
+    return mask
+
+
+def _reduce_timeseries(matrix: np.ndarray, reducer: Callable) -> np.ndarray:
+    if matrix.ndim == 1:
+        matrix = matrix[None, :]
+    return np.asarray([_as_scalar(row, reducer) for row in matrix], dtype=float)
+
+
+def _select_timeseries(matrix: np.ndarray, mask: slice | np.ndarray) -> np.ndarray:
+    arr = np.asarray(matrix, dtype=float)
+    if arr.ndim == 1:
+        arr = arr[None, :]
+    return arr[:, mask]
+
+
+def _rows_from_structured_results(
+    results: StructuredTreeResults,
+    reducer: Callable,
+    flow_field: str,
+    pressure_field: str,
+    diameter_field: str,
+    wss_flow: str,
+    time_window: Optional[Tuple[float, float]],
+    convert_pressure_to_mmhg: bool,
+) -> list[dict]:
+    mask = _time_mask(np.asarray(results.time, dtype=float), time_window)
+
+    try:
+        flow_ts = getattr(results, flow_field)
+    except AttributeError as exc:
+        raise AttributeError(f"StructuredTreeResults is missing flow field '{flow_field}'.") from exc
+
+    try:
+        pressure_ts = getattr(results, pressure_field)
+    except AttributeError as exc:
+        raise AttributeError(f"StructuredTreeResults is missing pressure field '{pressure_field}'.") from exc
+
+    wss_ts = results.wss_timeseries(use_flow=wss_flow)
+
+    flow_sel = _select_timeseries(flow_ts, mask)
+    pressure_sel = _select_timeseries(pressure_ts, mask)
+    wss_sel = _select_timeseries(wss_ts, mask)
+
+    flow_vals = _reduce_timeseries(flow_sel, reducer)
+    pressure_vals = _reduce_timeseries(pressure_sel, reducer)
+    wss_vals = _reduce_timeseries(wss_sel, reducer)
+
+    if convert_pressure_to_mmhg:
+        pressure_vals = pressure_vals * MMHG_PER_BARYE
+
+    rows = []
+    gens = np.asarray(results.gen, dtype=int)
+    try:
+        diam_arr = getattr(results, diameter_field)
+    except AttributeError as exc:
+        raise AttributeError(f"StructuredTreeResults is missing diameter field '{diameter_field}'.") from exc
+    diameters = np.asarray(diam_arr, dtype=float)
+    for gen, flow_val, pres_val, wss_val, d_val in zip(gens, flow_vals, pressure_vals, wss_vals, diameters):
+        rows.append({
+            "generation": int(gen),
+            "flow": float(flow_val),
+            "pressure": float(pres_val),
+            "wss": float(wss_val),
+            "diameter": float(d_val)
+        })
+    return rows
+
 # =========================
 # Main plotting function
 # =========================
 def plot_tree_metrics_by_generation(
-    vessels: Iterable[Any],
+    vessels: Optional[Iterable[Any]] = None,
     mu: float = 0.04,
     reducer: Callable = np.nanmean,
     flow_attr: str = "Q",
@@ -78,33 +183,74 @@ def plot_tree_metrics_by_generation(
                                     "Pressure by Generation",
                                     "Wall Shear Stress by Generation"),
     ylabels: Tuple[str, str, str] = ("Flow", "Pressure", "WSS"),
+    results: Optional[StructuredTreeResults] = None,
+    time_window: Optional[Tuple[float, float]] = None,
+    wss_flow: str = "in",
+    convert_pressure_to_mmhg: bool = True,
 ) -> Tuple[plt.Figure, np.ndarray]:
     """
-    Build a tidy DataFrame from TreeVessel objects, compute WSS, and create a 3-row figure:
-    row 1: Flow vs Generation
-    row 2: Pressure vs Generation
-    row 3: WSS vs Generation
+    Build generation-level flow/pressure/WSS summaries either from TreeVessel-like
+    iterables (legacy path) or from StructuredTreeResults (new storage).
 
     Parameters
     ----------
-    vessels : iterable of objects with attributes:
-        .generation (int), .flow, .pressure, .diameter (each scalar or array-like)
-    mu : viscosity in units consistent with flow & diameter
-    reducer : aggregation for time-series -> scalar (default: np.nanmean)
-    *attr : names of attributes on each vessel (override if your class differs)
+    vessels : iterable of objects with scalar or array attributes (legacy usage)
+    results : StructuredTreeResults, optional
+        If provided (or passed as the first positional argument), metrics are
+        pulled from the centralized SoA time-series store. In this mode
+        `flow_attr`/`pressure_attr` are interpreted as field names on the
+        StructuredTreeResults (defaults map to flow_in/pressure_in).
+    time_window : (t0, t1), optional
+        Restrict StructuredTreeResults reduction to this window. Ignored for
+        legacy vessel objects.
+    wss_flow : {"in","out"}
+        Flow branch used to compute WSS from StructuredTreeResults.
+    convert_pressure_to_mmhg : bool
+        Apply dyn/cm² → mmHg conversion for StructuredTreeResults inputs.
     """
-    # Build the table
-    rows = []
-    for v in vessels:
-        try:
-            gen = getattr(v, generation_attr)
-        except AttributeError:
-            continue
-        q = _as_scalar(getattr(v, flow_attr, np.nan), reducer=reducer)
-        p = _as_scalar(getattr(v, pressure_attr, np.nan), reducer=reducer) / 1333.2
-        d = _as_scalar(getattr(v, diameter_attr, np.nan), reducer=reducer)
-        tau = _compute_wss_from_q_d(q, d, mu)
-        rows.append({"generation": int(gen), "flow": q, "pressure": p, "wss": tau, "diameter": d})
+    rows: list[dict]
+
+    results_obj = results
+    vessel_iterable = vessels
+
+    if isinstance(vessels, StructuredTreeResults):
+        results_obj = vessels
+        vessel_iterable = None
+
+    if results_obj is not None and not isinstance(results_obj, StructuredTreeResults):
+        raise TypeError("results must be a StructuredTreeResults instance.")
+
+    if results_obj is not None and vessel_iterable is not None:
+        raise ValueError("Provide either vessels or StructuredTreeResults, not both.")
+
+    if results_obj is not None:
+        flow_field = _resolve_results_field(flow_attr, "flow_in")
+        pressure_field = _resolve_results_field(pressure_attr, "pressure_in")
+        diameter_field = _resolve_results_field(diameter_attr, "d")
+        rows = _rows_from_structured_results(
+            results_obj,
+            reducer=reducer,
+            flow_field=flow_field,
+            pressure_field=pressure_field,
+            diameter_field=diameter_field,
+            wss_flow=wss_flow,
+            time_window=time_window,
+            convert_pressure_to_mmhg=convert_pressure_to_mmhg,
+        )
+    else:
+        if vessel_iterable is None:
+            raise ValueError("Must supply either vessels iterable or StructuredTreeResults.")
+        rows = []
+        for v in vessel_iterable:
+            try:
+                gen = getattr(v, generation_attr)
+            except AttributeError:
+                continue
+            q = _as_scalar(getattr(v, flow_attr, np.nan), reducer=reducer)
+            p = _as_scalar(getattr(v, pressure_attr, np.nan), reducer=reducer) * MMHG_PER_BARYE
+            d = _as_scalar(getattr(v, diameter_attr, np.nan), reducer=reducer)
+            tau = _compute_wss_from_q_d(q, d, mu)
+            rows.append({"generation": int(gen), "flow": q, "pressure": p, "wss": tau, "diameter": d})
 
     df = pd.DataFrame(rows).dropna(subset=["generation"])
     if df.empty:
@@ -377,22 +523,3 @@ def plot_waveforms_by_generation(
 
     plt.subplots_adjust(hspace=0.28, top=0.85)
     return fig, axes, t_ref
-
-# -----------------------------
-# Example
-# -----------------------------
-# class TreeVessel:
-#     def __init__(self, generation, t, q, p, d):
-#         self.generation = generation
-#         self.t = np.asarray(t)
-#         self.flow = np.asarray(q)
-#         self.pressure = np.asarray(p)
-#         self.diameter = np.asarray(d)
-#
-# # Suppose different vessels have different time vectors:
-# t1 = np.linspace(0, 1.0, 250)
-# t2 = np.linspace(0, 0.9, 200)
-# v1 = TreeVessel(0, t1, 12*np.sin(2*np.pi*t1)+20, 90+5*np.sin(2*np.pi*(t1-0.1)), 0.004*np.ones_like(t1))
-# v2 = TreeVessel(1, t2, 6*np.sin(2*np.pi*t2)+10, 88+4*np.sin(2*np.pi*(t2-0.15)), 0.003*np.ones_like(t2))
-# fig, axes, t_ref = plot_waveforms_by_generation([v1, v2], mu=0.004, normalize_time=True)
-# plt.show()
