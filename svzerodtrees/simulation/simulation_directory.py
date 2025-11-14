@@ -1151,7 +1151,11 @@ class SimulationDirectory:
 
         def loss_function(params, targets, config):
             params = _apply_parameters(config, params)
-            result = pysvzerod.simulate(config.config)
+            try:
+                result = pysvzerod.simulate(config.config)
+            except Exception as exc:
+                print(f"pysvzerod simulation failed during RRI optimization: {exc}")
+                return 1e9
 
             mpa_result = result[result.name == 'branch0_seg0']
             mpa_result = mpa_result[mpa_result.time > mpa_result.time.max() - 1.0]
