@@ -139,6 +139,13 @@ class Simulation:
             # generate the simplified zerod config
             self.generate_simplified_nonlinear_zerod()
 
+        else:
+            if os.path.exists(self.simplified_zerod_config):
+                print(f"Using existing simplified zerod config at {self.simplified_zerod_config}")
+            else:
+                print(f"Generating simplified zerod config at {self.simplified_zerod_config}")
+                self.generate_simplified_linear_zerod()
+
         reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
         
         if optimize_bcs:
