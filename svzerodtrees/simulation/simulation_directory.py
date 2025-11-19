@@ -1425,14 +1425,14 @@ class SimulationDirectory:
         
         return lpa_flow, rpa_flow
     
-    def plot_mpa(self, clinical_targets=None, plot_pf_loop=True):
+    def plot_mpa(self, clinical_targets=None, plot_pf_loop=True, last_cycle_only=True):
         '''
         plot the MPA pressure
         
         :param clinical_targets: csv of clinical targets'''
 
         block = self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0']
-        time, flow, pressure = self.svzerod_data.get_result(block)
+        time, flow, pressure = self.svzerod_data.get_result(block, last_cycle_only=last_cycle_only)
         if time.size == 0 or flow.size == 0 or pressure.size == 0:
             raise RuntimeError("No MPA data available to plot.")
 

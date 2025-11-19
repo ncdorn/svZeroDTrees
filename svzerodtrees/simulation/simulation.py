@@ -95,6 +95,7 @@ class Simulation:
                 print(f'loading inflow from {inflow_path}...')
                 self.inflow = Inflow.periodic(path=inflow_path)
                 self.inflow.rescale(tsteps=self.n_tsteps)
+                self.is_fontan = False
             else:
                 raise FileNotFoundError(f'Inflow file {inflow_path} not found.')
         else:
