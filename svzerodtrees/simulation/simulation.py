@@ -151,11 +151,17 @@ class Simulation:
             # ensure that inflow is rescaled
             config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
             inflow_scale_factor_by_outlets = self.preop_dir.mesh_complete.n_outlets / 2.0
-            inflow_co = trapz(config.bcs["INFLOW"].Q, config.bcs["INFLOW"].t)
-            inflow_rescale = self.clinical_targets.q / inflow_co / inflow_scale_factor_by_outlets
+            inflow_co_from_zerod = trapz(config.bcs["INFLOW"].Q, config.bcs["INFLOW"].t)
+            if self.inflow_from_file:
+                # inflow from file, rescale based on that
+                inflow_co_from_file = trapz(self.inflow.q, self.inflow.t)
+                inflow_rescale = inflow_co_from_file / inflow_co_from_zerod / inflow_scale_factor_by_outlets
+            else:
+                # inflow not from file, we can use clinical_targets.q
+                inflow_rescale = self.clinical_targets.q / inflow_co_from_zerod / inflow_scale_factor_by_outlets
             if inflow_rescale != 1.0:
                 print(f"Rescaling inflow by factor {inflow_rescale:.3f} to account for number of outlets ({self.preop_dir.mesh_complete.n_outlets})")
-                config.inflows["INFLOW"].rescale(cardiac_output=inflow_co * inflow_rescale)
+                config.inflows["INFLOW"].rescale(cardiac_output=inflow_co_from_zerod * inflow_rescale)
                 config.to_json(self.simplified_zerod_config)
 
         reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
