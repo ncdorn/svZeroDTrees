@@ -949,13 +949,15 @@ class SimulationDirectory:
         '''
         if self.svzerod_data is None:
             raise ValueError("svZeroD_data not found. Please run the simulation first.")
+        
+        cycle_duration = self.svzerod_3Dcoupling.bcs['INFLOW'].t[-1]
 
         # get the MPA pressure
         time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
         if time.size == 0:
             raise RuntimeError("No svZeroD results available for nonlinear resistance optimization.")
 
-        mask_last_period = time > time.max() - 1.0
+        mask_last_period = time > time.max() - cycle_duration
         time_last_period = time[mask_last_period]
         pressure_last_period = pressure[mask_last_period]
         flow_last_period = flow[mask_last_period]
@@ -984,7 +986,7 @@ class SimulationDirectory:
         # rescale inflow back up to the original cardiac output
         # nonlinear_config.inflows['INFLOW'].rescale(scalar = 2)
 
-        def loss_function(nonlinear_resistance, targets, nonlinear_config):
+        def loss_function(nonlinear_resistance, targets, nonlinear_config, cycle_duration):
             # Update the nonlinear resistance values in the simplified 0D model
             # nonlinear resistance in format [lpa, rpa]
             nonlinear_config.vessel_map[1].stenosis_coefficient = nonlinear_resistance[0] / 2
@@ -995,7 +997,7 @@ class SimulationDirectory:
             result = pysvzerod.simulate(nonlinear_config.config) # Run the simulation with the updated nonlinear resistance
 
             mpa_result = result[result.name == 'branch0_seg0']
-            mpa_result = mpa_result[mpa_result.time > mpa_result.time.max() - 1.0]
+            mpa_result = mpa_result[mpa_result.time > mpa_result.time.max() - cycle_duration]
             flow = mpa_result.flow_in
             pressure = mpa_result.pressure_in
             mean_pressure = np.mean(pressure) / 1333.2
@@ -1004,7 +1006,7 @@ class SimulationDirectory:
 
             # get rpa split
             rpa_result = result[result.name == 'branch3_seg0']
-            rpa_result = rpa_result[rpa_result.time > rpa_result.time.max() - 1.0]
+            rpa_result = rpa_result[rpa_result.time > rpa_result.time.max() - cycle_duration]
             rpa_flow = rpa_result.flow_in
             rpa_split = np.trapz(rpa_flow, rpa_result.time) / np.trapz(flow, mpa_result.time)
 
@@ -1025,7 +1027,7 @@ class SimulationDirectory:
         # initial_guess = self.compute_pressure_drop(steady=False)  # get the initial guess for nonlinear resistance
         print(f"Starting optimization with initial guess for nonlinear resistances: LPA = {initial_guess[0]}, RPA = {initial_guess[1]}")
         bounds = Bounds(lb=[0, 0])  # set bounds for the nonlinear resistances to be positive and non-zero
-        result = minimize(loss_function, initial_guess, args=(targets, nonlinear_config),
+        result = minimize(loss_function, initial_guess, args=(targets, nonlinear_config, cycle_duration),
                           method='Nelder-Mead', options={'disp': True}, bounds=bounds)
 
         print("Optimization complete.")
@@ -1061,12 +1063,14 @@ class SimulationDirectory:
         '''
         if self.svzerod_data is None:
             raise ValueError("svZeroD_data not found. Please run the simulation first.")
+        
+        cycle_duration = self.svzerod_3Dcoupling.bcs['INFLOW'].t[-1]
 
-        time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
+        time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'], cycle_duration=cycle_duration)
         if time.size == 0:
             raise RuntimeError("No svZeroD results available for RRI optimization.")
 
-        mask_last_period = time > time.max() - 1.0
+        mask_last_period = time > time.max() - cycle_duration
         time_last_period = time[mask_last_period]
         pressure_last_period = pressure[mask_last_period]
         flow_last_period = flow[mask_last_period]
@@ -1149,7 +1153,7 @@ class SimulationDirectory:
 
             return params
 
-        def loss_function(params, targets, config):
+        def loss_function(params, targets, config, cycle_duration):
             params = _apply_parameters(config, params)
             try:
                 result = pysvzerod.simulate(config.config)
@@ -1158,7 +1162,7 @@ class SimulationDirectory:
                 return 1e9
 
             mpa_result = result[result.name == 'branch0_seg0']
-            mpa_result = mpa_result[mpa_result.time > mpa_result.time.max() - 1.0]
+            mpa_result = mpa_result[mpa_result.time > mpa_result.time.max() - cycle_duration]
             if mpa_result.empty:
                 return np.inf
 
@@ -1169,7 +1173,7 @@ class SimulationDirectory:
             dia_pressure = np.min(pressure) / 1333.2
 
             rpa_result = result[result.name == 'branch3_seg0']
-            rpa_result = rpa_result[rpa_result.time > rpa_result.time.max() - 1.0]
+            rpa_result = rpa_result[rpa_result.time > rpa_result.time.max() - cycle_duration]
             if rpa_result.empty:
                 return np.inf
             rpa_flow = rpa_result.flow_in
@@ -1207,7 +1211,7 @@ class SimulationDirectory:
         result = minimize(
             loss_function,
             initial_guess,
-            args=(targets, rri_config),
+            args=(targets, rri_config, cycle_duration),
             method='Powell',
             bounds=bounds,
             options={'disp': True}
