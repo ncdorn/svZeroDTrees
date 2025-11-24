@@ -150,7 +150,7 @@ class Simulation:
 
             # ensure that inflow is rescaled
             config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
-            inflow_scale_factor_by_outlets = self.preop_simdir.mesh_complete.n_outlets / 2.0
+            inflow_scale_factor_by_outlets = self.preop_dir.mesh_complete.n_outlets / 2.0
             inflow_co = trapz(config.bcs["INFLOW"].Q, config.bcs["INFLOW"].t)
             inflow_rescale = inflow_scale_factor_by_outlets / inflow_co
             if inflow_rescale != 1.0:
