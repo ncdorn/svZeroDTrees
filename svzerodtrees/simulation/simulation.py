@@ -7,6 +7,7 @@ from ..adaptation import MicrovascularAdaptor
 from ..microvasculature import TreeParameters
 import json
 import pandas as pd
+from scipy.integrate import trapz
 import os
 
 class Simulation:
@@ -146,6 +147,16 @@ class Simulation:
             else:
                 print(f"Generating simplified zerod config at {self.simplified_zerod_config}")
                 self.generate_simplified_nonlinear_zerod()
+
+            # ensure that inflow is rescaled
+            config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
+            inflow_scale_factor_by_outlets = self.preop_simdir.mesh_complete.n_outlets / 2.0
+            inflow_co = trapz(config.bcs["INFLOW"].Q, config.bcs["INFLOW"].t)
+            inflow_rescale = inflow_scale_factor_by_outlets / inflow_co
+            if inflow_rescale != 1.0:
+                print(f"Rescaling inflow by factor {inflow_rescale:.3f} to account for number of outlets ({self.preop_simdir.mesh_complete.n_outlets})")
+                config.inflows[next(iter(config.inflows))].rescale(rescale_factor=inflow_rescale)
+                config.to_json(self.simplified_zerod_config)
 
         reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
         
