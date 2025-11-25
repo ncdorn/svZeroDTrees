@@ -248,6 +248,8 @@ class Simulation:
                 # ensure inflow is the currect magnitude
                 if not self.inflow_from_file:
                     self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(cardiac_output=self.clinical_targets.q)
+                else:
+                    self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(cardiac_output=trapz(self.inflow.q, self.inflow.t))
 
             impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(self.preop_dir.path, mesh_complete=self.preop_dir.mesh_complete)
 
