@@ -242,8 +242,11 @@ class PAConfig():
             "inlet": "INFLOW"
         }
 
+        # use same number of tsteps to build tree as simparams
+        time_array = np.linspace(0, self.t[-1], self.simparams.number_of_time_pts_per_cardiac_cycle)
+
         self.lpa_tree = StructuredTree(name='lpa_tree', 
-                                       time=self.inflow.t, 
+                                       time=time_array, 
                                        simparams=self.simparams, 
                                        compliance_model=lpa_params.compliance_model)
 
@@ -259,7 +262,7 @@ class PAConfig():
         self.bcs["LPA_BC"] = self.lpa_tree.create_impedance_bc("LPA_BC", 0, self.clinical_targets.wedge_p * 1333.2)
 
         self.rpa_tree = StructuredTree(name='rpa_tree', 
-                                       time=self.inflow.t, 
+                                       time=time_array, 
                                        simparams=self.simparams,
                                        compliance_model=rpa_params.compliance_model)
 
