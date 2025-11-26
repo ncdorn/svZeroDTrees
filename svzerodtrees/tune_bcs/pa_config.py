@@ -243,7 +243,7 @@ class PAConfig():
         }
 
         # use same number of tsteps to build tree as simparams
-        time_array = np.linspace(0, self.t[-1], self.simparams.number_of_time_pts_per_cardiac_cycle)
+        time_array = np.linspace(0, self.inflow.t[-1], self.simparams.number_of_time_pts_per_cardiac_cycle)
 
         self.lpa_tree = StructuredTree(name='lpa_tree', 
                                        time=time_array, 
