@@ -97,8 +97,17 @@ class SvZeroDdata(SimulationFile):
             t_ref = float(t_raw[0])
             t_end_raw = float(t_raw[-1])
 
+            # Estimate the nominal timestep so we can allow for a missing final sample.
+            dt_nominal = 0.0
+            t_diffs = np.diff(t_raw)
+            if t_diffs.size:
+                pos = t_diffs[(t_diffs > 0) & np.isfinite(t_diffs)]
+                if pos.size:
+                    dt_nominal = float(np.median(pos))
+
             # Align end to the nearest *earlier* multiple of T relative to t_ref
-            k = math.floor((t_end_raw - t_ref) / T)
+            tolerance = dt_nominal if dt_nominal > 0 else 0.0
+            k = math.floor(((t_end_raw - t_ref) + tolerance) / T)
             if k < 1:
                 # Not even one full cycle present; fall back to earliest possible [t_ref, t_ref+T)
                 t_end = t_ref + T
