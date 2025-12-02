@@ -1055,7 +1055,7 @@ class SimulationDirectory:
         return optimized_resistances.tolist()  # return as a list for easier handling
 
 
-    def optimize_RRI(self, tuned_pa_config, initial_guess=None, tuning_iter=1, output_name='simplified_zerod_tuned_RRI.json'):
+    def optimize_RRI(self, tuned_pa_config, initial_guess=None, tuning_iter=1, output_name='simplified_zerod_tuned_RRI.json', optimizer='Nelder-Mead'):
         '''
         Optimize the stenosis coefficient, Poiseuille resistance, and inertance for the proximal LPA (vessel 1)
         and RPA (vessel 3) in the simplified PA config so that the 0D result matches the 3D target pressures/flow split.
@@ -1212,7 +1212,7 @@ class SimulationDirectory:
             loss_function,
             initial_guess,
             args=(targets, rri_config, cycle_duration),
-            method='Nelder-Mead',
+            method=optimizer,
             bounds=bounds,
             options={'disp': True}
         )
