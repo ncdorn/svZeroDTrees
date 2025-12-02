@@ -191,6 +191,7 @@ class Simulation:
                                                  rescale_inflow=run_steady, 
                                                  convert_to_cm=self.convert_to_cm, 
                                                  compliance_model=self.compliance_model,
+                                                 solver='Powell',
                                                  n_procs=24)
                 impedance_tuner.tune()
             # need to create coupling config and add to preop/postop directories
