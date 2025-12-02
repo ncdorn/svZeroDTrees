@@ -1212,7 +1212,7 @@ class SimulationDirectory:
             loss_function,
             initial_guess,
             args=(targets, rri_config, cycle_duration),
-            method='Powell',
+            method='Nelder-Mead',
             bounds=bounds,
             options={'disp': True}
         )

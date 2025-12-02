@@ -25,7 +25,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
                  convert_to_cm=True,
                  log_file=None,
                  maxiter=200,
-                 solver="Nelder-Mead"):
+                 solver="Powell"):
         super().__init__(config_handler, mesh_surfaces_path, clinical_targets)
         self.tune_space = tune_space
         self.compliance_model = (compliance_model or "").lower()
