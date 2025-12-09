@@ -1,6 +1,7 @@
 from .storage import StructuredTreeStorage
 import numpy as np
 from collections import deque
+import warnings
 
 
 def build_tree_soa(initial_d: float,
@@ -12,7 +13,7 @@ def build_tree_soa(initial_d: float,
                     eta: float,
                     compliance_model,
                     name: str,
-                    max_nodes: int = 200_000) -> StructuredTreeStorage:
+                    max_nodes: int = 500_000) -> StructuredTreeStorage:
         # Upper bound on nodes (loose): worst case full binary until collapse.
         # We grow python lists (amortized O(1)) and pack once.
 
@@ -27,42 +28,55 @@ def build_tree_soa(initial_d: float,
 
         q = deque([0])
         next_id = 0
+        truncated = False
 
         while q:
-            if len(ids) + 2 > max_nodes:
-                raise RuntimeError(
-                    f"Structured tree '{name}' exceeded max_nodes={max_nodes} while "
-                    f"building (alpha={alpha}, beta={beta}, d_min={d_min}). "
-                    "Try increasing d_min or lowering the branching ratios."
-                )
+            remaining = max_nodes - len(ids)
+            if remaining <= 0:
+                truncated = True
+                break
             i = q.popleft()
             di = d[i]
             gi = gen[i]
 
+            li = ri = -1
 
             # left
-            ld = alpha * di
-            li = next_id + 1
-            ids.append(li); gen.append(gi + 1); d.append(ld)
-            parent.append(i); left.append(-1); right.append(-1)
-            lc = ld < d_min
-            collapsed.append(lc)
+            if remaining >= 1:
+                next_id += 1
+                ld = alpha * di
+                li = next_id
+                ids.append(li); gen.append(gi + 1); d.append(ld)
+                parent.append(i); left.append(-1); right.append(-1)
+                lc = ld < d_min
+                collapsed.append(lc)
+                if not lc: q.append(li)
+            else:
+                truncated = True
 
+            remaining = max_nodes - len(ids)
             # right
-            rd = beta * di
-            ri = next_id + 2
-            ids.append(ri); gen.append(gi + 1); d.append(rd)
-            parent.append(i); left.append(-1); right.append(-1)
-            rc = rd < d_min
-            collapsed.append(rc)
+            if remaining >= 1:
+                next_id += 1
+                rd = beta * di
+                ri = next_id
+                ids.append(ri); gen.append(gi + 1); d.append(rd)
+                parent.append(i); left.append(-1); right.append(-1)
+                rc = rd < d_min
+                collapsed.append(rc)
+                if not rc: q.append(ri)
+            else:
+                truncated = True
 
             # set children's indices on parent row
             left[i]  = li
             right[i] = ri
 
-            if not lc: q.append(li)
-            if not rc: q.append(ri)
-            next_id += 2
+        if truncated:
+            warnings.warn(
+                f"Structured tree '{name}' reached max_nodes={max_nodes}; "
+                "remaining branches were truncated."
+            )
 
         # pack to compact arrays
         return StructuredTreeStorage(
