@@ -192,6 +192,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 options={"maxiter": self.maxiter}
             )
             x_init = result.x
+            if result.fun < 1e-5:
+                break
 
         print(f"[ImpedanceTuner] Optimized: {result.x}  f={result.fun:.3f}")
         # final simulate & plot

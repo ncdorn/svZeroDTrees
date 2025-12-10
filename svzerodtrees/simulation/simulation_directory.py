@@ -1221,6 +1221,8 @@ class SimulationDirectory:
                 options={'disp': True}
             )
             x_init = result.x
+            if result.fun < 1e-5:
+                break
 
         optimized_params = np.maximum(result.x, 0.0)
         print("RRI optimization complete.")
