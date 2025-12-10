@@ -6,6 +6,7 @@ from .simulation_directory import *
 from ..adaptation import MicrovascularAdaptor
 from ..microvasculature import TreeParameters
 import json
+import copy
 import pandas as pd
 from scipy.integrate import trapz
 import os
@@ -117,6 +118,9 @@ class Simulation:
         # check for default inflow.csv overrides without requiring constructor arguments
         self._maybe_refresh_inflow_from_file()
 
+        # derive inflows for 0D and 3D contexts
+        self._set_derived_inflows()
+
         # make a figures directory
         self.figures_dir = os.path.join(self.path, 'figures')
         os.makedirs(self.figures_dir, exist_ok=True)
@@ -139,6 +143,7 @@ class Simulation:
 
         # reload inflow if inflow.csv changed between runs
         self._maybe_refresh_inflow_from_file()
+        self._set_derived_inflows()
         
         if run_steady:
             # run the steady simulations
@@ -155,22 +160,7 @@ class Simulation:
 
             # make sure the simplified config uses the latest inflow waveform
             config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
-            self._sync_config_inflow(config, self.simplified_zerod_config)
-
-            # ensure that inflow is rescaled
-            inflow_scale_factor_by_outlets = self.preop_dir.mesh_complete.n_outlets / 2.0
-            inflow_co_from_zerod = trapz(config.bcs["INFLOW"].Q, config.bcs["INFLOW"].t)
-            if self.inflow_from_file:
-                # inflow from file, rescale based on that
-                inflow_co_from_file = trapz(self.inflow.q, self.inflow.t)
-                inflow_rescale = inflow_co_from_file / inflow_co_from_zerod / inflow_scale_factor_by_outlets
-            else:
-                # inflow not from file, we can use clinical_targets.q
-                inflow_rescale = self.clinical_targets.q / inflow_co_from_zerod / inflow_scale_factor_by_outlets
-            if inflow_rescale != 1.0:
-                print(f"Rescaling inflow by factor {inflow_rescale:.3f} to account for number of outlets ({self.preop_dir.mesh_complete.n_outlets})")
-                config.inflows["INFLOW"].rescale(cardiac_output=inflow_co_from_zerod * inflow_rescale)
-                config.to_json(self.simplified_zerod_config)
+            self._sync_config_inflow(config, self.simplified_zerod_config, inflow=self.inflow_0d)
 
         reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
         
@@ -228,12 +218,9 @@ class Simulation:
             self.zerod_config = ConfigHandler.from_json(self.simplified_zerod_config)
             zerod_source_path = self.simplified_zerod_config
 
-        self._sync_config_inflow(self.zerod_config, zerod_source_path)
+        self._sync_config_inflow(self.zerod_config, zerod_source_path, inflow=self.inflow_0d)
 
         if run_threed:
-            # rescale the inflow, in this case the first element in the inflows dict
-            self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(tsteps=2000)
-
             # create the trees
             if self.bc_type == 'impedance':
                 construct_impedance_trees(self.zerod_config, 
@@ -258,14 +245,8 @@ class Simulation:
             if self.is_fontan:
                 self.make_fontan_inflows()
             else:
-                # ensure inflow is the currect magnitude
-                if not self.inflow_from_file:
-                    self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(cardiac_output=self.clinical_targets.q)
-                else:
-                    self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(cardiac_output=trapz(self.inflow.q, self.inflow.t))
-
-            # push the latest inflow waveform into the config/bcs so the 3D coupler sees it
-            self._sync_config_inflow(self.zerod_config, self.zerod_config_path)
+                # ensure inflow is the correct magnitude and resolution for 3D coupling
+                self._sync_config_inflow(self.zerod_config, self.zerod_config_path, inflow=self.inflow_3d)
 
             impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(self.preop_dir.path, mesh_complete=self.preop_dir.mesh_complete)
 
@@ -310,6 +291,7 @@ class Simulation:
             self._inflow_file_mtime = os.path.getmtime(abs_path)
         except OSError:
             self._inflow_file_mtime = None
+        self._set_derived_inflows()
 
     def _maybe_refresh_inflow_from_file(self):
         '''
@@ -337,18 +319,38 @@ class Simulation:
             return True
         return False
 
-    def _sync_config_inflow(self, config_handler, config_path=None):
+    def _sync_config_inflow(self, config_handler, config_path=None, inflow=None):
         '''
         ensure a ConfigHandler object uses the current inflow waveform
         '''
-        if not self.inflow_from_file or self.inflow is None or config_handler is None:
+        inflow_obj = inflow if inflow is not None else self.inflow
+        if inflow_obj is None or config_handler is None:
             return False
 
-        config_handler.set_inflow(self.inflow)
-        config_handler.inflows[self.inflow.name] = self.inflow
+        config_handler.set_inflow(inflow_obj)
+        config_handler.inflows[inflow_obj.name] = inflow_obj
         if config_path is not None:
             config_handler.to_json(config_path)
         return True
+
+    def _set_derived_inflows(self):
+        '''
+        build inflow variants for 0D and 3D use cases from the base inflow
+        '''
+        if self.inflow is None:
+            self.inflow_0d = None
+            self.inflow_3d = None
+            return
+
+        n_outlets = getattr(self.preop_dir.mesh_complete, 'n_outlets', None)
+        outlet_scale = n_outlets / 2.0 if n_outlets is not None else 1.0
+        target_co = trapz(self.inflow.q, self.inflow.t) if self.inflow_from_file else self.clinical_targets.q
+
+        self.inflow_0d = copy.deepcopy(self.inflow)
+        self.inflow_0d.rescale(cardiac_output=target_co / outlet_scale if outlet_scale != 0 else target_co)
+
+        self.inflow_3d = copy.deepcopy(self.inflow)
+        self.inflow_3d.rescale(cardiac_output=target_co, tsteps=2000)
 
     def compute_adaptation(self, preopSimDir, postopSimDir,  adaptedSimDir):
         '''
