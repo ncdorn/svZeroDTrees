@@ -90,15 +90,14 @@ class Simulation:
 
         self.clinical_targets = ClinicalTargets.from_csv(clinical_targets)
 
-        if inflow_path is not None:
-            if os.path.exists(inflow_path):
-                self.inflow_from_file = True
-                print(f'loading inflow from {inflow_path}...')
-                self.inflow = Inflow.periodic(path=inflow_path)
-                self.inflow.rescale(tsteps=self.n_tsteps)
-                self.is_fontan = False
+        self.inflow_path = os.path.abspath(inflow_path) if inflow_path is not None else None
+        self._inflow_file_mtime = None
+
+        if self.inflow_path is not None:
+            if os.path.exists(self.inflow_path):
+                self._load_inflow_from_path(self.inflow_path)
             else:
-                raise FileNotFoundError(f'Inflow file {inflow_path} not found.')
+                raise FileNotFoundError(f'Inflow file {self.inflow_path} not found.')
         else:
             self.inflow_from_file = False
             # use a generic inflow profile
@@ -114,6 +113,9 @@ class Simulation:
                 self.is_fontan = False
                 self.inflow = Inflow.periodic()
                 self.inflow.rescale(cardiac_output=self.clinical_targets.q, tsteps=self.n_tsteps)
+
+        # check for default inflow.csv overrides without requiring constructor arguments
+        self._maybe_refresh_inflow_from_file()
 
         # make a figures directory
         self.figures_dir = os.path.join(self.path, 'figures')
@@ -134,6 +136,9 @@ class Simulation:
         '''
         run the entire pipeline
         '''
+
+        # reload inflow if inflow.csv changed between runs
+        self._maybe_refresh_inflow_from_file()
         
         if run_steady:
             # run the steady simulations
@@ -148,8 +153,11 @@ class Simulation:
                 print(f"Generating simplified zerod config at {self.simplified_zerod_config}")
                 self.generate_simplified_nonlinear_zerod()
 
-            # ensure that inflow is rescaled
+            # make sure the simplified config uses the latest inflow waveform
             config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
+            self._sync_config_inflow(config, self.simplified_zerod_config)
+
+            # ensure that inflow is rescaled
             inflow_scale_factor_by_outlets = self.preop_dir.mesh_complete.n_outlets / 2.0
             inflow_co_from_zerod = trapz(config.bcs["INFLOW"].Q, config.bcs["INFLOW"].t)
             if self.inflow_from_file:
@@ -193,7 +201,7 @@ class Simulation:
                                                  compliance_model=self.compliance_model,
                                                  solver='Nelder-Mead',
                                                  n_procs=24)
-                impedance_tuner.tune()
+                impedance_tuner.tune(nm_iter=5)
             # need to create coupling config and add to preop/postop directories
             # build trees for LPA/RPA
             elif self.bc_type == 'rcr':
@@ -215,8 +223,12 @@ class Simulation:
         # blank_threed_coupler = ConfigHandler.blank_threed_coupler(path=os.path.join(self.path, 'svzerod_3Dcoupling.json'))
         if os.path.exists(self.zerod_config_path):
             self.zerod_config = ConfigHandler.from_json(self.zerod_config_path)
+            zerod_source_path = self.zerod_config_path
         else:
             self.zerod_config = ConfigHandler.from_json(self.simplified_zerod_config)
+            zerod_source_path = self.simplified_zerod_config
+
+        self._sync_config_inflow(self.zerod_config, zerod_source_path)
 
         if run_threed:
             # rescale the inflow, in this case the first element in the inflows dict
@@ -279,6 +291,61 @@ class Simulation:
             self.adapted_dir.write_files(simname='Adapted Simulation', user_input=False, sim_config=self.threed_sim_config)
 
             # postprocess results
+
+    def _load_inflow_from_path(self, inflow_path):
+        '''
+        load an inflow waveform from disk and update bookkeeping
+        '''
+        abs_path = os.path.abspath(inflow_path)
+        print(f'loading inflow from {abs_path}...')
+        self.inflow = Inflow.periodic(path=abs_path)
+        self.inflow.rescale(tsteps=self.n_tsteps)
+        self.inflow_from_file = True
+        self.is_fontan = False
+        self.inflow_path = abs_path
+        try:
+            self._inflow_file_mtime = os.path.getmtime(abs_path)
+        except OSError:
+            self._inflow_file_mtime = None
+
+    def _maybe_refresh_inflow_from_file(self):
+        '''
+        reload inflow.csv if it exists and has changed since the last load
+        '''
+        candidate = self.inflow_path
+        if candidate is not None and not os.path.exists(candidate):
+            candidate = None
+
+        default_candidate = os.path.join(self.path, 'inflow.csv')
+        if candidate is None and os.path.exists(default_candidate):
+            candidate = default_candidate
+
+        if candidate is None or not os.path.exists(candidate):
+            return False
+
+        candidate = os.path.abspath(candidate)
+        try:
+            mtime = os.path.getmtime(candidate)
+        except OSError:
+            mtime = None
+
+        if (not self.inflow_from_file) or (self._inflow_file_mtime is None) or (mtime is not None and mtime != self._inflow_file_mtime):
+            self._load_inflow_from_path(candidate)
+            return True
+        return False
+
+    def _sync_config_inflow(self, config_handler, config_path=None):
+        '''
+        ensure a ConfigHandler object uses the current inflow waveform
+        '''
+        if not self.inflow_from_file or self.inflow is None or config_handler is None:
+            return False
+
+        config_handler.set_inflow(self.inflow)
+        config_handler.inflows[self.inflow.name] = self.inflow
+        if config_path is not None:
+            config_handler.to_json(config_path)
+        return True
 
     def compute_adaptation(self, preopSimDir, postopSimDir,  adaptedSimDir):
         '''

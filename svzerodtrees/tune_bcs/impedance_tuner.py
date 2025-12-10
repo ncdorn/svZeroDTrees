@@ -164,7 +164,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
 
     # ---- Main tuning routine ---- #
 
-    def tune(self):
+    def tune(self, nm_iter: int = 1):
         self._prepare_geometry_defaults()
         pa_config = self._make_pa_config()
 
@@ -179,14 +179,19 @@ class ImpedanceTuner(BoundaryConditionTuner):
         if self.grid_search_init:
             x0 = self._grid_search_init(pa_config, x0)
 
-
-        result = minimize(
-            fun=lambda x: self.loss_fn(x, pa_config),
-            x0=x0,
-            method=self.solver,
-            bounds=bounds if self.solver in ("Nelder-Mead", "L-BFGS-B", "Powell", "TNC", "SLSQP", "trust-constr") else None,
-            options={"maxiter": self.maxiter}
-        )
+        # ——— Optionally run Nelder-Mead multiple times ———
+        repeats = nm_iter if self.solver == "Nelder-Mead" else 1
+        x_init = x0
+        result = None
+        for i in range(max(1, repeats)):
+            result = minimize(
+                fun=lambda x: self.loss_fn(x, pa_config),
+                x0=x_init,
+                method=self.solver,
+                bounds=bounds if self.solver in ("Nelder-Mead", "L-BFGS-B", "Powell", "TNC", "SLSQP", "trust-constr") else None,
+                options={"maxiter": self.maxiter}
+            )
+            x_init = result.x
 
         print(f"[ImpedanceTuner] Optimized: {result.x}  f={result.fun:.3f}")
         # final simulate & plot

@@ -230,7 +230,7 @@ class StructuredTree:
         # explicit, side-effectful convenience method
         xi = build_kwargs.pop("xi", None)
         eta_sym = build_kwargs.pop("eta_sym", None)
-        max_nodes = int(build_kwargs.pop("max_nodes", 200_000))
+        max_nodes = int(build_kwargs.pop("max_nodes", 500_000))
         initial_d = build_kwargs["initial_d"]
         d_min = build_kwargs["d_min"]
         lrr = build_kwargs["lrr"]

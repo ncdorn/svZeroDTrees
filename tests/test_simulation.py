@@ -1,3 +1,4 @@
+import json
 import os
 from types import SimpleNamespace
 
@@ -12,6 +13,7 @@ class DummyInflow:
         self.name = name
         self.kind = kind
         self.q = list(values) if values is not None else [4.0, 1.0, 3.0]
+        self.t = list(range(len(self.q)))
         self.rescale_calls = []
         self.added_flows = []
         self.steady_value = steady_value
@@ -22,12 +24,14 @@ class DummyInflow:
     def add_steady_flow(self, flow):
         self.added_flows.append(flow)
         self.q.append(flow)
+        next_t = self.t[-1] + 1 if self.t else 0
+        self.t.append(next_t)
 
     def to_dict(self):
         return {
             "bc_name": self.name,
             "bc_type": "FLOW",
-            "bc_values": {"Q": self.q, "t": []},
+            "bc_values": {"Q": self.q, "t": self.t},
         }
 
 
@@ -55,10 +59,15 @@ class DummySimulationDirectory:
     def __init__(self, path, zerod_config=None, mesh_complete=None, **kwargs):
         self.path = path
         mesh_path = mesh_complete if mesh_complete is not None else os.path.join(path, "mesh.vtp")
+        mesh_surfaces_dir = os.path.join(path, "surfaces")
         if isinstance(mesh_path, str):
-            self.mesh_complete = SimpleNamespace(path=mesh_path, mesh_surfaces_dir=os.path.join(path, "surfaces"))
+            self.mesh_complete = SimpleNamespace(path=mesh_path, mesh_surfaces_dir=mesh_surfaces_dir, n_outlets=2)
         else:
             self.mesh_complete = mesh_path
+            if not hasattr(self.mesh_complete, "mesh_surfaces_dir"):
+                self.mesh_complete.mesh_surfaces_dir = mesh_surfaces_dir
+            if not hasattr(self.mesh_complete, "n_outlets"):
+                self.mesh_complete.n_outlets = 2
         self.generated = []
         self.runs = 0
         self.checked = False
@@ -169,3 +178,65 @@ def test_make_fontan_inflows_assigns_multiple_channels(simulation_env):
     ivc_inflow = inflows["INFLOW_IVC"]
     assert svc_inflow.steady_value == pytest.approx(0.7)
     assert ivc_inflow.steady_value == pytest.approx(1.5)
+
+
+def test_simulation_reloads_inflow_when_file_changes(simulation_env):
+    sim_mod = simulation_env.module
+    inflow_file = simulation_env.tmp_path / "inflow.csv"
+    inflow_file.write_text("t,q\n0,0\n1,1\n")
+
+    simulation_env.inflow_factory.default_q = [1.0, 2.0, 3.0]
+    sim = sim_mod.Simulation(path=simulation_env.tmp_path, inflow_path=str(inflow_file))
+    initial_waveform = list(sim.inflow.q)
+
+    simulation_env.inflow_factory.default_q = [9.0, 8.0, 7.0]
+    inflow_file.write_text("t,q\n0,0\n1,1\n2,2\n")
+    assert sim._maybe_refresh_inflow_from_file()
+    assert sim.inflow.q != initial_waveform
+    assert sim.inflow.q == simulation_env.inflow_factory.default_q
+
+
+def test_run_pipeline_updates_config_with_new_inflow(simulation_env):
+    sim_mod = simulation_env.module
+    tmp_path = simulation_env.tmp_path
+    inflow_file = tmp_path / "inflow.csv"
+    inflow_file.write_text("t,q\n0,0\n1,1\n")
+
+    # create baseline simplified config
+    simplified_config = {
+        "boundary_conditions": [
+            {"bc_name": "INFLOW", "bc_type": "FLOW", "bc_values": {"Q": [0.1, 0.2], "t": [0.0, 1.0]}}
+        ],
+        "vessels": [],
+        "junctions": [],
+        "simulation_parameters": {"number_of_time_pts_per_cardiac_cycle": 2},
+        "external_solver_coupling_blocks": [],
+        "trees": [],
+    }
+    simplified_path = tmp_path / "simplified_nonlinear_zerod.json"
+    simplified_path.write_text(json.dumps(simplified_config))
+
+    optimized_params = "\n".join(
+        [
+            "pa,lrr,diameter,d_min,alpha,beta,compliance model,Eh/r",
+            "lpa,10.0,0.5,0.1,0.8,0.5,ConstantCompliance,100000.0",
+            "rpa,10.0,0.5,0.1,0.8,0.5,ConstantCompliance,100000.0",
+        ]
+    )
+    (tmp_path / "optimized_params.csv").write_text(optimized_params)
+
+    simulation_env.inflow_factory.default_q = [1.0, 2.0, 3.0]
+    sim = sim_mod.Simulation(path=tmp_path, inflow_path=str(inflow_file))
+
+    # modify inflow and rerun pipeline without steady sims
+    simulation_env.inflow_factory.default_q = [5.0, 6.0, 7.0]
+    inflow_file.write_text("t,q\n0,0\n1,1\n2,2\n3,3\n")
+    sim.run_pipeline(run_steady=False, optimize_bcs=False, run_threed=False, adapt=False)
+
+    updated_config = json.loads(simplified_path.read_text())
+    inflow_values = next(
+        bc["bc_values"]["Q"]
+        for bc in updated_config["boundary_conditions"]
+        if bc["bc_name"].lower() == "inflow"
+    )
+    assert inflow_values == simulation_env.inflow_factory.default_q
