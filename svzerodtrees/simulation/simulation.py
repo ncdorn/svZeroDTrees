@@ -264,6 +264,9 @@ class Simulation:
                 else:
                     self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(cardiac_output=trapz(self.inflow.q, self.inflow.t))
 
+            # push the latest inflow waveform into the config/bcs so the 3D coupler sees it
+            self._sync_config_inflow(self.zerod_config, self.zerod_config_path)
+
             impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(self.preop_dir.path, mesh_complete=self.preop_dir.mesh_complete)
 
             self.zerod_config.to_json(self.zerod_config_path)

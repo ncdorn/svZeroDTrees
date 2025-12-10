@@ -268,13 +268,42 @@ class SimulationDirectory:
         self.svzerod_interface.write(self.svzerod_3Dcoupling.path)
 
         def write_svfsixml_input_params(user_input=user_input, sim_config=sim_config):
+            def _get_inflow_period():
+                inflow_candidates = []
+                for src in (self.svzerod_3Dcoupling, self.zerod_config):
+                    if src is not None and hasattr(src, 'inflows'):
+                        inflow_candidates.extend(src.inflows.values())
+                for inflow in inflow_candidates:
+                    if inflow is None:
+                        continue
+                    period = getattr(inflow, 't_per', None)
+                    if period is not None and period > 0:
+                        return period
+                    times = getattr(inflow, 't', [])
+                    if times:
+                        try:
+                            times_arr = np.asarray(times, dtype=float)
+                            if times_arr.size >= 2:
+                                span = float(times_arr.max() - times_arr.min())
+                                if span > 0:
+                                    return span
+                        except Exception:
+                            pass
+                return None
+
+            inflow_period = _get_inflow_period()
             if user_input:
                 n_tsteps = int(input('number of time steps (default 5000): ') or 5000)
-                dt = float(input('time step size (default 0.001): ') or 0.001)
             else:
                 if sim_config is None:
                     raise ValueError('sim_config is None, cannot write svFSI.xml')
                 n_tsteps = sim_config['n_tsteps']
+            if inflow_period is not None:
+                dt = inflow_period / 2000.0
+                print(f'using dt={dt} based on inflow period {inflow_period}s and 2000 steps per period')
+            elif user_input:
+                dt = float(input('time step size (default 0.001): ') or 0.001)
+            else:
                 dt = sim_config['dt']
             if self.convert_to_cm:
                 print("scaling mesh to cm...")
