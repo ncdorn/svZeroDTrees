@@ -1095,7 +1095,7 @@ class SimulationDirectory:
         
         cycle_duration = self.svzerod_3Dcoupling.bcs['INFLOW'].t[-1]
 
-        time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'], cycle_duration=cycle_duration)
+        time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'], cycle_duration=cycle_duration, window="last", full_cycle=False)
         if time.size == 0:
             raise RuntimeError("No svZeroD results available for RRI optimization.")
 
