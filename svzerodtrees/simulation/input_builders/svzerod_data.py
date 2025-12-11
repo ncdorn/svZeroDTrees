@@ -2,6 +2,8 @@ from .simulation_file import SimulationFile
 import numpy as np
 import pandas as pd
 import math
+import warnings
+
 
 class SvZeroDdata(SimulationFile):
     '''
@@ -28,33 +30,53 @@ class SvZeroDdata(SimulationFile):
         self,
         block,
         cycle_duration: float = 1.0,
-        last_cycle_only: bool = True,
+        window: str = "last",
+        full_cycle: bool = True,
         n_tsteps: int = 500,
         output_series: bool = False,
+        last_cycle_only=None,
+        last_full_cycle=None,
     ):
         """
         Get pressure and flow from svZeroD_data for a given CouplingBlock, with optional
-        extraction of the last full cycle and uniform resampling.
+        extraction of a final-cycle window and uniform resampling.
 
-        - If last_cycle_only=True, we:
-            1) Take t_ref = first timestamp in the data.
-            2) Let t_end_raw = last timestamp in the data.
-            3) Compute k = floor((t_end_raw - t_ref) / cycle_duration).
-            4) Define t_end = t_ref + k * cycle_duration (<= t_end_raw).
-            5) Window is [t_end - cycle_duration, t_end): this guarantees a **full** cycle,
-            discarding any partial cycle after t_end.
-        - Resampling: outputs exactly n_tsteps samples on [0, cycle_duration), endpoint=False.
+        Windowing behavior:
+        - window="last":
+            * If full_cycle=True, align to the last full cycle of length cycle_duration.
+            * If full_cycle=False, take the last cycle_duration worth of data even if incomplete.
+        - window="all": use the entire available time span.
+        Resampling: outputs exactly n_tsteps samples on [0, T_out), endpoint=False.
 
         Returns
         -------
         t_out : (n_tsteps,) np.ndarray
-            Resampled time in seconds, starting at 0 up to < cycle_duration.
+            Resampled time in seconds, starting at 0 up to < T_out (cycle_duration for
+            window="last", full span otherwise).
         q_out : (n_tsteps,) np.ndarray
             Resampled flow aligned to t_out.
         p_out : (n_tsteps,) np.ndarray
             Resampled pressure aligned to t_out.
         """
         df = self.df
+
+        # Backward compatibility shims
+        if last_cycle_only is not None:
+            warnings.warn(
+                "last_cycle_only is deprecated; use window='last' or window='all' instead.",
+                DeprecationWarning,
+            )
+            window = "last" if last_cycle_only else "all"
+        if last_full_cycle is not None:
+            warnings.warn(
+                "last_full_cycle is deprecated; use full_cycle instead.",
+                DeprecationWarning,
+            )
+            full_cycle = last_full_cycle
+
+        window = window.lower().strip()
+        if window not in {"last", "all"}:
+            raise ValueError("window must be 'last' or 'all'.")
 
         # Resolve time column (allow integer-named first column fallback)
         time_col = "time" if "time" in df.columns else df.columns[0]
@@ -89,7 +111,7 @@ class SvZeroDdata(SimulationFile):
         if t_raw.size < 2 or not np.isfinite(t_raw).all():
             raise RuntimeError("Invalid or insufficient time samples in svZeroD_data.")
 
-        if last_cycle_only:
+        if window == "last":
             T = float(cycle_duration)
             if not np.isfinite(T) or T <= 0:
                 raise ValueError("cycle_duration must be positive and finite.")
@@ -97,53 +119,71 @@ class SvZeroDdata(SimulationFile):
             t_ref = float(t_raw[0])
             t_end_raw = float(t_raw[-1])
 
-            # Estimate the nominal timestep so we can allow for a missing final sample.
-            dt_nominal = 0.0
-            t_diffs = np.diff(t_raw)
-            if t_diffs.size:
-                pos = t_diffs[(t_diffs > 0) & np.isfinite(t_diffs)]
-                if pos.size:
-                    dt_nominal = float(np.median(pos))
+            if full_cycle:
+                # Estimate the nominal timestep so we can allow for a missing final sample.
+                dt_nominal = 0.0
+                t_diffs = np.diff(t_raw)
+                if t_diffs.size:
+                    pos = t_diffs[(t_diffs > 0) & np.isfinite(t_diffs)]
+                    if pos.size:
+                        dt_nominal = float(np.median(pos))
 
-            # Align end to the nearest *earlier* multiple of T relative to t_ref
-            tolerance = dt_nominal if dt_nominal > 0 else 0.0
-            k = math.floor(((t_end_raw - t_ref) + tolerance) / T)
-            if k < 1:
-                # Not even one full cycle present; fall back to earliest possible [t_ref, t_ref+T)
-                t_end = t_ref + T
-                t_start = t_ref
-                # but clamp to available data
-                t_end = min(t_end, t_end_raw)
-            else:
-                t_end = t_ref + k * T
-                t_start = t_end - T
+                # Align end to the nearest *earlier* multiple of T relative to t_ref
+                tolerance = dt_nominal if dt_nominal > 0 else 0.0
+                k = math.floor(((t_end_raw - t_ref) + tolerance) / T)
+                if k < 1:
+                    # Not even one full cycle present; fall back to earliest possible [t_ref, t_ref+T)
+                    t_end = t_ref + T
+                    t_start = t_ref
+                    # but clamp to available data
+                    t_end = min(t_end, t_end_raw)
+                else:
+                    t_end = t_ref + k * T
+                    t_start = t_end - T
 
-            # Select strictly within [t_start, t_end)
-            sel = (t_raw >= t_start) & (t_raw < t_end)
-            t_win = t_raw[sel]
-            q_win = q_raw[sel]
-            p_win = p_raw[sel]
-
-            # If too few points (e.g., sparse sampling at boundary), step back by whole cycles if possible
-            while t_win.size < 2 and (t_start - T) >= t_ref:
-                t_end -= T
-                t_start -= T
+                # Select strictly within [t_start, t_end)
                 sel = (t_raw >= t_start) & (t_raw < t_end)
                 t_win = t_raw[sel]
                 q_win = q_raw[sel]
                 p_win = p_raw[sel]
 
-            # Final guard: if still <2 points, use whatever we have (last segment), but keep duration T
-            if t_win.size < 2:
-                t_win = t_raw
-                q_win = q_raw
-                p_win = p_raw
-                # redefine window origin so interpolation below is well-defined
-                t_start = float(t_win[0])
+                # If too few points (e.g., sparse sampling at boundary), step back by whole cycles if possible
+                while t_win.size < 2 and (t_start - T) >= t_ref:
+                    t_end -= T
+                    t_start -= T
+                    sel = (t_raw >= t_start) & (t_raw < t_end)
+                    t_win = t_raw[sel]
+                    q_win = q_raw[sel]
+                    p_win = p_raw[sel]
 
-            # Normalize to [0, T) for interpolation target
-            t0 = t_start
-            T_out = T
+                # Final guard: if still <2 points, use whatever we have (last segment), but keep duration T
+                if t_win.size < 2:
+                    t_win = t_raw
+                    q_win = q_raw
+                    p_win = p_raw
+                    # redefine window origin so interpolation below is well-defined
+                    t_start = float(t_win[0])
+
+                # Normalize to [0, T) for interpolation target
+                t0 = t_start
+                T_out = T
+            else:
+                # Take the last cycle_duration of data even if it is incomplete.
+                t_end = t_end_raw
+                t_start = t_end - T
+                sel = t_raw >= t_start
+                t_win = t_raw[sel]
+                q_win = q_raw[sel]
+                p_win = p_raw[sel]
+
+                if t_win.size < 2:
+                    t_win = t_raw
+                    q_win = q_raw
+                    p_win = p_raw
+                    t_start = float(t_win[0])
+
+                t0 = t_start
+                T_out = T
         else:
             # Use entire span; resample across its duration
             t0 = float(t_raw[0])

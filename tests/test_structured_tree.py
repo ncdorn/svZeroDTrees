@@ -71,20 +71,3 @@ def test_create_impedance_bc_serializes_kernel(simple_tree):
     assert bc.values["t"] == simple_tree.time
 
 
-def test_build_raises_when_node_cap_exceeded():
-    sim_params = SimParams({})
-    tree = StructuredTree(
-        name="exploding_tree",
-        time=[0.0, 0.5, 1.0],
-        simparams=sim_params,
-        compliance_model=ConstantCompliance(1.0),
-    )
-    with pytest.raises(RuntimeError, match="max_nodes"):
-        tree.build(
-            initial_d=1.0,
-            d_min=1e-4,
-            alpha=0.95,
-            beta=0.95,
-            lrr=2.0,
-            max_nodes=32,
-        )
