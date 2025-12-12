@@ -1084,7 +1084,7 @@ class SimulationDirectory:
         return optimized_resistances.tolist()  # return as a list for easier handling
 
 
-    def optimize_RRI(self, tuned_pa_config, initial_guess=None, tuning_iter=1, output_name='simplified_zerod_tuned_RRI.json', optimizer='Nelder-Mead', nm_iter: int = 1):
+    def optimize_RRI(self, tuned_pa_config, initial_guess=None, tuning_iter=1, output_name='simplified_zerod_tuned_RRI.json', optimizer='Nelder-Mead', nm_iter: int = 10):
         '''
         Optimize the stenosis coefficient, Poiseuille resistance, and inertance for the proximal LPA (vessel 1)
         and RPA (vessel 3) in the simplified PA config so that the 0D result matches the 3D target pressures/flow split.
@@ -1121,6 +1121,11 @@ class SimulationDirectory:
         }
 
         rri_config = ConfigHandler.from_json(tuned_pa_config)
+        log_path = os.path.join(self.path, "optimize_simplified_nonlinear_RRI.log")
+
+        def _append_log(message: str):
+            with open(log_path, "a") as log_file:
+                log_file.write(message + "\n")
 
         def _total_side_parameters(config):
             lpa_prox = config.vessel_map[1]
@@ -1182,18 +1187,31 @@ class SimulationDirectory:
 
             return params
 
-        def loss_function(params, targets, config, cycle_duration):
+        loss_weights = {
+            'mean': 1.0,
+            'sys': 1.0,
+            'dia': 1.0,
+            'rpa_split': 1.0,
+            'reg': 1e-12
+        }
+        penalty_growth = 5.0
+        max_penalty = 1e6
+        last_loss_breakdown = {}
+
+        def _evaluate_loss(params, targets, config, cycle_duration, weights):
             params = _apply_parameters(config, params)
             try:
                 result = pysvzerod.simulate(config.config)
             except Exception as exc:
                 print(f"pysvzerod simulation failed during RRI optimization: {exc}")
-                return 1e9
+                components = {key: np.inf for key in ['mean', 'sys', 'dia', 'rpa_split']}
+                return 1e9, components, {}
 
             mpa_result = result[result.name == 'branch0_seg0']
             mpa_result = mpa_result[mpa_result.time > mpa_result.time.max() - cycle_duration]
             if mpa_result.empty:
-                return np.inf
+                components = {key: np.inf for key in ['mean', 'sys', 'dia', 'rpa_split']}
+                return np.inf, components, {}
 
             flow = mpa_result.flow_in
             pressure = mpa_result.pressure_in
@@ -1204,18 +1222,26 @@ class SimulationDirectory:
             rpa_result = result[result.name == 'branch3_seg0']
             rpa_result = rpa_result[rpa_result.time > rpa_result.time.max() - cycle_duration]
             if rpa_result.empty:
-                return np.inf
+                components = {key: np.inf for key in ['mean', 'sys', 'dia', 'rpa_split']}
+                return np.inf, components, {}
             rpa_flow = rpa_result.flow_in
             rpa_split = np.trapz(rpa_flow, rpa_result.time) / np.trapz(flow, mpa_result.time)
 
-            lamb = 1e-12
+            components = {
+                'mean': abs((mean_pressure - targets['mean']) / targets['mean']) ** 2,
+                'sys': abs((sys_pressure - targets['sys']) / targets['sys']) ** 2,
+                'dia': abs((dia_pressure - targets['dia']) / targets['dia']) ** 2,
+                'rpa_split': abs((rpa_split - targets['rpa_split']) / targets['rpa_split']) ** 2
+            }
+
             loss = (
-                abs((mean_pressure - targets['mean']) / targets['mean']) ** 2 +
-                abs((sys_pressure - targets['sys']) / targets['sys'] * 5) ** 2 +
-                abs((dia_pressure - targets['dia']) / targets['dia']) ** 2 +
-                abs((rpa_split - targets['rpa_split']) / targets['rpa_split']) ** 2 +
-                lamb * np.dot(params, params)
+                weights['mean'] * components['mean'] +
+                weights['sys'] * components['sys'] +
+                weights['dia'] * components['dia'] +
+                weights['rpa_split'] * components['rpa_split'] +
+                weights['reg'] * np.dot(params, params)
             )
+            unweighted_loss = sum(components.values())
 
             print(
                 f"pressures: {int(sys_pressure * 100) / 100} / {int(dia_pressure * 100) / 100}/"
@@ -1223,24 +1249,60 @@ class SimulationDirectory:
                 f"{int(targets['sys'] * 100) / 100}/{int(targets['dia'] * 100) / 100}/"
                 f"{int(targets['mean'] * 100) / 100} mmHg"
             )
+            _append_log(
+                f"pressures: {sys_pressure:.4f}/{dia_pressure:.4f}/{mean_pressure:.4f} mmHg | target:"
+                f" {targets['sys']:.4f}/{targets['dia']:.4f}/{targets['mean']:.4f} mmHg"
+            )
             print(f"RPA split: {rpa_split}, target: {targets['rpa_split']}")
+            _append_log(f"RPA split: {rpa_split:.6f}, target: {targets['rpa_split']:.6f}")
             print(
                 "Current params:"
                 f" LPA = (stenosis={params[0]}, R={params[1]}, L={params[2]}),"
-                f" RPA = (stenosis={params[3]}, R={params[4]}, L={params[5]}), Loss = {loss}"
+                f" RPA = (stenosis={params[3]}, R={params[4]}, L={params[5]}), "
+                f"Loss = {loss}, Unweighted loss = {unweighted_loss}"
+            )
+            _append_log(
+                "Current params:"
+                f" LPA = (stenosis={params[0]:.6f}, R={params[1]:.6f}, L={params[2]:.6f}),"
+                f" RPA = (stenosis={params[3]:.6f}, R={params[4]:.6f}, L={params[5]:.6f}), "
+                f"Loss = {loss:.6e}, Unweighted loss = {unweighted_loss:.6e}"
             )
 
-            return loss
+            metrics = {
+                'mean_pressure': mean_pressure,
+                'sys_pressure': sys_pressure,
+                'dia_pressure': dia_pressure,
+                'rpa_split': rpa_split,
+            }
+
+            return loss, components, metrics
+
+        def loss_function(params, targets, config, cycle_duration):
+            nonlocal last_loss_breakdown
+            weighted_loss, components, metrics = _evaluate_loss(params, targets, config, cycle_duration, loss_weights)
+            unweighted_loss = sum(components.values())
+            last_loss_breakdown = {
+                'weighted_loss': weighted_loss,
+                'components': components,
+                'metrics': metrics,
+                'unweighted_loss': unweighted_loss,
+                'params': np.maximum(params, 0.0)
+            }
+            return weighted_loss
 
         print("Starting RRI optimization with initial guess:")
         print(f"  LPA -> stenosis={initial_guess[0]}, R={initial_guess[1]}, L={initial_guess[2]}")
         print(f"  RPA -> stenosis={initial_guess[3]}, R={initial_guess[4]}, L={initial_guess[5]}")
+        _append_log("Starting RRI optimization with initial guess:")
+        _append_log(f"  LPA -> stenosis={initial_guess[0]:.6f}, R={initial_guess[1]:.6f}, L={initial_guess[2]:.6f}")
+        _append_log(f"  RPA -> stenosis={initial_guess[3]:.6f}, R={initial_guess[4]:.6f}, L={initial_guess[5]:.6f}")
 
         bounds = Bounds(lb=[0.0] * len(initial_guess))
         repeats = nm_iter if optimizer == "Nelder-Mead" else 1
+        max_runs = max(1, repeats)
         x_init = initial_guess
         result = None
-        for _ in range(max(1, repeats)):
+        for run_idx in range(max_runs):
             result = minimize(
                 loss_function,
                 x_init,
@@ -1250,7 +1312,32 @@ class SimulationDirectory:
                 options={'disp': True}
             )
             x_init = result.x
-            if result.fun < 1e-5:
+            unweighted_loss = last_loss_breakdown.get('unweighted_loss', np.inf)
+            print(
+                f"Nelder-Mead run {run_idx + 1}/{max_runs} complete: "
+                f"weighted loss={result.fun}, unweighted loss={unweighted_loss}, weights={loss_weights}"
+            )
+            _append_log(
+                f"Nelder-Mead run {run_idx + 1}/{max_runs} complete: "
+                f"weighted loss={result.fun:.6e}, unweighted loss={unweighted_loss:.6e}, "
+                f"weights={loss_weights}"
+            )
+            if unweighted_loss < 1e-5:
+                break
+            if run_idx == max_runs - 1:
+                break
+
+            components = last_loss_breakdown.get('components', {})
+            for key in ['mean', 'sys', 'dia', 'rpa_split']:
+                residual = components.get(key, np.inf)
+                if not np.isfinite(residual):
+                    continue
+                updated_weight = loss_weights[key] * (1.0 + penalty_growth * residual)
+                loss_weights[key] = min(updated_weight, max_penalty)
+
+            print(f"Updated loss weights for next run: {loss_weights}")
+            _append_log(f"Updated loss weights for next run: {loss_weights}")
+            if not np.isfinite(unweighted_loss):
                 break
 
         optimized_params = np.maximum(result.x, 0.0)
@@ -1259,6 +1346,12 @@ class SimulationDirectory:
             "Optimized parameters:"
             f" LPA = (stenosis={optimized_params[0]}, R={optimized_params[1]}, L={optimized_params[2]}),"
             f" RPA = (stenosis={optimized_params[3]}, R={optimized_params[4]}, L={optimized_params[5]})"
+        )
+        _append_log("RRI optimization complete.")
+        _append_log(
+            "Optimized parameters:"
+            f" LPA = (stenosis={optimized_params[0]:.6f}, R={optimized_params[1]:.6f}, L={optimized_params[2]:.6f}),"
+            f" RPA = (stenosis={optimized_params[3]:.6f}, R={optimized_params[4]:.6f}, L={optimized_params[5]:.6f})"
         )
 
         _apply_parameters(rri_config, optimized_params)
