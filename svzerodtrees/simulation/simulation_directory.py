@@ -1308,7 +1308,7 @@ class SimulationDirectory:
                 f"weighted loss={result.fun}, unweighted loss={unweighted_loss}, weights={loss_weights}"
             )
             _append_log(
-                f"Nelder-Mead run {run_idx + 1}/{max_runs} complete: "
+                f"\nNelder-Mead run {run_idx + 1}/{max_runs} complete: "
                 f"weighted loss={result.fun:.6e}, unweighted loss={unweighted_loss:.6e}, "
                 f"weights={loss_weights}, "
                 f"pressures={metrics.get('sys_pressure', np.nan):.6f}/"
@@ -1316,7 +1316,7 @@ class SimulationDirectory:
                 f"{metrics.get('mean_pressure', np.nan):.6f} mmHg, "
                 f"pressure_targets={targets['sys']:.6f}/{targets['dia']:.6f}/{targets['mean']:.6f} mmHg, "
                 f"rpa_split={metrics.get('rpa_split', np.nan):.6f}, "
-                f"rpa_split_target={targets['rpa_split']:.6f}"
+                f"rpa_split_target={targets['rpa_split']:.6f}\n"
             )
             if unweighted_loss < 1e-5:
                 break
