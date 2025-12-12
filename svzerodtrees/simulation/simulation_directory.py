@@ -1249,23 +1249,12 @@ class SimulationDirectory:
                 f"{int(targets['sys'] * 100) / 100}/{int(targets['dia'] * 100) / 100}/"
                 f"{int(targets['mean'] * 100) / 100} mmHg"
             )
-            _append_log(
-                f"pressures: {sys_pressure:.4f}/{dia_pressure:.4f}/{mean_pressure:.4f} mmHg | target:"
-                f" {targets['sys']:.4f}/{targets['dia']:.4f}/{targets['mean']:.4f} mmHg"
-            )
             print(f"RPA split: {rpa_split}, target: {targets['rpa_split']}")
-            _append_log(f"RPA split: {rpa_split:.6f}, target: {targets['rpa_split']:.6f}")
             print(
                 "Current params:"
                 f" LPA = (stenosis={params[0]}, R={params[1]}, L={params[2]}),"
                 f" RPA = (stenosis={params[3]}, R={params[4]}, L={params[5]}), "
                 f"Loss = {loss}, Unweighted loss = {unweighted_loss}"
-            )
-            _append_log(
-                "Current params:"
-                f" LPA = (stenosis={params[0]:.6f}, R={params[1]:.6f}, L={params[2]:.6f}),"
-                f" RPA = (stenosis={params[3]:.6f}, R={params[4]:.6f}, L={params[5]:.6f}), "
-                f"Loss = {loss:.6e}, Unweighted loss = {unweighted_loss:.6e}"
             )
 
             metrics = {
@@ -1313,6 +1302,7 @@ class SimulationDirectory:
             )
             x_init = result.x
             unweighted_loss = last_loss_breakdown.get('unweighted_loss', np.inf)
+            metrics = last_loss_breakdown.get('metrics', {})
             print(
                 f"Nelder-Mead run {run_idx + 1}/{max_runs} complete: "
                 f"weighted loss={result.fun}, unweighted loss={unweighted_loss}, weights={loss_weights}"
@@ -1320,7 +1310,13 @@ class SimulationDirectory:
             _append_log(
                 f"Nelder-Mead run {run_idx + 1}/{max_runs} complete: "
                 f"weighted loss={result.fun:.6e}, unweighted loss={unweighted_loss:.6e}, "
-                f"weights={loss_weights}"
+                f"weights={loss_weights}, "
+                f"pressures={metrics.get('sys_pressure', np.nan):.6f}/"
+                f"{metrics.get('dia_pressure', np.nan):.6f}/"
+                f"{metrics.get('mean_pressure', np.nan):.6f} mmHg, "
+                f"pressure_targets={targets['sys']:.6f}/{targets['dia']:.6f}/{targets['mean']:.6f} mmHg, "
+                f"rpa_split={metrics.get('rpa_split', np.nan):.6f}, "
+                f"rpa_split_target={targets['rpa_split']:.6f}"
             )
             if unweighted_loss < 1e-5:
                 break
