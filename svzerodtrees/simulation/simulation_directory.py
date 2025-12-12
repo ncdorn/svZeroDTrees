@@ -1211,7 +1211,7 @@ class SimulationDirectory:
             lamb = 1e-12
             loss = (
                 abs((mean_pressure - targets['mean']) / targets['mean']) ** 2 +
-                abs((sys_pressure - targets['sys']) / targets['sys'] * 1.2) ** 2 +
+                abs((sys_pressure - targets['sys']) / targets['sys'] * 2) ** 2 +
                 abs((dia_pressure - targets['dia']) / targets['dia']) ** 2 +
                 abs((rpa_split - targets['rpa_split']) / targets['rpa_split']) ** 2 +
                 lamb * np.dot(params, params)
