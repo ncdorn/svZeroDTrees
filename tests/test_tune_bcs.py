@@ -325,8 +325,13 @@ def test_impedance_tuner_loss_fn_computes_weighted_loss():
 
     params = tune_space.vector_to_param_dict(x0)
     diff = np.abs(np.array(pa_config.P_mpa) - np.array(clinical_targets.mpa_p)) / clinical_targets.mpa_p
-    weights = np.array([1.5, 1.0, 1.2])
-    pressure_loss = (np.dot(diff, weights)) ** 2 * 100.0
+    pressure_components = diff ** 2
+    weights = {"sys": 1.5, "dia": 1.0, "mean": 1.2}
+    pressure_loss = (
+        weights["sys"] * pressure_components[0] +
+        weights["dia"] * pressure_components[1] +
+        weights["mean"] * pressure_components[2]
+    ) * 100.0
     flowsplit_loss = ((pa_config.rpa_split - clinical_targets.rpa_split) / clinical_targets.rpa_split) ** 2 * 100.0
     l2 = 1e-5 * (params["comp.lpa.C"] ** 2 + params["comp.rpa.C"] ** 2)
     expected = pressure_loss + flowsplit_loss + l2

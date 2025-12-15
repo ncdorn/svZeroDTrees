@@ -203,7 +203,9 @@ class ImpedanceTuner(BoundaryConditionTuner):
         # augmented Lagrangian-style weight updating
         self._augmented_mode = True
         self._loss_weights = {
-            "pressure": 1.0,
+            "sys": 1.0,
+            "dia": 1.0,
+            "mean": 1.0,
             "flow": 1.0,
             "reg": 1.0,
         }
@@ -245,7 +247,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 break
 
             components = self._last_loss_breakdown.get("components", {})
-            for key in ["pressure", "flow"]:
+            for key in ["sys", "dia", "mean", "flow"]:
                 residual = components.get(key, np.inf)
                 if not np.isfinite(residual):
                     continue
@@ -283,9 +285,28 @@ class ImpedanceTuner(BoundaryConditionTuner):
             print(f"[loss_fn] simulation error: {e} params={params}")
             return 1e9
 
-        # ---- Loss: weighted MPA pressure + flow split + mild L2 on compliance ----
-        weights = np.array([1.5, 1.0, 1.2]) if (self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p) else np.array([1.0, 0.0, 1.0])
-        pressure_loss = np.sum(np.dot(np.abs(np.array(pa_config.P_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p, weights))**2 * 100.0
+        # ---- Loss: weighted MPA pressure (sys/dia/mean separately) + flow split + mild L2 on compliance ----
+        pressure_weights = (
+            {"sys": 1.5, "dia": 1.0, "mean": 1.2}
+            if (self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p)
+            else {"sys": 1.0, "dia": 0.0, "mean": 1.0}
+        )
+        pressure_diff = np.abs(np.array(pa_config.P_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p
+        pressure_components = {
+            "sys": pressure_diff[0] ** 2,
+            "dia": pressure_diff[1] ** 2,
+            "mean": pressure_diff[2] ** 2,
+        }
+        pressure_contrib = {
+            "sys": pressure_weights["sys"] * pressure_components["sys"] * 100.0,
+            "dia": pressure_weights["dia"] * pressure_components["dia"] * 100.0,
+            "mean": pressure_weights["mean"] * pressure_components["mean"] * 100.0,
+        }
+        pressure_loss = (
+            pressure_contrib["sys"] +
+            pressure_contrib["dia"] +
+            pressure_contrib["mean"]
+        )
         flowsplit_loss = ((pa_config.rpa_split - self.clinical_targets.rpa_split) / self.clinical_targets.rpa_split)**2 * 100.0
 
         if self.compliance_model == "olufsen":
@@ -294,9 +315,11 @@ class ImpedanceTuner(BoundaryConditionTuner):
             l2 = 1e-5 * (params["comp.lpa.C"]**2 + params["comp.rpa.C"]**2)
 
         base_total = float(pressure_loss + flowsplit_loss + l2)
-        loss_weights = self._loss_weights or {"pressure": 1.0, "flow": 1.0, "reg": 1.0}
+        loss_weights = self._loss_weights or {"sys": 1.0, "dia": 1.0, "mean": 1.0, "flow": 1.0, "reg": 1.0}
         weighted_total = (
-            loss_weights.get("pressure", 1.0) * pressure_loss +
+            loss_weights.get("sys", 1.0) * pressure_contrib["sys"] +
+            loss_weights.get("dia", 1.0) * pressure_contrib["dia"] +
+            loss_weights.get("mean", 1.0) * pressure_contrib["mean"] +
             loss_weights.get("flow", 1.0) * flowsplit_loss +
             loss_weights.get("reg", 1.0) * l2
         )
@@ -307,7 +330,9 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 "weighted_loss": weighted_total,
                 "unweighted_loss": unweighted_loss,
                 "components": {
-                    "pressure": pressure_loss,
+                    "sys": pressure_contrib["sys"],
+                    "dia": pressure_contrib["dia"],
+                    "mean": pressure_contrib["mean"],
                     "flow": flowsplit_loss,
                     "reg": l2,
                 },
