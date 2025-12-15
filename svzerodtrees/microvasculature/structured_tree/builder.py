@@ -13,7 +13,7 @@ def build_tree_soa(initial_d: float,
                     eta: float,
                     compliance_model,
                     name: str,
-                    max_nodes: int = 500_000) -> StructuredTreeStorage:
+                    max_nodes: int = 100_000) -> StructuredTreeStorage:
         # Upper bound on nodes (loose): worst case full binary until collapse.
         # We grow python lists (amortized O(1)) and pack once.
 
