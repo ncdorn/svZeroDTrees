@@ -82,7 +82,7 @@ class Simulation:
                 'nodes': 3,
                 'procs_per_node': 24,
                 'memory': 16,
-                'hours': 16
+                'hours': 20
             }
 
         ## Bools
