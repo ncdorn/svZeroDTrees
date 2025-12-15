@@ -247,11 +247,14 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 break
 
             components = self._last_loss_breakdown.get("components", {})
+            finite_components = {k: v for k, v in components.items() if np.isfinite(v)}
+            total_residual = sum(finite_components.values()) if finite_components else 0.0
             for key in ["sys", "dia", "mean", "flow"]:
                 residual = components.get(key, np.inf)
-                if not np.isfinite(residual):
+                if not np.isfinite(residual) or total_residual <= 0.0:
                     continue
-                updated_weight = self._loss_weights[key] * (1.0 + penalty_growth * residual)
+                share = residual / total_residual
+                updated_weight = self._loss_weights[key] * (1.0 + penalty_growth * share)
                 self._loss_weights[key] = min(updated_weight, max_penalty)
 
             print(f"Updated loss weights for next run: {self._loss_weights}")
