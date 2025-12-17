@@ -51,6 +51,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self._augmented_mode = False
         self._loss_weights = None
         self._last_loss_breakdown = {}
+        self._opt_csv_path = None
 
 
     # ---- Internal helpers ---- #
@@ -176,6 +177,9 @@ class ImpedanceTuner(BoundaryConditionTuner):
             else:
                 base_dir = os.getcwd()
             self.log_file = os.path.join(base_dir, "impedance_tuning.log")
+        else:
+            base_dir = os.path.dirname(os.path.abspath(self.log_file))
+        self._opt_csv_path = os.path.join(base_dir, "optimized_params.csv")
 
         def _append_log(msg: str):
             with open(self.log_file, "a") as lf:
@@ -200,6 +204,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
         max_runs = max(1, repeats)
         x_init = x0
         result = None
+        best_x = None
+        best_unweighted_loss = np.inf
         # augmented Lagrangian-style weight updating
         self._augmented_mode = True
         self._loss_weights = {
@@ -221,9 +227,17 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 bounds=bounds if self.solver in ("Nelder-Mead", "L-BFGS-B", "Powell", "TNC", "SLSQP", "trust-constr") else None,
                 options={"maxiter": self.maxiter}
             )
-            x_init = result.x
             unweighted_loss = self._last_loss_breakdown.get("unweighted_loss", np.inf)
             metrics = self._last_loss_breakdown.get("metrics", {})
+            accepted = True
+            if best_x is None:
+                best_x = result.x
+                best_unweighted_loss = unweighted_loss
+            elif unweighted_loss > best_unweighted_loss:
+                accepted = False
+            else:
+                best_x = result.x
+                best_unweighted_loss = unweighted_loss
             print(
                 f"Nelder-Mead run {run_idx + 1}/{max_runs} complete: "
                 f"weighted loss={result.fun}, unweighted loss={unweighted_loss}, weights={self._loss_weights}"
@@ -241,6 +255,15 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 f"rpa_split={metrics.get('rpa_split', np.nan):.6f}, "
                 f"rpa_split_target={self.clinical_targets.rpa_split:.6f}"
             )
+            if accepted:
+                x_init = result.x
+                self.loss_fn(result.x, pa_config, finalize=True)
+            else:
+                x_init = best_x
+                _append_log(
+                    "Nelder-Mead run rejected: "
+                    f"unweighted loss {unweighted_loss:.6e} exceeded previous {best_unweighted_loss:.6e}"
+                )
             if unweighted_loss < 1e-5:
                 break
             if run_idx == max_runs - 1:
@@ -262,9 +285,9 @@ class ImpedanceTuner(BoundaryConditionTuner):
             if not np.isfinite(unweighted_loss):
                 break
 
-        print(f"[ImpedanceTuner] Optimized: {result.x}  f={result.fun:.3f}")
+        print(f"[ImpedanceTuner] Optimized: {best_x}  f={best_unweighted_loss:.3f}")
         # final simulate & plot
-        _ = self.loss_fn(result.x, pa_config, finalize=True)
+        _ = self.loss_fn(best_x, pa_config, finalize=True)
         pa_config.plot_mpa()
         return result
     
@@ -356,7 +379,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 rpa_params.to_csv_row(loss=final_loss, flow_split=pa_config.rpa_split, p_mpa=pa_config.P_mpa)
             ]
             keys = sorted({k for r in rows for k in r})
-            with open("optimized_params.csv", "w", newline="") as f:
+            csv_path = self._opt_csv_path or "optimized_params.csv"
+            with open(csv_path, "w", newline="") as f:
                 w = csv.DictWriter(f, fieldnames=keys); w.writeheader(); w.writerows(rows)
 
         return weighted_total if self._augmented_mode else base_total
