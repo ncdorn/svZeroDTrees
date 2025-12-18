@@ -1119,9 +1119,14 @@ class StructuredTree:
         return r_final.x[0], R_final
 
 
-    def create_bcs(self):
-        ''''
-        create the inflow and distal pressure BCs. This function will prepare a block_dict to be run by svzerodplus
+    def create_bcs(self,
+                   distal_bc_type: Literal["PRESSURE", "RESISTANCE"] = "PRESSURE",
+                   distal_resistance: Optional[float] = None):
+        '''
+        create the inflow BC and distal BCs (pressure or resistance). This function will prepare a block_dict to be run by svzerodplus.
+
+        :param distal_bc_type: distal BC type to apply at every outlet ("PRESSURE" or "RESISTANCE")
+        :param distal_resistance: explicit resistance to use when distal_bc_type == "RESISTANCE" (defaults to equivalent tree resistance)
         '''
         self.block_dict["boundary_conditions"] = [] # erase the previous boundary conditions
         timesteps = len(self.Q_in) # identify the number of timesteps in the flow boundary condition
@@ -1137,19 +1142,35 @@ class StructuredTree:
                 },
         )
 
+        bc_kind = distal_bc_type.upper()
+        if bc_kind not in ("PRESSURE", "RESISTANCE"):
+            raise ValueError(f"Unsupported distal_bc_type '{distal_bc_type}'. Use 'PRESSURE' or 'RESISTANCE'.")
+
         for vessel_config in self.block_dict["vessels"]:
             if "boundary_conditions" in vessel_config:
                 if "outlet" in vessel_config["boundary_conditions"]:
-                    self.block_dict["boundary_conditions"].append(
-                        {
-                        "bc_name": "P_d" + str(vessel_config["vessel_id"]),
-                        "bc_type": "PRESSURE",
-                        "bc_values": {
-                            "P": [self.Pd,] * 2,
-                            "t": [0.0, 1.0]
+                    vessel_id = str(vessel_config["vessel_id"])
+                    if bc_kind == "PRESSURE":
+                        bc_entry = {
+                            "bc_name": "P_d" + vessel_id,
+                            "bc_type": "PRESSURE",
+                            "bc_values": {
+                                "P": [self.Pd,] * 2,
+                                "t": [0.0, 1.0]
                             }
                         }
-                    )
+                    else:
+                        R_val = distal_resistance if distal_resistance is not None else self.equivalent_resistance()
+                        bc_entry = {
+                            "bc_name": "R_d" + vessel_id,
+                            "bc_type": "RESISTANCE",
+                            "bc_values": {
+                                "R": float(R_val),
+                                "Pd": self.Pd
+                            }
+                        }
+
+                    self.block_dict["boundary_conditions"].append(bc_entry)
 
 
     def count_vessels(self):
@@ -1200,7 +1221,9 @@ class StructuredTree:
                  Pd: float = 1.0,
                  number_of_cardiac_cycles=1,
                  number_of_time_pts_per_cardiac_cycle = 100,
-                 json_path=None
+                 json_path=None,
+                 distal_bc_type: Literal["PRESSURE", "RESISTANCE"] = "PRESSURE",
+                 distal_resistance: Optional[float] = None
                  ):
         '''
         simulate the structured tree
@@ -1212,6 +1235,8 @@ class StructuredTree:
         :param number_of_cardiac_cycles: number of cardiac cycles to simulate
         :param number_of_time_pts_per_cardiac_cycle: number of time points per cardiac cycle
         :param viscosity: viscosity of the blood [g/cm/s]
+        :param distal_bc_type: distal BC type to apply ("PRESSURE" or "RESISTANCE")
+        :param distal_resistance: optional fixed resistance when distal_bc_type == "RESISTANCE"
 
         :return result: result dictionary from svzerodsolver
         '''
@@ -1236,7 +1261,7 @@ class StructuredTree:
         self.Pd = Pd
         
         # create solver config from StructuredTree and get tree flow result
-        self.create_bcs()
+        self.create_bcs(distal_bc_type=distal_bc_type, distal_resistance=distal_resistance)
 
         # result = run_svzerodplus(self.block_dict)
 
