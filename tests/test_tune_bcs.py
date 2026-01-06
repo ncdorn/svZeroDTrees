@@ -240,7 +240,7 @@ def test_pa_config_simulate_runs_with_impedance_trees(monkeypatch):
         def compute_olufsen_impedance(self, n_procs=1):
             self._n_procs = n_procs
 
-        def create_impedance_bc(self, bc_name, outlet_id, pd, inductance=0.0):
+        def create_impedance_bc(self, bc_name, outlet_id, pd):
             return BoundaryCondition.from_config(
                 {
                     "bc_name": bc_name,
@@ -249,7 +249,6 @@ def test_pa_config_simulate_runs_with_impedance_trees(monkeypatch):
                         "Z": [100.0],
                         "t": [0.0, 1.0],
                         "Pd": pd,
-                        "L": inductance,
                     },
                 }
             )
@@ -347,7 +346,7 @@ def test_impedance_tuning_with_inductance_builds_valid_threed_config(monkeypatch
         def compute_olufsen_impedance(self, n_procs=1):
             self._n_procs = n_procs
 
-        def create_impedance_bc(self, bc_name, outlet_id, pd, inductance=0.0):
+        def create_impedance_bc(self, bc_name, outlet_id, pd):
             return BoundaryCondition.from_config(
                 {
                     "bc_name": bc_name,
@@ -355,7 +354,7 @@ def test_impedance_tuning_with_inductance_builds_valid_threed_config(monkeypatch
                     "bc_values": {
                         "Z": [100.0],
                         "t": [0.0, 1.0],
-                        "Pd": pd
+                        "Pd": pd,
                     },
                 }
             )

@@ -19,6 +19,7 @@ class ConfigHandler():
         self._config = config
 
         self.tree_params = {} # list of StructuredTree params
+        self.bc_inductance = {} # map bc name -> inductance for 3D coupling
 
         # initialize config maps
         self.branch_map = {} # {branch id: Vessel instance}
@@ -441,6 +442,10 @@ class ConfigHandler():
                 self.branch_map[br] = Vessel.from_config(vessel_config)
             else: 
                 self.branch_map[br].add_segment(vessel_config)
+            if "boundary_conditions" in vessel_config:
+                outlet_name = vessel_config["boundary_conditions"].get("outlet")
+                if outlet_name:
+                    self.bc_inductance[outlet_name] = vessel_config["zero_d_element_values"].get("L", 0.0)
         
         # initialize the junction map (dict of junctions)
         for junction_config in self._config['junctions']:
@@ -729,7 +734,7 @@ class ConfigHandler():
                 surface = list(mesh_complete.mesh_surfaces.values())[bc_count + self.n_inflows].filename
                 inductance = 0.0
                 if include_distal_vessel and bc.type == "IMPEDANCE":
-                    inductance = float(bc.values.get("L", 0.0) or 0.0)
+                    inductance = float(self.bc_inductance.get(bc.name, 0.0) or 0.0)
 
                 if inductance != 0.0:
                     vessel_name = f"branch{next_vessel_id}_seg0"

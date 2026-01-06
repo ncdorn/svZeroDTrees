@@ -679,7 +679,7 @@ class StructuredTree:
         return self.Z_t, self.time
 
 
-    def create_impedance_bc(self, name, tree_id, Pd: float = 0.0, inductance: float = 0.0):
+    def create_impedance_bc(self, name, tree_id, Pd: float = 0.0):
         '''
         create an impedance BC object
         
@@ -697,7 +697,6 @@ class StructuredTree:
                 "Z": self.Z_t.tolist(),
                 "t": self.time,
                 "Pd": Pd,
-                "L": float(inductance),
             }
         })
 

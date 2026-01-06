@@ -47,6 +47,8 @@ def construct_impedance_trees(config_handler,
             del config_handler.bcs[name]
         outlet_bc_names = [f'IMPEDANCE_{i}' for i in range(len(cap_info))]
     cap_to_bc = {list(cap_info.keys())[i]: outlet_bc_names[i] for i in range(len(outlet_bc_names))}
+    if not hasattr(config_handler, "bc_inductance"):
+        config_handler.bc_inductance = {}
 
     if use_mean:
         '''use the mean diameter of the cap surfaces to construct the lpa and rpa trees and use these trees for all outlets'''
@@ -114,15 +116,15 @@ def construct_impedance_trees(config_handler,
                     cap_to_bc[cap_name],
                     0,
                     wedge_pressure * 1333.2,
-                    inductance=lpa_params.inductance,
                 )
+                config_handler.bc_inductance[cap_to_bc[cap_name]] = lpa_params.inductance
             elif 'rpa' in cap_name.lower():
                 config_handler.bcs[cap_to_bc[cap_name]] = rpa_tree.create_impedance_bc(
                     cap_to_bc[cap_name],
                     1,
                     wedge_pressure * 1333.2,
-                    inductance=rpa_params.inductance,
                 )
+                config_handler.bc_inductance[cap_to_bc[cap_name]] = rpa_params.inductance
             else:
                 raise ValueError('cap name not recognized')
             
@@ -165,8 +167,8 @@ def construct_impedance_trees(config_handler,
                 bc_name,
                 idx,
                 wedge_pressure * 1333.2,
-                inductance=params.inductance,
             )
+            config_handler.bc_inductance[bc_name] = params.inductance
 
 
 def assign_rcr_bcs(config_handler, 

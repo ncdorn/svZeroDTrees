@@ -265,7 +265,6 @@ class PAConfig():
             "LPA_BC",
             0,
             self.clinical_targets.wedge_p * 1333.2,
-            inductance=lpa_params.inductance,
         )
 
         self.rpa_tree = StructuredTree(name='rpa_tree', 
@@ -286,7 +285,6 @@ class PAConfig():
             "RPA_BC",
             1,
             self.clinical_targets.wedge_p * 1333.2,
-            inductance=rpa_params.inductance,
         )
 
 

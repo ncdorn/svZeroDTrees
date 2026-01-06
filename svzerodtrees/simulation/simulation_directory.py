@@ -1422,7 +1422,11 @@ class SimulationDirectory:
 
                     bc_name = f'IMPEDANCE_{bc_idx}'
 
-                    self.svzerod_3Dcoupling.bcs[bc_name] = tree.create_impedance_bc(bc_name, wedge_p * 1333.2)
+                    self.svzerod_3Dcoupling.bcs[bc_name] = tree.create_impedance_bc(
+                        bc_name,
+                        bc_idx,
+                        wedge_p * 1333.2,
+                    )
 
                     bc_idx += 1
 
