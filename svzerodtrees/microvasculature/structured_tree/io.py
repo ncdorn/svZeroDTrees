@@ -50,7 +50,7 @@ def to_block_dict(store: StructuredTreeStorage) -> dict:
     # C' (per unit length) = 3*A/(2*(Eh/r))  → C_total = C' * L
     C_total = (3.0 * A / (2.0 * Eh_over_r_)) * L_v
 
-    # Inertance (inductance) of the segment: L = ρ * L / A
+    # Inductance of the segment: L = ρ * L / A
     L_inert = rho * L_v / A_
 
     # Clean up any residual inf/nan caused by extreme inputs

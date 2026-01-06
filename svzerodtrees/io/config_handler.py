@@ -534,7 +534,15 @@ class ConfigHandler():
             self.coupling_blocks = {}
             for coupling_block in self._config["external_solver_coupling_blocks"]:
                 # create a mapping from connected block name to coupling block
-                self.coupling_blocks[coupling_block['connected_block']] = CouplingBlock.from_config(coupling_block)
+                block = CouplingBlock.from_config(coupling_block)
+                connected_block = coupling_block['connected_block']
+                self.coupling_blocks[connected_block] = block
+                for vessel in self.vessel_map.values():
+                    if vessel.name == connected_block and vessel.bc and "outlet" in vessel.bc:
+                        outlet_name = vessel.bc["outlet"]
+                        if outlet_name not in self.coupling_blocks:
+                            self.coupling_blocks[outlet_name] = block
+                        break
 
         self.assemble_config()
 
@@ -618,13 +626,14 @@ class ConfigHandler():
             return [self.vessel_map[id].to_dict() for id in self.branch_map[branch].ids]
 
 
-    def  generate_threed_coupler(self, simdir, inflow_from_0d=True, mesh_complete=None):
+    def  generate_threed_coupler(self, simdir, inflow_from_0d=True, mesh_complete=None, include_distal_vessel=False):
         '''
         create a 3D-0D coupling blocks config from the boundary conditions and save it to a json
 
         :param simdir: directory to save the json to
         :param inflow_from_0d: bool to indicate if the inflow is from the 0D model
         :param mesh_complete: MeshComplete object
+        :param include_distal_vessel: bool to add an inductance-only vessel before impedance BCs
 
         :return coupling_block_list: list of coupling block names
         '''
@@ -714,10 +723,50 @@ class ConfigHandler():
         print(f"threed coupler vessel map: {threed_coupler.vessel_map}")
         # create the coupling blocks
         bc_count = 0
+        next_vessel_id = max(threed_coupler.vessel_map.keys(), default=-1) + 1
         for i, bc in enumerate(threed_coupler.bcs.values()):
             if 'inflow' not in bc.name.lower():
-                block_name = bc.name.replace('_', '')
-                threed_coupler.coupling_blocks[bc.name] = CouplingBlock.from_bc(bc, surface=list(mesh_complete.mesh_surfaces.values())[bc_count + self.n_inflows].filename)
+                surface = list(mesh_complete.mesh_surfaces.values())[bc_count + self.n_inflows].filename
+                inductance = 0.0
+                if include_distal_vessel and bc.type == "IMPEDANCE":
+                    inductance = float(bc.values.get("L", 0.0) or 0.0)
+
+                if inductance != 0.0:
+                    vessel_name = f"branch{next_vessel_id}_seg0"
+                    threed_coupler.vessel_map[next_vessel_id] = Vessel.from_config(
+                        {
+                            "boundary_conditions": {
+                                "outlet": bc.name
+                            },
+                            "vessel_id": next_vessel_id,
+                            "vessel_length": 10.0,
+                            "vessel_name": vessel_name,
+                            "zero_d_element_type": "BloodVessel",
+                            "zero_d_element_values": {
+                                "C": 0.0,
+                                "L": inductance,
+                                "R_poiseuille": 0.0,
+                                "stenosis_coefficient": 0.0
+                            }
+                        }
+                    )
+                    threed_coupler.coupling_blocks[bc.name] = CouplingBlock(
+                        {
+                            "name": bc.name.replace('_', ''),
+                            "type": "FLOW",
+                            "location": "inlet",
+                            "connected_block": vessel_name,
+                            "periodic": False,
+                            "values": {
+                                "t": [0.0, 1.0],
+                                "Q": [1.0, 1.0]
+                            },
+                            "surface": surface
+                        }
+                    )
+                    next_vessel_id += 1
+                else:
+                    threed_coupler.coupling_blocks[bc.name] = CouplingBlock.from_bc(bc, surface=surface)
                 bc_count += 1
 
         # copy the trees over
@@ -747,5 +796,3 @@ class ConfigHandler():
     def config(self):
         self.assemble_config()
         return self._config
-
-

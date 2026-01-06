@@ -572,7 +572,7 @@ class SimulationDirectory:
             # compute nonlinear resistance coefficient by fitting resistance vs flows
             lpa_flows = np.array([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], dtype=float)
             lpa_res_vals = np.array([lpa_resistance["sys"], lpa_resistance["dia"], lpa_resistance["mean"]], dtype=float)
-            rpa_flows = np.array([Q_sys_lpa, Q_dia_rpa, Q_mean_rpa], dtype=float)
+            rpa_flows = np.array([Q_sys_rpa, Q_dia_rpa, Q_mean_rpa], dtype=float)
             rpa_res_vals = np.array([rpa_resistance["sys"], rpa_resistance["dia"], rpa_resistance["mean"]], dtype=float)
 
             S_lpa = np.polyfit(lpa_flows, lpa_res_vals, 1)
@@ -1086,7 +1086,7 @@ class SimulationDirectory:
 
     def optimize_RRI(self, tuned_pa_config, initial_guess=None, tuning_iter=1, output_name='simplified_zerod_tuned_RRI.json', optimizer='Nelder-Mead', nm_iter: int = 10):
         '''
-        Optimize the stenosis coefficient, Poiseuille resistance, and inertance for the proximal LPA (vessel 1)
+        Optimize the stenosis coefficient, Poiseuille resistance, and inductance for the proximal LPA (vessel 1)
         and RPA (vessel 3) in the simplified PA config so that the 0D result matches the 3D target pressures/flow split.
         Vessels 2 and 4 are forced to zero to isolate the proximal tuning.
         '''
@@ -1374,9 +1374,12 @@ class SimulationDirectory:
         if self.zerod_config is not None:
             construct_impedance_trees(self.zerod_config, self.mesh_complete.mesh_surfaces_dir, wedge_pressure=wedge_p, d_min=d_min, convert_to_cm=self.convert_to_cm)
 
-            self.svzerod_3Dcoupling, coupling_blocks = self.zerod_config.generate_threed_coupler(self.path, 
-                                                                                                inflow_from_0d=True, 
-                                                                                                mesh_complete=self.mesh_complete)
+            self.svzerod_3Dcoupling, coupling_blocks = self.zerod_config.generate_threed_coupler(
+                self.path,
+                inflow_from_0d=True,
+                mesh_complete=self.mesh_complete,
+                include_distal_vessel=True,
+            )
         else:
             # we will need to create the svzerod_3Dcoupling.json file from scratch and choose the inflows
             # self.svzerod_3Dcoupling is a blank config at this point and bc's corresponding to each surface will need to be added
@@ -1424,7 +1427,12 @@ class SimulationDirectory:
                     bc_idx += 1
 
             self.svzerod_3Dcoupling.to_json('blank_edited_config.json')
-            self.svzerod_3Dcoupling, coupling_blocks = self.svzerod_3Dcoupling.generate_threed_coupler(self.path, inflow_from_0d=True, mesh_complete=self.mesh_complete)
+            self.svzerod_3Dcoupling, coupling_blocks = self.svzerod_3Dcoupling.generate_threed_coupler(
+                self.path,
+                inflow_from_0d=True,
+                mesh_complete=self.mesh_complete,
+                include_distal_vessel=True,
+            )
 
     def flow_split(self, get_mean=False, verbose=True):
         '''

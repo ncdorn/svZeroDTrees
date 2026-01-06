@@ -249,7 +249,11 @@ class Simulation:
                 # ensure inflow is the correct magnitude and resolution for 3D coupling
                 self._sync_config_inflow(self.zerod_config, self.zerod_config_path, inflow=self.inflow_3d)
 
-            impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(self.preop_dir.path, mesh_complete=self.preop_dir.mesh_complete)
+            impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(
+                self.preop_dir.path,
+                mesh_complete=self.preop_dir.mesh_complete,
+                include_distal_vessel=True,
+            )
 
             self.zerod_config.to_json(self.zerod_config_path)
             # run preop + postop simulations

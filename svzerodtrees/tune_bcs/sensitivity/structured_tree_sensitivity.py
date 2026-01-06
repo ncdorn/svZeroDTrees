@@ -698,6 +698,7 @@ def _make_tree_params(
     alpha: float,
     beta: float,
     compliance_model: ComplianceModel,
+    inductance: float = 0.0,
 ) -> TreeParameters:
     if isinstance(compliance_model, OlufsenCompliance):
         k_params = (
@@ -719,6 +720,7 @@ def _make_tree_params(
         k1=k_params[0],
         k2=k_params[1],
         k3=k_params[2],
+        inductance=inductance,
     )
 
 
@@ -735,6 +737,7 @@ def _clone_tree_params(params: TreeParameters) -> TreeParameters:
         k1=params.k1,
         k2=params.k2,
         k3=params.k3,
+        inductance=params.inductance,
     )
     return clone
 

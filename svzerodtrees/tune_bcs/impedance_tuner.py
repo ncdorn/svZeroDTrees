@@ -120,16 +120,20 @@ class ImpedanceTuner(BoundaryConditionTuner):
             eta_sym=params.get("rpa.eta_sym"),
         )
         d_min   = params.get("d_min", 0.01)
+        lpa_inductance = params.get("lpa.inductance", 0.0)
+        rpa_inductance = params.get("rpa.inductance", 0.0)
 
         lpa_comp = self._build_compliance("lpa", params)
         rpa_comp = self._build_compliance("rpa", params)
 
         lpa_params = TreeParameters(name="lpa", lrr=lrr, diameter=lpa_d, d_min=d_min,
                                     alpha=alpha_l, beta=beta_l, compliance_model=lpa_comp,
-                                    xi=params.get("lpa.xi"), eta_sym=params.get("lpa.eta_sym"))
+                                    xi=params.get("lpa.xi"), eta_sym=params.get("lpa.eta_sym"),
+                                    inductance=lpa_inductance)
         rpa_params = TreeParameters(name="rpa", lrr=lrr, diameter=rpa_d, d_min=d_min,
                                     alpha=alpha_r, beta=beta_r, compliance_model=rpa_comp,
-                                    xi=params.get("rpa.xi"), eta_sym=params.get("rpa.eta_sym"))
+                                    xi=params.get("rpa.xi"), eta_sym=params.get("rpa.eta_sym"),
+                                    inductance=rpa_inductance)
         return lpa_params, rpa_params
     
     def _grid_search_init(self, pa_config, x0: np.ndarray) -> np.ndarray:

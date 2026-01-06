@@ -44,7 +44,7 @@ class TreeVessel:
         # Compliance model
         self.compliance_model = compliance_model or ConstantCompliance(1e5)  # dyn/cm²
         # self.C = 3 * self.a / 2 / self.compliance_model.evaluate(self._r)  # update compliance based on initial radius
-        # self.L = self.density * self.l / self.a  # inertance
+        # self.L = self.density * self.l / self.a  # inductance
 
 
         # Adaptation parameters

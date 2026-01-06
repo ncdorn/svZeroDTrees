@@ -110,9 +110,19 @@ def construct_impedance_trees(config_handler,
         for idx, (cap_name, area) in enumerate(cap_info.items()):
             print(f'generating tree {idx + 1} of {len(cap_info)} for cap {cap_name}...')
             if 'lpa' in cap_name.lower():
-                config_handler.bcs[cap_to_bc[cap_name]] = lpa_tree.create_impedance_bc(cap_to_bc[cap_name], 0, wedge_pressure * 1333.2)
+                config_handler.bcs[cap_to_bc[cap_name]] = lpa_tree.create_impedance_bc(
+                    cap_to_bc[cap_name],
+                    0,
+                    wedge_pressure * 1333.2,
+                    inductance=lpa_params.inductance,
+                )
             elif 'rpa' in cap_name.lower():
-                config_handler.bcs[cap_to_bc[cap_name]] = rpa_tree.create_impedance_bc(cap_to_bc[cap_name], 1, wedge_pressure * 1333.2)
+                config_handler.bcs[cap_to_bc[cap_name]] = rpa_tree.create_impedance_bc(
+                    cap_to_bc[cap_name],
+                    1,
+                    wedge_pressure * 1333.2,
+                    inductance=rpa_params.inductance,
+                )
             else:
                 raise ValueError('cap name not recognized')
             
@@ -151,7 +161,12 @@ def construct_impedance_trees(config_handler,
 
             bc_name = cap_to_bc[cap_name]
 
-            config_handler.bcs[bc_name] = tree.create_impedance_bc(bc_name, idx, wedge_pressure * 1333.2)
+            config_handler.bcs[bc_name] = tree.create_impedance_bc(
+                bc_name,
+                idx,
+                wedge_pressure * 1333.2,
+                inductance=params.inductance,
+            )
 
 
 def assign_rcr_bcs(config_handler, 

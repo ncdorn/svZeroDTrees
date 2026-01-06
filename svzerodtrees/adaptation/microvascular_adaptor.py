@@ -262,8 +262,8 @@ class MicrovascularAdaptor:
 
         # distribute the impedance to lpa and rpa specifically
         self.createImpedanceBCs()
-        
-        self.adapted_simdir.svzerod_3Dcoupling = self.postop_simdir.svzerod_3Dcoupling
+        # work on a deep copy so we do not mutate the original postop coupling config
+        self.adapted_simdir.svzerod_3Dcoupling = copy.deepcopy(self.postop_simdir.svzerod_3Dcoupling)
         # change path
         self.adapted_simdir.svzerod_3Dcoupling.path = os.path.join(self.adapted_simdir.path, 'svzerod_3Dcoupling.json')
         # update the config with the adapted trees
@@ -272,6 +272,88 @@ class MicrovascularAdaptor:
 
         print("saving adapted config to " + self.adapted_simdir.svzerod_3Dcoupling.path)
         self.adapted_simdir.svzerod_3Dcoupling.to_json(self.adapted_simdir.svzerod_3Dcoupling.path)
+
+    def _resolve_rri_config_paths(self, nm_iter: int = 5) -> Tuple[str, str]:
+        """
+        Find or generate tuned reduced-order PA configs for preop and postop simulations.
+        Returns (preop_config_path, postop_config_path).
+        """
+        preop_rri_path = os.path.join(self.preop_simdir.path, 'preop_simplified_zerod_tuned_RRI.json')
+        postop_rri_path = os.path.join(self.postop_simdir.path, 'postop_simplified_zerod_tuned_RRI.json')
+
+        if os.path.exists(preop_rri_path):
+            print(f"Using existing preop RRI config at {preop_rri_path}")
+            preop_config_path = preop_rri_path
+        else:
+            preop_rri = self.preop_simdir.optimize_RRI(
+                self.reduced_order_pa_path,
+                output_name=os.path.basename(preop_rri_path),
+                nm_iter=nm_iter
+            )
+            preop_config_path = preop_rri.get('output_config') if isinstance(preop_rri, dict) else preop_rri_path
+
+        if os.path.exists(postop_rri_path):
+            print(f"Using existing postop RRI config at {postop_rri_path}")
+            postop_config_path = postop_rri_path
+        else:
+            postop_rri = self.postop_simdir.optimize_RRI(
+                self.reduced_order_pa_path,
+                output_name=os.path.basename(postop_rri_path),
+                nm_iter=nm_iter
+            )
+            postop_config_path = postop_rri.get('output_config') if isinstance(postop_rri, dict) else postop_rri_path
+
+        return preop_config_path, postop_config_path
+
+    def _finalize_coupling_with_adapted_trees(self):
+        """
+        Attach adapted trees to the coupling config, regenerate impedance BCs,
+        and write the adapted coupling file.
+        """
+        # distribute the impedance to lpa and rpa specifically
+        self.createImpedanceBCs()
+        
+        # work on a deep copy so we do not mutate the original postop coupling config
+        self.adapted_simdir.svzerod_3Dcoupling = copy.deepcopy(self.postop_simdir.svzerod_3Dcoupling)
+        # change path
+        self.adapted_simdir.svzerod_3Dcoupling.path = os.path.join(self.adapted_simdir.path, 'svzerod_3Dcoupling.json')
+        # update the config with the adapted trees
+        self.adapted_simdir.svzerod_3Dcoupling.tree_params[self.lpa_tree.name] = self.lpa_tree.to_dict()
+        self.adapted_simdir.svzerod_3Dcoupling.tree_params[self.rpa_tree.name] = self.rpa_tree.to_dict()
+
+        print("saving adapted config to " + self.adapted_simdir.svzerod_3Dcoupling.path)
+        self.adapted_simdir.svzerod_3Dcoupling.to_json(self.adapted_simdir.svzerod_3Dcoupling.path)
+
+    def adapt_cwss(self, n_iter: int = 100):
+        """
+        Adapt microvasculature using the constant wall shear stress assumption by scaling
+        the structured tree diameters based on pre/post flow ratios.
+        """
+        # Resolve or compute tuned reduced-order configs
+        preop_config_path, postop_config_path = self._resolve_rri_config_paths(nm_iter=5)
+
+        # Build PAConfig objects
+        preop_pa, postop_pa = initialize_from_paths(
+            preop_config_path,
+            postop_config_path,
+            os.path.dirname(self.preop_simdir.path) + '/optimized_params.csv',
+            os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv'
+        )
+
+        # Gather mean outlet flows
+        sum_flows = lambda d: tuple(map(lambda x: sum(x.values()), d.flow_split(get_mean=True)))
+        preop_lpa_flow, preop_rpa_flow = sum_flows(self.preop_simdir)
+        postop_lpa_flow, postop_rpa_flow = sum_flows(self.postop_simdir)
+
+        # Scale diameters to enforce constant WSS
+        _apply_constant_wss_scaling(preop_pa.lpa_tree.store, preop_flow=preop_lpa_flow, postop_flow=postop_lpa_flow, n_iter=n_iter)
+        _apply_constant_wss_scaling(preop_pa.rpa_tree.store, preop_flow=preop_rpa_flow, postop_flow=postop_rpa_flow, n_iter=n_iter)
+
+        # assign adapted trees
+        self.lpa_tree = preop_pa.lpa_tree
+        self.rpa_tree = preop_pa.rpa_tree
+
+        self._finalize_coupling_with_adapted_trees()
 
     def construct_impedance_trees(self):
         '''
@@ -477,49 +559,14 @@ class MicrovascularAdaptor:
     
     def adapt_cwss_ims(self, K_arr, fig_dir: str = None):
 
-        preop_pa = self.simple_pa
-
-        # preop_pa.inflows["INFLOW"].q = [q / (self.postop_simdir.mesh_complete.n_outlets // 2) for q in preop_pa.inflows["INFLOW"].q]
-
-        # compute difference in pressure drop to get postop nonlinear resistance
-        # TODO: use optimize nonlinear resistance instead as this is what I previously did
-        # S_lpa_preop, S_rpa_preop = self.preop_simdir.optimize_nonlinear_resistance(self.reduced_order_pa_path, initial_guess=[100, 100])
-        # S_lpa_postop, S_rpa_postop = self.postop_simdir.optimize_nonlinear_resistance(self.reduced_order_pa_path, initial_guess=[100, 100])
-        S_lpa_preop, S_rpa_preop = self.preop_simdir.compute_pressure_drop(steady=False)
-        S_lpa_postop, S_rpa_postop = self.postop_simdir.compute_pressure_drop(steady=False)
-
-        # fixed values for testing
-        # S_lpa_preop = 225.59599016730704
-        # S_rpa_preop = 2174.5744993285525
-        # S_lpa_postop = 133.44002892612093
-        # S_rpa_postop = 1639.2238005469198
-
-
-        postop_pa = copy.deepcopy(preop_pa)
-
-        # rescale postop stenosis coefficient
-        # postop_pa.lpa.stenosis_coefficient *= S_lpa_postop / S_lpa_preop
-        # postop_pa.vessel_map[2].stenosis_coefficient *= S_lpa_postop / S_lpa_preop
-        # postop_pa.rpa.stenosis_coefficient *= S_rpa_postop / S_rpa_preop
-        # postop_pa.vessel_map[4].stenosis_coefficient *= S_rpa_postop / S_rpa_preop
-
-        # fixed values for testing
-        postop_pa.lpa.stenosis_coefficient = 19.7
-        postop_pa.vessel_map[2].stenosis_coefficient = 19.7
-        postop_pa.rpa.stenosis_coefficient = 7.6
-        postop_pa.vessel_map[4].stenosis_coefficient = 7.6
-
-        print("rescaled postop lpa stenosis coefficient to " + str(postop_pa.lpa.stenosis_coefficient))
-        print("rescaled postop rpa stenosis coefficient to " + str(postop_pa.rpa.stenosis_coefficient))
-
-        # save pa jsons
-        preop_pa.to_json(os.path.join(self.preop_simdir.path, 'preop_simple_pa.json'))
-        postop_pa.to_json(os.path.join(self.postop_simdir.path, 'postop_simple_pa.json'))
+        # Optimize reduced-order PA (RRI) separately for preop and postop simulations,
+        # unless tuned configs already exist on disk.
+        preop_config_path, postop_config_path = self._resolve_rri_config_paths(nm_iter=5)
 
         # initialize preop and postop PAConfig objects
         preop_pa, postop_pa = initialize_from_paths(
-            os.path.join(self.preop_simdir.path, 'preop_simple_pa.json'),
-            os.path.join(self.postop_simdir.path, 'postop_simple_pa.json'),
+            preop_config_path,
+            postop_config_path,
             os.path.dirname(self.preop_simdir.path) + '/optimized_params.csv',
             os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv'
         )
@@ -534,15 +581,4 @@ class MicrovascularAdaptor:
 
         # rescale inflow
 
-        # distribute the impedance to lpa and rpa specifically
-        self.createImpedanceBCs()
-        
-        self.adapted_simdir.svzerod_3Dcoupling = self.postop_simdir.svzerod_3Dcoupling
-        # change path
-        self.adapted_simdir.svzerod_3Dcoupling.path = os.path.join(self.adapted_simdir.path, 'svzerod_3Dcoupling.json')
-        # update the config with the adapted trees
-        self.adapted_simdir.svzerod_3Dcoupling.tree_params[self.lpa_tree.name] = self.lpa_tree.to_dict()
-        self.adapted_simdir.svzerod_3Dcoupling.tree_params[self.rpa_tree.name] = self.rpa_tree.to_dict()
-
-        print("saving adapted config to " + self.adapted_simdir.svzerod_3Dcoupling.path)
-        self.adapted_simdir.svzerod_3Dcoupling.to_json(self.adapted_simdir.svzerod_3Dcoupling.path)
+        self._finalize_coupling_with_adapted_trees()

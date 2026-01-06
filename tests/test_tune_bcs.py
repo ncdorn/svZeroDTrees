@@ -7,8 +7,12 @@ from types import SimpleNamespace
 import svzerodtrees.tune_bcs.rcr_tuner as rcr_module
 
 from svzerodtrees.io.blocks import BoundaryCondition, SimParams, Vessel
+from svzerodtrees.microvasculature import TreeParameters
+from svzerodtrees.microvasculature.compliance import ConstantCompliance
 from svzerodtrees.tune_bcs.clinical_targets import ClinicalTargets
+import svzerodtrees.tune_bcs.pa_config as pa_config_module
 from svzerodtrees.tune_bcs.pa_config import PAConfig
+from svzerodtrees.io.config_handler import ConfigHandler
 from svzerodtrees.tune_bcs.tune_space import (
     FreeParam,
     FixedParam,
@@ -19,6 +23,7 @@ from svzerodtrees.tune_bcs.tune_space import (
 from svzerodtrees.tune_bcs.impedance_tuner import ImpedanceTuner
 from svzerodtrees.tune_bcs.rcr_tuner import RCRTuner
 from svzerodtrees.microvasculature.structured_tree.asymmetry import alpha_beta_from_xi_eta
+from tests.test_config_validation import _validate_config_connectivity
 
 
 def _make_vessel(vessel_id, name, *, bc=None, length=5.0, resistance=100.0):
@@ -58,7 +63,7 @@ def _build_pa_config(flow_profile):
     )
     sim_params = SimParams(
         {
-            "number_of_time_pts": len(flow_profile),
+            "number_of_time_pts_per_cardiac_cycle": len(flow_profile),
             "number_of_cardiac_cycles": 1,
             "output_all_cycles": False,
         }
@@ -219,6 +224,79 @@ def test_tune_space_packs_and_resolves_parameters():
     assert params["comp.rpa.C"] == pytest.approx(2 * 6.6e4)
 
 
+def test_pa_config_simulate_runs_with_impedance_trees(monkeypatch):
+    pa_config = _build_pa_config([10.0, 10.0])
+
+    class DummyStructuredTree:
+        def __init__(self, name, time, simparams, compliance_model):
+            self.name = name
+            self.time = time
+            self.simparams = simparams
+            self.compliance_model = compliance_model
+
+        def build(self, **kwargs):
+            self._build_kwargs = kwargs
+
+        def compute_olufsen_impedance(self, n_procs=1):
+            self._n_procs = n_procs
+
+        def create_impedance_bc(self, bc_name, outlet_id, pd, inductance=0.0):
+            return BoundaryCondition.from_config(
+                {
+                    "bc_name": bc_name,
+                    "bc_type": "IMPEDANCE",
+                    "bc_values": {
+                        "Z": [100.0],
+                        "t": [0.0, 1.0],
+                        "Pd": pd,
+                        "L": inductance,
+                    },
+                }
+            )
+
+    def fake_simulate(config):
+        import pandas as pd
+
+        return pd.DataFrame(
+            {
+                "name": ["branch0_seg0", "branch3_seg0"],
+                "flow_in": [0.0, 2.5],
+                "flow_out": [5.0, 0.0],
+                "pressure_in": [1333.2 * 20.0, 0.0],
+            }
+        )
+
+    monkeypatch.setattr(pa_config_module, "StructuredTree", DummyStructuredTree)
+    monkeypatch.setattr(pa_config_module.pysvzerod, "simulate", fake_simulate)
+
+    lpa_params = TreeParameters(
+        name="lpa",
+        lrr=10.0,
+        diameter=0.3,
+        d_min=0.01,
+        alpha=0.9,
+        beta=0.6,
+        compliance_model=ConstantCompliance(6.6e4),
+        inductance=0.0,
+    )
+    rpa_params = TreeParameters(
+        name="rpa",
+        lrr=10.0,
+        diameter=0.3,
+        d_min=0.01,
+        alpha=0.9,
+        beta=0.6,
+        compliance_model=ConstantCompliance(6.6e4),
+        inductance=0.0,
+    )
+
+    pa_config.create_impedance_trees(lpa_params, rpa_params, n_procs=1)
+    pa_config.simulate()
+
+    assert pa_config.rpa_split == pytest.approx(0.5)
+    assert pa_config.P_mpa[0] == pytest.approx(20.0)
+
+
 def test_impedance_tuner_build_tree_params_uses_defaults():
     clinical_targets = ClinicalTargets(mpa_p=[30.0, 15.0, 22.0], rpa_split=0.6, wedge_p=12.0, q=5.0)
     tune_space = TuneSpace(free=[], fixed=[], tied=[])
@@ -251,6 +329,87 @@ def test_impedance_tuner_build_tree_params_uses_defaults():
     assert rpa_params.compliance_model.value == pytest.approx(7.0e4)
     assert lpa_params.alpha == pytest.approx(0.9)
     assert rpa_params.beta == pytest.approx(0.55)
+
+
+def test_impedance_tuning_with_inductance_builds_valid_threed_config(monkeypatch, tmp_path):
+    pa_config = _build_pa_config([10.0, 10.0])
+
+    class DummyStructuredTree:
+        def __init__(self, name, time, simparams, compliance_model):
+            self.name = name
+            self.time = time
+            self.simparams = simparams
+            self.compliance_model = compliance_model
+
+        def build(self, **kwargs):
+            self._build_kwargs = kwargs
+
+        def compute_olufsen_impedance(self, n_procs=1):
+            self._n_procs = n_procs
+
+        def create_impedance_bc(self, bc_name, outlet_id, pd, inductance=0.0):
+            return BoundaryCondition.from_config(
+                {
+                    "bc_name": bc_name,
+                    "bc_type": "IMPEDANCE",
+                    "bc_values": {
+                        "Z": [100.0],
+                        "t": [0.0, 1.0],
+                        "Pd": pd
+                    },
+                }
+            )
+
+    monkeypatch.setattr(pa_config_module, "StructuredTree", DummyStructuredTree)
+
+    inductance_value = 0.05
+    lpa_params = TreeParameters(
+        name="lpa",
+        lrr=10.0,
+        diameter=0.3,
+        d_min=0.01,
+        alpha=0.9,
+        beta=0.6,
+        compliance_model=ConstantCompliance(6.6e4),
+        inductance=inductance_value,
+    )
+    rpa_params = TreeParameters(
+        name="rpa",
+        lrr=10.0,
+        diameter=0.3,
+        d_min=0.01,
+        alpha=0.9,
+        beta=0.6,
+        compliance_model=ConstantCompliance(6.6e4),
+        inductance=inductance_value,
+    )
+
+    pa_config.create_impedance_trees(lpa_params, rpa_params, n_procs=1)
+    config_handler = ConfigHandler(pa_config.config)
+
+    class DummySurface:
+        def __init__(self, filename):
+            self.filename = filename
+
+    class DummyMeshComplete:
+        def __init__(self, filenames):
+            self.mesh_surfaces = {
+                f"surface_{idx}": DummySurface(name)
+                for idx, name in enumerate(filenames)
+            }
+
+    mesh_complete = DummyMeshComplete(
+        ["INFLOW.vtp", "LPA.vtp", "RPA.vtp"]
+    )
+    threed_coupler, _ = config_handler.generate_threed_coupler(
+        simdir=str(tmp_path),
+        inflow_from_0d=True,
+        mesh_complete=mesh_complete,
+        include_distal_vessel=True,
+    )
+
+    errors = _validate_config_connectivity(threed_coupler.config)
+    assert not errors, "\n".join(errors)
 
 
 def test_impedance_tuner_build_tree_params_uses_xi_eta_sym():

@@ -20,6 +20,7 @@ class TreeParameters:
                  k3: float = None, # want to eventually deprecate k1, k2, k3.
                  xi: float = None,
                  eta_sym: float = None,
+                 inductance: float = 0.0,
                  ):
         
         if compliance_model is None:
@@ -36,6 +37,7 @@ class TreeParameters:
         if self.eta_sym is None and self.alpha:
             self.eta_sym = self.beta / self.alpha
         self.compliance_model = compliance_model 
+        self.inductance = inductance
 
 
         # want to eventually deprecate!! and only rely on compliance model class
@@ -58,6 +60,12 @@ class TreeParameters:
         beta = row["beta"].values[0] if "beta" in row else None
         xi = row["xi"].values[0] if "xi" in row else None
         eta_sym = row["eta_sym"].values[0] if "eta_sym" in row else None
+        if "inductance" in row:
+            inductance = row["inductance"].values[0]
+        elif "inertance" in row:
+            inductance = row["inertance"].values[0]
+        else:
+            inductance = 0.0
 
         if row["compliance model"].values[0] == "ConstantCompliance":
             compliance_model = ConstantCompliance(row["Eh/r"].values[0])
@@ -68,7 +76,7 @@ class TreeParameters:
         else:
             raise ValueError(f"Unknown compliance model: {row['compliance model'].values[0]}")
 
-        return cls(name, lrr, diameter, d_min, alpha, beta, compliance_model, xi=xi, eta_sym=eta_sym)
+        return cls(name, lrr, diameter, d_min, alpha, beta, compliance_model, xi=xi, eta_sym=eta_sym, inductance=inductance)
 
     def as_list(self) -> list:
         return [self.k1, self.k2, self.k3, self.lrr, self.alpha, self.beta]
@@ -91,7 +99,8 @@ class TreeParameters:
         return (
             f"{self.compliance_model.description()} with params {self.compliance_model.params}, "
             f"diameter: {self.diameter:.3f}, d_min: {self.d_min:.3f}, l_rr: {self.lrr:.3f}, "
-            f"alpha: {self.alpha:.3f}, beta: {self.beta:.3f}, xi: {xi_str}, eta_sym: {eta_str}"
+            f"alpha: {self.alpha:.3f}, beta: {self.beta:.3f}, xi: {xi_str}, eta_sym: {eta_str}, "
+            f"inductance: {self.inductance:.3g}"
         )
     
     def to_csv_row(self, loss, flow_split, p_mpa):
@@ -111,6 +120,7 @@ class TreeParameters:
             "beta": self.beta,
             "xi": self.xi,
             "eta_sym": self.eta_sym,
+            "inductance": self.inductance,
             "loss": loss,
             "flow_split": flow_split,
             "p_mpa": f"[{p_mpa[0]} {p_mpa[1]} {p_mpa[2]}]",
