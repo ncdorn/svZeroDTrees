@@ -192,7 +192,7 @@ class Simulation:
                                                  solver='Nelder-Mead',
                                                  log_file=os.path.join(self.path, 'stree_impedance_optimization.log'),
                                                  n_procs=24)
-                impedance_tuner.tune(nm_iter=10)
+                impedance_tuner.tune(nm_iter=5)
             # need to create coupling config and add to preop/postop directories
             # build trees for LPA/RPA
             elif self.bc_type == 'rcr':
