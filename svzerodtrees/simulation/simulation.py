@@ -190,6 +190,7 @@ class Simulation:
                                                  convert_to_cm=self.convert_to_cm, 
                                                  compliance_model=self.compliance_model,
                                                  solver='Nelder-Mead',
+                                                 grid_search_init=False,
                                                  log_file=os.path.join(self.path, 'stree_impedance_optimization.log'),
                                                  n_procs=24)
                 impedance_tuner.tune(nm_iter=5)
