@@ -1438,7 +1438,7 @@ class SimulationDirectory:
                 include_distal_vessel=True,
             )
 
-    def flow_split(self, get_mean=False, verbose=True):
+    def flow_split(self, get_mean=False, verbose=True, steady=False):
         '''
         get the flow split between the LPA and RPA
 
@@ -1537,7 +1537,7 @@ class SimulationDirectory:
                     if verbose:
                         print(f"Skipping {block.surface}: missing mesh surface metadata.")
                     continue
-                time, flow, pressure = self.svzerod_data.get_result(block)
+                time, flow, pressure = self.svzerod_data.get_result(block, steady=steady)
                 if time.size == 0:
                     continue
 
