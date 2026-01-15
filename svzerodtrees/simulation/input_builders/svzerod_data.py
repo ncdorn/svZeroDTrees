@@ -34,6 +34,7 @@ class SvZeroDdata(SimulationFile):
         full_cycle: bool = True,
         n_tsteps: int = 500,
         output_series: bool = False,
+        steady: bool = False,
         last_cycle_only=None,
         last_full_cycle=None,
     ):
@@ -47,6 +48,7 @@ class SvZeroDdata(SimulationFile):
             * If full_cycle=False, take the last cycle_duration worth of data even if incomplete.
         - window="all": use the entire available time span.
         Resampling: outputs exactly n_tsteps samples on [0, T_out), endpoint=False.
+        If steady=True, returns only the last (time, flow, pressure) sample and skips windowing/resampling.
 
         Returns
         -------
@@ -107,6 +109,17 @@ class SvZeroDdata(SimulationFile):
         t_raw = t_raw[keep]
         q_raw = q_raw[keep]
         p_raw = p_raw[keep]
+
+        if steady:
+            finite = np.isfinite(t_raw) & np.isfinite(q_raw) & np.isfinite(p_raw)
+            if not finite.any():
+                raise RuntimeError("No finite samples available for steady result.")
+            t_last = float(t_raw[finite][-1])
+            q_last = float(q_raw[finite][-1])
+            p_last = float(p_raw[finite][-1])
+            if output_series:
+                return pd.Series([t_last]), pd.Series([q_last]), pd.Series([p_last])
+            return t_last, q_last, p_last
 
         if t_raw.size < 2 or not np.isfinite(t_raw).all():
             raise RuntimeError("Invalid or insufficient time samples in svZeroD_data.")
