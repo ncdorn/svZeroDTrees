@@ -47,6 +47,7 @@ class Simulation:
                  compliance_model: str = 'constant',
                  zerod_config='zerod_config.json',
                  convert_to_cm=False,
+                 mesh_scale_factor=1.0,
                  optimized=False, 
                  inflow_path=None):
         
@@ -56,10 +57,10 @@ class Simulation:
         self.zerod_config_path = os.path.join(self.path, zerod_config)
         self.simplified_zerod_config = os.path.join(self.path, 'simplified_nonlinear_zerod.json')
 
-        self.preop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, preop_dir), zerod_config=self.zerod_config_path, convert_to_cm=convert_to_cm)
-        self.postop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, postop_dir), zerod_config=self.zerod_config_path, convert_to_cm=convert_to_cm)
+        self.preop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, preop_dir), zerod_config=self.zerod_config_path, convert_to_cm=convert_to_cm, mesh_scale_factor=mesh_scale_factor)
+        self.postop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, postop_dir), zerod_config=self.zerod_config_path, convert_to_cm=convert_to_cm, mesh_scale_factor=mesh_scale_factor)
         if adapted_dir is not None:
-            self.adapted_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, adapted_dir), mesh_complete=self.postop_dir.mesh_complete.path, convert_to_cm=convert_to_cm)
+            self.adapted_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, adapted_dir), mesh_complete=self.postop_dir.mesh_complete.path, convert_to_cm=convert_to_cm, mesh_scale_factor=mesh_scale_factor)
 
         self.tune_space = tune_space
 
@@ -88,6 +89,7 @@ class Simulation:
         ## Bools
         self.optimized = optimized
         self.convert_to_cm = convert_to_cm
+        self.mesh_scale_factor = mesh_scale_factor
 
         self.clinical_targets = ClinicalTargets.from_csv(clinical_targets)
 
@@ -258,13 +260,13 @@ class Simulation:
 
             self.zerod_config.to_json(self.zerod_config_path)
             # run preop + postop simulations
-            preop_sim = SimulationDirectory.from_directory(self.preop_dir.path, threed_coupler=self.zerod_config_path, convert_to_cm=self.convert_to_cm)
+            preop_sim = SimulationDirectory.from_directory(self.preop_dir.path, threed_coupler=self.zerod_config_path, convert_to_cm=self.convert_to_cm, mesh_scale_factor=self.mesh_scale_factor)
             preop_sim.write_files(simname='Preop Simulation', user_input=False, sim_config=self.threed_sim_config)
             preop_sim.run()
         
         if adapt:
             # run postop simulation
-            postop_sim = SimulationDirectory.from_directory(self.postop_dir.path, self.zerod_config_path, convert_to_cm=self.convert_to_cm)
+            postop_sim = SimulationDirectory.from_directory(self.postop_dir.path, self.zerod_config_path, convert_to_cm=self.convert_to_cm, mesh_scale_factor=self.mesh_scale_factor)
             postop_sim.write_files(simname='Postop Simulation', user_input=False, sim_config=self.threed_sim_config)
             postop_sim.run()
 
@@ -404,7 +406,7 @@ class Simulation:
             dir_path = os.path.join(self.steady_dir, label)
             os.makedirs(dir_path, exist_ok=True)
             # create the steady simulation
-            steady_sims[label] = SimulationDirectory.from_directory(path=dir_path, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm)
+            steady_sims[label] = SimulationDirectory.from_directory(path=dir_path, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, mesh_scale_factor=self.mesh_scale_factor)
             steady_sims[label].generate_steady_sim(flow_rate=q)
             # cd into directory to sumit simulation
             os.chdir(steady_sims[label].path)
@@ -428,9 +430,9 @@ class Simulation:
         if mean_dir is None:
             mean_dir = os.path.join(self.steady_dir, 'mean')
 
-        sys_sim = SimulationDirectory.from_directory(sys_dir, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, is_pulmonary=True)
-        dia_sim = SimulationDirectory.from_directory(dia_dir, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, is_pulmonary=True)
-        mean_sim = SimulationDirectory.from_directory(mean_dir, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, is_pulmonary=True)
+        sys_sim = SimulationDirectory.from_directory(sys_dir, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, is_pulmonary=True, mesh_scale_factor=self.mesh_scale_factor)
+        dia_sim = SimulationDirectory.from_directory(dia_dir, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, is_pulmonary=True, mesh_scale_factor=self.mesh_scale_factor)
+        mean_sim = SimulationDirectory.from_directory(mean_dir, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, is_pulmonary=True, mesh_scale_factor=self.mesh_scale_factor)
 
         R_sys_lpa, R_sys_rpa = sys_sim.compute_pressure_drop()
         R_dia_lpa, R_dia_rpa = dia_sim.compute_pressure_drop()

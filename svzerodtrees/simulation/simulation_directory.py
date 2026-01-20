@@ -30,7 +30,8 @@ class SimulationDirectory:
                  results_dir=None,
                  clinical_target=None,
                  fig_dir=None,
-                 convert_to_cm=False):
+                 convert_to_cm=False,
+                 mesh_scale_factor=1.0):
         '''
         initialize the simulation handler which handles threed simulation data'''
 
@@ -72,9 +73,10 @@ class SimulationDirectory:
         self.results_file = os.path.join(self.path, 'results.txt')
 
         self.convert_to_cm = convert_to_cm
+        self.mesh_scale_factor = mesh_scale_factor
 
     @classmethod
-    def from_directory(cls, path='.', zerod_config: str =None, mesh_complete: str ='mesh-complete', threed_coupler=None, results_dir: str =None, convert_to_cm: bool =False, is_pulmonary=True):
+    def from_directory(cls, path='.', zerod_config: str =None, mesh_complete: str ='mesh-complete', threed_coupler=None, results_dir: str =None, convert_to_cm: bool =False, is_pulmonary=True, mesh_scale_factor=1.0):
         '''
         create a simulation directory object from the path to the simulation directory
         and search for the necessary files within the path'''
@@ -196,7 +198,8 @@ class SimulationDirectory:
                    results_dir,
                    clinical_targets,
                    fig_dir,
-                   convert_to_cm)
+                   convert_to_cm,
+                   mesh_scale_factor)
     
     def duplicate(self, new_path):
         '''
@@ -204,7 +207,13 @@ class SimulationDirectory:
 
         os.system(f'cp -r {self.path} {new_path}')
 
-        return SimulationDirectory.from_directory(new_path)
+        return SimulationDirectory.from_directory(new_path, convert_to_cm=self.convert_to_cm, mesh_scale_factor=self.mesh_scale_factor)
+
+    def _resolve_mesh_scale_factor(self):
+        scale_factor = self.mesh_scale_factor if self.mesh_scale_factor is not None else 1.0
+        if self.convert_to_cm:
+            scale_factor *= 0.1
+        return scale_factor
 
     def run(self):
         '''
@@ -305,11 +314,9 @@ class SimulationDirectory:
                 dt = float(input('time step size (default 0.001): ') or 0.001)
             else:
                 dt = sim_config['dt']
+            mesh_scale_factor = self._resolve_mesh_scale_factor()
             if self.convert_to_cm:
                 print("scaling mesh to cm...")
-                mesh_scale_factor = 0.1
-            else:
-                mesh_scale_factor = 1.0
             self.svFSIxml.write(self.mesh_complete, n_tsteps=n_tsteps, dt=dt, scale_factor=mesh_scale_factor)
         
         def write_runscript_input_params(user_input=user_input, sim_config=sim_config):
@@ -1471,7 +1478,7 @@ class SimulationDirectory:
                     if verbose:
                         print(f"Skipping {block.surface}: missing mesh surface metadata.")
                     continue
-                time, flow, _ = self.svzerod_data.get_result(block)
+                time, flow, _ = self.svzerod_data.get_result(block, steady=steady)
                 if time.size == 0 or flow.size == 0:
                     continue
                 mean_flow = float(np.trapz(flow, time))
@@ -1537,7 +1544,7 @@ class SimulationDirectory:
                     if verbose:
                         print(f"Skipping {block.surface}: missing mesh surface metadata.")
                     continue
-                time, flow, pressure = self.svzerod_data.get_result(block, steady=steady)
+                time, flow, pressure = self.svzerod_data.get_result(block)
                 if time.size == 0:
                     continue
 
