@@ -89,6 +89,48 @@ def _per_generation_stats(
     return WaveformStats(mean=mean, median=median, q25=q25, q75=q75)
 
 
+def _resolve_wall_thickness(
+    diameters: np.ndarray,
+    wall_thickness: Optional[np.ndarray],
+    *,
+    wall_thickness_ratio: float,
+    min_wall_thickness: float,
+) -> np.ndarray:
+    r = 0.5 * np.asarray(diameters, dtype=float)
+    if wall_thickness is None:
+        thickness = r * float(wall_thickness_ratio)
+    else:
+        thickness = np.asarray(wall_thickness, dtype=float)
+        if thickness.ndim == 0:
+            thickness = np.full_like(r, float(thickness))
+    thickness = np.maximum(thickness, float(min_wall_thickness))
+    return thickness
+
+
+def _intramural_stress_timeseries(
+    pressure_ts: np.ndarray,
+    diameters: np.ndarray,
+    *,
+    wall_thickness: Optional[np.ndarray],
+    wall_thickness_ratio: float,
+    min_wall_thickness: float,
+) -> np.ndarray:
+    r = 0.5 * np.asarray(diameters, dtype=float)[:, None]
+    thickness = _resolve_wall_thickness(
+        diameters,
+        wall_thickness,
+        wall_thickness_ratio=wall_thickness_ratio,
+        min_wall_thickness=min_wall_thickness,
+    )
+    if thickness.ndim == 1:
+        thickness = thickness[:, None]
+    if thickness.shape[0] != r.shape[0]:
+        raise ValueError("wall_thickness must be scalar or have length equal to n_vessels.")
+    if thickness.shape[1] not in (1, pressure_ts.shape[1]):
+        raise ValueError("wall_thickness must be shape (N,), (N,1), or (N,T).")
+    return np.asarray(pressure_ts, dtype=float) * r / thickness
+
+
 def compute_generation_waveforms(
     results: StructuredTreeResults,
     store: Optional[StructuredTreeStorage] = None,
@@ -101,7 +143,23 @@ def compute_generation_waveforms(
     take_abs_flow_for_wss: bool = False,
     convert_pressure_to_mmhg: bool = True,
     normalize_time: bool = False,
+    include_intramural: bool = False,
+    wall_thickness: Optional[np.ndarray] = None,
+    wall_thickness_ratio: float = 0.1,
+    min_wall_thickness: float = 1e-9,
 ) -> GenerationWaveformData:
+    """
+    Compute per-generation waveform statistics without plotting.
+
+    Returns
+    -------
+    GenerationWaveformData
+        generations: unique generation indices (shape (G,))
+        counts: number of vessels per generation (shape (G,))
+        time: time axis used for statistics (shape (T,))
+        metrics: dict with keys 'flow', 'pressure', 'wss', and optionally 'intramural_stress'
+        normalized_time: whether the time axis was normalized to [0, 1]
+    """
     if results is None:
         raise ValueError("StructuredTreeResults is required.")
     if wss_flow not in {"in", "out"}:
@@ -120,11 +178,11 @@ def compute_generation_waveforms(
     except AttributeError as exc:
         raise AttributeError(f"StructuredTreeResults is missing pressure field '{pressure_field}'.") from exc
 
-    pressure_ts = pressure_ts[:, time_mask]
-    flow_ts = flow_ts[:, time_mask]
-
     if convert_pressure_to_mmhg:
         pressure_ts = pressure_ts * MMHG_PER_BARYE
+
+    pressure_ts = pressure_ts[:, time_mask]
+    flow_ts = flow_ts[:, time_mask]
 
     if take_abs_flow_for_wss:
         try:
@@ -140,6 +198,16 @@ def compute_generation_waveforms(
     else:
         wss_ts = results.wss_timeseries(use_flow=wss_flow)
     wss_ts = np.asarray(wss_ts, dtype=float)[:, time_mask]
+
+    ims_ts = None
+    if include_intramural:
+        ims_ts = _intramural_stress_timeseries(
+            pressure_ts,
+            results.d,
+            wall_thickness=wall_thickness,
+            wall_thickness_ratio=wall_thickness_ratio,
+            min_wall_thickness=min_wall_thickness,
+        )
 
     mask = np.isfinite(results.gen)
     if not include_collapsed:
@@ -160,6 +228,12 @@ def compute_generation_waveforms(
     pressure_stats = _per_generation_stats(generations, pressure, gens_unique)
     wss_stats = _per_generation_stats(generations, wss, gens_unique)
 
+    metrics = {"flow": flow_stats, "pressure": pressure_stats, "wss": wss_stats}
+    if include_intramural and ims_ts is not None:
+        intramural = ims_ts[mask]
+        ims_stats = _per_generation_stats(generations, intramural, gens_unique)
+        metrics["intramural_stress"] = ims_stats
+
     t_plot = time.copy()
     if normalize_time:
         t_span = float(t_plot[-1] - t_plot[0]) if t_plot.size else 0.0
@@ -171,9 +245,24 @@ def compute_generation_waveforms(
         generations=gens_unique,
         counts=counts,
         time=t_plot,
-        metrics={"flow": flow_stats, "pressure": pressure_stats, "wss": wss_stats},
+        metrics=metrics,
         normalized_time=normalize_time,
     )
+
+
+def compute_generation_waveforms_for_tree(
+    tree: "StructuredTree",
+    **kwargs,
+) -> GenerationWaveformData:
+    """
+    Convenience wrapper accepting a StructuredTree instance.
+    The tree must have `.store` and `.results` populated (e.g., after simulate()).
+    """
+    if not hasattr(tree, "results") or tree.results is None:
+        raise ValueError("StructuredTree instance does not contain results. Run simulate() first.")
+    if not hasattr(tree, "store") or tree.store is None:
+        raise ValueError("StructuredTree instance does not contain storage (call build() first).")
+    return compute_generation_waveforms(tree.results, tree.store, **kwargs)
 
 
 def plot_generation_waveforms(
@@ -188,6 +277,10 @@ def plot_generation_waveforms(
     take_abs_flow_for_wss: bool = False,
     convert_pressure_to_mmhg: bool = True,
     normalize_time: bool = False,
+    include_intramural: bool = False,
+    wall_thickness: Optional[np.ndarray] = None,
+    wall_thickness_ratio: float = 0.1,
+    min_wall_thickness: float = 1e-9,
     figsize: Tuple[float, float] = (10.5, 9.0),
     linewidth: float = 1.4,
     alpha_band: float = 0.20,
@@ -208,6 +301,10 @@ def plot_generation_waveforms(
         take_abs_flow_for_wss=take_abs_flow_for_wss,
         convert_pressure_to_mmhg=convert_pressure_to_mmhg,
         normalize_time=normalize_time,
+        include_intramural=include_intramural,
+        wall_thickness=wall_thickness,
+        wall_thickness_ratio=wall_thickness_ratio,
+        min_wall_thickness=min_wall_thickness,
     )
 
     if panel_titles is None:
@@ -216,20 +313,27 @@ def plot_generation_waveforms(
             "Pressure by Generation (waveforms)",
             "Wall Shear Stress by Generation (waveforms)",
         )
+        if include_intramural:
+            panel_titles = panel_titles + ("Intramural Stress by Generation (waveforms)",)
     if ylabels is None:
         ylabels = (
             "Flow",
             "Pressure [mmHg]" if convert_pressure_to_mmhg else "Pressure",
             "WSS",
         )
+        if include_intramural:
+            ylabels = ylabels + ("Intramural Stress",)
 
-    fig, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
+    n_panels = 4 if include_intramural else 3
+    fig, axes = plt.subplots(n_panels, 1, figsize=figsize, sharex=True)
     plt.subplots_adjust(hspace=0.28)
 
     cmap = plt.get_cmap(cmap_name)
     t = data.time
 
     metric_keys = ("flow", "pressure", "wss")
+    if include_intramural:
+        metric_keys = metric_keys + ("intramural_stress",)
 
     for ax, metric, title, ylabel in zip(axes, metric_keys, panel_titles, ylabels):
         stats = data.metrics[metric]

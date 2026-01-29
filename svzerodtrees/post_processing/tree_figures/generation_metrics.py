@@ -139,6 +139,48 @@ def _reduce_over_time(values: np.ndarray, mask: np.ndarray, reducer: TimeReducer
     return reduced
 
 
+def _resolve_wall_thickness(
+    diameters: np.ndarray,
+    wall_thickness: Optional[np.ndarray],
+    *,
+    wall_thickness_ratio: float,
+    min_wall_thickness: float,
+) -> np.ndarray:
+    r = 0.5 * np.asarray(diameters, dtype=float)
+    if wall_thickness is None:
+        thickness = r * float(wall_thickness_ratio)
+    else:
+        thickness = np.asarray(wall_thickness, dtype=float)
+        if thickness.ndim == 0:
+            thickness = np.full_like(r, float(thickness))
+    thickness = np.maximum(thickness, float(min_wall_thickness))
+    return thickness
+
+
+def _intramural_stress_timeseries(
+    pressure_ts: np.ndarray,
+    diameters: np.ndarray,
+    *,
+    wall_thickness: Optional[np.ndarray],
+    wall_thickness_ratio: float,
+    min_wall_thickness: float,
+) -> np.ndarray:
+    r = 0.5 * np.asarray(diameters, dtype=float)[:, None]
+    thickness = _resolve_wall_thickness(
+        diameters,
+        wall_thickness,
+        wall_thickness_ratio=wall_thickness_ratio,
+        min_wall_thickness=min_wall_thickness,
+    )
+    if thickness.ndim == 1:
+        thickness = thickness[:, None]
+    if thickness.shape[0] != r.shape[0]:
+        raise ValueError("wall_thickness must be scalar or have length equal to n_vessels.")
+    if thickness.shape[1] not in (1, pressure_ts.shape[1]):
+        raise ValueError("wall_thickness must be shape (N,), (N,1), or (N,T).")
+    return np.asarray(pressure_ts, dtype=float) * r / thickness
+
+
 def compute_generation_metrics(
     results: StructuredTreeResults,
     store: Optional[StructuredTreeStorage] = None,
@@ -151,9 +193,14 @@ def compute_generation_metrics(
     time_reducer: TimeReducer = _default_time_reducer,
     take_abs_flow_for_wss: bool = False,
     convert_pressure_to_mmhg: bool = True,
+    include_intramural: bool = False,
+    wall_thickness: Optional[np.ndarray] = None,
+    wall_thickness_ratio: float = 0.1,
+    min_wall_thickness: float = 1e-9,
 ) -> Dict[str, np.ndarray]:
     """
-    Build per-vessel aggregates (flow, pressure, WSS) and metadata for plotting.
+    Build per-vessel aggregates (flow, pressure, WSS, optionally intramural stress)
+    and metadata for plotting or downstream aggregation.
 
     Parameters
     ----------
@@ -172,6 +219,14 @@ def compute_generation_metrics(
         Use |Q| when computing WSS time-series.
     convert_pressure_to_mmhg : bool
         Convert pressure values from dyn/cm² to mmHg for readability.
+    include_intramural : bool
+        If True, compute intramural stress σθ = P * r / h.
+    wall_thickness : array-like, optional
+        Optional wall thickness values (scalar or length-N array). Defaults to r*wall_thickness_ratio.
+    wall_thickness_ratio : float
+        Thickness ratio h/r used when wall_thickness is None (default: 0.1).
+    min_wall_thickness : float
+        Minimum wall thickness for numerical stability.
     """
     if results is None:
         raise ValueError("StructuredTreeResults is required.")
@@ -196,6 +251,20 @@ def compute_generation_metrics(
     if convert_pressure_to_mmhg:
         pressure = pressure * MMHG_PER_BARYE
 
+    intramural = None
+    if include_intramural:
+        pressure_ts = np.asarray(pressure_ts, dtype=float)
+        if convert_pressure_to_mmhg:
+            pressure_ts = pressure_ts * MMHG_PER_BARYE
+        ims_ts = _intramural_stress_timeseries(
+            pressure_ts,
+            results.d,
+            wall_thickness=wall_thickness,
+            wall_thickness_ratio=wall_thickness_ratio,
+            min_wall_thickness=min_wall_thickness,
+        )
+        intramural = _reduce_over_time(ims_ts, time_mask, time_reducer)
+
     mask = np.isfinite(results.gen)
     if not include_collapsed:
         mask &= ~collapsed
@@ -210,7 +279,93 @@ def compute_generation_metrics(
         "is_collapsed": collapsed[mask],
         "time_window": time_window,
     }
+    if include_intramural and intramural is not None:
+        data["intramural_stress"] = intramural[mask]
     return data
+
+
+def summarize_generation_metrics(
+    data: Dict[str, np.ndarray],
+    *,
+    flow_requires_positive: bool = True,
+    metric_fields: Sequence[str] = ("flow", "pressure", "wss", "intramural_stress"),
+) -> Dict[str, GenerationSummary]:
+    """
+    Compute per-generation summaries from the output of compute_generation_metrics.
+
+    Parameters
+    ----------
+    data : dict
+        Output of compute_generation_metrics.
+    flow_requires_positive : bool
+        If True, drop non-positive flow values before summarizing (log-scale safe).
+
+    Returns
+    -------
+    dict
+        Mapping of metric name to GenerationSummary with fields:
+        - generation: unique generation indices
+        - median, q25, q75, mean, std: per-generation statistics
+        - count: number of vessels contributing to each generation
+    """
+    generations = np.asarray(data["generation"], dtype=float)
+    summaries: Dict[str, GenerationSummary] = {}
+
+    for field in metric_fields:
+        if field not in data:
+            continue
+        values = np.asarray(data[field], dtype=float)
+        if field == "flow" and flow_requires_positive:
+            values = np.where(values > 0.0, values, np.nan)
+        summaries[field] = _summarize_by_generation(generations, values)
+
+    return summaries
+
+
+def compute_generation_metric_summaries(
+    results: StructuredTreeResults,
+    store: Optional[StructuredTreeStorage] = None,
+    *,
+    time_window: Optional[Tuple[float, float]] = None,
+    flow_field: str = "flow_in",
+    pressure_field: str = "pressure_in",
+    wss_flow: str = "in",
+    include_collapsed: bool = True,
+    time_reducer: TimeReducer = _default_time_reducer,
+    take_abs_flow_for_wss: bool = False,
+    convert_pressure_to_mmhg: bool = True,
+    flow_requires_positive: bool = True,
+    include_intramural: bool = False,
+    wall_thickness: Optional[np.ndarray] = None,
+    wall_thickness_ratio: float = 0.1,
+    min_wall_thickness: float = 1e-9,
+) -> Tuple[Dict[str, GenerationSummary], Dict[str, np.ndarray]]:
+    """
+    Compute per-generation summary stats without plotting.
+
+    Returns the summaries and the per-vessel data dictionary.
+    """
+    data = compute_generation_metrics(
+        results,
+        store,
+        time_window=time_window,
+        flow_field=flow_field,
+        pressure_field=pressure_field,
+        wss_flow=wss_flow,
+        include_collapsed=include_collapsed,
+        time_reducer=time_reducer,
+        take_abs_flow_for_wss=take_abs_flow_for_wss,
+        convert_pressure_to_mmhg=convert_pressure_to_mmhg,
+        include_intramural=include_intramural,
+        wall_thickness=wall_thickness,
+        wall_thickness_ratio=wall_thickness_ratio,
+        min_wall_thickness=min_wall_thickness,
+    )
+    summaries = summarize_generation_metrics(
+        data,
+        flow_requires_positive=flow_requires_positive,
+    )
+    return summaries, data
 
 
 def _jittered_scatter(
@@ -262,6 +417,10 @@ def plot_generation_metrics(
     time_reducer: TimeReducer = _default_time_reducer,
     take_abs_flow_for_wss: bool = False,
     convert_pressure_to_mmhg: bool = True,
+    include_intramural: bool = False,
+    wall_thickness: Optional[np.ndarray] = None,
+    wall_thickness_ratio: float = 0.1,
+    min_wall_thickness: float = 1e-9,
     figsize: Tuple[float, float] = (9.0, 9.5),
     jitter: float = 0.12,
     scatter_alpha: float = 0.65,
@@ -291,6 +450,10 @@ def plot_generation_metrics(
         time_reducer=time_reducer,
         take_abs_flow_for_wss=take_abs_flow_for_wss,
         convert_pressure_to_mmhg=convert_pressure_to_mmhg,
+        include_intramural=include_intramural,
+        wall_thickness=wall_thickness,
+        wall_thickness_ratio=wall_thickness_ratio,
+        min_wall_thickness=min_wall_thickness,
     )
 
     if panel_titles is None:
@@ -299,20 +462,27 @@ def plot_generation_metrics(
             "Pressure by Generation",
             "Wall Shear Stress by Generation",
         )
+        if include_intramural:
+            panel_titles = panel_titles + ("Intramural Stress by Generation",)
     if ylabels is None:
         ylabels = ("Flow", "Pressure [mmHg]" if convert_pressure_to_mmhg else "Pressure", "WSS")
+        if include_intramural:
+            ylabels = ylabels + ("Intramural Stress",)
 
-    fig, axes = plt.subplots(3, 1, figsize=figsize, sharex=True)
+    n_panels = 4 if include_intramural else 3
+    fig, axes = plt.subplots(n_panels, 1, figsize=figsize, sharex=True)
     plt.subplots_adjust(hspace=0.28)
 
     cmap = plt.get_cmap(cmap_name)
-    summaries: Dict[str, GenerationSummary] = {}
+    summaries = summarize_generation_metrics(data, flow_requires_positive=True)
 
     metrics = (
         ("flow", panel_titles[0], ylabels[0]),
         ("pressure", panel_titles[1], ylabels[1]),
         ("wss", panel_titles[2], ylabels[2]),
     )
+    if include_intramural:
+        metrics = metrics + (("intramural_stress", panel_titles[3], ylabels[3]),)
 
     generations = data["generation"]
     diameters = data["diameter"]
@@ -339,8 +509,7 @@ def plot_generation_metrics(
             base_size=base_marker_size,
             min_marker_scale=min_marker_scale,
         )
-        summary = _summarize_by_generation(generations, values_plot)
-        summaries[field] = summary
+        summary = summaries[field]
         if summary.generation.size:
             ax.plot(summary.generation, summary.median, color="#303030", linewidth=2.4, marker="o")
             ax.fill_between(

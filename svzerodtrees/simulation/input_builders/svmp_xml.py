@@ -1,5 +1,7 @@
 from .simulation_file import SimulationFile
+from ...io import ConfigHandler
 import xml.etree.ElementTree as ET
+import os
 
 class SvMPxml(SimulationFile):
     '''
@@ -17,7 +19,17 @@ class SvMPxml(SimulationFile):
         self.xml_tree = ET.parse(self.path)
         self.xml_root = self.xml_tree.getroot()
 
-    def write(self, mesh_complete, scale_factor=1.0, n_tsteps=1000, dt=0.01):
+    def write(self,
+              mesh_complete,
+              scale_factor=1.0,
+              n_tsteps=1000,
+              dt=0.01,
+              threed_coupler=None,
+              coupling_type="semi-implicit",
+              configuration_file="svzerod_3Dcoupling.json",
+              shared_library="/home/users/ndorn/svZeroDSolver/Release/src/interface/libsvzero_interface.so",
+              initial_flows=0.0,
+              initial_pressures=0.0):
         '''
         write the svFSI.xml file
         
@@ -181,6 +193,17 @@ class SvMPxml(SimulationFile):
         couple_to_svzerod = ET.SubElement(add_eqn, "Couple_to_svZeroD")
         couple_to_svzerod.set("type", "SI")
 
+        coupling_blocks_by_surface = {}
+        if threed_coupler is not None:
+            if isinstance(threed_coupler, str):
+                threed_coupler = ConfigHandler.from_json(threed_coupler, is_pulmonary=False, is_threed_interface=True)
+            for block in threed_coupler.coupling_blocks.values():
+                surface = getattr(block, "surface", None)
+                if not surface:
+                    continue
+                surface_base = os.path.splitext(os.path.basename(surface))[0].lower()
+                coupling_blocks_by_surface[surface_base] = block.name
+
         # add boundary conditions
         for vtp in mesh_complete.mesh_surfaces.values():
             add_bc = ET.SubElement(add_eqn, "Add_BC")
@@ -190,6 +213,23 @@ class SvMPxml(SimulationFile):
             typ.text = "Neu"
             time_dep = ET.SubElement(add_bc, "Time_dependence")
             time_dep.text = "Coupled"
+
+            block_name = coupling_blocks_by_surface.get(add_bc.get("name", "").lower())
+            if block_name:
+                svzerod_block = ET.SubElement(add_bc, "svZeroDSolver_block")
+                svzerod_block.text = block_name
+
+                svzerod_interface = ET.SubElement(add_bc, "svZeroDSolver_interface")
+                coupling_type_node = ET.SubElement(svzerod_interface, "Coupling_type")
+                coupling_type_node.text = str(coupling_type)
+                config_node = ET.SubElement(svzerod_interface, "Configuration_file")
+                config_node.text = str(configuration_file)
+                shared_lib_node = ET.SubElement(svzerod_interface, "Shared_library")
+                shared_lib_node.text = str(shared_library)
+                init_flows_node = ET.SubElement(svzerod_interface, "Initial_flows")
+                init_flows_node.text = str(initial_flows)
+                init_pressures_node = ET.SubElement(svzerod_interface, "Initial_pressures")
+                init_pressures_node.text = str(initial_pressures)
         
         # add wall bc
         add_wall_bc = ET.SubElement(add_eqn, "Add_BC")

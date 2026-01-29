@@ -22,7 +22,6 @@ class SimulationDirectory:
     def __init__(self, path, 
                  zerod_config=None,
                  mesh_complete=None, 
-                 svzerod_interface=None, 
                  svzerod_3Dcoupling=None, 
                  svFSIxml=None, 
                  solver_runscript=None, 
@@ -46,9 +45,6 @@ class SimulationDirectory:
 
         # mesh complete directory
         self.mesh_complete = mesh_complete
-
-        # svZeroD_interface.dat file
-        self.svzerod_interface = svzerod_interface
 
         # svzerod_3Dcoupling.json file
         self.svzerod_3Dcoupling = svzerod_3Dcoupling
@@ -113,15 +109,6 @@ class SimulationDirectory:
             print('mesh-complete not found')
             mesh_complete = None
         
-        # check for svZeroD_interface.dat
-        svzerod_interface = os.path.join(path, 'svZeroD_interface.dat')
-        if os.path.exists(svzerod_interface):
-            print('svZeroD_interface.dat found')
-            svzerod_interface = SvZeroDInterface(svzerod_interface)
-        else:
-            print('svZeroD_interface.dat not found')
-            svzerod_interface = SvZeroDInterface(svzerod_interface)
-
         # check for svzerod_3Dcoupling.json
         svzerod_3Dcoupling = os.path.join(path, 'svzerod_3Dcoupling.json')
         if threed_coupler is not None and zerod_config is not None and mesh_complete is not None:
@@ -190,7 +177,6 @@ class SimulationDirectory:
         return cls(path,
                    zerod_config,
                    mesh_complete, 
-                   svzerod_interface, 
                    svzerod_3Dcoupling, 
                    svFSIxml, 
                    solver_runscript, 
@@ -238,12 +224,6 @@ class SimulationDirectory:
         else:
             raise FileNotFoundError('mesh-complete does not exist')
         
-        if self.svzerod_interface.is_written:
-            if verbose:
-                print('svZeroD_interface.dat written')
-        else:
-            raise FileNotFoundError('svZeroD_interface.dat does not exist')
-        
         if self.svFSIxml.is_written:
             if verbose:
                 print('svFSI.xml written')
@@ -273,8 +253,6 @@ class SimulationDirectory:
         # write the 3d-0d coupling json file
 
         print(f'writing files for {simname}...')
-
-        self.svzerod_interface.write(self.svzerod_3Dcoupling.path)
 
         def write_svfsixml_input_params(user_input=user_input, sim_config=sim_config):
             def _get_inflow_period():
@@ -317,7 +295,15 @@ class SimulationDirectory:
             mesh_scale_factor = self._resolve_mesh_scale_factor()
             if self.convert_to_cm:
                 print("scaling mesh to cm...")
-            self.svFSIxml.write(self.mesh_complete, n_tsteps=n_tsteps, dt=dt, scale_factor=mesh_scale_factor)
+            config_file = None
+            if self.svzerod_3Dcoupling is not None:
+                config_file = os.path.basename(self.svzerod_3Dcoupling.path)
+            self.svFSIxml.write(self.mesh_complete,
+                                n_tsteps=n_tsteps,
+                                dt=dt,
+                                scale_factor=mesh_scale_factor,
+                                threed_coupler=self.svzerod_3Dcoupling,
+                                configuration_file=config_file or "svzerod_3Dcoupling.json")
         
         def write_runscript_input_params(user_input=user_input, sim_config=sim_config):
             if user_input:
