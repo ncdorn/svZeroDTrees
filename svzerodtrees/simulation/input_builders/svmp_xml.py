@@ -190,9 +190,6 @@ class SvMPxml(SimulationFile):
 
 
 
-        couple_to_svzerod = ET.SubElement(add_eqn, "Couple_to_svZeroD")
-        couple_to_svzerod.set("type", "SI")
-
         coupling_blocks_by_surface = {}
         if threed_coupler is not None:
             if isinstance(threed_coupler, str):
