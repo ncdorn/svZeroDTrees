@@ -203,6 +203,18 @@ class SvMPxml(SimulationFile):
                     continue
                 surface_base = os.path.splitext(os.path.basename(surface))[0].lower()
                 coupling_blocks_by_surface[surface_base] = block.name
+            if coupling_blocks_by_surface:
+                svzerod_interface = ET.SubElement(add_eqn, "svZeroDSolver_interface")
+                coupling_type_node = ET.SubElement(svzerod_interface, "Coupling_type")
+                coupling_type_node.text = str(coupling_type)
+                config_node = ET.SubElement(svzerod_interface, "Configuration_file")
+                config_node.text = str(configuration_file)
+                shared_lib_node = ET.SubElement(svzerod_interface, "Shared_library")
+                shared_lib_node.text = str(shared_library)
+                init_flows_node = ET.SubElement(svzerod_interface, "Initial_flows")
+                init_flows_node.text = str(initial_flows)
+                init_pressures_node = ET.SubElement(svzerod_interface, "Initial_pressures")
+                init_pressures_node.text = str(initial_pressures)
 
         # add boundary conditions
         for vtp in mesh_complete.mesh_surfaces.values():
@@ -218,18 +230,6 @@ class SvMPxml(SimulationFile):
             if block_name:
                 svzerod_block = ET.SubElement(add_bc, "svZeroDSolver_block")
                 svzerod_block.text = block_name
-
-                svzerod_interface = ET.SubElement(add_bc, "svZeroDSolver_interface")
-                coupling_type_node = ET.SubElement(svzerod_interface, "Coupling_type")
-                coupling_type_node.text = str(coupling_type)
-                config_node = ET.SubElement(svzerod_interface, "Configuration_file")
-                config_node.text = str(configuration_file)
-                shared_lib_node = ET.SubElement(svzerod_interface, "Shared_library")
-                shared_lib_node.text = str(shared_library)
-                init_flows_node = ET.SubElement(svzerod_interface, "Initial_flows")
-                init_flows_node.text = str(initial_flows)
-                init_pressures_node = ET.SubElement(svzerod_interface, "Initial_pressures")
-                init_pressures_node.text = str(initial_pressures)
         
         # add wall bc
         add_wall_bc = ET.SubElement(add_eqn, "Add_BC")
