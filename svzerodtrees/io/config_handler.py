@@ -33,7 +33,7 @@ class ConfigHandler():
         # bool for simulation checks
         self.is_written = True
         if path is not None:
-            self.path = path.replace(' ', '\ ')
+            self.path = path.replace(' ', '\\ ')
 
         self.is_pulmonary = is_pulmonary
         self.threed_interface = is_threed_interface
@@ -384,7 +384,21 @@ class ConfigHandler():
             )
 
         else:
-            self.bcs[bc_name] = inflow.to_bc()
+            if hasattr(inflow, "to_bc"):
+                self.bcs[bc_name] = inflow.to_bc()
+            elif hasattr(inflow, "to_dict"):
+                self.bcs[bc_name] = BoundaryCondition.from_config(inflow.to_dict())
+            else:
+                if not hasattr(inflow, "q") or not hasattr(inflow, "t"):
+                    raise AttributeError("inflow must provide to_bc(), to_dict(), or q/t arrays")
+                self.bcs[bc_name] = BoundaryCondition.from_config(
+                    {
+                        "bc_name": bc_name,
+                        "bc_type": "FLOW",
+                        "bc_values": {"Q": list(inflow.q), "t": list(inflow.t)},
+                    }
+                )
+            self.inflows[bc_name] = inflow
 
 
     def map_vessels_to_branches(self):
@@ -523,17 +537,16 @@ class ConfigHandler():
             # find the vessel paths
             self.find_vessel_paths()
 
-        # label the mpa, rpa and lpa
-        if self.is_pulmonary:
-            self.root.label = 'mpa'
-            self.root.children[0].label = 'lpa'
-            self.root.children[1].label = 'rpa'
-            
-        # add these in incase we index using the mpa, lpa, rpa strings
-        if self.is_pulmonary:
-            self.mpa = self.root
-            self.lpa = self.root.children[0]
-            self.rpa = self.root.children[1]
+        # label the mpa, rpa and lpa when vessels are present
+        if self.is_pulmonary and hasattr(self, "root") and self.root is not None:
+            if len(self.root.children) >= 2:
+                self.root.label = 'mpa'
+                self.root.children[0].label = 'lpa'
+                self.root.children[1].label = 'rpa'
+                # add these in case we index using the mpa, lpa, rpa strings
+                self.mpa = self.root
+                self.lpa = self.root.children[0]
+                self.rpa = self.root.children[1]
 
         if self.threed_interface:
             self.coupling_blocks = {}

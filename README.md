@@ -39,16 +39,14 @@ There are currently two microvascular adaptation schemes:
 [] add clinical targets to json file
 
 ## Modules
-`interface.py`: highest level commands for building trees and computing adaptation
+`simulation`: end-to-end pipeline orchestration (0D + 3D coupling)
 
-`preop.py`: build trees
+`tune_bcs`: boundary condition tuning and assignment
 
-`operation.py`: perform repairs in zerod
+`adaptation`: compute adaptation of trees
 
-`adaptation.py`: compute adaptation of trees
+`post_processing`: post-processing utilities and plotting
 
-`post_processing`: methods for post processing data, most are called automatically through the interface
-   
 ## Classes
 `ConfigHandler`: data handler for the 0D solver json config, with additional classes for each 0d element type
 
@@ -71,89 +69,13 @@ tree_result = tree.simulate(Q_in = [10.0, 10.0], Pd=100.0)
 
 ```
 
-## json config for bc adaptation
-the json config file requires the following keys
-* name: name of the experiment
-* model: name of svZeroDSolver model config to build trees
-* adapt: type of adaptation, either `cwss` (constant wall shear stress) or `ps` (pries and secomb)
-* optimized: True if the boundary conditions have been optimized, False if the package should optimize boundary conditions
-* is_full_pa_tree: True if the model is a pulmonary arterial tree. A different optimization algorithm must be used
-* trees_exist: True if structured trees already exist for the pre-operative model
-* mesh_surfaces_path: path to outlet mesh surfaces, required for PA tree optimization
-* task: task to be run, either `repair`, `optimize_stent`, `threed_adaptation`
+## YAML Interface (v1)
+svzerodtrees uses a YAML-first interface with explicit workflows. The CLI and Python API share the same schema.
 
-## Running a config file
-The highest level command is `run_from_file(config.json)` examples of `config.json` are provided below:
-
-### construct trees only
-```json
-{   "name": "foo_exp",
-    "model": "foo",
-    "adapt": "cwss",
-    "optimized": false,
-    "is_full_pa_tree": true,
-    "trees_exist": false,
-    "mesh_surfaces_path": "/foo/bar/Meshes/1.6M_elements/mesh-surfaces",
-    "task": "construct_trees",
-    "construct_trees": {
-        "tree_type": "cwss"
-        }
-}
-```
-see more information [here](examples/construct_tree/README.md) and example code [here](examples/construct_tree/)
-
-### 0d stent repair
-```json
-{   "name": "foo_exp",
-    "model": "foo",
-    "adapt": "cwss",
-    "optimized": false,
-    "is_full_pa_tree": true,
-    "trees_exist": false,
-    "mesh_surfaces_path": "/foo/bar/Meshes/1.6M_elements/mesh-surfaces",
-    "task": "repair",
-    "repair": {
-        "type": "stent",
-        "location": "proximal",
-        "value": [0.5, 0.5]
-        }
-}
-```
-
-### stent optimization
-```json
-{   "name": "foo_stent_opt",
-    "model": "foo",
-    "adapt": "ps",
-    "optimized": true,
-    "is_full_pa_tree": true,
-    "trees_exist": true,
-    "mesh_surfaces_path": "/foo/bar/Meshes/1.6M_elements/mesh-surfaces",
-    "repair": {
-        "type": "optimize_stent",
-        "location": "proximal",
-        "value": [0.5, 0.5],
-        "objective": "flow split"
-        }
-}
-```
-
-### 3D coupling
-```json
-{   "name": "foo_3d_coupling",
-    "model": "foo",
-    "adapt": "ps",
-    "optimized": false,
-    "is_full_pa_tree": true,
-    "trees_exist": false,
-    "mesh_surfaces_path": "/foo/bar/Meshes/1.6M_elements/mesh-surfaces",
-    "task": "threed_adaptation",
-    "threed_adaptation":
-        {
-        "preop_dir": "/foo/bar/threed_model/preop",
-        "postop_dir": "/foo/bar/threed_model/postop",
-        "adapted_dir": "/foo/bar/threed_model/adapted"
-        }
-}
-```
-
+### CLI
+```\n+svzerodtrees pipeline config.yml\n+svzerodtrees tune-bcs config.yml\n+svzerodtrees construct-trees config.yml\n+svzerodtrees adapt config.yml\n+svzerodtrees postprocess config.yml\n+svzerodtrees schema\n+```\n+
+### Python API
+```python\n+from svzerodtrees import load_config\n+from svzerodtrees import PipelineWorkflow\n+\n+cfg = load_config(\"config.yml\")\n+PipelineWorkflow.from_config(cfg).run()\n+```\n+
+### Quick YAML example (pipeline)
+```yaml\n+version: 1\n+workflow: pipeline\n+paths:\n+  root: .\n+  zerod_config: zerod_config.json\n+  clinical_targets: clinical_targets.csv\n+  mesh_surfaces: mesh-complete/mesh-surfaces\n+  preop_dir: preop\n+  postop_dir: postop\n+  adapted_dir: adapted\n+  optimized_params: optimized_params.csv\n+bcs:\n+  type: impedance\n+  compliance_model: constant\n+  is_pulmonary: true\n+adaptation:\n+  method: cwss\n+  location: uniform\n+  iterations: 10\n+pipeline:\n+  run_steady: true\n+  optimize_bcs: true\n+  run_threed: true\n+  adapt: true\n+```\n+
+See `docs/interface.md` for the full schema and additional examples.

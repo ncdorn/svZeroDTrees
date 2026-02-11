@@ -1,0 +1,39 @@
+version: 1
+workflow: tune_bcs
+
+paths:
+  root: .
+  zerod_config: ../data/zerod_config.json
+  clinical_targets: ../data/clinical_targets.csv
+  mesh_surfaces: ../data/mesh-surfaces
+
+bcs:
+  type: impedance
+  compliance_model: constant
+  is_pulmonary: true
+  tune_space:
+    free:
+      - name: lpa.alpha
+        init: 0.9
+        lb: 0.7
+        ub: 0.99
+      - name: lpa.beta
+        init: 0.6
+        lb: 0.3
+        ub: 0.9
+      - name: rpa.alpha
+        init: 0.9
+        lb: 0.7
+        ub: 0.99
+      - name: rpa.beta
+        init: 0.6
+        lb: 0.3
+        ub: 0.9
+      - name: lrr
+        init: 10.0
+        lb: 4.0
+        ub: 25.0
+    fixed:
+      - name: d_min
+        value: 0.01
+    tied: []

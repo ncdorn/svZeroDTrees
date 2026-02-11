@@ -8,7 +8,7 @@ from ..microvasculature import TreeParameters
 import json
 import copy
 import pandas as pd
-from scipy.integrate import trapz
+from scipy.integrate import trapezoid
 import os
 
 class Simulation:
@@ -352,7 +352,7 @@ class Simulation:
 
         n_outlets = getattr(self.preop_dir.mesh_complete, 'n_outlets', None)
         outlet_scale = n_outlets / 2.0 if n_outlets is not None else 1.0
-        target_co = trapz(self.inflow.q, self.inflow.t) if self.inflow_from_file else self.clinical_targets.q
+        target_co = trapezoid(self.inflow.q, self.inflow.t) if self.inflow_from_file else self.clinical_targets.q
 
         self.inflow_0d = copy.deepcopy(self.inflow)
         self.inflow_0d.rescale(cardiac_output=target_co / outlet_scale if outlet_scale != 0 else target_co)

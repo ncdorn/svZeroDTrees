@@ -23,7 +23,22 @@ from svzerodtrees.tune_bcs.tune_space import (
 from svzerodtrees.tune_bcs.impedance_tuner import ImpedanceTuner
 from svzerodtrees.tune_bcs.rcr_tuner import RCRTuner
 from svzerodtrees.microvasculature.structured_tree.asymmetry import alpha_beta_from_xi_eta
-from tests.test_config_validation import _validate_config_connectivity
+
+
+def _validate_config_connectivity(config):
+    errors = []
+    for key in ("vessels", "junctions", "boundary_conditions"):
+        if key not in config:
+            errors.append(f"missing key: {key}")
+    if errors:
+        return errors
+
+    vessel_ids = {v.get("vessel_id") for v in config["vessels"]}
+    for junction in config.get("junctions", []):
+        for entry in junction.get("inlet_vessels", []) + junction.get("outlet_vessels", []):
+            if entry not in vessel_ids:
+                errors.append(f"junction references unknown vessel_id {entry}")
+    return errors
 
 
 def _make_vessel(vessel_id, name, *, bc=None, length=5.0, resistance=100.0):

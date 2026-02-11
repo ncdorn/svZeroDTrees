@@ -1,0 +1,24 @@
+version: 1
+workflow: adapt
+
+paths:
+  root: .
+  zerod_config: ../data/zerod_config.json
+  clinical_targets: ../data/clinical_targets.csv
+  preop_dir: preop
+  postop_dir: postop
+  adapted_dir: adapted
+  optimized_params: optimized_params.csv
+
+bcs:
+  type: impedance
+  compliance_model: constant
+  is_pulmonary: true
+
+adaptation:
+  method: cwss
+  location: uniform
+  iterations: 10
+
+threed:
+  convert_to_cm: false

@@ -1,9 +1,10 @@
-from svzerodtrees.interface import *
 import os
+from svzerodtrees import load_config, PipelineWorkflow
 
 '''
-example script for running an svZeroDTrees experiment from a json config file
+example script for running an svZeroDTrees pipeline from a yaml config file
 '''
 if __name__ == '__main__':
-    os.chdir('/Users/ndorn/ndorn@stanford.edu - Google Drive/My Drive/Stanford/PhD/Simvascular/zerod_models/AS2_prestent/experiments')
-    run_from_file('AS2_stent.json')
+    os.chdir('examples')
+    cfg = load_config('pipeline_example.yml')
+    PipelineWorkflow.from_config(cfg).run()
