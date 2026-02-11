@@ -1,81 +1,69 @@
 # svZeroDTrees
-This is a package to generate structured and morphometric trees to simulate microvascular adaptation in svZeroDPlus.
+Structured tree boundary condition modeling for svZeroD cardiovascular simulations.
 
-## Installing
+**Capabilities**
+- Generate structured tree boundary conditions for svZeroD outlets.
+- Tune boundary conditions (impedance or RCR) to clinical targets.
+- Adapt microvasculature using CWSS or Pries/Secomb models.
+- Optional 3D coupling pipeline via SimVascular tools.
 
-1. Clone the repository with `git clone https://github.com/ncdorn/svZeroDTrees.git`
-2. In desired python environment run
+**Requirements**
+- Python >= 3.8.
+- Python packages (installed via `pip install -e .`): `scipy`, `numpy`, `vtk`, `pandas`, `matplotlib`, `networkx`, `svsuperestimator`, `multiprocess`, `pysvzerod`, `pyyaml`.
+- External tools for 3D coupling only: SimVascular `svpre`, `svsolver`, `svpost` in PATH.
+- Input data files:
+- `zerod_config.json` (svZeroD config)
+- `clinical_targets.csv`
+- `mesh-surfaces` directory
+- Optional `inflow.csv` for custom inflow
 
-   `cd svZeroDTrees`
-   
-   `pip install -e .`
-
-## Dependencies
-
-clone and install:
-* [svZeroDSolver](https://github.com/SimVascular/svZeroDSolver)
-* [svSuperEstimator](https://github.com/StanfordCBCL/svSuperEstimator)
-
-standard packages:
-* scipy
-* numpy
-* vtk
-* pandas
-* matplotlib
-* networkx
-
-
-## Overview
-Generate structured trees at the outlet of 0d models created in SimVascular based on outflow boundary conditions to simulate microvasculature. Adapt these trees to changes in flow at the outlet based on upstream changes, such as stenosis relief.
-There are currently two microvascular adaptation schemes:
-* constant wall shear stress assumption (Yang et al. 2016)
-* Pries and Secomb model (Pries et al. 1998)
-
-## todo
-[] document all code
-
-[] robustify documentation
-
-[] add clinical targets to json file
-
-## Modules
-`simulation`: end-to-end pipeline orchestration (0D + 3D coupling)
-
-`tune_bcs`: boundary condition tuning and assignment
-
-`adaptation`: compute adaptation of trees
-
-`post_processing`: post-processing utilities and plotting
-
-## Classes
-`ConfigHandler`: data handler for the 0D solver json config, with additional classes for each 0d element type
-
-`ResultHandler`: data handler for the simulation result data
-
-`StructuredTreeBC`: class for handling structured trees
-
-`TreeVessel`: class for handling vessels of the structured tree
-   
-
-## building a simple tree
-A simple tree with resistance 100.0 can be built with the following methods. steady through the tree is computed easily as well
-
-```python
-tree = StructuredTree(name='simple tree')
-tree.optimize_tree_diameter(resistance=100.0)
-
-# compute pressure and flow in the tree with inlet flow 10.0 cm3/s and distal pressure 100.0 dyn/cm2
-tree_result = tree.simulate(Q_in = [10.0, 10.0], Pd=100.0)
-
+**Install**
+```bash
+git clone https://github.com/ncdorn/svZeroDTrees.git
+cd svZeroDTrees
+pip install -e .
 ```
 
-## YAML Interface (v1)
-svzerodtrees uses a YAML-first interface with explicit workflows. The CLI and Python API share the same schema.
+**Quickstart**
+CLI (use the example config):
+```bash
+svzerodtrees pipeline examples/pipeline_example.yml
+```
 
-### CLI
-```\n+svzerodtrees pipeline config.yml\n+svzerodtrees tune-bcs config.yml\n+svzerodtrees construct-trees config.yml\n+svzerodtrees adapt config.yml\n+svzerodtrees postprocess config.yml\n+svzerodtrees schema\n+```\n+
-### Python API
-```python\n+from svzerodtrees import load_config\n+from svzerodtrees import PipelineWorkflow\n+\n+cfg = load_config(\"config.yml\")\n+PipelineWorkflow.from_config(cfg).run()\n+```\n+
-### Quick YAML example (pipeline)
-```yaml\n+version: 1\n+workflow: pipeline\n+paths:\n+  root: .\n+  zerod_config: zerod_config.json\n+  clinical_targets: clinical_targets.csv\n+  mesh_surfaces: mesh-complete/mesh-surfaces\n+  preop_dir: preop\n+  postop_dir: postop\n+  adapted_dir: adapted\n+  optimized_params: optimized_params.csv\n+bcs:\n+  type: impedance\n+  compliance_model: constant\n+  is_pulmonary: true\n+adaptation:\n+  method: cwss\n+  location: uniform\n+  iterations: 10\n+pipeline:\n+  run_steady: true\n+  optimize_bcs: true\n+  run_threed: true\n+  adapt: true\n+```\n+
-See `docs/interface.md` for the full schema and additional examples.
+Generate a schema template:
+```bash
+svzerodtrees schema
+```
+
+Python API:
+```python
+from svzerodtrees import load_config
+from svzerodtrees.api import PipelineWorkflow
+
+cfg = load_config("examples/pipeline_example.yml")
+PipelineWorkflow.from_config(cfg).run()
+```
+
+**Workflows**
+- `pipeline`: end-to-end run (0D setup, BC tuning, optional 3D, adaptation).
+- `tune_bcs`: optimize impedance or RCR parameters only.
+- `construct_trees`: assign impedance or RCR BCs to a svZeroD config.
+- `adapt`: run microvascular adaptation using preop/postop results.
+- `postprocess`: generate figures from saved tree pickles.
+
+**Outputs**
+Typical outputs are written under `paths.root` and include:
+- `optimized_params.csv` or `optimized_rcr_params.csv` from tuning.
+- `svzerod_config_with_bcs.json` (or `paths.output_config`) from tree construction.
+- `preop`, `postop`, `adapted` directories for pipeline/adaptation runs.
+- Figures from postprocess workflow (PNG outputs you specify).
+
+**Examples**
+- YAML configs: `examples/pipeline_example.yml`, `examples/tune_bcs_example.yml`,
+  `examples/construct_tree/construct_trees_example.yml`, `examples/adapt_example.yml`,
+  `examples/postprocess_example.yml`.
+- Narrative example: `examples/construct_tree/README.md`.
+
+**Reference**
+- Schema reference: `docs/interface.md`.
+- User guide: `docs/overview.md`.

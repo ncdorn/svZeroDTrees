@@ -2,20 +2,34 @@
 
 This document defines the YAML schema used by the CLI and Python API. The schema is strict: unknown keys raise errors.
 
-## Workflows
-- `pipeline`: end-to-end run using `Simulation.run_pipeline`
-- `tune_bcs`: tune boundary conditions only
-- `construct_trees`: assign impedance or RCR BCs
-- `adapt`: run microvascular adaptation (impedance BCs)
-- `postprocess`: generate figures from saved tree pickles
+**Workflows**
+- `pipeline`: end-to-end run using `Simulation.run_pipeline`.
+- `tune_bcs`: tune boundary conditions only.
+- `construct_trees`: assign impedance or RCR BCs.
+- `adapt`: run microvascular adaptation (impedance BCs).
+- `postprocess`: generate figures from saved tree pickles.
 
-## Top-Level Keys
-- `version`: must be `1`
-- `workflow`: one of `pipeline|tune_bcs|construct_trees|adapt|postprocess`
-- `paths`: required
-- `bcs`, `trees`, `adaptation`, `pipeline`, `threed`, `postprocess`: optional depending on workflow
+**Workflow Requirements**
 
-## Paths
+| Workflow | Required Sections | Optional Sections |
+| --- | --- | --- |
+| `pipeline` | `version`, `workflow`, `paths` | `bcs`, `adaptation`, `pipeline`, `threed` |
+| `tune_bcs` | `version`, `workflow`, `paths`, `bcs` | `threed` |
+| `construct_trees` | `version`, `workflow`, `paths`, `bcs`, `trees` | `threed` |
+| `adapt` | `version`, `workflow`, `paths` | `bcs`, `adaptation`, `threed` |
+| `postprocess` | `version`, `workflow`, `paths`, `postprocess` | none |
+
+**Path Resolution**
+- `paths.root` is resolved to an absolute path.
+- All other relative paths are resolved relative to `paths.root`.
+
+**Top-Level Keys**
+- `version`: must be `1`.
+- `workflow`: one of `pipeline|tune_bcs|construct_trees|adapt|postprocess`.
+- `paths`: required for all workflows.
+- `bcs`, `trees`, `adaptation`, `pipeline`, `threed`, `postprocess`: required only for certain workflows.
+
+**Paths**
 ```yaml
 paths:
   root: .
@@ -30,7 +44,7 @@ paths:
   output_config: svzerod_config_with_bcs.json
 ```
 
-## BCs
+**BCs**
 ```yaml
 bcs:
   type: impedance  # impedance | rcr
@@ -51,11 +65,11 @@ bcs:
   rcr_params: [R_LPA, C_LPA, R_RPA, C_RPA]
 ```
 
-Supported transforms:
+Supported transforms for `tune_space`:
 - `to_native`: `identity|positive|unit_interval`
 - `from_native`: `identity|log`
 
-## Trees
+**Trees**
 ```yaml
 trees:
   d_min: 0.01
@@ -85,9 +99,9 @@ trees:
       params:
         value: 66000.0
 ```
-If `optimized_params_csv` is present, `lpa`/`rpa` blocks are optional.
+If `optimized_params_csv` is present, `lpa` and `rpa` blocks are optional.
 
-## Adaptation
+**Adaptation**
 ```yaml
 adaptation:
   method: cwss
@@ -95,7 +109,7 @@ adaptation:
   iterations: 10
 ```
 
-## Pipeline
+**Pipeline**
 ```yaml
 pipeline:
   run_steady: true
@@ -104,7 +118,7 @@ pipeline:
   adapt: true
 ```
 
-## 3D
+**3D**
 ```yaml
 threed:
   mesh_scale_factor: 1.0
@@ -115,7 +129,7 @@ threed:
     svpost: postsolver
 ```
 
-## Postprocess
+**Postprocess**
 ```yaml
 postprocess:
   figures:
@@ -132,8 +146,8 @@ Supported `kind` values:
 - `generation_waveforms`
 - `visualize_hemodynamics`
 
-## CLI Usage
-```
+**CLI Usage**
+```bash
 svzerodtrees pipeline config.yml
 svzerodtrees tune-bcs config.yml
 svzerodtrees construct-trees config.yml
