@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 import numpy as np
 
 @dataclass
@@ -16,7 +17,7 @@ class StructuredTreeStorage:
     # tree-level scalars/defaults
     lrr: float
     density: float
-    compliance_model: str | int | object  # whatever you use
+    compliance_model: Any
     name: str
     eta: float
 

@@ -37,9 +37,15 @@ class PipelineWorkflow:
             "clinical_targets": paths.clinical_targets,
             "preop_dir": os.path.basename(paths.preop_dir) if paths.preop_dir else "preop",
             "postop_dir": os.path.basename(paths.postop_dir) if paths.postop_dir else "postop",
-            "adapted_dir": os.path.basename(paths.adapted_dir) if paths.adapted_dir else "adapted",
             "zerod_config": os.path.basename(paths.zerod_config) if paths.zerod_config else "zerod_config.json",
         }
+        if pipeline is not None and not pipeline.adapt:
+            # Avoid initializing adapted simulation directories when adaptation is disabled.
+            sim_kwargs["adapted_dir"] = None
+        else:
+            sim_kwargs["adapted_dir"] = (
+                os.path.basename(paths.adapted_dir) if paths.adapted_dir else "adapted"
+            )
 
         if bcs is not None:
             sim_kwargs["bc_type"] = bcs.type

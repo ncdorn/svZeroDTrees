@@ -1,5 +1,5 @@
 import math
-from typing import Iterable, Callable, Any, Tuple, Optional
+from typing import Iterable, Callable, Any, Tuple, Optional, Union
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -86,7 +86,7 @@ def _resolve_results_field(name: Optional[str], default: str) -> str:
     return alias if alias is not None else name
 
 
-def _time_mask(times: np.ndarray, window: Optional[Tuple[float, float]]) -> slice | np.ndarray:
+def _time_mask(times: np.ndarray, window: Optional[Tuple[float, float]]) -> Union[slice, np.ndarray]:
     if window is None:
         return slice(None)
     if len(window) != 2:
@@ -106,7 +106,7 @@ def _reduce_timeseries(matrix: np.ndarray, reducer: Callable) -> np.ndarray:
     return np.asarray([_as_scalar(row, reducer) for row in matrix], dtype=float)
 
 
-def _select_timeseries(matrix: np.ndarray, mask: slice | np.ndarray) -> np.ndarray:
+def _select_timeseries(matrix: np.ndarray, mask: Union[slice, np.ndarray]) -> np.ndarray:
     arr = np.asarray(matrix, dtype=float)
     if arr.ndim == 1:
         arr = arr[None, :]
