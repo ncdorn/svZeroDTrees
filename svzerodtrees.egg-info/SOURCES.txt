@@ -4,10 +4,14 @@ examples/AS1_SU0308_analysis.py
 examples/run_experiment.py
 examples/construct_tree/construct_trees.py
 svzerodtrees/__init__.py
+svzerodtrees/api.py
+svzerodtrees/cli.py
+svzerodtrees/config.py
 svzerodtrees/utils.py
 svzerodtrees.egg-info/PKG-INFO
 svzerodtrees.egg-info/SOURCES.txt
 svzerodtrees.egg-info/dependency_links.txt
+svzerodtrees.egg-info/entry_points.txt
 svzerodtrees.egg-info/requires.txt
 svzerodtrees.egg-info/top_level.txt
 svzerodtrees/_archive/pries_secomb.py
@@ -98,7 +102,12 @@ svzerodtrees/tune_bcs/tune_space.py
 svzerodtrees/tune_bcs/utils.py
 svzerodtrees/tune_bcs/sensitivity/__init__.py
 svzerodtrees/tune_bcs/sensitivity/structured_tree_sensitivity.py
+tests/test_cli_dispatch.py
+tests/test_config_validation.py
+tests/test_pipeline_mapping.py
+tests/test_simulation.py
 tests/test_structured_tree.py
+tests/test_tune_bcs.py
 workflows/AS1_vessel_analysis.py
 workflows/LPA_RPA_adapt.py
 workflows/threed_analysis.py

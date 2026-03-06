@@ -439,8 +439,9 @@ class StructuredTree:
         left_idx  = st.left.astype(np.int32)
         right_idx = st.right.astype(np.int32)
 
-        # nodes by generation (exclude collapsed in spectral path)
-        idx_by_gen = [np.where((gens == g) & (~collapsed))[0] for g in range(max_gen + 1)]
+        # nodes by generation (include collapsed leaves so their segment
+        # impedance contributes to parent loads, matching Olufsen recursion)
+        idx_by_gen = [np.where(gens == g)[0] for g in range(max_gen + 1)]
         # absolute index -> row-in-gen map
         n_nodes = d.size
         pos_map_by_gen = []
@@ -470,7 +471,7 @@ class StructuredTree:
                         Z_dc_next, next_idx = None, idx
                         continue
                     li = left_idx[idx];  ri = right_idx[idx]
-                    hasL = (li >= 0) & (~collapsed[li]);  hasR = (ri >= 0) & (~collapsed[ri])
+                    hasL = (li >= 0);  hasR = (ri >= 0)
                     if g == max_gen or Z_dc_next is None or next_idx.size == 0:
                         Z_load = np.zeros(idx.size, dtype=np.float64)
                     else:
@@ -565,8 +566,8 @@ class StructuredTree:
                         continue
 
                     li = left_idx[idx];  ri = right_idx[idx]
-                    hasL = (li >= 0) & (~collapsed[li])
-                    hasR = (ri >= 0) & (~collapsed[ri])
+                    hasL = (li >= 0)
+                    hasR = (ri >= 0)
 
                     if g == max_gen or Z_next is None or next_idx.size == 0:
                         if leaf_termination == "zero":
@@ -694,6 +695,9 @@ class StructuredTree:
             "bc_type": "IMPEDANCE",
             "bc_values": {
                 "tree": tree_id,
+                # lowercase `z` is the current svZeroDSolver input field
+                "z": self.Z_t.tolist(),
+                # keep legacy fields for compatibility with existing svzerodtrees code paths
                 "Z": self.Z_t.tolist(),
                 "t": self.time,
                 "Pd": Pd,

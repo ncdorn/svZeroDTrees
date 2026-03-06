@@ -67,7 +67,24 @@ def test_create_impedance_bc_serializes_kernel(simple_tree):
     assert bc.type == "IMPEDANCE"
     assert bc.values["tree"] == tree_id
     assert bc.values["Pd"] == pytest.approx(pd_value)
+    assert bc.values["z"] == pytest.approx(kernel.tolist())
     assert bc.values["Z"] == pytest.approx(kernel.tolist())
     assert bc.values["t"] == simple_tree.time
 
+
+def test_impedance_bc_accepts_solver_schema():
+    bc = BoundaryCondition.from_config(
+        {
+            "bc_name": "OUT",
+            "bc_type": "IMPEDANCE",
+            "bc_values": {
+                "z": [10.0, 2.0, 1.0],
+                "Pd": 3.0,
+            },
+        }
+    )
+
+    assert bc.Z == pytest.approx([10.0, 2.0, 1.0])
+    assert bc.values["z"] == pytest.approx([10.0, 2.0, 1.0])
+    assert bc.values["Z"] == pytest.approx([10.0, 2.0, 1.0])
 
