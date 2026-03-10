@@ -8,8 +8,11 @@ from ..microvasculature import TreeParameters
 import json
 import copy
 import pandas as pd
+import numpy as np
 from scipy.integrate import trapezoid
 import os
+import glob
+import re
 
 class Simulation:
     '''
@@ -48,6 +51,12 @@ class Simulation:
                  zerod_config='zerod_config.json',
                  convert_to_cm=False,
                  mesh_scale_factor=1.0,
+                 wall_model='rigid',
+                 elasticity_modulus=5062674.563165,
+                 poisson_ratio=0.5,
+                 shell_thickness=0.12,
+                 prestress_file=None,
+                 prestress_file_path=None,
                  optimized=False, 
                  inflow_path=None):
         
@@ -77,14 +86,30 @@ class Simulation:
 
         # simulation parameters
         self.n_tsteps = 2000
+        wall_model = str(wall_model).lower()
+        if wall_model not in {"rigid", "deformable"}:
+            raise ValueError("wall_model must be one of rigid|deformable")
         self.threed_sim_config = {
                 'n_tsteps': 4000,
                 'dt': 0.0005,
                 'nodes': 3,
                 'procs_per_node': 24,
                 'memory': 16,
-                'hours': 20
+                'hours': 20,
+                'wall_model': wall_model,
+                'elasticity_modulus': float(elasticity_modulus),
+                'poisson_ratio': float(poisson_ratio),
+                'shell_thickness': float(shell_thickness),
+                'prestress_file': prestress_file,
+                'prestress_file_path': prestress_file_path,
             }
+        if wall_model == "deformable":
+            if float(elasticity_modulus) <= 0.0:
+                raise ValueError("elasticity_modulus must be > 0 for deformable wall model")
+            if float(shell_thickness) <= 0.0:
+                raise ValueError("shell_thickness must be > 0 for deformable wall model")
+            if not (-1.0 < float(poisson_ratio) <= 0.5):
+                raise ValueError("poisson_ratio must satisfy -1.0 < v <= 0.5 for deformable wall model")
 
         ## Bools
         self.optimized = optimized
@@ -259,6 +284,10 @@ class Simulation:
             )
 
             self.zerod_config.to_json(self.zerod_config_path)
+
+            if self.threed_sim_config.get("wall_model") == "deformable":
+                self._resolve_or_generate_prestress_file(run_steady=run_steady)
+
             # run preop + postop simulations
             preop_sim = SimulationDirectory.from_directory(self.preop_dir.path, threed_coupler=self.zerod_config_path, convert_to_cm=self.convert_to_cm, mesh_scale_factor=self.mesh_scale_factor)
             preop_sim.write_files(simname='Preop Simulation', user_input=False, sim_config=self.threed_sim_config)
@@ -283,6 +312,138 @@ class Simulation:
             self.adapted_dir.write_files(simname='Adapted Simulation', user_input=False, sim_config=self.threed_sim_config)
 
             # postprocess results
+
+    @staticmethod
+    def _extract_step_id(path):
+        basename = os.path.basename(path)
+        match = re.search(r"(\d+)\.vtu$", basename)
+        return int(match.group(1)) if match else -1
+
+    def _get_latest_result_vtu(self, sim_dir):
+        candidates = glob.glob(os.path.join(sim_dir, "*-procs", "result_*.vtu"))
+        if not candidates:
+            candidates = glob.glob(os.path.join(sim_dir, "result_*.vtu"))
+        if not candidates:
+            return None
+        return max(candidates, key=lambda p: (self._extract_step_id(p), os.path.getmtime(p)))
+
+    def _compute_mean_wall_traction(self, result_dir, wall_path, out_path):
+        try:
+            import vtk
+        except Exception as exc:
+            raise RuntimeError("vtk is required for auto prestress setup (threed.prestress_file=auto)") from exc
+
+        result_vtus = sorted(glob.glob(os.path.join(result_dir, "result_*.vtu")), key=self._extract_step_id)
+        if not result_vtus:
+            raise FileNotFoundError(f"No result_*.vtu files found in {result_dir}")
+        selected_vtus = result_vtus[-min(10, len(result_vtus)):]
+
+        wall_reader = vtk.vtkXMLPolyDataReader()
+        wall_reader.SetFileName(str(wall_path))
+        wall_reader.Update()
+        wall = wall_reader.GetOutput()
+
+        wall_ids_arr = wall.GetPointData().GetArray("GlobalNodeID")
+        if wall_ids_arr is None:
+            raise RuntimeError(f"GlobalNodeID is missing on wall file: {wall_path}")
+        npts = wall.GetNumberOfPoints()
+        wall_ids = np.array([int(wall_ids_arr.GetTuple1(i)) for i in range(npts)], dtype=np.int64)
+
+        mean_t = np.zeros((npts, 3), dtype=np.float64)
+        for vtu_path in selected_vtus:
+            reader = vtk.vtkXMLUnstructuredGridReader()
+            reader.SetFileName(vtu_path)
+            reader.Update()
+            mesh = reader.GetOutput()
+            traction_arr = mesh.GetPointData().GetArray("Traction")
+            if traction_arr is None:
+                raise RuntimeError(f"Traction array missing in {vtu_path}")
+            for i in range(npts):
+                mean_t[i, :] += np.asarray(traction_arr.GetTuple(int(wall_ids[i]) - 1), dtype=np.float64)
+        mean_t /= float(len(selected_vtus))
+
+        out_arr = vtk.vtkDoubleArray()
+        out_arr.SetNumberOfComponents(3)
+        out_arr.SetNumberOfTuples(npts)
+        out_arr.SetName("Traction")
+        for i in range(npts):
+            out_arr.SetTuple3(i, float(mean_t[i, 0]), float(mean_t[i, 1]), float(mean_t[i, 2]))
+
+        wall_copy = vtk.vtkPolyData()
+        wall_copy.DeepCopy(wall)
+        wall_copy.GetPointData().AddArray(out_arr)
+
+        writer = vtk.vtkXMLPolyDataWriter()
+        writer.SetInputData(wall_copy)
+        writer.SetFileName(str(out_path))
+        writer.Write()
+
+    def _run_auto_prestress_from_steady_mean(self):
+        mean_dir = os.path.join(self.steady_dir, "mean")
+        mean_result = self._get_latest_result_vtu(mean_dir)
+        if mean_result is None:
+            print("No steady mean result found; running steady simulations first for prestress setup.")
+            self.run_steady_sims()
+            mean_result = self._get_latest_result_vtu(mean_dir)
+        if mean_result is None:
+            raise FileNotFoundError(f"Unable to locate steady mean result in {mean_dir}")
+
+        prestress_dir = os.path.join(self.path, "prestress")
+        os.makedirs(prestress_dir, exist_ok=True)
+
+        wall_path = self.preop_dir.mesh_complete.walls_combined.path
+        if wall_path is None or not os.path.exists(wall_path):
+            raise FileNotFoundError(f"Wall file not found for prestress setup: {wall_path}")
+
+        mean_result_dir = os.path.dirname(mean_result)
+        traction_file = os.path.join(prestress_dir, "rigid_wall_mean_traction.vtp")
+        self._compute_mean_wall_traction(mean_result_dir, wall_path, traction_file)
+
+        prestress_sim = SimulationDirectory.from_directory(
+            path=prestress_dir,
+            mesh_complete=self.preop_dir.mesh_complete.path,
+            convert_to_cm=self.convert_to_cm,
+            mesh_scale_factor=self.mesh_scale_factor,
+        )
+        prestress_sim.svzerod_3Dcoupling.to_json(prestress_sim.svzerod_3Dcoupling.path)
+        prestress_config = {
+            "n_tsteps": 3,
+            "dt": 0.001,
+            "nodes": 1,
+            "procs_per_node": 1,
+            "memory": 8,
+            "hours": 1,
+            "simulation_mode": "prestress",
+            "traction_file_path": traction_file,
+            "wall_model": "deformable",
+            "elasticity_modulus": self.threed_sim_config["elasticity_modulus"],
+            "poisson_ratio": self.threed_sim_config["poisson_ratio"],
+            "shell_thickness": self.threed_sim_config["shell_thickness"],
+        }
+        prestress_sim.write_files(simname="Prestress Simulation", user_input=False, sim_config=prestress_config)
+        prestress_sim.run()
+        prestress_sim.check_simulation(poll_interval=10)
+
+        prestress_result = self._get_latest_result_vtu(prestress_dir)
+        if prestress_result is None:
+            raise FileNotFoundError(f"Prestress simulation completed but no result_*.vtu found in {prestress_dir}")
+        self.threed_sim_config["prestress_file_path"] = prestress_result
+        print(f"Using prestress_file_path={prestress_result}")
+
+    def _resolve_or_generate_prestress_file(self, run_steady=True):
+        prestress_path = self.threed_sim_config.get("prestress_file_path")
+        prestress_file = self.threed_sim_config.get("prestress_file")
+        if prestress_path:
+            return
+        if isinstance(prestress_file, str) and prestress_file.lower() not in {"auto", "from_steady_mean"}:
+            self.threed_sim_config["prestress_file_path"] = os.path.abspath(prestress_file)
+            return
+        if prestress_file in (True, "auto", "from_steady_mean") or (
+            isinstance(prestress_file, str) and prestress_file.lower() in {"auto", "from_steady_mean"}
+        ):
+            if not run_steady and self._get_latest_result_vtu(os.path.join(self.steady_dir, "mean")) is None:
+                print("run_steady=False but auto prestress requested; generating steady mean run for prestress setup.")
+            self._run_auto_prestress_from_steady_mean()
 
     def _load_inflow_from_path(self, inflow_path):
         '''

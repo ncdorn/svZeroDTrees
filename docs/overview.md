@@ -83,3 +83,4 @@ trees:
 **Where to Go Next**
 - Full schema reference: `docs/interface.md`.
 - Complete examples: `examples/*.yml` and `examples/construct_tree/README.md`.
+- Iteration helper API: `svzerodtrees.tuning.iteration` (`compute_centerline_mpa_metrics`, `compute_flow_split_metrics`, `evaluate_iteration_gate`, `generate_reduced_pa_from_iteration`).

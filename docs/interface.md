@@ -123,11 +123,19 @@ pipeline:
 threed:
   mesh_scale_factor: 1.0
   convert_to_cm: false
+  wall_model: rigid  # rigid | deformable
+  elasticity_modulus: 5062674.563165
+  poisson_ratio: 0.5
+  shell_thickness: 0.12
+  prestress_file: auto  # auto | from_steady_mean | path/to/prestress_result.vtu
+  prestress_file_path: path/to/prestress_result.vtu
   solver_paths:
     svpre: svpre
     svsolver: svsolver
     svpost: postsolver
 ```
+
+For deformable wall runs, setting `prestress_file: auto` creates and runs a `prestress/` simulation using mean wall traction from `steady/mean` results, then uses that resulting VTU as `Prestress_file_path`.
 
 **Postprocess**
 ```yaml

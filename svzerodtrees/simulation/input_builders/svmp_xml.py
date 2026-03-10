@@ -24,6 +24,13 @@ class SvMPxml(SimulationFile):
               scale_factor=1.0,
               n_tsteps=1000,
               dt=0.01,
+              wall_model="rigid",
+              elasticity_modulus=5062674.563165,
+              poisson_ratio=0.5,
+              shell_thickness=0.12,
+              prestress_file_path=None,
+              simulation_mode="flow",
+              traction_file_path=None,
               threed_coupler=None,
               coupling_type="semi-implicit",
               configuration_file="svzerod_3Dcoupling.json",
@@ -92,6 +99,85 @@ class SvMPxml(SimulationFile):
         debug = ET.SubElement(gensimparams, "Debug")
         debug.text = "0"
 
+        simulation_mode = str(simulation_mode).lower()
+        if simulation_mode not in {"flow", "prestress"}:
+            raise ValueError("simulation_mode must be one of flow|prestress")
+
+        wall_model = str(wall_model).lower()
+        if wall_model not in {"rigid", "deformable"}:
+            raise ValueError("wall_model must be one of rigid|deformable")
+        if wall_model == "deformable":
+            if float(elasticity_modulus) <= 0.0:
+                raise ValueError("elasticity_modulus must be > 0 for deformable wall model")
+            if float(shell_thickness) <= 0.0:
+                raise ValueError("shell_thickness must be > 0 for deformable wall model")
+            if not (-1.0 < float(poisson_ratio) <= 0.5):
+                raise ValueError("poisson_ratio must satisfy -1.0 < v <= 0.5 for deformable wall model")
+
+        if simulation_mode == "prestress":
+            if not traction_file_path:
+                raise ValueError("traction_file_path is required for simulation_mode='prestress'")
+
+            add_mesh = ET.SubElement(svfsifile, "Add_mesh")
+            add_mesh.set("name", "wall")
+            set_shell = ET.SubElement(add_mesh, "Set_mesh_as_shell")
+            set_shell.text = "true"
+            msh_file_path = ET.SubElement(add_mesh, "Mesh_file_path")
+            msh_file_path.text = mesh_complete.walls_combined.path
+
+            add_eqn = ET.SubElement(svfsifile, "Add_equation")
+            add_eqn.set("type", "CMM")
+            coupled = ET.SubElement(add_eqn, "Coupled")
+            coupled.text = "true"
+            min_iterations = ET.SubElement(add_eqn, "Min_iterations")
+            min_iterations.text = "3"
+            max_iterations = ET.SubElement(add_eqn, "Max_iterations")
+            max_iterations.text = "30"
+            tolerance = ET.SubElement(add_eqn, "Tolerance")
+            tolerance.text = "1e-12"
+            prestress = ET.SubElement(add_eqn, "Prestress")
+            prestress.text = "true"
+            initialize = ET.SubElement(add_eqn, "Initialize")
+            initialize.text = "prestress"
+
+            poisson_ratio_node = ET.SubElement(add_eqn, "Poisson_ratio")
+            poisson_ratio_node.text = str(poisson_ratio)
+            shell_thickness_node = ET.SubElement(add_eqn, "Shell_thickness")
+            shell_thickness_node.text = str(shell_thickness)
+            elasticity_modulus_node = ET.SubElement(add_eqn, "Elasticity_modulus")
+            elasticity_modulus_node.text = str(elasticity_modulus)
+
+            output = ET.SubElement(add_eqn, "Output", {"type": "Spatial"})
+            displacement = ET.SubElement(output, "Displacement")
+            displacement.text = "true"
+            stress = ET.SubElement(output, "Stress")
+            stress.text = "true"
+
+            ls = ET.SubElement(add_eqn, "LS", {"type": "GMRES"})
+            linear_algebra = ET.SubElement(ls, "Linear_algebra", {"type": "fsils"})
+            preconditioner = ET.SubElement(linear_algebra, "Preconditioner")
+            preconditioner.text = "fsils"
+            ls_max_iterations = ET.SubElement(ls, "Max_iterations")
+            ls_max_iterations.text = "500"
+            ls_tolerance = ET.SubElement(ls, "Tolerance")
+            ls_tolerance.text = "1e-12"
+
+            add_bf = ET.SubElement(add_eqn, "Add_BF")
+            add_bf.set("mesh", "wall")
+            bf_type = ET.SubElement(add_bf, "Type")
+            bf_type.text = "traction"
+            time_dep = ET.SubElement(add_bf, "Time_dependence")
+            time_dep.text = "spatial"
+            spatial_values = ET.SubElement(add_bf, "Spatial_values_file_path")
+            spatial_values.text = str(traction_file_path)
+
+            self.xml_tree = ET.ElementTree(svfsifile)
+            ET.indent(self.xml_tree.getroot())
+            with open(self.path, "wb") as file:
+                self.xml_tree.write(file, encoding="utf-8", xml_declaration=True)
+            self.is_written = True
+            return
+
         # add mesh
         add_mesh = ET.SubElement(svfsifile, "Add_mesh")
         add_mesh.set("name", "msh")
@@ -118,31 +204,48 @@ class SvMPxml(SimulationFile):
 
         # add equation
         add_eqn = ET.SubElement(svfsifile, "Add_equation")
-        add_eqn.set("type", "fluid")
+        add_eqn.set("type", "fluid" if wall_model == "rigid" else "CMM")
 
         coupled = ET.SubElement(add_eqn, "Coupled")
-        coupled.text = "1"
+        coupled.text = "true" if wall_model == "deformable" else "1"
 
-        min_iterations = ET.SubElement(add_eqn, "Min_iterations")
-        min_iterations.text = "3"
+        if wall_model == "rigid":
+            min_iterations = ET.SubElement(add_eqn, "Min_iterations")
+            min_iterations.text = "3"
 
         max_iterations = ET.SubElement(add_eqn, "Max_iterations")
         max_iterations.text = "10"
 
         tolerance = ET.SubElement(add_eqn, "Tolerance")
-        tolerance.text = "1e-3"
+        tolerance.text = "0.01" if wall_model == "deformable" else "1e-3"
 
-        backflow_stab = ET.SubElement(add_eqn, "Backflow_stabilization_coefficient")
-        backflow_stab.text = "0.2"
+        if wall_model == "rigid":
+            backflow_stab = ET.SubElement(add_eqn, "Backflow_stabilization_coefficient")
+            backflow_stab.text = "0.2"
 
-        density = ET.SubElement(add_eqn, "Density")
-        density.text = "1.06"
+        if wall_model == "rigid":
+            density = ET.SubElement(add_eqn, "Density")
+            density.text = "1.06"
+        else:
+            fluid_density = ET.SubElement(add_eqn, "Fluid_density")
+            fluid_density.text = "1.06"
+            solid_density = ET.SubElement(add_eqn, "Solid_density")
+            solid_density.text = "1.0"
+            poisson_ratio_node = ET.SubElement(add_eqn, "Poisson_ratio")
+            poisson_ratio_node.text = str(poisson_ratio)
+            shell_thickness_node = ET.SubElement(add_eqn, "Shell_thickness")
+            shell_thickness_node.text = str(shell_thickness)
+            elasticity_modulus_node = ET.SubElement(add_eqn, "Elasticity_modulus")
+            elasticity_modulus_node.text = str(elasticity_modulus)
 
         viscosity = ET.SubElement(add_eqn, "Viscosity", {"model": "Constant"})
         value = ET.SubElement(viscosity, "Value")
         value.text = "0.04"
 
         output = ET.SubElement(add_eqn, "Output", {"type": "Spatial"})
+        if wall_model == "deformable":
+            displacement = ET.SubElement(output, "Displacement")
+            displacement.text = "true"
         velocity = ET.SubElement(output, "Velocity")
         velocity.text = "true"
 
@@ -161,32 +264,33 @@ class SvMPxml(SimulationFile):
         divergence = ET.SubElement(output, "Divergence")
         divergence.text = "true"
 
-        ls = ET.SubElement(add_eqn, "LS", {"type": "NS"})
+        ls = ET.SubElement(add_eqn, "LS", {"type": "NS" if wall_model == "rigid" else "GMRES"})
 
         linear_algebra = ET.SubElement(ls, "Linear_algebra", {"type": "fsils"})
         preconditioner = ET.SubElement(linear_algebra, "Preconditioner")
         preconditioner.text = "fsils"
 
         ls_max_iterations = ET.SubElement(ls, "Max_iterations")
-        ls_max_iterations.text = "10"
-
-        ns_gm_max_iterations = ET.SubElement(ls, "NS_GM_max_iterations")
-        ns_gm_max_iterations.text = "3"
-
-        ns_cg_max_iterations = ET.SubElement(ls, "NS_CG_max_iterations")
-        ns_cg_max_iterations.text = "500"
+        ls_max_iterations.text = "10" if wall_model == "rigid" else "100"
 
         ls_tolerance = ET.SubElement(ls, "Tolerance")
-        ls_tolerance.text = "1e-3"
+        ls_tolerance.text = "1e-3" if wall_model == "rigid" else "0.01"
 
-        ns_gm_tolerance = ET.SubElement(ls, "NS_GM_tolerance")
-        ns_gm_tolerance.text = "1e-3"
+        if wall_model == "rigid":
+            ns_gm_max_iterations = ET.SubElement(ls, "NS_GM_max_iterations")
+            ns_gm_max_iterations.text = "3"
 
-        ns_cg_tolerance = ET.SubElement(ls, "NS_CG_tolerance")
-        ns_cg_tolerance.text = "1e-3"
+            ns_cg_max_iterations = ET.SubElement(ls, "NS_CG_max_iterations")
+            ns_cg_max_iterations.text = "500"
 
-        krylov_space_dim = ET.SubElement(ls, "Krylov_space_dimension")
-        krylov_space_dim.text = "50"
+            ns_gm_tolerance = ET.SubElement(ls, "NS_GM_tolerance")
+            ns_gm_tolerance.text = "1e-3"
+
+            ns_cg_tolerance = ET.SubElement(ls, "NS_CG_tolerance")
+            ns_cg_tolerance.text = "1e-3"
+
+            krylov_space_dim = ET.SubElement(ls, "Krylov_space_dimension")
+            krylov_space_dim.text = "50"
 
 
 
@@ -232,11 +336,17 @@ class SvMPxml(SimulationFile):
         add_wall_bc = ET.SubElement(add_eqn, "Add_BC")
         add_wall_bc.set("name", "wall")
         typ = ET.SubElement(add_wall_bc, "Type")
-        typ.text = "Dir"
-        time_dep = ET.SubElement(add_wall_bc, "Time_dependence")
-        time_dep.text = "Steady"
-        value = ET.SubElement(add_wall_bc, "Value")
-        value.text = "0.0"
+        if wall_model == "deformable":
+            typ.text = "CMM"
+            if prestress_file_path:
+                prestress_path_node = ET.SubElement(add_wall_bc, "Prestress_file_path")
+                prestress_path_node.text = str(prestress_file_path)
+        else:
+            typ.text = "Dir"
+            time_dep = ET.SubElement(add_wall_bc, "Time_dependence")
+            time_dep.text = "Steady"
+            value = ET.SubElement(add_wall_bc, "Value")
+            value.text = "0.0"
 
         # Create the XML tree
         self.xml_tree = ET.ElementTree(svfsifile)

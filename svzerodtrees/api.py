@@ -64,6 +64,12 @@ class PipelineWorkflow:
         if threed is not None:
             sim_kwargs["mesh_scale_factor"] = threed.mesh_scale_factor
             sim_kwargs["convert_to_cm"] = threed.convert_to_cm
+            sim_kwargs["wall_model"] = threed.wall_model
+            sim_kwargs["elasticity_modulus"] = threed.elasticity_modulus
+            sim_kwargs["poisson_ratio"] = threed.poisson_ratio
+            sim_kwargs["shell_thickness"] = threed.shell_thickness
+            sim_kwargs["prestress_file"] = threed.prestress_file
+            sim_kwargs["prestress_file_path"] = threed.prestress_file_path
 
         if paths.inflow is not None:
             sim_kwargs["inflow_path"] = paths.inflow

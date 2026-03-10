@@ -240,3 +240,20 @@ def test_run_pipeline_updates_config_with_new_inflow(simulation_env):
         if bc["bc_name"].lower() == "inflow"
     )
     assert inflow_values == simulation_env.inflow_factory.default_q
+
+
+def test_deformable_auto_prestress_invokes_setup(simulation_env, monkeypatch):
+    sim_mod = simulation_env.module
+    sim = sim_mod.Simulation(path=simulation_env.tmp_path, wall_model="deformable", prestress_file="auto")
+
+    called = {"value": False}
+
+    def fake_auto():
+        called["value"] = True
+        sim.threed_sim_config["prestress_file_path"] = "/tmp/prestress/result_0003.vtu"
+
+    monkeypatch.setattr(sim, "_run_auto_prestress_from_steady_mean", fake_auto)
+    sim._resolve_or_generate_prestress_file(run_steady=False)
+
+    assert called["value"] is True
+    assert sim.threed_sim_config["prestress_file_path"] == "/tmp/prestress/result_0003.vtu"

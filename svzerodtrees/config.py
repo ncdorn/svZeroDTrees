@@ -66,6 +66,12 @@ class ThreeDConfig:
     mesh_scale_factor: float = 1.0
     convert_to_cm: bool = False
     solver_paths: Optional[Dict[str, str]] = None
+    wall_model: str = "rigid"
+    elasticity_modulus: float = 5062674.563165
+    poisson_ratio: float = 0.5
+    shell_thickness: float = 0.12
+    prestress_file: Optional[str] = None
+    prestress_file_path: Optional[str] = None
 
 
 @dataclass
@@ -325,11 +331,59 @@ def load_config(path: str) -> BaseConfig:
     threed = None
     if raw.get("threed") is not None:
         data = raw["threed"]
-        _ensure_keys(data, ["mesh_scale_factor", "convert_to_cm", "solver_paths"], "threed")
+        _ensure_keys(
+            data,
+            [
+                "mesh_scale_factor",
+                "convert_to_cm",
+                "solver_paths",
+                "wall_model",
+                "elasticity_modulus",
+                "poisson_ratio",
+                "shell_thickness",
+                "prestress_file",
+                "prestress_file_path",
+            ],
+            "threed",
+        )
+        wall_model = str(data.get("wall_model", "rigid")).lower()
+        if wall_model not in {"rigid", "deformable"}:
+            raise ValueError("threed.wall_model must be one of rigid|deformable")
+
+        elasticity_modulus = float(data.get("elasticity_modulus", 5062674.563165))
+        poisson_ratio = float(data.get("poisson_ratio", 0.5))
+        shell_thickness = float(data.get("shell_thickness", 0.12))
+        prestress_file = data.get("prestress_file")
+        if isinstance(prestress_file, bool):
+            prestress_file = "auto" if prestress_file else None
+        elif prestress_file is not None:
+            prestress_file = str(prestress_file)
+
+        prestress_file_path = (
+            _resolve_path(paths.root, data.get("prestress_file_path"))
+            if data.get("prestress_file_path")
+            else None
+        )
+        if prestress_file and prestress_file.lower() not in {"auto", "from_steady_mean"}:
+            # allow prestress_file to also directly carry a path
+            prestress_file_path = _resolve_path(paths.root, prestress_file)
+        if wall_model == "deformable":
+            if elasticity_modulus <= 0.0:
+                raise ValueError("threed.elasticity_modulus must be > 0 for deformable wall model")
+            if shell_thickness <= 0.0:
+                raise ValueError("threed.shell_thickness must be > 0 for deformable wall model")
+            if not (-1.0 < poisson_ratio <= 0.5):
+                raise ValueError("threed.poisson_ratio must satisfy -1.0 < v <= 0.5 for deformable wall model")
         threed = ThreeDConfig(
             mesh_scale_factor=float(data.get("mesh_scale_factor", 1.0)),
             convert_to_cm=bool(data.get("convert_to_cm", False)),
             solver_paths=data.get("solver_paths"),
+            wall_model=wall_model,
+            elasticity_modulus=elasticity_modulus,
+            poisson_ratio=poisson_ratio,
+            shell_thickness=shell_thickness,
+            prestress_file=prestress_file,
+            prestress_file_path=prestress_file_path,
         )
 
     postprocess = None
@@ -440,6 +494,12 @@ pipeline:
 threed:
   mesh_scale_factor: 1.0
   convert_to_cm: false
+  wall_model: rigid  # rigid | deformable
+  elasticity_modulus: 5062674.563165
+  poisson_ratio: 0.5
+  shell_thickness: 0.12
+  prestress_file: auto  # auto | from_steady_mean | path/to/prestress_result.vtu
+  prestress_file_path: path/to/prestress_result.vtu
   solver_paths:
     svpre: svpre
     svsolver: svsolver

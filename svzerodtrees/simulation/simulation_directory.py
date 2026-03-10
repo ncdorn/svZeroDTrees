@@ -292,6 +292,13 @@ class SimulationDirectory:
                 dt = float(input('time step size (default 0.001): ') or 0.001)
             else:
                 dt = sim_config['dt']
+            wall_model = "rigid" if sim_config is None else str(sim_config.get("wall_model", "rigid")).lower()
+            elasticity_modulus = 5062674.563165 if sim_config is None else float(sim_config.get("elasticity_modulus", 5062674.563165))
+            poisson_ratio = 0.5 if sim_config is None else float(sim_config.get("poisson_ratio", 0.5))
+            shell_thickness = 0.12 if sim_config is None else float(sim_config.get("shell_thickness", 0.12))
+            prestress_file_path = None if sim_config is None else sim_config.get("prestress_file_path")
+            simulation_mode = "flow" if sim_config is None else str(sim_config.get("simulation_mode", "flow")).lower()
+            traction_file_path = None if sim_config is None else sim_config.get("traction_file_path")
             mesh_scale_factor = self._resolve_mesh_scale_factor()
             if self.convert_to_cm:
                 print("scaling mesh to cm...")
@@ -303,7 +310,14 @@ class SimulationDirectory:
                                 dt=dt,
                                 scale_factor=mesh_scale_factor,
                                 threed_coupler=self.svzerod_3Dcoupling,
-                                configuration_file=config_file or "svzerod_3Dcoupling.json")
+                                configuration_file=config_file or "svzerod_3Dcoupling.json",
+                                wall_model=wall_model,
+                                elasticity_modulus=elasticity_modulus,
+                                poisson_ratio=poisson_ratio,
+                                shell_thickness=shell_thickness,
+                                prestress_file_path=prestress_file_path,
+                                simulation_mode=simulation_mode,
+                                traction_file_path=traction_file_path)
         
         def write_runscript_input_params(user_input=user_input, sim_config=sim_config):
             if user_input:
@@ -392,7 +406,8 @@ class SimulationDirectory:
             'nodes': 2,
             'procs_per_node': 24,
             'memory': 16,
-            'hours': 6
+            'hours': 6,
+            'wall_model': 'rigid',
         }
 
         self.write_files(simname='Steady Simulation', user_input=False, sim_config=sim_config)
