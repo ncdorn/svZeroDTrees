@@ -14,13 +14,14 @@ from ..tune_bcs import construct_impedance_trees, ClinicalTargets
 from .input_builders.simulation_file import SimulationFile
 from ..microvasculature import StructuredTree
 
+_DEFAULT_TREE_LRR = 10.0
+
 class SimulationDirectory:
     '''
     a class for handling simulation directories of pulmonary artery simulations'''
     def __init__(self, path, 
                  zerod_config=None,
                  mesh_complete=None, 
-                 svzerod_interface=None, 
                  svzerod_3Dcoupling=None, 
                  svFSIxml=None, 
                  solver_runscript=None, 
@@ -28,7 +29,8 @@ class SimulationDirectory:
                  results_dir=None,
                  clinical_target=None,
                  fig_dir=None,
-                 convert_to_cm=False):
+                 convert_to_cm=False,
+                 mesh_scale_factor=1.0):
         '''
         initialize the simulation handler which handles threed simulation data'''
 
@@ -43,9 +45,6 @@ class SimulationDirectory:
 
         # mesh complete directory
         self.mesh_complete = mesh_complete
-
-        # svZeroD_interface.dat file
-        self.svzerod_interface = svzerod_interface
 
         # svzerod_3Dcoupling.json file
         self.svzerod_3Dcoupling = svzerod_3Dcoupling
@@ -70,9 +69,10 @@ class SimulationDirectory:
         self.results_file = os.path.join(self.path, 'results.txt')
 
         self.convert_to_cm = convert_to_cm
+        self.mesh_scale_factor = mesh_scale_factor
 
     @classmethod
-    def from_directory(cls, path='.', zerod_config: str =None, mesh_complete: str ='mesh-complete', threed_coupler=None, results_dir: str =None, convert_to_cm: bool =False, is_pulmonary=True):
+    def from_directory(cls, path='.', zerod_config: str =None, mesh_complete: str ='mesh-complete', threed_coupler=None, results_dir: str =None, convert_to_cm: bool =False, is_pulmonary=True, mesh_scale_factor=1.0):
         '''
         create a simulation directory object from the path to the simulation directory
         and search for the necessary files within the path'''
@@ -109,15 +109,6 @@ class SimulationDirectory:
             print('mesh-complete not found')
             mesh_complete = None
         
-        # check for svZeroD_interface.dat
-        svzerod_interface = os.path.join(path, 'svZeroD_interface.dat')
-        if os.path.exists(svzerod_interface):
-            print('svZeroD_interface.dat found')
-            svzerod_interface = SvZeroDInterface(svzerod_interface)
-        else:
-            print('svZeroD_interface.dat not found')
-            svzerod_interface = SvZeroDInterface(svzerod_interface)
-
         # check for svzerod_3Dcoupling.json
         svzerod_3Dcoupling = os.path.join(path, 'svzerod_3Dcoupling.json')
         if threed_coupler is not None and zerod_config is not None and mesh_complete is not None:
@@ -186,7 +177,6 @@ class SimulationDirectory:
         return cls(path,
                    zerod_config,
                    mesh_complete, 
-                   svzerod_interface, 
                    svzerod_3Dcoupling, 
                    svFSIxml, 
                    solver_runscript, 
@@ -194,7 +184,8 @@ class SimulationDirectory:
                    results_dir,
                    clinical_targets,
                    fig_dir,
-                   convert_to_cm)
+                   convert_to_cm,
+                   mesh_scale_factor)
     
     def duplicate(self, new_path):
         '''
@@ -202,7 +193,13 @@ class SimulationDirectory:
 
         os.system(f'cp -r {self.path} {new_path}')
 
-        return SimulationDirectory.from_directory(new_path)
+        return SimulationDirectory.from_directory(new_path, convert_to_cm=self.convert_to_cm, mesh_scale_factor=self.mesh_scale_factor)
+
+    def _resolve_mesh_scale_factor(self):
+        scale_factor = self.mesh_scale_factor if self.mesh_scale_factor is not None else 1.0
+        if self.convert_to_cm:
+            scale_factor *= 0.1
+        return scale_factor
 
     def run(self):
         '''
@@ -226,12 +223,6 @@ class SimulationDirectory:
                 print('mesh-complete exists')
         else:
             raise FileNotFoundError('mesh-complete does not exist')
-        
-        if self.svzerod_interface.is_written:
-            if verbose:
-                print('svZeroD_interface.dat written')
-        else:
-            raise FileNotFoundError('svZeroD_interface.dat does not exist')
         
         if self.svFSIxml.is_written:
             if verbose:
@@ -263,23 +254,56 @@ class SimulationDirectory:
 
         print(f'writing files for {simname}...')
 
-        self.svzerod_interface.write(self.svzerod_3Dcoupling.path)
-
         def write_svfsixml_input_params(user_input=user_input, sim_config=sim_config):
+            def _get_inflow_period():
+                inflow_candidates = []
+                for src in (self.svzerod_3Dcoupling, self.zerod_config):
+                    if src is not None and hasattr(src, 'inflows'):
+                        inflow_candidates.extend(src.inflows.values())
+                for inflow in inflow_candidates:
+                    if inflow is None:
+                        continue
+                    period = getattr(inflow, 't_per', None)
+                    if period is not None and period > 0:
+                        return period
+                    times = getattr(inflow, 't', [])
+                    if times:
+                        try:
+                            times_arr = np.asarray(times, dtype=float)
+                            if times_arr.size >= 2:
+                                span = float(times_arr.max() - times_arr.min())
+                                if span > 0:
+                                    return span
+                        except Exception:
+                            pass
+                return None
+
+            inflow_period = _get_inflow_period()
             if user_input:
                 n_tsteps = int(input('number of time steps (default 5000): ') or 5000)
-                dt = float(input('time step size (default 0.001): ') or 0.001)
             else:
                 if sim_config is None:
                     raise ValueError('sim_config is None, cannot write svFSI.xml')
                 n_tsteps = sim_config['n_tsteps']
+            if inflow_period is not None:
+                dt = inflow_period / 2000.0
+                print(f'using dt={dt} based on inflow period {inflow_period}s and 2000 steps per period')
+            elif user_input:
+                dt = float(input('time step size (default 0.001): ') or 0.001)
+            else:
                 dt = sim_config['dt']
+            mesh_scale_factor = self._resolve_mesh_scale_factor()
             if self.convert_to_cm:
                 print("scaling mesh to cm...")
-                mesh_scale_factor = 0.1
-            else:
-                mesh_scale_factor = 1.0
-            self.svFSIxml.write(self.mesh_complete, n_tsteps=n_tsteps, dt=dt, scale_factor=mesh_scale_factor)
+            config_file = None
+            if self.svzerod_3Dcoupling is not None:
+                config_file = os.path.basename(self.svzerod_3Dcoupling.path)
+            self.svFSIxml.write(self.mesh_complete,
+                                n_tsteps=n_tsteps,
+                                dt=dt,
+                                scale_factor=mesh_scale_factor,
+                                threed_coupler=self.svzerod_3Dcoupling,
+                                configuration_file=config_file or "svzerod_3Dcoupling.json")
         
         def write_runscript_input_params(user_input=user_input, sim_config=sim_config):
             if user_input:
@@ -373,34 +397,86 @@ class SimulationDirectory:
 
         self.write_files(simname='Steady Simulation', user_input=False, sim_config=sim_config)
 
+    @staticmethod
+    def _cycle_statistics(signal, dia_window_fraction: float = 0.05):
+        """
+        Compute systolic (maximum), diastolic (local minimum averaged over a window),
+        and mean values for a periodic waveform.
+
+        Parameters
+        ----------
+        signal : array-like
+            Waveform samples across one cardiac cycle.
+        dia_window_fraction : float
+            Fraction of the cycle length used to average around the minimum; guards
+            against noise from a single sample.
+        """
+        if signal is None:
+            return 0.0, 0.0, 0.0
+
+        arr = np.asarray(signal, dtype=float)
+        arr = arr[np.isfinite(arr)]
+        if arr.size == 0:
+            return 0.0, 0.0, 0.0
+
+        sys_val = float(np.max(arr))
+        mean_val = float(np.mean(arr))
+
+        min_idx = int(np.argmin(arr))
+        window = max(1, int(round(arr.size * dia_window_fraction)))
+        half = window // 2
+        start = max(0, min_idx - half)
+        end = min(arr.size, start + window)
+        if end <= start:
+            dia_val = float(arr[min_idx])
+        else:
+            dia_val = float(np.mean(arr[start:end]))
+
+        return sys_val, dia_val, mean_val
+
     def _compute_pressure_drops(self, get_mean=False):
         lpa_flow, rpa_flow = self.flow_split(get_mean=False)
 
         # get the MPA mean, systolic, diastolic pressure
-        time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'], get_series=True)
-        time = time[time > time.max() - 1.0]
-        pressure = pressure[time.index]
-        sys_p = np.max(pressure)
-        dia_p = pressure.iloc[0]
-        mean_p = np.mean(pressure)
+        time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
+        if time.size == 0:
+            raise RuntimeError("No MPA data available to compute pressure drops.")
+
+        mask_last_period = time > time.max() - 1.0
+        time_last_period = time[mask_last_period]
+        pressure_last_period = pressure[mask_last_period]
+
+        if time_last_period.size == 0:
+            time_last_period = time
+            pressure_last_period = pressure
+
+        if pressure_last_period.size == 0:
+            raise RuntimeError("Pressure array is empty after masking for the last period.")
+
+        sys_p, dia_p, mean_p = self._cycle_statistics(pressure_last_period)
 
         lpa_outlet_pressures = {'sys': [], 'dia': [], 'mean': []}
         rpa_outlet_pressures = {'sys': [], 'dia': [], 'mean': []}
         for block in self.svzerod_3Dcoupling.coupling_blocks.values():
+            time, flow, pressure = self.svzerod_data.get_result(block)
+            if time.size == 0:
+                continue
+
+            mask_last_period = time > time.max() - 1.0
+            pressure_last_period = pressure[mask_last_period]
+            if pressure_last_period.size == 0:
+                pressure_last_period = pressure
+
+            sys_val, dia_val, mean_val = self._cycle_statistics(pressure_last_period)
+
             if 'lpa' in block.surface.lower():
-                time, flow, pressure = self.svzerod_data.get_result(block, get_series=True)
-                time = time[time > time.max() - 1.0]
-                pressure = pressure[time.index]
-                lpa_outlet_pressures['sys'].append(np.max(pressure))
-                lpa_outlet_pressures['dia'].append(pressure.iloc[0])
-                lpa_outlet_pressures['mean'].append(np.mean(pressure))
-            if 'rpa' in block.surface.lower():
-                time, flow, pressure = self.svzerod_data.get_result(block, get_series=True)
-                time = time[time > time.max() - 1.0]
-                pressure = pressure[time.index]
-                rpa_outlet_pressures['sys'].append(np.max(pressure))
-                rpa_outlet_pressures['dia'].append(pressure.iloc[0])
-                rpa_outlet_pressures['mean'].append(np.mean(pressure))
+                lpa_outlet_pressures['sys'].append(sys_val)
+                lpa_outlet_pressures['dia'].append(dia_val)
+                lpa_outlet_pressures['mean'].append(mean_val)
+            elif 'rpa' in block.surface.lower():
+                rpa_outlet_pressures['sys'].append(sys_val)
+                rpa_outlet_pressures['dia'].append(dia_val)
+                rpa_outlet_pressures['mean'].append(mean_val)
 
         lpa_pressure_drops = {
             'sys': sys_p - np.mean(lpa_outlet_pressures['sys']),
@@ -431,6 +507,9 @@ class SimulationDirectory:
             'mean': rpa_pressure_drops['mean'] / Q_mean_rpa
         }
 
+        print(f'\nLPA flow: {Q_sys_lpa} cm3/s, {Q_dia_lpa} cm3/s, {Q_mean_lpa} cm3/s')
+        print(f'RPA flow: {Q_sys_rpa} cm3/s, {Q_dia_rpa} cm3/s, {Q_mean_rpa} cm3/s')
+
         print(f'\nLPA pressure drop: {lpa_pressure_drops["sys"] / 1333.2} mmHg, {lpa_pressure_drops["dia"] / 1333.2} mmHg, {lpa_pressure_drops["mean"] / 1333.2} mmHg')
         print(f'RPA pressure drop: {rpa_pressure_drops["sys"] / 1333.2} mmHg, {rpa_pressure_drops["dia"] / 1333.2} mmHg, {rpa_pressure_drops["mean"] / 1333.2} mmHg')
 
@@ -439,9 +518,6 @@ class SimulationDirectory:
 
         print(f'\nLPA PVR: {lpa_resistance["mean"] / 80.0} Wood units')
         print(f'RPA PVR: {rpa_resistance["mean"] / 80.0} Wood units')
-
-        print(f'\nLPA flow: {Q_sys_lpa} dyn/cm5/s, {Q_dia_lpa} dyn/cm5/s, {Q_mean_lpa} dyn/cm5/s')
-        print(f'RPA flow: {Q_sys_rpa} dyn/cm5/s, {Q_dia_rpa} dyn/cm5/s, {Q_mean_rpa} dyn/cm5/s')
 
         if get_mean:
             return mean_p, Q_mean_lpa, Q_mean_rpa, lpa_resistance['mean'], rpa_resistance['mean']
@@ -487,8 +563,26 @@ class SimulationDirectory:
             Q_sys_lpa, Q_dia_lpa, Q_mean_lpa, Q_sys_rpa, Q_dia_rpa, Q_mean_rpa, lpa_resistance, rpa_resistance = self._compute_pressure_drops(get_mean=False)
 
             # compute nonlinear resistance coefficient by fitting resistance vs flows
-            S_lpa = np.polyfit([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], [lpa_resistance["sys"], lpa_resistance["dia"], lpa_resistance["mean"]], 1)
-            S_rpa = np.polyfit([Q_sys_lpa, Q_dia_rpa, Q_mean_rpa], [rpa_resistance["sys"], rpa_resistance["dia"], rpa_resistance["mean"]], 1)
+            lpa_flows = np.array([Q_sys_lpa, Q_dia_lpa, Q_mean_lpa], dtype=float)
+            lpa_res_vals = np.array([lpa_resistance["sys"], lpa_resistance["dia"], lpa_resistance["mean"]], dtype=float)
+            rpa_flows = np.array([Q_sys_rpa, Q_dia_rpa, Q_mean_rpa], dtype=float)
+            rpa_res_vals = np.array([rpa_resistance["sys"], rpa_resistance["dia"], rpa_resistance["mean"]], dtype=float)
+
+            S_lpa = np.polyfit(lpa_flows, lpa_res_vals, 1)
+            S_rpa = np.polyfit(rpa_flows, rpa_res_vals, 1)
+
+            def _compute_r_squared(x_vals, y_vals, coeffs):
+                y_pred = np.polyval(coeffs, x_vals)
+                ss_res = np.sum((y_vals - y_pred) ** 2)
+                ss_tot = np.sum((y_vals - np.mean(y_vals)) ** 2)
+                if np.isclose(ss_tot, 0.0):
+                    return 1.0 if np.isclose(ss_res, 0.0) else 0.0
+                return 1.0 - ss_res / ss_tot
+
+            lpa_r2 = _compute_r_squared(lpa_flows, lpa_res_vals, S_lpa)
+            rpa_r2 = _compute_r_squared(rpa_flows, rpa_res_vals, S_rpa)
+            print(f"LPA resistance fit R^2: {lpa_r2:.4f}")
+            print(f"RPA resistance fit R^2: {rpa_r2:.4f}")
 
             # plot the resistance fit
             fig, ax = plt.subplots(1, 2, figsize=(10, 10))
@@ -519,11 +613,198 @@ class SimulationDirectory:
 
         return lpa_resistance, rpa_resistance
 
-    def generate_simplified_zerod(self, path='simplified_nonlinear_zerod.json', nonlinear=True, optimize=False):
+    def compute_nonlinear_resistance_sampled(self, num_samples=50, flow_tolerance=1e-6, plot_name='resistance_fit_sampled.png'):
         '''
-        compute the simplified 0D model for a 3D pulmonary model from the steady simulation result'''
+        Estimate nonlinear resistance coefficients for the LPA and RPA using a dense sampling of the last cardiac cycle.
 
-        if optimize:
+        Parameters
+        ----------
+        num_samples : int
+            Number of evenly spaced samples to take across the final cardiac cycle (>=3).
+        flow_tolerance : float
+            Minimum absolute flow magnitude (in cm3/s) to include in the regression; points below this are skipped.
+        plot_name : str
+            Filename for the diagnostic plot stored in self.fig_dir.
+        '''
+        if self.svzerod_data is None:
+            raise ValueError("svZeroD_data not found. Please run the simulation first.")
+        if self.svzerod_3Dcoupling is None:
+            raise ValueError("svzerod_3Dcoupling configuration is required to gather outlet data.")
+        if self.mesh_complete is None:
+            raise ValueError("mesh_complete data is required to categorize LPA/RPA outlets.")
+        if num_samples < 3:
+            raise ValueError("num_samples must be at least 3 to perform a linear fit.")
+
+        # pull MPA pressure and restrict to the final period
+        try:
+            mpa_block = self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0']
+        except KeyError as exc:
+            raise KeyError("branch0_seg0 MPA block not found in coupling_blocks.") from exc
+        time, _, pressure = self.svzerod_data.get_result(mpa_block)
+        time = np.asarray(time, dtype=float)
+        pressure = np.asarray(pressure, dtype=float)
+
+        if time.size == 0 or pressure.size == 0:
+            raise RuntimeError("No MPA data available to compute nonlinear resistance.")
+
+        mask_last_period = time > time.max() - 1.0
+        time_last = time[mask_last_period] if mask_last_period.any() else time
+        pressure_last = pressure[mask_last_period] if mask_last_period.any() else pressure
+
+        valid = np.isfinite(time_last) & np.isfinite(pressure_last)
+        time_last = time_last[valid]
+        pressure_last = pressure_last[valid]
+
+        if time_last.size < 2:
+            raise RuntimeError("Insufficient MPA samples in the last cardiac cycle.")
+
+        sort_idx = np.argsort(time_last)
+        time_last = time_last[sort_idx]
+        pressure_last = pressure_last[sort_idx]
+
+        sample_times = np.linspace(time_last.min(), time_last.max(), num_samples)
+        mpa_pressure_samples = np.interp(sample_times, time_last, pressure_last)
+
+        # initialize accumulators for outlet data
+        lpa_flow_samples = np.zeros(num_samples)
+        lpa_pressure_sum = np.zeros(num_samples)
+        lpa_pressure_counts = np.zeros(num_samples)
+
+        rpa_flow_samples = np.zeros(num_samples)
+        rpa_pressure_sum = np.zeros(num_samples)
+        rpa_pressure_counts = np.zeros(num_samples)
+
+        for block in self.svzerod_3Dcoupling.coupling_blocks.values():
+            if 'inflow' in block.surface.lower():
+                continue
+
+            outlet = self.mesh_complete.mesh_surfaces.get(block.surface)
+            if outlet is None:
+                continue
+
+            bt, bf, bp = self.svzerod_data.get_result(block)
+            bt = np.asarray(bt, dtype=float)
+            bf = np.asarray(bf, dtype=float)
+            bp = np.asarray(bp, dtype=float)
+
+            if bt.size == 0 or bf.size == 0 or bp.size == 0:
+                continue
+
+            outlet_mask = bt > bt.max() - 1.0
+            bt_last = bt[outlet_mask] if outlet_mask.any() else bt
+            bf_last = bf[outlet_mask] if outlet_mask.any() else bf
+            bp_last = bp[outlet_mask] if outlet_mask.any() else bp
+
+            outlet_valid = np.isfinite(bt_last) & np.isfinite(bf_last) & np.isfinite(bp_last)
+            bt_last = bt_last[outlet_valid]
+            bf_last = bf_last[outlet_valid]
+            bp_last = bp_last[outlet_valid]
+
+            if bt_last.size < 2:
+                continue
+
+            outlet_sort = np.argsort(bt_last)
+            bt_last = bt_last[outlet_sort]
+            bf_last = bf_last[outlet_sort]
+            bp_last = bp_last[outlet_sort]
+
+            flow_interp = np.interp(sample_times, bt_last, bf_last)
+            pressure_interp = np.interp(sample_times, bt_last, bp_last)
+
+            if getattr(outlet, 'lpa', False):
+                lpa_flow_samples += flow_interp
+                lpa_pressure_sum += pressure_interp
+                lpa_pressure_counts += 1.0
+            elif getattr(outlet, 'rpa', False):
+                rpa_flow_samples += flow_interp
+                rpa_pressure_sum += pressure_interp
+                rpa_pressure_counts += 1.0
+
+        if not np.any(lpa_pressure_counts):
+            raise RuntimeError("No LPA outlet data found to compute resistance.")
+        if not np.any(rpa_pressure_counts):
+            raise RuntimeError("No RPA outlet data found to compute resistance.")
+
+        lpa_outlet_pressure = np.divide(
+            lpa_pressure_sum,
+            lpa_pressure_counts,
+            out=np.full_like(lpa_pressure_sum, np.nan),
+            where=lpa_pressure_counts > 0
+        )
+        rpa_outlet_pressure = np.divide(
+            rpa_pressure_sum,
+            rpa_pressure_counts,
+            out=np.full_like(rpa_pressure_sum, np.nan),
+            where=rpa_pressure_counts > 0
+        )
+
+        lpa_pressure_drop = mpa_pressure_samples - lpa_outlet_pressure
+        rpa_pressure_drop = mpa_pressure_samples - rpa_outlet_pressure
+
+        lpa_valid = (np.abs(lpa_flow_samples) > flow_tolerance) & np.isfinite(lpa_pressure_drop)
+        rpa_valid = (np.abs(rpa_flow_samples) > flow_tolerance) & np.isfinite(rpa_pressure_drop)
+
+        if lpa_valid.sum() < 2:
+            raise RuntimeError("Insufficient valid LPA samples above flow_tolerance for regression.")
+        if rpa_valid.sum() < 2:
+            raise RuntimeError("Insufficient valid RPA samples above flow_tolerance for regression.")
+
+        lpa_resistance_samples = lpa_pressure_drop[lpa_valid] / lpa_flow_samples[lpa_valid]
+        rpa_resistance_samples = rpa_pressure_drop[rpa_valid] / rpa_flow_samples[rpa_valid]
+
+        if np.allclose(lpa_flow_samples[lpa_valid], lpa_flow_samples[lpa_valid][0]):
+            raise RuntimeError("LPA flow samples lack variation; cannot fit a line.")
+        if np.allclose(rpa_flow_samples[rpa_valid], rpa_flow_samples[rpa_valid][0]):
+            raise RuntimeError("RPA flow samples lack variation; cannot fit a line.")
+
+        lpa_fit = np.polyfit(lpa_flow_samples[lpa_valid], lpa_resistance_samples, 1)
+        rpa_fit = np.polyfit(rpa_flow_samples[rpa_valid], rpa_resistance_samples, 1)
+
+        # diagnostic plot
+        fig, axes = plt.subplots(1, 2, figsize=(10, 10))
+
+        def _plot(ax, flows, resistances, fit, title):
+            ax.scatter(flows, resistances, s=25, alpha=0.7, label='samples')
+            q_min, q_max = np.min(flows), np.max(flows)
+            if np.isclose(q_min, q_max):
+                q_min -= 1.0
+                q_max += 1.0
+            q = np.linspace(q_min, q_max, 200)
+            ax.plot(q, np.polyval(fit, q), color='tab:red', label='linear fit')
+            ax.set_xlabel('Flow (cm3/s)')
+            ax.set_ylabel('Resistance (dyn/cm5/s)')
+            ax.set_title(title)
+            ax.legend()
+
+        _plot(axes[0], lpa_flow_samples[lpa_valid], lpa_resistance_samples, lpa_fit, 'LPA flow vs resistance')
+        _plot(axes[1], rpa_flow_samples[rpa_valid], rpa_resistance_samples, rpa_fit, 'RPA flow vs resistance')
+
+        plt.tight_layout()
+        if self.fig_dir is None:
+            raise RuntimeError("fig_dir is not set; cannot save resistance plot.")
+        plt.savefig(os.path.join(self.fig_dir, plot_name))
+        plt.close(fig)
+
+        print(f'LPA nonlinear resistance coefficient: slope={lpa_fit[0]}, intercept={lpa_fit[1]}')
+        print(f'RPA nonlinear resistance coefficient: slope={rpa_fit[0]}, intercept={rpa_fit[1]}')
+
+        return {'slope': lpa_fit[0], 'intercept': lpa_fit[1]}, {'slope': rpa_fit[0], 'intercept': rpa_fit[1]}
+
+    def generate_simplified_zerod(self, path='simplified_nonlinear_zerod.json', nonlinear=True, optimize_nonlin=False, optimize_rri=False):
+        '''
+        compute the simplified 0D model for a 3D pulmonary model'''
+
+        lpa_resistance = None
+        rpa_resistance = None
+        lpa_rri_params = None
+        rpa_rri_params = None
+
+        if optimize_rri:
+            print("Optimizing RRI parameters (stenosis, R, L) against 3D result...")
+            rri_result = self.optimize_RRI('simplified_zerod_config.json')
+            lpa_rri_params = rri_result['LPA']
+            rpa_rri_params = rri_result['RPA']
+        elif optimize_nonlin:
             print("Optimizing nonlinear resistance coefficients against 3D result...")
             lpa_resistance, rpa_resistance = self.optimize_nonlinear_resistance('simplified_zerod_config.json')
         else:
@@ -532,6 +813,39 @@ class SimulationDirectory:
         # need to rescale the inflow and make it periodic with a generic shape (see Inflow class)
         inflow = Inflow.periodic(path=None)
         inflow.rescale(cardiac_output=self.svzerod_3Dcoupling.bcs['INFLOW'].Q[0])
+
+        def _segment_values(resistance, inductance, stenosis):
+            return {
+                "R_poiseuille": resistance,
+                "C": 0.0,
+                "L": inductance,
+                "stenosis_coefficient": stenosis
+            }
+
+        vessel_segment_values = {}
+        if optimize_rri and lpa_rri_params is not None and rpa_rri_params is not None:
+            lpa_stenosis, lpa_R, lpa_L = lpa_rri_params
+            rpa_stenosis, rpa_R, rpa_L = rpa_rri_params
+
+            vessel_segment_values[1] = _segment_values(lpa_R / 2, lpa_L, lpa_stenosis / 2)
+            vessel_segment_values[2] = _segment_values(lpa_R / 2, 0.0, lpa_stenosis / 2)
+            vessel_segment_values[3] = _segment_values(rpa_R / 2, rpa_L, rpa_stenosis / 2)
+            vessel_segment_values[4] = _segment_values(rpa_R / 2, 0.0, rpa_stenosis / 2)
+        else:
+            # fallback to legacy behavior using either nonlinear coefficients or steady resistances
+            if lpa_resistance is None or rpa_resistance is None:
+                raise RuntimeError("Unable to determine LPA/RPA resistance values for simplified model.")
+
+            if nonlinear:
+                vessel_segment_values[1] = _segment_values(1.0, 0.0, lpa_resistance / 2)
+                vessel_segment_values[2] = _segment_values(1.0, 0.0, lpa_resistance / 2)
+                vessel_segment_values[3] = _segment_values(1.0, 0.0, rpa_resistance / 2)
+                vessel_segment_values[4] = _segment_values(1.0, 0.0, rpa_resistance / 2)
+            else:
+                vessel_segment_values[1] = _segment_values(lpa_resistance / 2, 0.0, 0.0)
+                vessel_segment_values[2] = _segment_values(lpa_resistance / 2, 0.0, 0.0)
+                vessel_segment_values[3] = _segment_values(rpa_resistance / 2, 0.0, 0.0)
+                vessel_segment_values[4] = _segment_values(rpa_resistance / 2, 0.0, 0.0)
 
         config = ConfigHandler({
             "boundary_conditions": [
@@ -616,12 +930,7 @@ class SimulationDirectory:
                     "vessel_length": 1.0,
                     "vessel_name": "branch1_seg0",
                     "zero_d_element_type": "BloodVessel",
-                    "zero_d_element_values": {
-                        "R_poiseuille": 1.0 if nonlinear else lpa_resistance / 2,
-                        "C": 0.0,
-                        "L": 0.0,
-                        "stenosis_coefficient": lpa_resistance / 2 if nonlinear else 0.0
-                    }
+                    "zero_d_element_values": vessel_segment_values[1]
                 },
                 {
                     "boundary_conditions": {
@@ -631,24 +940,14 @@ class SimulationDirectory:
                     "vessel_length": 1.0,
                     "vessel_name": "branch2_seg0",
                     "zero_d_element_type": "BloodVessel",
-                    "zero_d_element_values": {
-                        "R_poiseuille": 1.0 if nonlinear else lpa_resistance / 2,
-                        "C": 0.0,
-                        "L": 0.0,
-                        "stenosis_coefficient": lpa_resistance / 2 if nonlinear else 0.0
-                    }
+                    "zero_d_element_values": vessel_segment_values[2]
                 },
                 {
                     "vessel_id": 3,
                     "vessel_length": 1.0,
                     "vessel_name": "branch3_seg0",
                     "zero_d_element_type": "BloodVessel",
-                    "zero_d_element_values": {
-                        "R_poiseuille": 1.0 if nonlinear else rpa_resistance / 2,
-                        "C": 0.0,
-                        "L": 0.0,
-                        "stenosis_coefficient": rpa_resistance / 2 if nonlinear else 0.0
-                    }
+                    "zero_d_element_values": vessel_segment_values[3]
                 },
                 {
                     "boundary_conditions": {
@@ -658,12 +957,7 @@ class SimulationDirectory:
                     "vessel_length": 1.0,
                     "vessel_name": "branch4_seg0",
                     "zero_d_element_type": "BloodVessel",
-                    "zero_d_element_values": {
-                        "R_poiseuille": 1.0 if nonlinear else rpa_resistance / 2,
-                        "C": 0.0,
-                        "L": 0.0,
-                        "stenosis_coefficient": rpa_resistance / 2 if nonlinear else 0.0
-                    }
+                    "zero_d_element_values": vessel_segment_values[4]
                 }
             ]
         })
@@ -677,18 +971,35 @@ class SimulationDirectory:
         '''
         if self.svzerod_data is None:
             raise ValueError("svZeroD_data not found. Please run the simulation first.")
+        
+        cycle_duration = self.svzerod_3Dcoupling.bcs['INFLOW'].t[-1]
 
         # get the MPA pressure
         time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
-        time = time[time > time.max() - 1.0]
-        pressure = pressure[time.index]
-        flow = flow[time.index]
+        if time.size == 0:
+            raise RuntimeError("No svZeroD results available for nonlinear resistance optimization.")
+
+        mask_last_period = time > time.max() - cycle_duration
+        time_last_period = time[mask_last_period]
+        pressure_last_period = pressure[mask_last_period]
+        flow_last_period = flow[mask_last_period]
+
+        if time_last_period.size == 0:
+            time_last_period = time
+            pressure_last_period = pressure
+            flow_last_period = flow
 
         # get rpa split
         lpa_flow, rpa_flow = self.flow_split()
         rpa_split = sum(rpa_flow['mean'].values()) / (sum(lpa_flow['mean'].values()) + sum(rpa_flow['mean'].values()))
 
-        targets = {'mean': np.mean(pressure) / 1333.2, 'sys': np.max(pressure) / 1333.2, 'dia': np.min(pressure) / 1333.2, 'rpa_split': rpa_split}
+        pressure_window = pressure_last_period
+        targets = {
+            'mean': float(np.mean(pressure_window)) / 1333.2,
+            'sys': float(np.max(pressure_window)) / 1333.2,
+            'dia': float(np.min(pressure_window)) / 1333.2,
+            'rpa_split': rpa_split
+        }
         # targets = {'mean': 34, 'sys': 68, 'dia': 8, 'rpa_split': targets['rpa_split']}
 
         # compute a loss function of a nonlinear resistance model with impedance boundary conditions
@@ -697,7 +1008,7 @@ class SimulationDirectory:
         # rescale inflow back up to the original cardiac output
         # nonlinear_config.inflows['INFLOW'].rescale(scalar = 2)
 
-        def loss_function(nonlinear_resistance, targets, nonlinear_config):
+        def loss_function(nonlinear_resistance, targets, nonlinear_config, cycle_duration):
             # Update the nonlinear resistance values in the simplified 0D model
             # nonlinear resistance in format [lpa, rpa]
             nonlinear_config.vessel_map[1].stenosis_coefficient = nonlinear_resistance[0] / 2
@@ -708,7 +1019,7 @@ class SimulationDirectory:
             result = pysvzerod.simulate(nonlinear_config.config) # Run the simulation with the updated nonlinear resistance
 
             mpa_result = result[result.name == 'branch0_seg0']
-            mpa_result = mpa_result[mpa_result.time > mpa_result.time.max() - 1.0]
+            mpa_result = mpa_result[mpa_result.time > mpa_result.time.max() - cycle_duration]
             flow = mpa_result.flow_in
             pressure = mpa_result.pressure_in
             mean_pressure = np.mean(pressure) / 1333.2
@@ -717,7 +1028,7 @@ class SimulationDirectory:
 
             # get rpa split
             rpa_result = result[result.name == 'branch3_seg0']
-            rpa_result = rpa_result[rpa_result.time > rpa_result.time.max() - 1.0]
+            rpa_result = rpa_result[rpa_result.time > rpa_result.time.max() - cycle_duration]
             rpa_flow = rpa_result.flow_in
             rpa_split = np.trapz(rpa_flow, rpa_result.time) / np.trapz(flow, mpa_result.time)
 
@@ -738,7 +1049,7 @@ class SimulationDirectory:
         # initial_guess = self.compute_pressure_drop(steady=False)  # get the initial guess for nonlinear resistance
         print(f"Starting optimization with initial guess for nonlinear resistances: LPA = {initial_guess[0]}, RPA = {initial_guess[1]}")
         bounds = Bounds(lb=[0, 0])  # set bounds for the nonlinear resistances to be positive and non-zero
-        result = minimize(loss_function, initial_guess, args=(targets, nonlinear_config),
+        result = minimize(loss_function, initial_guess, args=(targets, nonlinear_config, cycle_duration),
                           method='Nelder-Mead', options={'disp': True}, bounds=bounds)
 
         print("Optimization complete.")
@@ -764,8 +1075,289 @@ class SimulationDirectory:
         nonlinear_config.to_json(os.path.join(self.path, 'simplified_zerod_tuned.json'))
 
         return optimized_resistances.tolist()  # return as a list for easier handling
+
+
+    def optimize_RRI(self, tuned_pa_config, initial_guess=None, tuning_iter=1, output_name='simplified_zerod_tuned_RRI.json', optimizer='Nelder-Mead', nm_iter: int = 10):
+        '''
+        Optimize the stenosis coefficient, Poiseuille resistance, and inductance for the proximal LPA (vessel 1)
+        and RPA (vessel 3) in the simplified PA config so that the 0D result matches the 3D target pressures/flow split.
+        Vessels 2 and 4 are forced to zero to isolate the proximal tuning.
+        '''
+        if self.svzerod_data is None:
+            raise ValueError("svZeroD_data not found. Please run the simulation first.")
         
-        
+        cycle_duration = self.svzerod_3Dcoupling.bcs['INFLOW'].t[-1]
+
+        time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'], cycle_duration=cycle_duration, window="last", full_cycle=False)
+        if time.size == 0:
+            raise RuntimeError("No svZeroD results available for RRI optimization.")
+
+        mask_last_period = time > time.max() - cycle_duration
+        time_last_period = time[mask_last_period]
+        pressure_last_period = pressure[mask_last_period]
+        flow_last_period = flow[mask_last_period]
+
+        if time_last_period.size == 0:
+            time_last_period = time
+            pressure_last_period = pressure
+            flow_last_period = flow
+
+        lpa_flow, rpa_flow = self.flow_split()
+        rpa_split = sum(rpa_flow['mean'].values()) / (sum(lpa_flow['mean'].values()) + sum(rpa_flow['mean'].values()))
+
+        pressure_window = pressure_last_period if pressure_last_period.size else pressure
+        targets = {
+            'mean': float(np.mean(pressure_window)) / 1333.2,
+            'sys': float(np.max(pressure_window)) / 1333.2,
+            'dia': float(np.min(pressure_window)) / 1333.2,
+            'rpa_split': rpa_split
+        }
+
+        rri_config = ConfigHandler.from_json(tuned_pa_config)
+        log_path = os.path.join(self.path, "optimize_simplified_nonlinear_RRI.log")
+
+        def _append_log(message: str):
+            with open(log_path, "a") as log_file:
+                log_file.write(message + "\n")
+
+        def _total_side_parameters(config):
+            lpa_prox = config.vessel_map[1]
+            lpa_dist = config.vessel_map.get(2)
+            rpa_prox = config.vessel_map[3]
+            rpa_dist = config.vessel_map.get(4)
+
+            lpa_total_stenosis = lpa_prox.stenosis_coefficient + (lpa_dist.stenosis_coefficient if lpa_dist else 0.0)
+            lpa_total_R = lpa_prox.R + (lpa_dist.R if lpa_dist else 0.0)
+            lpa_L = lpa_prox.L
+
+            rpa_total_stenosis = rpa_prox.stenosis_coefficient + (rpa_dist.stenosis_coefficient if rpa_dist else 0.0)
+            rpa_total_R = rpa_prox.R + (rpa_dist.R if rpa_dist else 0.0)
+            rpa_L = rpa_prox.L
+
+            return (lpa_total_stenosis, lpa_total_R, lpa_L,
+                    rpa_total_stenosis, rpa_total_R, rpa_L)
+
+        if initial_guess is None:
+            lpa_sten, lpa_R, lpa_L, rpa_sten, rpa_R, rpa_L = _total_side_parameters(rri_config)
+            initial_guess = [
+                max(lpa_sten, 1e-6),
+                100.0,
+                10.0,
+                max(rpa_sten, 1e-6),
+                100.0,
+                10.0
+            ]
+
+        def _apply_parameters(config, params):
+            params = np.maximum(params, 0.0)
+            lpa_stenosis, lpa_R, lpa_L, rpa_stenosis, rpa_R, rpa_L = params
+
+            lpa_prox = config.vessel_map[1]
+            lpa_dist = config.vessel_map.get(2)
+            lpa_split = 0.5 if lpa_dist is not None else 1.0
+
+            lpa_prox.stenosis_coefficient = lpa_stenosis * lpa_split
+            lpa_prox.R = lpa_R * lpa_split
+            lpa_prox.L = lpa_L
+
+            if lpa_dist is not None:
+                lpa_dist.stenosis_coefficient = lpa_stenosis * lpa_split
+                lpa_dist.R = lpa_R * lpa_split
+                lpa_dist.L = 0.0
+
+            rpa_prox = config.vessel_map[3]
+            rpa_dist = config.vessel_map.get(4)
+            rpa_split = 0.5 if rpa_dist is not None else 1.0
+
+            rpa_prox.stenosis_coefficient = rpa_stenosis * rpa_split
+            rpa_prox.R = rpa_R * rpa_split
+            rpa_prox.L = rpa_L
+
+            if rpa_dist is not None:
+                rpa_dist.stenosis_coefficient = rpa_stenosis * rpa_split
+                rpa_dist.R = rpa_R * rpa_split
+                rpa_dist.L = 0.0
+
+            return params
+
+        loss_weights = {
+            'mean': 1.0,
+            'sys': 1.0,
+            'dia': 1.0,
+            'rpa_split': 1.0,
+            'reg': 1e-12
+        }
+        penalty_growth = 5.0
+        max_penalty = 1e6
+        last_loss_breakdown = {}
+
+        def _evaluate_loss(params, targets, config, cycle_duration, weights):
+            params = _apply_parameters(config, params)
+            try:
+                result = pysvzerod.simulate(config.config)
+            except Exception as exc:
+                print(f"pysvzerod simulation failed during RRI optimization: {exc}")
+                components = {key: np.inf for key in ['mean', 'sys', 'dia', 'rpa_split']}
+                return 1e9, components, {}
+
+            mpa_result = result[result.name == 'branch0_seg0']
+            mpa_result = mpa_result[mpa_result.time > mpa_result.time.max() - cycle_duration]
+            if mpa_result.empty:
+                components = {key: np.inf for key in ['mean', 'sys', 'dia', 'rpa_split']}
+                return np.inf, components, {}
+
+            flow = mpa_result.flow_in
+            pressure = mpa_result.pressure_in
+            mean_pressure = np.mean(pressure) / 1333.2
+            sys_pressure = np.max(pressure) / 1333.2
+            dia_pressure = np.min(pressure) / 1333.2
+
+            rpa_result = result[result.name == 'branch3_seg0']
+            rpa_result = rpa_result[rpa_result.time > rpa_result.time.max() - cycle_duration]
+            if rpa_result.empty:
+                components = {key: np.inf for key in ['mean', 'sys', 'dia', 'rpa_split']}
+                return np.inf, components, {}
+            rpa_flow = rpa_result.flow_in
+            rpa_split = np.trapz(rpa_flow, rpa_result.time) / np.trapz(flow, mpa_result.time)
+
+            components = {
+                'mean': abs((mean_pressure - targets['mean']) / targets['mean']) ** 2,
+                'sys': abs((sys_pressure - targets['sys']) / targets['sys']) ** 2,
+                'dia': abs((dia_pressure - targets['dia']) / targets['dia']) ** 2,
+                'rpa_split': abs((rpa_split - targets['rpa_split']) / targets['rpa_split']) ** 2
+            }
+
+            loss = (
+                weights['mean'] * components['mean'] +
+                weights['sys'] * components['sys'] +
+                weights['dia'] * components['dia'] +
+                weights['rpa_split'] * components['rpa_split'] +
+                weights['reg'] * np.dot(params, params)
+            )
+            unweighted_loss = sum(components.values())
+
+            print(
+                f"pressures: {int(sys_pressure * 100) / 100} / {int(dia_pressure * 100) / 100}/"
+                f"{int(mean_pressure * 100) / 100} mmHg | target: "
+                f"{int(targets['sys'] * 100) / 100}/{int(targets['dia'] * 100) / 100}/"
+                f"{int(targets['mean'] * 100) / 100} mmHg"
+            )
+            print(f"RPA split: {rpa_split}, target: {targets['rpa_split']}")
+            print(
+                "Current params:"
+                f" LPA = (stenosis={params[0]}, R={params[1]}, L={params[2]}),"
+                f" RPA = (stenosis={params[3]}, R={params[4]}, L={params[5]}), "
+                f"Loss = {loss}, Unweighted loss = {unweighted_loss}"
+            )
+
+            metrics = {
+                'mean_pressure': mean_pressure,
+                'sys_pressure': sys_pressure,
+                'dia_pressure': dia_pressure,
+                'rpa_split': rpa_split,
+            }
+
+            return loss, components, metrics
+
+        def loss_function(params, targets, config, cycle_duration):
+            nonlocal last_loss_breakdown
+            weighted_loss, components, metrics = _evaluate_loss(params, targets, config, cycle_duration, loss_weights)
+            unweighted_loss = sum(components.values())
+            last_loss_breakdown = {
+                'weighted_loss': weighted_loss,
+                'components': components,
+                'metrics': metrics,
+                'unweighted_loss': unweighted_loss,
+                'params': np.maximum(params, 0.0)
+            }
+            return weighted_loss
+
+        print("Starting RRI optimization with initial guess:")
+        print(f"  LPA -> stenosis={initial_guess[0]}, R={initial_guess[1]}, L={initial_guess[2]}")
+        print(f"  RPA -> stenosis={initial_guess[3]}, R={initial_guess[4]}, L={initial_guess[5]}")
+        _append_log("Starting RRI optimization with initial guess:")
+        _append_log(f"  LPA -> stenosis={initial_guess[0]:.6f}, R={initial_guess[1]:.6f}, L={initial_guess[2]:.6f}")
+        _append_log(f"  RPA -> stenosis={initial_guess[3]:.6f}, R={initial_guess[4]:.6f}, L={initial_guess[5]:.6f}")
+
+        bounds = Bounds(lb=[0.0] * len(initial_guess))
+        repeats = nm_iter if optimizer == "Nelder-Mead" else 1
+        max_runs = max(1, repeats)
+        x_init = initial_guess
+        result = None
+        for run_idx in range(max_runs):
+            result = minimize(
+                loss_function,
+                x_init,
+                args=(targets, rri_config, cycle_duration),
+                method=optimizer,
+                bounds=bounds,
+                options={'disp': True}
+            )
+            x_init = result.x
+            unweighted_loss = last_loss_breakdown.get('unweighted_loss', np.inf)
+            metrics = last_loss_breakdown.get('metrics', {})
+            print(
+                f"Nelder-Mead run {run_idx + 1}/{max_runs} complete: "
+                f"weighted loss={result.fun}, unweighted loss={unweighted_loss}, weights={loss_weights}"
+            )
+            _append_log(
+                f"\nNelder-Mead run {run_idx + 1}/{max_runs} complete: "
+                f"weighted loss={result.fun:.6e}, unweighted loss={unweighted_loss:.6e}, "
+                f"weights={loss_weights}, "
+                f"pressures={metrics.get('sys_pressure', np.nan):.6f}/"
+                f"{metrics.get('dia_pressure', np.nan):.6f}/"
+                f"{metrics.get('mean_pressure', np.nan):.6f} mmHg, "
+                f"pressure_targets={targets['sys']:.6f}/{targets['dia']:.6f}/{targets['mean']:.6f} mmHg, "
+                f"rpa_split={metrics.get('rpa_split', np.nan):.6f}, "
+                f"rpa_split_target={targets['rpa_split']:.6f}\n"
+            )
+            if unweighted_loss < 1e-5:
+                break
+            if run_idx == max_runs - 1:
+                break
+
+            components = last_loss_breakdown.get('components', {})
+            for key in ['mean', 'sys', 'dia', 'rpa_split']:
+                residual = components.get(key, np.inf)
+                if not np.isfinite(residual):
+                    continue
+                updated_weight = loss_weights[key] * (1.0 + penalty_growth * residual)
+                loss_weights[key] = min(updated_weight, max_penalty)
+
+            print(f"Updated loss weights for next run: {loss_weights}")
+            _append_log(f"Updated loss weights for next run: {loss_weights}")
+            if not np.isfinite(unweighted_loss):
+                break
+
+        optimized_params = np.maximum(result.x, 0.0)
+        print("RRI optimization complete.")
+        print(
+            "Optimized parameters:"
+            f" LPA = (stenosis={optimized_params[0]}, R={optimized_params[1]}, L={optimized_params[2]}),"
+            f" RPA = (stenosis={optimized_params[3]}, R={optimized_params[4]}, L={optimized_params[5]})"
+        )
+        _append_log("RRI optimization complete.")
+        _append_log(
+            "Optimized parameters:"
+            f" LPA = (stenosis={optimized_params[0]:.6f}, R={optimized_params[1]:.6f}, L={optimized_params[2]:.6f}),"
+            f" RPA = (stenosis={optimized_params[3]:.6f}, R={optimized_params[4]:.6f}, L={optimized_params[5]:.6f})"
+        )
+
+        _apply_parameters(rri_config, optimized_params)
+
+        if tuning_iter > 1:
+            print(f"Saving config after tuning iteration {tuning_iter}...")
+
+        rri_config.inflows['INFLOW'].rescale(tsteps=500)
+        output_path = os.path.join(self.path, output_name)
+        rri_config.to_json(output_path)
+
+        return {
+            'LPA': optimized_params[:3].tolist(),
+            'RPA': optimized_params[3:].tolist(),
+            'output_config': output_path
+        }
+
 
     def generate_impedance_bcs(self):
 
@@ -775,9 +1367,12 @@ class SimulationDirectory:
         if self.zerod_config is not None:
             construct_impedance_trees(self.zerod_config, self.mesh_complete.mesh_surfaces_dir, wedge_pressure=wedge_p, d_min=d_min, convert_to_cm=self.convert_to_cm)
 
-            self.svzerod_3Dcoupling, coupling_blocks = self.zerod_config.generate_threed_coupler(self.path, 
-                                                                                                inflow_from_0d=True, 
-                                                                                                mesh_complete=self.mesh_complete)
+            self.svzerod_3Dcoupling, coupling_blocks = self.zerod_config.generate_threed_coupler(
+                self.path,
+                inflow_from_0d=True,
+                mesh_complete=self.mesh_complete,
+                include_distal_vessel=True,
+            )
         else:
             # we will need to create the svzerod_3Dcoupling.json file from scratch and choose the inflows
             # self.svzerod_3Dcoupling is a blank config at this point and bc's corresponding to each surface will need to be added
@@ -813,21 +1408,30 @@ class SimulationDirectory:
                     print(f'generating tree {bc_idx} for cap {vtp.filename} with diameter {cap_d}...')
                     tree = StructuredTree(name=vtp.filename, time=self.svzerod_3Dcoupling.bcs['INFLOW'].t, simparams=self.svzerod_3Dcoupling.simparams)
 
-                    tree.build_tree(initial_d=cap_d, d_min=d_min)
+                    tree.build(initial_d=cap_d, d_min=d_min, lrr=_DEFAULT_TREE_LRR)
 
                     # compute the impedance in frequency domain
                     tree.compute_olufsen_impedance()
 
                     bc_name = f'IMPEDANCE_{bc_idx}'
 
-                    self.svzerod_3Dcoupling.bcs[bc_name] = tree.create_impedance_bc(bc_name, wedge_p * 1333.2)
+                    self.svzerod_3Dcoupling.bcs[bc_name] = tree.create_impedance_bc(
+                        bc_name,
+                        bc_idx,
+                        wedge_p * 1333.2,
+                    )
 
                     bc_idx += 1
 
             self.svzerod_3Dcoupling.to_json('blank_edited_config.json')
-            self.svzerod_3Dcoupling, coupling_blocks = self.svzerod_3Dcoupling.generate_threed_coupler(self.path, inflow_from_0d=True, mesh_complete=self.mesh_complete)
+            self.svzerod_3Dcoupling, coupling_blocks = self.svzerod_3Dcoupling.generate_threed_coupler(
+                self.path,
+                inflow_from_0d=True,
+                mesh_complete=self.mesh_complete,
+                include_distal_vessel=True,
+            )
 
-    def flow_split(self, get_mean=False, verbose=True):
+    def flow_split(self, get_mean=False, verbose=True, steady=False):
         '''
         get the flow split between the LPA and RPA
 
@@ -836,6 +1440,11 @@ class SimulationDirectory:
         :return (lpa_flow, rpa_flow)'''
 
         # get the LPA and RPA boundary conditions based on surface name
+        def _surface_from_block(block):
+            if self.mesh_complete is None or self.mesh_complete.mesh_surfaces is None:
+                return None
+            return self.mesh_complete.mesh_surfaces.get(block.surface)
+
         if get_mean:
             lpa_flow = {
                 'upper': 0.0,
@@ -850,24 +1459,36 @@ class SimulationDirectory:
             for block in self.svzerod_3Dcoupling.coupling_blocks.values():
                 if 'inflow' in block.surface.lower():
                     continue
-                outlet = self.mesh_complete.mesh_surfaces[block.surface]
+                outlet = _surface_from_block(block)
+                if outlet is None:
+                    if verbose:
+                        print(f"Skipping {block.surface}: missing mesh surface metadata.")
+                    continue
+                time, flow, _ = self.svzerod_data.get_result(block, steady=steady)
+                if time.size == 0 or flow.size == 0:
+                    continue
+                mean_flow = float(np.trapz(flow, time))
                 if outlet.lpa:
                     if outlet.lobe == 'upper':
-                        lpa_flow['upper'] += self.svzerod_data.get_flow(block)
+                        lpa_flow['upper'] += mean_flow
                     elif outlet.lobe == 'middle':
-                        lpa_flow['middle'] += self.svzerod_data.get_flow(block)
+                        lpa_flow['middle'] += mean_flow
                     elif outlet.lobe == 'lower':
-                        lpa_flow['lower'] += self.svzerod_data.get_flow(block)
+                        lpa_flow['lower'] += mean_flow
                 elif outlet.rpa:
                     if outlet.lobe == 'upper':
-                        rpa_flow['upper'] += self.svzerod_data.get_flow(block)
+                        rpa_flow['upper'] += mean_flow
                     elif outlet.lobe == 'middle':
-                        rpa_flow['middle'] += self.svzerod_data.get_flow(block)
+                        rpa_flow['middle'] += mean_flow
                     elif outlet.lobe == 'lower':
-                        rpa_flow['lower'] += self.svzerod_data.get_flow(block)
+                        rpa_flow['lower'] += mean_flow
            
             # get the total flow
             total_flow = sum(lpa_flow.values()) + sum(rpa_flow.values())
+            if total_flow <= 0.0:
+                if verbose:
+                    print("No outlet flow data available to compute split.")
+                return lpa_flow, rpa_flow
             lpa_pct = math.trunc(sum(lpa_flow.values()) / total_flow * 1000) / 10
             rpa_pct = math.trunc(sum(rpa_flow.values()) / total_flow * 1000) / 10
 
@@ -904,41 +1525,58 @@ class SimulationDirectory:
             for block in self.svzerod_3Dcoupling.coupling_blocks.values():
                 if 'inflow' in block.surface.lower():
                     continue
-                outlet = self.mesh_complete.mesh_surfaces[block.surface]
-                time, flow, pressure = self.svzerod_data.get_result(block, get_series=True)
-                time = time[time > time.max() - 1.0]
-                last_half_time = time[time > time.max() - 0.5]
-                # use the indices of the time to get the flow
+                outlet = _surface_from_block(block)
+                if outlet is None:
+                    if verbose:
+                        print(f"Skipping {block.surface}: missing mesh surface metadata.")
+                    continue
+                time, flow, pressure = self.svzerod_data.get_result(block)
+                if time.size == 0:
+                    continue
+
+                mask_last_period = time > time.max() - 1.0
+                time_last_period = time[mask_last_period]
+                flow_last_period = flow[mask_last_period]
+
+                if time_last_period.size == 0:
+                    time_last_period = time
+                    flow_last_period = flow
+
+                flow_window = flow_last_period if flow_last_period.size else flow
+                if flow_window.size == 0:
+                    continue
+
+                peak_flow, dia_flow, mean_flow = self._cycle_statistics(flow_window)
+
                 if outlet.lpa:
-                    lpa_flow['sys'][outlet.lobe] += np.max(flow[time.index])
-                    lpa_flow['dia'][outlet.lobe] += flow[time.index].iloc[0]
-                    lpa_flow['mean'][outlet.lobe] += np.mean(flow[time.index])
+                    lpa_flow['sys'][outlet.lobe] += peak_flow
+                    lpa_flow['dia'][outlet.lobe] += dia_flow
+                    lpa_flow['mean'][outlet.lobe] += mean_flow
                 elif outlet.rpa:
-                    rpa_flow['sys'][outlet.lobe] += np.max(flow[time.index])
-                    rpa_flow['dia'][outlet.lobe] += flow[time.index].iloc[0]
-                    rpa_flow['mean'][outlet.lobe] += np.mean(flow[time.index])
+                    rpa_flow['sys'][outlet.lobe] += peak_flow
+                    rpa_flow['dia'][outlet.lobe] += dia_flow
+                    rpa_flow['mean'][outlet.lobe] += mean_flow
         
         return lpa_flow, rpa_flow
     
-    def plot_mpa(self, clinical_targets=None, plot_pf_loop=True):
+    def plot_mpa(self, clinical_targets=None, plot_pf_loop=True, window="last", full_cycle=True, cycle_duration=1.0, last_cycle_only=None, last_full_cycle=None):
         '''
         plot the MPA pressure
         
         :param clinical_targets: csv of clinical targets'''
 
-        time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'])
+        block = self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0']
+        if last_cycle_only is not None:
+            window = "last" if last_cycle_only else "all"
+        if last_full_cycle is not None:
+            full_cycle = last_full_cycle
 
-        
-        if time.max() > 2.0:
-            # remove the 1st period of results
-            time = time[time > 1.0]
-            print(f'length of time: {len(time)}')
-            flow = flow[time.index]
-            pressure = pressure[time.index]
-        else:
-            print('Using some result from 1st period! results may not be converged')
-            print(f'length of time: {len(time)}')
-            print(f'pressure at t=0.2: {pressure[time[time == 0.2].index].values[0] / 1333.2} mmHg')
+        time, flow, pressure = self.svzerod_data.get_result(block, 
+                                                            window=window,
+                                                            full_cycle=full_cycle,
+                                                            cycle_duration=cycle_duration)
+        if time.size == 0 or flow.size == 0 or pressure.size == 0:
+            raise RuntimeError("No MPA data available to plot.")
 
         pressure = pressure / 1333.2
 
@@ -986,14 +1624,9 @@ class SimulationDirectory:
         else:
             plt.savefig(os.path.join(self.path, 'figures', 'mpa.png'))
 
-        # get the time over the last period
-        time = time[time > time.max() - 1.0]
-        # use the indices of the time to get the flow
-        pressure = pressure[time.index]
-
-        sys_p = np.max(pressure)
-        dias_p = np.min(pressure)
-        mean_p = np.mean(pressure)
+        sys_p = float(np.max(pressure))
+        dias_p = float(np.min(pressure))
+        mean_p = float(np.mean(pressure))
 
         print(f'MPA systolic pressure: {sys_p} mmHg')
         print(f'MPA diastolic pressure: {dias_p} mmHg')
@@ -1004,17 +1637,20 @@ class SimulationDirectory:
             f.write(f'MPA diastolic pressure: {dias_p} mmHg\n')
             f.write(f'MPA mean pressure: {mean_p} mmHg\n\n')
 
-    def plot_outlet(self):
+    def plot_outlet(self, cycle_duration=1.0):
         '''
         plot the outlet pressures'''
 
-        fig, ax = plt.subplots(1, 3, figsize=(10, 10))
+        fig, ax = plt.subplots(1, 3, figsize=(12, 8))
 
         # block = self.svzerod_3Dcoupling.coupling_blocks['RESISTANCE_0']
 
         for block in self.svzerod_3Dcoupling.coupling_blocks.values():
 
-            time, flow, pressure = self.svzerod_data.get_result(block)
+            time, flow, pressure = self.svzerod_data.get_result(block, 
+                                                                cycle_duration=cycle_duration)
+            if time.size == 0:
+                continue
 
             if 'lpa' in block.surface.lower():
                 color='r'
@@ -1043,6 +1679,9 @@ class SimulationDirectory:
             ax[2].set_xlabel('Flow (mL/s)')
             ax[2].set_ylabel('Pressure (mmHg)')
             ax[2].set_title(f'outlet pressure vs flow')
+
+        for axis in ax:
+            axis.legend()
 
         plt.tight_layout()
         plt.savefig(os.path.join(self.path, 'figures', f'outlets.png'))
@@ -1140,4 +1779,3 @@ if __name__ == '__main__':
 
 
     
-

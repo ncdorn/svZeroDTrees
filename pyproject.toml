@@ -34,6 +34,9 @@ dev = [
 "Source" = "https://github.com/yourusername/svzerodtrees"
 "Bug Tracker" = "https://github.com/yourusername/svzerodtrees/issues"
 
+[project.scripts]
+svzerodtrees = "svzerodtrees.cli:main"
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"

@@ -1,0 +1,24 @@
+version: 1
+workflow: postprocess
+
+paths:
+  root: .
+
+postprocess:
+  figures:
+    - kind: generation_metrics
+      input: results/structured_tree.pkl
+      output: figures/generation_metrics.png
+      options:
+        time_window: [0.0, 1.0]
+        exclude_collapsed: true
+    - kind: generation_waveforms
+      input: results/structured_tree.pkl
+      output: figures/generation_waveforms.png
+      options:
+        normalize_time: true
+    - kind: visualize_hemodynamics
+      input: results/structured_tree.pkl
+      output: figures/visualize_hemodynamics.png
+      options:
+        convert_pressure_to_mmhg: true

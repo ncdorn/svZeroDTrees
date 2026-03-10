@@ -93,10 +93,6 @@ def initialize_from_paths(
     clinical_targets = ClinicalTargets.from_csv(clinical_targets_csv)
     lpa_params, rpa_params = load_optimized_params(optimized_tree_params_csv)
 
-    # RESET D_MIN FOR TESTING
-    lpa_params.d_min = 0.05
-    rpa_params.d_min = 0.05
-
     preop_pa = create_preop_model(preop_config_path, clinical_targets, lpa_params, rpa_params)
     simulate_homeostatic_state(preop_pa)
 

@@ -4,8 +4,9 @@ from scipy.optimize import minimize
 from ..simulation.threedutils import vtp_info
 from ..tune_bcs.pa_config import PAConfig
 from ..microvasculature import TreeParameters, compliance as comp_mod
+from ..microvasculature.structured_tree.asymmetry import resolve_branch_scaling
 from ..tune_bcs.tune_space import TuneSpace
-import csv, math
+import csv, math, os
 
 class ImpedanceTuner(BoundaryConditionTuner):
     def __init__(self,
@@ -24,7 +25,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
                  convert_to_cm=True,
                  log_file=None,
                  maxiter=200,
-                 solver="Nelder-Mead"):
+                 solver="Powell"):
         super().__init__(config_handler, mesh_surfaces_path, clinical_targets)
         self.tune_space = tune_space
         self.compliance_model = (compliance_model or "").lower()
@@ -47,6 +48,10 @@ class ImpedanceTuner(BoundaryConditionTuner):
 
         # will be filled in tune()
         self._geom_defaults = {}
+        self._augmented_mode = False
+        self._loss_weights = None
+        self._last_loss_breakdown = {}
+        self._opt_csv_path = None
 
 
     # ---- Internal helpers ---- #
@@ -79,8 +84,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
         rpa_mean_d = np.mean([(area / np.pi) ** 0.5 * 2 for area in rpa_info.values()])
         lpa_mean_d = np.mean([(area / np.pi) ** 0.5 * 2 for area in lpa_info.values()])
         # clamp for safety
-        rpa_mean_d = min(rpa_mean_d, 0.4)
-        lpa_mean_d = min(lpa_mean_d, 0.4)
+        rpa_mean_d = rpa_mean_d
+        lpa_mean_d = lpa_mean_d
         self._geom_defaults = {
             "rpa.default_diameter": rpa_mean_d,
             "lpa.default_diameter": lpa_mean_d,
@@ -102,19 +107,33 @@ class ImpedanceTuner(BoundaryConditionTuner):
         lpa_d = params.get("lpa.diameter", self._geom_defaults["lpa.default_diameter"])
         rpa_d = params.get("rpa.diameter", self._geom_defaults["rpa.default_diameter"])
         lrr   = params.get("lrr", 10.0)
-        alpha_l = params.get("lpa.alpha", 0.9)
-        alpha_r = params.get("rpa.alpha", 0.9)
-        beta_l  = params.get("lpa.beta", 0.6)
-        beta_r  = params.get("rpa.beta", 0.6)
+        alpha_l, beta_l = resolve_branch_scaling(
+            alpha=params.get("lpa.alpha"),
+            beta=params.get("lpa.beta"),
+            xi=params.get("lpa.xi"),
+            eta_sym=params.get("lpa.eta_sym"),
+        )
+        alpha_r, beta_r = resolve_branch_scaling(
+            alpha=params.get("rpa.alpha"),
+            beta=params.get("rpa.beta"),
+            xi=params.get("rpa.xi"),
+            eta_sym=params.get("rpa.eta_sym"),
+        )
         d_min   = params.get("d_min", 0.01)
+        lpa_inductance = params.get("lpa.inductance", 0.0)
+        rpa_inductance = params.get("rpa.inductance", 0.0)
 
         lpa_comp = self._build_compliance("lpa", params)
         rpa_comp = self._build_compliance("rpa", params)
 
         lpa_params = TreeParameters(name="lpa", lrr=lrr, diameter=lpa_d, d_min=d_min,
-                                    alpha=alpha_l, beta=beta_l, compliance_model=lpa_comp)
+                                    alpha=alpha_l, beta=beta_l, compliance_model=lpa_comp,
+                                    xi=params.get("lpa.xi"), eta_sym=params.get("lpa.eta_sym"),
+                                    inductance=lpa_inductance)
         rpa_params = TreeParameters(name="rpa", lrr=lrr, diameter=rpa_d, d_min=d_min,
-                                    alpha=alpha_r, beta=beta_r, compliance_model=rpa_comp)
+                                    alpha=alpha_r, beta=beta_r, compliance_model=rpa_comp,
+                                    xi=params.get("rpa.xi"), eta_sym=params.get("rpa.eta_sym"),
+                                    inductance=rpa_inductance)
         return lpa_params, rpa_params
     
     def _grid_search_init(self, pa_config, x0: np.ndarray) -> np.ndarray:
@@ -147,13 +166,29 @@ class ImpedanceTuner(BoundaryConditionTuner):
             if f < best_f:
                 best_f, best_x = f, trial
 
-        print(f"[grid] best init loss={best_f:.3f} from candidates={candidates}")
+        print(f"[grid] best init loss={best_f:.3f} for candidate={best_x[-1]}")
         return best_x
     
 
     # ---- Main tuning routine ---- #
 
-    def tune(self):
+    def tune(self, nm_iter: int = 1):
+        # set log path if not provided
+        if self.log_file is None:
+            base_dir = getattr(self.config_handler, "path", None)
+            if base_dir is not None:
+                base_dir = os.path.dirname(os.path.abspath(base_dir))
+            else:
+                base_dir = os.getcwd()
+            self.log_file = os.path.join(base_dir, "impedance_tuning.log")
+        else:
+            base_dir = os.path.dirname(os.path.abspath(self.log_file))
+        self._opt_csv_path = os.path.join(base_dir, "optimized_params.csv")
+
+        def _append_log(msg: str):
+            with open(self.log_file, "a") as lf:
+                lf.write(msg + "\n")
+
         self._prepare_geometry_defaults()
         pa_config = self._make_pa_config()
 
@@ -168,18 +203,95 @@ class ImpedanceTuner(BoundaryConditionTuner):
         if self.grid_search_init:
             x0 = self._grid_search_init(pa_config, x0)
 
+        # ——— Optionally run Nelder-Mead multiple times ———
+        repeats = nm_iter if self.solver == "Nelder-Mead" else 1
+        max_runs = max(1, repeats)
+        x_init = x0
+        result = None
+        best_x = None
+        best_unweighted_loss = np.inf
+        # augmented Lagrangian-style weight updating
+        self._augmented_mode = True
+        self._loss_weights = {
+            "sys": 1.0,
+            "dia": 1.0,
+            "mean": 1.0,
+            "flow": 1.0,
+            "reg": 1.0,
+        }
+        self._last_loss_breakdown = {}
+        penalty_growth = 5.0
+        max_penalty = 1e6
 
-        result = minimize(
-            fun=lambda x: self.loss_fn(x, pa_config),
-            x0=x0,
-            method=self.solver,
-            bounds=bounds if self.solver in ("Nelder-Mead", "L-BFGS-B", "Powell", "TNC", "SLSQP", "trust-constr") else None,
-            options={"maxiter": self.maxiter}
-        )
+        for run_idx in range(max_runs):
+            result = minimize(
+                fun=lambda x: self.loss_fn(x, pa_config),
+                x0=x_init,
+                method=self.solver,
+                bounds=bounds if self.solver in ("Nelder-Mead", "L-BFGS-B", "Powell", "TNC", "SLSQP", "trust-constr") else None,
+                options={"maxiter": self.maxiter}
+            )
+            unweighted_loss = self._last_loss_breakdown.get("unweighted_loss", np.inf)
+            metrics = self._last_loss_breakdown.get("metrics", {})
+            accepted = True
+            if best_x is None:
+                best_x = result.x
+                best_unweighted_loss = unweighted_loss
+            elif unweighted_loss > best_unweighted_loss:
+                accepted = False
+            else:
+                best_x = result.x
+                best_unweighted_loss = unweighted_loss
+            print(
+                f"Nelder-Mead run {run_idx + 1}/{max_runs} complete: "
+                f"weighted loss={result.fun}, unweighted loss={unweighted_loss}, weights={self._loss_weights}"
+            )
+            _append_log(
+                f"Nelder-Mead run {run_idx + 1}/{max_runs} complete: "
+                f"weighted loss={result.fun:.6e}, unweighted loss={unweighted_loss:.6e}, "
+                f"weights={self._loss_weights}, "
+                f"pressures={metrics.get('sys_pressure', np.nan):.6f}/"
+                f"{metrics.get('dia_pressure', np.nan):.6f}/"
+                f"{metrics.get('mean_pressure', np.nan):.6f} mmHg, "
+                f"pressure_targets={self.clinical_targets.mpa_p[0]:.6f}/"
+                f"{self.clinical_targets.mpa_p[1]:.6f}/"
+                f"{self.clinical_targets.mpa_p[2]:.6f} mmHg, "
+                f"rpa_split={metrics.get('rpa_split', np.nan):.6f}, "
+                f"rpa_split_target={self.clinical_targets.rpa_split:.6f}"
+            )
+            if accepted:
+                x_init = result.x
+                self.loss_fn(result.x, pa_config, finalize=True)
+            else:
+                x_init = best_x
+                _append_log(
+                    "Nelder-Mead run rejected: "
+                    f"unweighted loss {unweighted_loss:.6e} exceeded previous {best_unweighted_loss:.6e}"
+                )
+            if unweighted_loss < 1e-5:
+                break
+            if run_idx == max_runs - 1:
+                break
 
-        print(f"[ImpedanceTuner] Optimized: {result.x}  f={result.fun:.3f}")
+            components = self._last_loss_breakdown.get("components", {})
+            finite_components = {k: v for k, v in components.items() if np.isfinite(v)}
+            total_residual = sum(finite_components.values()) if finite_components else 0.0
+            for key in ["sys", "dia", "mean", "flow"]:
+                residual = components.get(key, np.inf)
+                if not np.isfinite(residual) or total_residual <= 0.0:
+                    continue
+                share = residual / total_residual
+                updated_weight = self._loss_weights[key] * (1.0 + penalty_growth * share)
+                self._loss_weights[key] = min(updated_weight, max_penalty)
+
+            print(f"Updated loss weights for next run: {self._loss_weights}")
+            _append_log(f"Updated loss weights for next run: {self._loss_weights}")
+            if not np.isfinite(unweighted_loss):
+                break
+
+        print(f"[ImpedanceTuner] Optimized: {best_x}  f={best_unweighted_loss:.3f}")
         # final simulate & plot
-        _ = self.loss_fn(result.x, pa_config, finalize=True)
+        _ = self.loss_fn(best_x, pa_config, finalize=True)
         pa_config.plot_mpa()
         return result
     
@@ -203,9 +315,28 @@ class ImpedanceTuner(BoundaryConditionTuner):
             print(f"[loss_fn] simulation error: {e} params={params}")
             return 1e9
 
-        # ---- Loss: weighted MPA pressure + flow split + mild L2 on compliance ----
-        weights = np.array([1.5, 1.0, 1.2]) if (self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p) else np.array([1.0, 0.0, 1.0])
-        pressure_loss = np.sum(np.dot(np.abs(np.array(pa_config.P_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p, weights))**2 * 100.0
+        # ---- Loss: weighted MPA pressure (sys/dia/mean separately) + flow split + mild L2 on compliance ----
+        pressure_weights = (
+            {"sys": 1.5, "dia": 1.0, "mean": 1.2}
+            if (self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p)
+            else {"sys": 1.0, "dia": 0.0, "mean": 1.0}
+        )
+        pressure_diff = np.abs(np.array(pa_config.P_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p
+        pressure_components = {
+            "sys": pressure_diff[0] ** 2,
+            "dia": pressure_diff[1] ** 2,
+            "mean": pressure_diff[2] ** 2,
+        }
+        pressure_contrib = {
+            "sys": pressure_weights["sys"] * pressure_components["sys"] * 100.0,
+            "dia": pressure_weights["dia"] * pressure_components["dia"] * 100.0,
+            "mean": pressure_weights["mean"] * pressure_components["mean"] * 100.0,
+        }
+        pressure_loss = (
+            pressure_contrib["sys"] +
+            pressure_contrib["dia"] +
+            pressure_contrib["mean"]
+        )
         flowsplit_loss = ((pa_config.rpa_split - self.clinical_targets.rpa_split) / self.clinical_targets.rpa_split)**2 * 100.0
 
         if self.compliance_model == "olufsen":
@@ -213,16 +344,47 @@ class ImpedanceTuner(BoundaryConditionTuner):
         else:
             l2 = 1e-5 * (params["comp.lpa.C"]**2 + params["comp.rpa.C"]**2)
 
-        total = float(pressure_loss + flowsplit_loss + l2)
+        base_total = float(pressure_loss + flowsplit_loss + l2)
+        loss_weights = self._loss_weights or {"sys": 1.0, "dia": 1.0, "mean": 1.0, "flow": 1.0, "reg": 1.0}
+        weighted_total = (
+            loss_weights.get("sys", 1.0) * pressure_contrib["sys"] +
+            loss_weights.get("dia", 1.0) * pressure_contrib["dia"] +
+            loss_weights.get("mean", 1.0) * pressure_contrib["mean"] +
+            loss_weights.get("flow", 1.0) * flowsplit_loss +
+            loss_weights.get("reg", 1.0) * l2
+        )
+        unweighted_loss = pressure_loss + flowsplit_loss + l2
+
+        if self._augmented_mode:
+            self._last_loss_breakdown = {
+                "weighted_loss": weighted_total,
+                "unweighted_loss": unweighted_loss,
+                "components": {
+                    "sys": pressure_contrib["sys"],
+                    "dia": pressure_contrib["dia"],
+                    "mean": pressure_contrib["mean"],
+                    "flow": flowsplit_loss,
+                    "reg": l2,
+                },
+                "metrics": {
+                    "sys_pressure": pa_config.P_mpa[0],
+                    "dia_pressure": pa_config.P_mpa[1],
+                    "mean_pressure": pa_config.P_mpa[2],
+                    "rpa_split": pa_config.rpa_split,
+                },
+                "params": params,
+            }
 
         if finalize:
+            final_loss = weighted_total if self._augmented_mode else base_total
             # Write once on final call
             rows = [
-                lpa_params.to_csv_row(loss=total, flow_split=1 - pa_config.rpa_split, p_mpa=pa_config.P_mpa),
-                rpa_params.to_csv_row(loss=total, flow_split=pa_config.rpa_split, p_mpa=pa_config.P_mpa)
+                lpa_params.to_csv_row(loss=final_loss, flow_split=1 - pa_config.rpa_split, p_mpa=pa_config.P_mpa),
+                rpa_params.to_csv_row(loss=final_loss, flow_split=pa_config.rpa_split, p_mpa=pa_config.P_mpa)
             ]
             keys = sorted({k for r in rows for k in r})
-            with open("optimized_params.csv", "w", newline="") as f:
+            csv_path = self._opt_csv_path or "optimized_params.csv"
+            with open(csv_path, "w", newline="") as f:
                 w = csv.DictWriter(f, fieldnames=keys); w.writeheader(); w.writerows(rows)
 
-        return total
+        return weighted_total if self._augmented_mode else base_total

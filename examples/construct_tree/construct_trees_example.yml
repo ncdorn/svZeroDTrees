@@ -1,0 +1,41 @@
+version: 1
+workflow: construct_trees
+
+paths:
+  root: .
+  zerod_config: examples/construct_tree/simple_config.json
+  clinical_targets: examples/construct_tree/clinical_targets.csv
+  mesh_surfaces: examples/construct_tree/mesh-surfaces
+  output_config: examples/construct_tree/config_w_impedance_bcs.json
+
+bcs:
+  type: impedance
+  compliance_model: constant
+  is_pulmonary: true
+
+trees:
+  d_min: 0.01
+  use_mean: true
+  specify_diameter: true
+  lpa:
+    lrr: 10.0
+    diameter: 0.3
+    d_min: 0.01
+    alpha: 0.9
+    beta: 0.6
+    inductance: 0.0
+    compliance:
+      model: constant
+      params:
+        value: 66000.0
+  rpa:
+    lrr: 10.0
+    diameter: 0.3
+    d_min: 0.01
+    alpha: 0.9
+    beta: 0.6
+    inductance: 0.0
+    compliance:
+      model: constant
+      params:
+        value: 66000.0

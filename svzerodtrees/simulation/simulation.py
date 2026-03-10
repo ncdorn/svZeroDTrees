@@ -6,7 +6,9 @@ from .simulation_directory import *
 from ..adaptation import MicrovascularAdaptor
 from ..microvasculature import TreeParameters
 import json
+import copy
 import pandas as pd
+from scipy.integrate import trapezoid
 import os
 
 class Simulation:
@@ -23,9 +25,9 @@ class Simulation:
                  steady_dir='steady',
                  bc_type='impedance',
                  adaptation_config = {
-                     "method": "wss-ims",
+                     "method": "cwss",
                      "location": "uniform",
-                     "iterations": 100,
+                     "iterations": 10,
                  },
                  tune_space: TuneSpace = TuneSpace(
                     free=[
@@ -45,6 +47,7 @@ class Simulation:
                  compliance_model: str = 'constant',
                  zerod_config='zerod_config.json',
                  convert_to_cm=False,
+                 mesh_scale_factor=1.0,
                  optimized=False, 
                  inflow_path=None):
         
@@ -54,10 +57,10 @@ class Simulation:
         self.zerod_config_path = os.path.join(self.path, zerod_config)
         self.simplified_zerod_config = os.path.join(self.path, 'simplified_nonlinear_zerod.json')
 
-        self.preop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, preop_dir), zerod_config=self.zerod_config_path, convert_to_cm=convert_to_cm)
-        self.postop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, postop_dir), zerod_config=self.zerod_config_path, convert_to_cm=convert_to_cm)
+        self.preop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, preop_dir), zerod_config=self.zerod_config_path, convert_to_cm=convert_to_cm, mesh_scale_factor=mesh_scale_factor)
+        self.postop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, postop_dir), zerod_config=self.zerod_config_path, convert_to_cm=convert_to_cm, mesh_scale_factor=mesh_scale_factor)
         if adapted_dir is not None:
-            self.adapted_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, adapted_dir), mesh_complete=self.postop_dir.mesh_complete.path, convert_to_cm=convert_to_cm)
+            self.adapted_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, adapted_dir), mesh_complete=self.postop_dir.mesh_complete.path, convert_to_cm=convert_to_cm, mesh_scale_factor=mesh_scale_factor)
 
         self.tune_space = tune_space
 
@@ -75,28 +78,29 @@ class Simulation:
         # simulation parameters
         self.n_tsteps = 2000
         self.threed_sim_config = {
-                'n_tsteps': 6000,
+                'n_tsteps': 4000,
                 'dt': 0.0005,
                 'nodes': 3,
                 'procs_per_node': 24,
                 'memory': 16,
-                'hours': 16
+                'hours': 20
             }
 
         ## Bools
         self.optimized = optimized
         self.convert_to_cm = convert_to_cm
+        self.mesh_scale_factor = mesh_scale_factor
 
         self.clinical_targets = ClinicalTargets.from_csv(clinical_targets)
 
-        if inflow_path is not None:
-            if os.path.exists(inflow_path):
-                self.inflow_from_file = True
-                print(f'loading inflow from {inflow_path}...')
-                self.inflow = Inflow.periodic(path=inflow_path)
-                self.inflow.rescale(tsteps=self.n_tsteps)
+        self.inflow_path = os.path.abspath(inflow_path) if inflow_path is not None else None
+        self._inflow_file_mtime = None
+
+        if self.inflow_path is not None:
+            if os.path.exists(self.inflow_path):
+                self._load_inflow_from_path(self.inflow_path)
             else:
-                raise FileNotFoundError(f'Inflow file {inflow_path} not found.')
+                raise FileNotFoundError(f'Inflow file {self.inflow_path} not found.')
         else:
             self.inflow_from_file = False
             # use a generic inflow profile
@@ -112,6 +116,12 @@ class Simulation:
                 self.is_fontan = False
                 self.inflow = Inflow.periodic()
                 self.inflow.rescale(cardiac_output=self.clinical_targets.q, tsteps=self.n_tsteps)
+
+        # check for default inflow.csv overrides without requiring constructor arguments
+        self._maybe_refresh_inflow_from_file()
+
+        # derive inflows for 0D and 3D contexts
+        self._set_derived_inflows()
 
         # make a figures directory
         self.figures_dir = os.path.join(self.path, 'figures')
@@ -132,12 +142,27 @@ class Simulation:
         '''
         run the entire pipeline
         '''
+
+        # reload inflow if inflow.csv changed between runs
+        self._maybe_refresh_inflow_from_file()
+        self._set_derived_inflows()
         
         if run_steady:
             # run the steady simulations
             self.run_steady_sims()
             # generate the simplified zerod config
             self.generate_simplified_nonlinear_zerod()
+
+        else:
+            if os.path.exists(self.simplified_zerod_config):
+                print(f"Using existing simplified zerod config at {self.simplified_zerod_config}")
+            else:
+                print(f"Generating simplified zerod config at {self.simplified_zerod_config}")
+                self.generate_simplified_nonlinear_zerod()
+
+            # make sure the simplified config uses the latest inflow waveform
+            config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
+            self._sync_config_inflow(config, self.simplified_zerod_config, inflow=self.inflow_0d)
 
         reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
         
@@ -149,8 +174,8 @@ class Simulation:
                     print("Continuing optimization from previous run...")
                     # load the previous optimization results
                     opt_params = pd.read_csv(os.path.join(self.path, 'optimized_params.csv'))
-                    lpa_params = TreeParameters.from_row_new(opt_params[opt_params.pa == 'lpa'])
-                    rpa_params = TreeParameters.from_row_new(opt_params[opt_params.pa == 'rpa'])
+                    lpa_params = TreeParameters.from_row(opt_params[opt_params.pa == 'lpa'])
+                    rpa_params = TreeParameters.from_row(opt_params[opt_params.pa == 'rpa'])
                     reduced_config = ConfigHandler.from_json(os.path.join(self.path, "pa_config_test_tuning.json"), is_pulmonary=True)
                 else:
                     initial_guess = None
@@ -166,8 +191,11 @@ class Simulation:
                                                  rescale_inflow=run_steady, 
                                                  convert_to_cm=self.convert_to_cm, 
                                                  compliance_model=self.compliance_model,
+                                                 solver='Nelder-Mead',
+                                                 grid_search_init=True,
+                                                 log_file=os.path.join(self.path, 'stree_impedance_optimization.log'),
                                                  n_procs=24)
-                impedance_tuner.tune()
+                impedance_tuner.tune(nm_iter=5)
             # need to create coupling config and add to preop/postop directories
             # build trees for LPA/RPA
             elif self.bc_type == 'rcr':
@@ -182,20 +210,21 @@ class Simulation:
             #     'rpa': [opt_params['k1'][opt_params.pa=='rpa'].values[0], opt_params['k2'][opt_params.pa=='rpa'].values[0], opt_params['k3'][opt_params.pa=='rpa'].values[0], opt_params['lrr'][opt_params.pa=='rpa'].values[0], opt_params['diameter'][opt_params.pa=='rpa'].values[0]]
             # }
 
-            lpa_params = TreeParameters.from_row_new(opt_params[opt_params.pa == 'lpa'])
-            rpa_params = TreeParameters.from_row_new(opt_params[opt_params.pa == 'rpa'])
+            lpa_params = TreeParameters.from_row(opt_params[opt_params.pa == 'lpa'])
+            rpa_params = TreeParameters.from_row(opt_params[opt_params.pa == 'rpa'])
 
         # generate blank threed coupler
         # blank_threed_coupler = ConfigHandler.blank_threed_coupler(path=os.path.join(self.path, 'svzerod_3Dcoupling.json'))
         if os.path.exists(self.zerod_config_path):
             self.zerod_config = ConfigHandler.from_json(self.zerod_config_path)
+            zerod_source_path = self.zerod_config_path
         else:
             self.zerod_config = ConfigHandler.from_json(self.simplified_zerod_config)
+            zerod_source_path = self.simplified_zerod_config
+
+        self._sync_config_inflow(self.zerod_config, zerod_source_path, inflow=self.inflow_0d)
 
         if run_threed:
-            # rescale the inflow, in this case the first element in the inflows dict
-            self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(tsteps=2000)
-
             # create the trees
             if self.bc_type == 'impedance':
                 construct_impedance_trees(self.zerod_config, 
@@ -220,21 +249,24 @@ class Simulation:
             if self.is_fontan:
                 self.make_fontan_inflows()
             else:
-                # ensure inflow is the currect magnitude
-                if not self.inflow_from_file:
-                    self.zerod_config.inflows[next(iter(self.zerod_config.inflows))].rescale(cardiac_output=self.clinical_targets.q)
+                # ensure inflow is the correct magnitude and resolution for 3D coupling
+                self._sync_config_inflow(self.zerod_config, self.zerod_config_path, inflow=self.inflow_3d)
 
-            impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(self.preop_dir.path, mesh_complete=self.preop_dir.mesh_complete)
+            impedance_threed_coupler, coupling_block_list = self.zerod_config.generate_threed_coupler(
+                self.preop_dir.path,
+                mesh_complete=self.preop_dir.mesh_complete,
+                include_distal_vessel=True,
+            )
 
             self.zerod_config.to_json(self.zerod_config_path)
             # run preop + postop simulations
-            preop_sim = SimulationDirectory.from_directory(self.preop_dir.path, threed_coupler=self.zerod_config_path, convert_to_cm=self.convert_to_cm)
+            preop_sim = SimulationDirectory.from_directory(self.preop_dir.path, threed_coupler=self.zerod_config_path, convert_to_cm=self.convert_to_cm, mesh_scale_factor=self.mesh_scale_factor)
             preop_sim.write_files(simname='Preop Simulation', user_input=False, sim_config=self.threed_sim_config)
             preop_sim.run()
         
         if adapt:
             # run postop simulation
-            postop_sim = SimulationDirectory.from_directory(self.postop_dir.path, self.zerod_config_path, convert_to_cm=self.convert_to_cm)
+            postop_sim = SimulationDirectory.from_directory(self.postop_dir.path, self.zerod_config_path, convert_to_cm=self.convert_to_cm, mesh_scale_factor=self.mesh_scale_factor)
             postop_sim.write_files(simname='Postop Simulation', user_input=False, sim_config=self.threed_sim_config)
             postop_sim.run()
 
@@ -251,6 +283,82 @@ class Simulation:
             self.adapted_dir.write_files(simname='Adapted Simulation', user_input=False, sim_config=self.threed_sim_config)
 
             # postprocess results
+
+    def _load_inflow_from_path(self, inflow_path):
+        '''
+        load an inflow waveform from disk and update bookkeeping
+        '''
+        abs_path = os.path.abspath(inflow_path)
+        print(f'loading inflow from {abs_path}...')
+        self.inflow = Inflow.periodic(path=abs_path)
+        self.inflow.rescale(tsteps=self.n_tsteps)
+        self.inflow_from_file = True
+        self.is_fontan = False
+        self.inflow_path = abs_path
+        try:
+            self._inflow_file_mtime = os.path.getmtime(abs_path)
+        except OSError:
+            self._inflow_file_mtime = None
+        self._set_derived_inflows()
+
+    def _maybe_refresh_inflow_from_file(self):
+        '''
+        reload inflow.csv if it exists and has changed since the last load
+        '''
+        candidate = self.inflow_path
+        if candidate is not None and not os.path.exists(candidate):
+            candidate = None
+
+        default_candidate = os.path.join(self.path, 'inflow.csv')
+        if candidate is None and os.path.exists(default_candidate):
+            candidate = default_candidate
+
+        if candidate is None or not os.path.exists(candidate):
+            return False
+
+        candidate = os.path.abspath(candidate)
+        try:
+            mtime = os.path.getmtime(candidate)
+        except OSError:
+            mtime = None
+
+        if (not self.inflow_from_file) or (self._inflow_file_mtime is None) or (mtime is not None and mtime != self._inflow_file_mtime):
+            self._load_inflow_from_path(candidate)
+            return True
+        return False
+
+    def _sync_config_inflow(self, config_handler, config_path=None, inflow=None):
+        '''
+        ensure a ConfigHandler object uses the current inflow waveform
+        '''
+        inflow_obj = inflow if inflow is not None else self.inflow
+        if inflow_obj is None or config_handler is None:
+            return False
+
+        config_handler.set_inflow(inflow_obj)
+        config_handler.inflows[inflow_obj.name] = inflow_obj
+        if config_path is not None:
+            config_handler.to_json(config_path)
+        return True
+
+    def _set_derived_inflows(self):
+        '''
+        build inflow variants for 0D and 3D use cases from the base inflow
+        '''
+        if self.inflow is None:
+            self.inflow_0d = None
+            self.inflow_3d = None
+            return
+
+        n_outlets = getattr(self.preop_dir.mesh_complete, 'n_outlets', None)
+        outlet_scale = n_outlets / 2.0 if n_outlets is not None else 1.0
+        target_co = trapezoid(self.inflow.q, self.inflow.t) if self.inflow_from_file else self.clinical_targets.q
+
+        self.inflow_0d = copy.deepcopy(self.inflow)
+        self.inflow_0d.rescale(cardiac_output=target_co / outlet_scale if outlet_scale != 0 else target_co)
+
+        self.inflow_3d = copy.deepcopy(self.inflow)
+        self.inflow_3d.rescale(cardiac_output=target_co, tsteps=2000)
 
     def compute_adaptation(self, preopSimDir, postopSimDir,  adaptedSimDir):
         '''
@@ -298,7 +406,7 @@ class Simulation:
             dir_path = os.path.join(self.steady_dir, label)
             os.makedirs(dir_path, exist_ok=True)
             # create the steady simulation
-            steady_sims[label] = SimulationDirectory.from_directory(path=dir_path, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm)
+            steady_sims[label] = SimulationDirectory.from_directory(path=dir_path, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, mesh_scale_factor=self.mesh_scale_factor)
             steady_sims[label].generate_steady_sim(flow_rate=q)
             # cd into directory to sumit simulation
             os.chdir(steady_sims[label].path)
@@ -322,9 +430,9 @@ class Simulation:
         if mean_dir is None:
             mean_dir = os.path.join(self.steady_dir, 'mean')
 
-        sys_sim = SimulationDirectory.from_directory(sys_dir, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, is_pulmonary=True)
-        dia_sim = SimulationDirectory.from_directory(dia_dir, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, is_pulmonary=True)
-        mean_sim = SimulationDirectory.from_directory(mean_dir, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, is_pulmonary=True)
+        sys_sim = SimulationDirectory.from_directory(sys_dir, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, is_pulmonary=True, mesh_scale_factor=self.mesh_scale_factor)
+        dia_sim = SimulationDirectory.from_directory(dia_dir, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, is_pulmonary=True, mesh_scale_factor=self.mesh_scale_factor)
+        mean_sim = SimulationDirectory.from_directory(mean_dir, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, is_pulmonary=True, mesh_scale_factor=self.mesh_scale_factor)
 
         R_sys_lpa, R_sys_rpa = sys_sim.compute_pressure_drop()
         R_dia_lpa, R_dia_rpa = dia_sim.compute_pressure_drop()

@@ -241,13 +241,18 @@ class PAConfig():
         self.mpa.bc = {
             "inlet": "INFLOW"
         }
+        self.lpa_dist.L = lpa_params.inductance
+        self.rpa_dist.L = rpa_params.inductance
+
+        # use same number of tsteps to build tree as simparams
+        time_array = np.linspace(0, self.inflow.t[-1], self.simparams.number_of_time_pts_per_cardiac_cycle).tolist()
 
         self.lpa_tree = StructuredTree(name='lpa_tree', 
-                                       time=self.inflow.t, 
+                                       time=time_array, 
                                        simparams=self.simparams, 
                                        compliance_model=lpa_params.compliance_model)
 
-        self.lpa_tree.build_tree(initial_d=lpa_params.diameter, 
+        self.lpa_tree.build(initial_d=lpa_params.diameter, 
                                  d_min=lpa_params.d_min, 
                                  lrr=lpa_params.lrr, 
                                  alpha=lpa_params.alpha, 
@@ -256,14 +261,18 @@ class PAConfig():
         # compute the impedance in frequency domain NEED TO SUB IN COMPLIANCE MODEL
         self.lpa_tree.compute_olufsen_impedance(n_procs=n_procs)
 
-        self.bcs["LPA_BC"] = self.lpa_tree.create_impedance_bc("LPA_BC", 0, self.clinical_targets.wedge_p * 1333.2)
+        self.bcs["LPA_BC"] = self.lpa_tree.create_impedance_bc(
+            "LPA_BC",
+            0,
+            self.clinical_targets.wedge_p * 1333.2,
+        )
 
         self.rpa_tree = StructuredTree(name='rpa_tree', 
-                                       time=self.inflow.t, 
+                                       time=time_array, 
                                        simparams=self.simparams,
                                        compliance_model=rpa_params.compliance_model)
 
-        self.rpa_tree.build_tree(initial_d=rpa_params.diameter, 
+        self.rpa_tree.build(initial_d=rpa_params.diameter, 
                                  d_min=rpa_params.d_min, 
                                  lrr=rpa_params.lrr, 
                                  alpha=rpa_params.alpha, 
@@ -272,7 +281,11 @@ class PAConfig():
         # compute the impedance in frequency domain
         self.rpa_tree.compute_olufsen_impedance(n_procs=n_procs)
 
-        self.bcs["RPA_BC"] = self.rpa_tree.create_impedance_bc("RPA_BC", 1, self.clinical_targets.wedge_p * 1333.2)
+        self.bcs["RPA_BC"] = self.rpa_tree.create_impedance_bc(
+            "RPA_BC",
+            1,
+            self.clinical_targets.wedge_p * 1333.2,
+        )
 
 
     def create_steady_trees(self, lpa_params: TreeParameters, rpa_params: TreeParameters):

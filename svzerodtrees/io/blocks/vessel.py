@@ -41,7 +41,7 @@ class Vessel():
         self._C_eq = self._C
         self._L_eq = self._L
         # get diameter with viscosity 0.04
-        self._diameter = ((128 * 0.04 * self.length) / (np.pi * self._R)) ** (1 / 4)
+        self._diameter = self._calculate_diameter(self._R)
     
     @classmethod
     def from_config(cls, config):
@@ -172,14 +172,14 @@ class Vessel():
     def L(self, new_L):
         self._L = new_L
 
-    @property
-    def L_eq(self):
-        if len(self.children) != 0:
-            self._update_L_eq()
-        return self._L_eq
+    # @property
+    # def L_eq(self):
+    #     if len(self.children) != 0:
+    #         self._update_L_eq()
+    #     return self._L_eq
 
-    def _update_L_eq(self):
-        self._L_eq = self._L + (1 / sum([1 / child.L_eq for child in self.children]))
+    # def _update_L_eq(self):
+    #     self._L_eq = self._L + (1 / sum([1 / child.L_eq for child in self.children]))
 
     @property
     def stenosis_coefficient(self):
@@ -209,5 +209,10 @@ class Vessel():
         self.R = 8 * 0.04 * self.length / (np.pi * (self._diameter / 2) ** 4)
 
     def _update_diameter(self):
-        self._diameter = ((128 * 0.04 * self.length) / (np.pi * self.R)) ** (1 / 4)
+        self._diameter = self._calculate_diameter(self.R)
 
+    def _calculate_diameter(self, resistance):
+        # avoid division by zero when the resistance is zero
+        if resistance == 0:
+            return np.inf
+        return ((128 * 0.04 * self.length) / (np.pi * resistance)) ** (1 / 4)

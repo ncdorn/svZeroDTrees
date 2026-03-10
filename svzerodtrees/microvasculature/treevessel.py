@@ -44,7 +44,7 @@ class TreeVessel:
         # Compliance model
         self.compliance_model = compliance_model or ConstantCompliance(1e5)  # dyn/cm²
         # self.C = 3 * self.a / 2 / self.compliance_model.evaluate(self._r)  # update compliance based on initial radius
-        # self.L = self.density * self.l / self.a  # inertance
+        # self.L = self.density * self.l / self.a  # inductance
 
 
         # Adaptation parameters
@@ -85,7 +85,7 @@ class TreeVessel:
         Factory method to construct a TreeVessel from primitive parameters.
         """
 
-        viscosity = 0.04  # poise
+        viscosity = 0.049  # poise
         r = diameter / 2
         a = np.pi * r**2
 
@@ -338,7 +338,7 @@ class TreeVessel:
         # self.eta = self.fl_visc(self.d)
         # self.params["viscosity"] = self.eta
 
-        self.eta = 0.04
+        self.eta = 0.049
         
         R, C, L, l = self.calc_zero_d_values(self.d, self.eta)
         self.params["vessel_length"] = l

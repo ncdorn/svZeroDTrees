@@ -95,40 +95,24 @@ def get_coupled_surfaces(simulation_dir):
     assume we aer already in the simulation directory
     '''
 
-    # get a map of surface id's to vtp files
-    simulation_name = os.path.basename(simulation_dir)
-    surface_id_map = {}
-    with open(simulation_dir + '/' + simulation_name + '.svpre', 'r') as ff:
-        for line in ff:
-            line = line.strip()
-            if line.startswith('set_surface_id'):
-                line_objs = line.split(' ')
-                vtp_file = simulation_dir + '/' + line_objs[1]
-                surface_id = line_objs[2]
-                surface_id_map[surface_id] = vtp_file
-    
-    # get a map of sruface id's to coupling blocks
-    coupling_map = {}
-    reading_coupling_blocks=False
-    with open(simulation_dir + '/svZeroD_interface.dat', 'r') as ff:
-        for line in ff:
-            line = line.strip()
-            if not reading_coupling_blocks:
-                if line.startswith('svZeroD external coupling block names'):
-                    reading_coupling_blocks=True
-                    pass
-                else:
-                    continue
-            else:
-                if line == '':
-                    break
-                else:
-                    line_objs = line.split(' ')
-                    coupling_block = line_objs[0]
-                    surface_id = line_objs[1]
-                    coupling_map[surface_id] = coupling_block
-    
-    block_surface_map = {coupling_map[id]: surface_id_map[id] for id in coupling_map.keys()}
+    svmp_path = os.path.join(simulation_dir, 'svFSIplus.xml')
+    if not os.path.exists(svmp_path):
+        raise FileNotFoundError(f'svFSIplus.xml not found at {svmp_path}')
+
+    xml_tree = ET.parse(svmp_path)
+    xml_root = xml_tree.getroot()
+
+    block_surface_map = {}
+    for add_bc in xml_root.iter("Add_BC"):
+        block_node = add_bc.find("svZeroDSolver_block")
+        if block_node is None or not block_node.text:
+            continue
+        block_name = block_node.text.strip()
+        bc_name = add_bc.get("name")
+        if not bc_name:
+            continue
+        vtp_path = os.path.join(simulation_dir, 'mesh-complete', 'mesh-surfaces', f'{bc_name}.vtp')
+        block_surface_map[block_name] = vtp_path
 
     return block_surface_map
 
@@ -215,9 +199,6 @@ def setup_simdir_from_mesh(sim_dir, zerod_config,
 
     # write svpre file
     # inlet_idx, outlet_idxs = write_svpre_file(sim_dir, mesh_complete)
-
-    # write svzerod interface file
-    write_svzerod_interface(sim_dir) # PATH TO ZEROD COUPLER NEEDS TO BE CHANGED IF ON SHERLOCK
 
     # write solver input file
     # dt, num_timesteps, steps_btwn_restart = write_solver_inp(sim_dir, outlet_idxs, n_cycles=2)

@@ -19,6 +19,7 @@ class ConfigHandler():
         self._config = config
 
         self.tree_params = {} # list of StructuredTree params
+        self.bc_inductance = {} # map bc name -> inductance for 3D coupling
 
         # initialize config maps
         self.branch_map = {} # {branch id: Vessel instance}
@@ -32,7 +33,7 @@ class ConfigHandler():
         # bool for simulation checks
         self.is_written = True
         if path is not None:
-            self.path = path.replace(' ', '\ ')
+            self.path = path.replace(' ', '\\ ')
 
         self.is_pulmonary = is_pulmonary
         self.threed_interface = is_threed_interface
@@ -383,7 +384,21 @@ class ConfigHandler():
             )
 
         else:
-            self.bcs[bc_name] = inflow.to_bc()
+            if hasattr(inflow, "to_bc"):
+                self.bcs[bc_name] = inflow.to_bc()
+            elif hasattr(inflow, "to_dict"):
+                self.bcs[bc_name] = BoundaryCondition.from_config(inflow.to_dict())
+            else:
+                if not hasattr(inflow, "q") or not hasattr(inflow, "t"):
+                    raise AttributeError("inflow must provide to_bc(), to_dict(), or q/t arrays")
+                self.bcs[bc_name] = BoundaryCondition.from_config(
+                    {
+                        "bc_name": bc_name,
+                        "bc_type": "FLOW",
+                        "bc_values": {"Q": list(inflow.q), "t": list(inflow.t)},
+                    }
+                )
+            self.inflows[bc_name] = inflow
 
 
     def map_vessels_to_branches(self):
@@ -441,6 +456,10 @@ class ConfigHandler():
                 self.branch_map[br] = Vessel.from_config(vessel_config)
             else: 
                 self.branch_map[br].add_segment(vessel_config)
+            if "boundary_conditions" in vessel_config:
+                outlet_name = vessel_config["boundary_conditions"].get("outlet")
+                if outlet_name:
+                    self.bc_inductance[outlet_name] = vessel_config["zero_d_element_values"].get("L", 0.0)
         
         # initialize the junction map (dict of junctions)
         for junction_config in self._config['junctions']:
@@ -518,23 +537,30 @@ class ConfigHandler():
             # find the vessel paths
             self.find_vessel_paths()
 
-        # label the mpa, rpa and lpa
-        if self.is_pulmonary:
-            self.root.label = 'mpa'
-            self.root.children[0].label = 'lpa'
-            self.root.children[1].label = 'rpa'
-            
-        # add these in incase we index using the mpa, lpa, rpa strings
-        if self.is_pulmonary:
-            self.mpa = self.root
-            self.lpa = self.root.children[0]
-            self.rpa = self.root.children[1]
+        # label the mpa, rpa and lpa when vessels are present
+        if self.is_pulmonary and hasattr(self, "root") and self.root is not None:
+            if len(self.root.children) >= 2:
+                self.root.label = 'mpa'
+                self.root.children[0].label = 'lpa'
+                self.root.children[1].label = 'rpa'
+                # add these in case we index using the mpa, lpa, rpa strings
+                self.mpa = self.root
+                self.lpa = self.root.children[0]
+                self.rpa = self.root.children[1]
 
         if self.threed_interface:
             self.coupling_blocks = {}
             for coupling_block in self._config["external_solver_coupling_blocks"]:
                 # create a mapping from connected block name to coupling block
-                self.coupling_blocks[coupling_block['connected_block']] = CouplingBlock.from_config(coupling_block)
+                block = CouplingBlock.from_config(coupling_block)
+                connected_block = coupling_block['connected_block']
+                self.coupling_blocks[connected_block] = block
+                for vessel in self.vessel_map.values():
+                    if vessel.name == connected_block and vessel.bc and "outlet" in vessel.bc:
+                        outlet_name = vessel.bc["outlet"]
+                        if outlet_name not in self.coupling_blocks:
+                            self.coupling_blocks[outlet_name] = block
+                        break
 
         self.assemble_config()
 
@@ -618,13 +644,14 @@ class ConfigHandler():
             return [self.vessel_map[id].to_dict() for id in self.branch_map[branch].ids]
 
 
-    def  generate_threed_coupler(self, simdir, inflow_from_0d=True, mesh_complete=None):
+    def  generate_threed_coupler(self, simdir, inflow_from_0d=True, mesh_complete=None, include_distal_vessel=False):
         '''
         create a 3D-0D coupling blocks config from the boundary conditions and save it to a json
 
         :param simdir: directory to save the json to
         :param inflow_from_0d: bool to indicate if the inflow is from the 0D model
         :param mesh_complete: MeshComplete object
+        :param include_distal_vessel: bool to add an inductance-only vessel before impedance BCs
 
         :return coupling_block_list: list of coupling block names
         '''
@@ -714,10 +741,50 @@ class ConfigHandler():
         print(f"threed coupler vessel map: {threed_coupler.vessel_map}")
         # create the coupling blocks
         bc_count = 0
+        next_vessel_id = max(threed_coupler.vessel_map.keys(), default=-1) + 1
         for i, bc in enumerate(threed_coupler.bcs.values()):
             if 'inflow' not in bc.name.lower():
-                block_name = bc.name.replace('_', '')
-                threed_coupler.coupling_blocks[bc.name] = CouplingBlock.from_bc(bc, surface=list(mesh_complete.mesh_surfaces.values())[bc_count + self.n_inflows].filename)
+                surface = list(mesh_complete.mesh_surfaces.values())[bc_count + self.n_inflows].filename
+                inductance = 0.0
+                if include_distal_vessel and bc.type == "IMPEDANCE":
+                    inductance = float(self.bc_inductance.get(bc.name, 0.0) or 0.0)
+
+                if inductance != 0.0:
+                    vessel_name = f"branch{next_vessel_id}_seg0"
+                    threed_coupler.vessel_map[next_vessel_id] = Vessel.from_config(
+                        {
+                            "boundary_conditions": {
+                                "outlet": bc.name
+                            },
+                            "vessel_id": next_vessel_id,
+                            "vessel_length": 10.0,
+                            "vessel_name": vessel_name,
+                            "zero_d_element_type": "BloodVessel",
+                            "zero_d_element_values": {
+                                "C": 0.0,
+                                "L": inductance,
+                                "R_poiseuille": 0.0,
+                                "stenosis_coefficient": 0.0
+                            }
+                        }
+                    )
+                    threed_coupler.coupling_blocks[bc.name] = CouplingBlock(
+                        {
+                            "name": bc.name.replace('_', ''),
+                            "type": "FLOW",
+                            "location": "inlet",
+                            "connected_block": vessel_name,
+                            "periodic": False,
+                            "values": {
+                                "t": [0.0, 1.0],
+                                "Q": [1.0, 1.0]
+                            },
+                            "surface": surface
+                        }
+                    )
+                    next_vessel_id += 1
+                else:
+                    threed_coupler.coupling_blocks[bc.name] = CouplingBlock.from_bc(bc, surface=surface)
                 bc_count += 1
 
         # copy the trees over
@@ -747,5 +814,3 @@ class ConfigHandler():
     def config(self):
         self.assemble_config()
         return self._config
-
-

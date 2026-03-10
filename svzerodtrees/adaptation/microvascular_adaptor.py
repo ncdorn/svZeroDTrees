@@ -1,23 +1,104 @@
 import json
 import csv
+import copy
+import os
+from typing import Dict, Tuple
+
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.optimize import minimize_scalar
+import pandas as pd
 
 from ..io import ConfigHandler
-import matplotlib.pyplot as plt
-import os
-from ..microvasculature import StructuredTree
-from ..utils import *
-from ..simulation.threedutils import vtp_info
+from ..microvasculature import StructuredTree, TreeParameters
 from ..simulation.simulation_directory import SimulationDirectory
+from ..simulation.threedutils import vtp_info
 from ..tune_bcs.clinical_targets import ClinicalTargets
-from .setup import *
+from ..utils import *
 from .integrator import run_adaptation
 from .models import CWSSIMSAdaptation
+from .setup import *
 
-# ---- at module top-level (same .py file), not inside a class ----
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import os
-import copy
-from typing import Tuple
+
+_DEFAULT_ALPHA = 0.9
+_DEFAULT_BETA = 0.6
+_DEFAULT_LRR = 10.0
+_MIN_FLOW_EPS = 1e-8
+
+
+def _optimize_tree_for_resistance(
+    tree: StructuredTree,
+    R_target: float,
+    d_min: float,
+    *,
+    alpha: float = _DEFAULT_ALPHA,
+    beta: float = _DEFAULT_BETA,
+    lrr: float = _DEFAULT_LRR,
+) -> Tuple[float, float]:
+    """
+    Tune the root diameter so that the structured tree matches the target resistance.
+    Returns (optimized_root_diameter, matched_resistance).
+    """
+    if R_target <= 0.0:
+        raise ValueError(f"Target resistance must be positive, got {R_target}")
+
+    print(f'[{tree.name}] optimizing root diameter to match R={R_target:.6g}')
+
+    lower = max(d_min * 1.02, 1e-4)
+    upper = max(tree.diameter, lower * 2.0)
+    upper_cap = max(upper, lower) * 1e3
+
+    eval_counter = {"count": 0}
+
+    def objective(diameter: float) -> float:
+        tree.build(initial_d=float(diameter), d_min=d_min, alpha=alpha, beta=beta, lrr=lrr)
+        current_R = tree.equivalent_resistance()
+        eval_counter["count"] += 1
+        print(f'[{tree.name}]   eval {eval_counter["count"]:02d}: d={float(diameter):.6f} cm → R={current_R:.6g}')
+        return abs(current_R - R_target)
+
+    # Expand upper bound until resistance is below target or limit reached
+    for _ in range(12):
+        tree.build(initial_d=upper, d_min=d_min, alpha=alpha, beta=beta, lrr=lrr)
+        current_R = tree.equivalent_resistance()
+        print(f'[{tree.name}]   bound check: d={upper:.6f} cm → R={current_R:.6g}')
+        if current_R <= R_target or upper >= upper_cap:
+            break
+        upper *= 1.5
+
+    result = minimize_scalar(objective, bounds=(lower, upper), method="bounded", options={"xatol": 1e-5})
+    if not result.success:
+        raise RuntimeError(f"Failed to match resistance {R_target} for tree {tree.name}: {result.message}")
+
+    optimized_diameter = float(result.x)
+    tree.build(initial_d=optimized_diameter, d_min=d_min, alpha=alpha, beta=beta, lrr=lrr)
+    matched_resistance = tree.equivalent_resistance()
+    print(f'[{tree.name}] optimized diameter={optimized_diameter:.6f} cm, matched R={matched_resistance:.6g}')
+    return optimized_diameter, matched_resistance
+
+
+def _apply_constant_wss_scaling(store, preop_flow: float, postop_flow: float, n_iter: int) -> None:
+    """
+    Uniformly scale diameters to enforce constant wall shear stress assumption.
+    """
+    if n_iter <= 0:
+        return
+
+    Q_old = float(preop_flow)
+    Q_new = float(postop_flow)
+
+    if not np.isfinite(Q_old) or abs(Q_old) < _MIN_FLOW_EPS:
+        return
+
+    ratio = abs(Q_new) / max(abs(Q_old), _MIN_FLOW_EPS)
+    if ratio <= 0.0:
+        return
+
+    scale = ratio ** (1.0 / 3.0)
+    total_scale = scale ** n_iter
+    orig_dtype = np.asarray(store.d).dtype
+    scaled = np.asarray(store.d, dtype=np.float64) * total_scale
+    store.d = scaled.astype(orig_dtype, copy=False)
 
 def _adapt_single_bc_worker(
         bc_name: str,
@@ -27,18 +108,23 @@ def _adapt_single_bc_worker(
         postop_flow,           # 1D array-like
         n_iter: int,
         d_min: float
-    ) -> Tuple[str, float]:
+    ) -> Tuple[str, float, float]:
         """
-        Top-level, picklable worker: builds & adapts a StructuredTree and returns (bc_name, R_adapt).
+        Top-level, picklable worker: builds & adapts a StructuredTree and returns
+        (bc_name, R_adapt, optimized_root_diameter).
         """
-        # Import here to avoid pickling large modules on executor startup if not needed elsewhere
-        # from .structured_tree import StructuredTree  # adjust import to your project structure
-
         tree = StructuredTree(name=bc_name, time=t, simparams=None)
-        tree.optimize_tree_diameter(resistance=R_preop, d_min=d_min)
-        tree.adapt_constant_wss(preop_flow, postop_flow, n_iter=n_iter)
-        R_adapt = tree.root.R_eq
-        return bc_name, R_adapt
+
+        optimized_root_diameter, _ = _optimize_tree_for_resistance(
+            tree,
+            R_target=float(R_preop),
+            d_min=d_min,
+        )
+
+        _apply_constant_wss_scaling(tree.store, preop_flow=float(preop_flow), postop_flow=float(postop_flow), n_iter=n_iter)
+        R_adapt = tree.equivalent_resistance()
+        adapted_root_diameter = float(tree.store.d[0]) if tree.store.n_nodes() else optimized_root_diameter
+        return bc_name, R_adapt, adapted_root_diameter
 
 class MicrovascularAdaptor: 
     '''
@@ -50,7 +136,7 @@ class MicrovascularAdaptor:
                  postop_simdir: SimulationDirectory, 
                  adapted_simdir: SimulationDirectory,
                  clinical_targets: ClinicalTargets,
-                 reduced_order_pa: json = None,
+                 reduced_order_pa: json,
                  tree_params: csv = None, 
                  method: str = 'cwss', 
                  location: str = 'uniform',
@@ -70,6 +156,7 @@ class MicrovascularAdaptor:
         self.preop_simdir = preop_simdir
         self.postop_simdir = postop_simdir
         self.adapted_simdir = adapted_simdir
+        self.reduced_order_pa_path = reduced_order_pa
             
 
         # grab tree params from csv, of form [k1, k2, k3, lrr, diameter]
@@ -85,25 +172,34 @@ class MicrovascularAdaptor:
         self.method = method
         self.location = location
         self.bc_type = bc_type
+        self.tree_params: Dict[str, TreeParameters] = {}
+        self.lpa_tree = None
+        self.rpa_tree = None
+
+        def _load_tree_parameters(df, side: str) -> TreeParameters:
+            subset = df[df["pa"].str.lower() == side.lower()]
+            if subset.empty:
+                raise ValueError(f"Could not find tree parameters for '{side}' in {tree_params}.")
+            cols_lower = {col.lower() for col in subset.columns}
+            if {"compliance model", "alpha", "beta"}.issubset(cols_lower):
+                return TreeParameters.from_row(subset)
+            else:
+                raise ValueError(f"Tree parameters for '{side}' are missing required columns alpha, beta, compliance model in {tree_params}.")
 
         if self.bc_type == 'impedance':
             print("adaptating impedance boundary conditions")
             self.simple_pa = ConfigHandler.from_json(reduced_order_pa, is_pulmonary=True)
-            opt_params = pd.read_csv(os.path.join(tree_params))
-            self.tree_params = {
-                'lpa': [opt_params['k1'][opt_params.pa=='lpa'].values[0], opt_params['k2'][opt_params.pa=='lpa'].values[0], opt_params['k3'][opt_params.pa=='lpa'].values[0], opt_params['lrr'][opt_params.pa=='lpa'].values[0], opt_params['diameter'][opt_params.pa=='lpa'].values[0]],
-                'rpa': [opt_params['k1'][opt_params.pa=='rpa'].values[0], opt_params['k2'][opt_params.pa=='rpa'].values[0], opt_params['k3'][opt_params.pa=='rpa'].values[0], opt_params['lrr'][opt_params.pa=='rpa'].values[0], opt_params['diameter'][opt_params.pa=='rpa'].values[0]]
-            }
+            opt_params = pd.read_csv(tree_params)
+            self.tree_params['lpa'] = _load_tree_parameters(opt_params, 'lpa')
+            self.tree_params['rpa'] = _load_tree_parameters(opt_params, 'rpa')
             # construct lpa and rpa trees
             self.lpa_tree, self.rpa_tree = self.construct_impedance_trees()
         elif self.bc_type == 'resistance':
             print("adapting resistance boundary conditions")
             if tree_params is not None:
-                opt_params = pd.read_csv(os.path.join(tree_params))
-                self.tree_params = {
-                    'lpa': [opt_params['k1'][opt_params.pa=='lpa'].values[0], opt_params['k2'][opt_params.pa=='lpa'].values[0], opt_params['k3'][opt_params.pa=='lpa'].values[0], opt_params['lrr'][opt_params.pa=='lpa'].values[0], opt_params['diameter'][opt_params.pa=='lpa'].values[0]],
-                    'rpa': [opt_params['k1'][opt_params.pa=='rpa'].values[0], opt_params['k2'][opt_params.pa=='rpa'].values[0], opt_params['k3'][opt_params.pa=='rpa'].values[0], opt_params['lrr'][opt_params.pa=='rpa'].values[0], opt_params['diameter'][opt_params.pa=='rpa'].values[0]]
-                }
+                opt_params = pd.read_csv(tree_params)
+                self.tree_params['lpa'] = _load_tree_parameters(opt_params, 'lpa')
+                self.tree_params['rpa'] = _load_tree_parameters(opt_params, 'rpa')
         else:
             raise ValueError(f"bc_type {bc_type} not recognized, please use 'impedance' or 'resistance'")
             
@@ -121,8 +217,8 @@ class MicrovascularAdaptor:
 
         if fig_dir is not None:
             print("computing preop impedance! \n")
-            Z_t_l_pre, time = self.lpa_tree.compute_olufsen_impedance(self.tree_params['lpa'][0], self.tree_params['lpa'][1], self.tree_params['lpa'][2], n_procs=24)
-            Z_t_r_pre, time = self.rpa_tree.compute_olufsen_impedance(self.tree_params['rpa'][0], self.tree_params['rpa'][1], self.tree_params['rpa'][2],n_procs=24)
+            Z_t_l_pre, time = self.lpa_tree.compute_olufsen_impedance(n_procs=24)
+            Z_t_r_pre, time = self.rpa_tree.compute_olufsen_impedance(n_procs=24)
             self.lpa_tree.plot_stiffness(path=os.path.join(fig_dir, 'lpa_stiffness_preop.png'))
             self.rpa_tree.plot_stiffness(path=os.path.join(fig_dir, 'rpa_stiffness_preop.png'))
 
@@ -139,8 +235,8 @@ class MicrovascularAdaptor:
             self.rpa_tree.adapt_wss_ims(Q=preop_rpa_flow, Q_new=postop_rpa_flow, n_iter=self.n_iter)
 
         print("computing adapted impedance! \n")
-        Z_t_l_adapt, time = self.lpa_tree.compute_olufsen_impedance(self.tree_params['lpa'][0], self.tree_params['lpa'][1], self.tree_params['lpa'][2], n_procs=24)
-        Z_t_r_adapt, time = self.rpa_tree.compute_olufsen_impedance(self.tree_params['rpa'][0], self.tree_params['rpa'][1], self.tree_params['rpa'][2],n_procs=24)
+        Z_t_l_adapt, time = self.lpa_tree.compute_olufsen_impedance(n_procs=24)
+        Z_t_r_adapt, time = self.rpa_tree.compute_olufsen_impedance(n_procs=24)
 
         if fig_dir is not None:
             # plot the preop and postop impedance
@@ -166,8 +262,8 @@ class MicrovascularAdaptor:
 
         # distribute the impedance to lpa and rpa specifically
         self.createImpedanceBCs()
-        
-        self.adapted_simdir.svzerod_3Dcoupling = self.postop_simdir.svzerod_3Dcoupling
+        # work on a deep copy so we do not mutate the original postop coupling config
+        self.adapted_simdir.svzerod_3Dcoupling = copy.deepcopy(self.postop_simdir.svzerod_3Dcoupling)
         # change path
         self.adapted_simdir.svzerod_3Dcoupling.path = os.path.join(self.adapted_simdir.path, 'svzerod_3Dcoupling.json')
         # update the config with the adapted trees
@@ -177,23 +273,131 @@ class MicrovascularAdaptor:
         print("saving adapted config to " + self.adapted_simdir.svzerod_3Dcoupling.path)
         self.adapted_simdir.svzerod_3Dcoupling.to_json(self.adapted_simdir.svzerod_3Dcoupling.path)
 
+    def _resolve_rri_config_paths(self, nm_iter: int = 5) -> Tuple[str, str]:
+        """
+        Find or generate tuned reduced-order PA configs for preop and postop simulations.
+        Returns (preop_config_path, postop_config_path).
+        """
+        preop_rri_path = os.path.join(self.preop_simdir.path, 'preop_simplified_zerod_tuned_RRI.json')
+        postop_rri_path = os.path.join(self.postop_simdir.path, 'postop_simplified_zerod_tuned_RRI.json')
+
+        if os.path.exists(preop_rri_path):
+            print(f"Using existing preop RRI config at {preop_rri_path}")
+            preop_config_path = preop_rri_path
+        else:
+            preop_rri = self.preop_simdir.optimize_RRI(
+                self.reduced_order_pa_path,
+                output_name=os.path.basename(preop_rri_path),
+                nm_iter=nm_iter
+            )
+            preop_config_path = preop_rri.get('output_config') if isinstance(preop_rri, dict) else preop_rri_path
+
+        if os.path.exists(postop_rri_path):
+            print(f"Using existing postop RRI config at {postop_rri_path}")
+            postop_config_path = postop_rri_path
+        else:
+            postop_rri = self.postop_simdir.optimize_RRI(
+                self.reduced_order_pa_path,
+                output_name=os.path.basename(postop_rri_path),
+                nm_iter=nm_iter
+            )
+            postop_config_path = postop_rri.get('output_config') if isinstance(postop_rri, dict) else postop_rri_path
+
+        return preop_config_path, postop_config_path
+
+    def _finalize_coupling_with_adapted_trees(self):
+        """
+        Attach adapted trees to the coupling config, regenerate impedance BCs,
+        and write the adapted coupling file.
+        """
+        # distribute the impedance to lpa and rpa specifically
+        self.createImpedanceBCs()
+        
+        # work on a deep copy so we do not mutate the original postop coupling config
+        self.adapted_simdir.svzerod_3Dcoupling = copy.deepcopy(self.postop_simdir.svzerod_3Dcoupling)
+        # change path
+        self.adapted_simdir.svzerod_3Dcoupling.path = os.path.join(self.adapted_simdir.path, 'svzerod_3Dcoupling.json')
+        # update the config with the adapted trees
+        self.adapted_simdir.svzerod_3Dcoupling.tree_params[self.lpa_tree.name] = self.lpa_tree.to_dict()
+        self.adapted_simdir.svzerod_3Dcoupling.tree_params[self.rpa_tree.name] = self.rpa_tree.to_dict()
+
+        print("saving adapted config to " + self.adapted_simdir.svzerod_3Dcoupling.path)
+        self.adapted_simdir.svzerod_3Dcoupling.to_json(self.adapted_simdir.svzerod_3Dcoupling.path)
+
+    def adapt_cwss(self, n_iter: int = 100):
+        """
+        Adapt microvasculature using the constant wall shear stress assumption by scaling
+        the structured tree diameters based on pre/post flow ratios.
+        """
+        # Resolve or compute tuned reduced-order configs
+        preop_config_path, postop_config_path = self._resolve_rri_config_paths(nm_iter=5)
+
+        # Build PAConfig objects
+        preop_pa, postop_pa = initialize_from_paths(
+            preop_config_path,
+            postop_config_path,
+            os.path.dirname(self.preop_simdir.path) + '/optimized_params.csv',
+            os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv'
+        )
+
+        # Gather mean outlet flows
+        sum_flows = lambda d: tuple(map(lambda x: sum(x.values()), d.flow_split(get_mean=True)))
+        preop_lpa_flow, preop_rpa_flow = sum_flows(self.preop_simdir)
+        postop_lpa_flow, postop_rpa_flow = sum_flows(self.postop_simdir)
+
+        # Scale diameters to enforce constant WSS
+        _apply_constant_wss_scaling(preop_pa.lpa_tree.store, preop_flow=preop_lpa_flow, postop_flow=postop_lpa_flow, n_iter=n_iter)
+        _apply_constant_wss_scaling(preop_pa.rpa_tree.store, preop_flow=preop_rpa_flow, postop_flow=postop_rpa_flow, n_iter=n_iter)
+
+        # assign adapted trees
+        self.lpa_tree = preop_pa.lpa_tree
+        self.rpa_tree = preop_pa.rpa_tree
+
+        self._finalize_coupling_with_adapted_trees()
+
     def construct_impedance_trees(self):
         '''
         construct the trees for the preop and postop simulations
         '''
 
-        k1_l, k2_l, k3_l, lrr_l, d_l = self.tree_params['lpa']
-        k1_r, k2_r, k3_r, lrr_r, d_r = self.tree_params['rpa']
+        lpa_params = self.tree_params.get('lpa')
+        rpa_params = self.tree_params.get('rpa')
+        if lpa_params is None or rpa_params is None:
+            raise RuntimeError("Tree parameters must be loaded before constructing impedance trees.")
 
         time_array = self.preop_simdir.svzerod_3Dcoupling.bcs['INFLOW'].t
         
-        lpa_tree = StructuredTree(name='LPA', time=time_array, simparams=None)
-        print(f'building LPA tree with lpa parameters: {self.tree_params["lpa"]}')
-        lpa_tree.build(initial_d=d_l, d_min=0.01, lrr=lrr_l)
+        lpa_tree = StructuredTree(
+            name='LPA',
+            time=time_array,
+            simparams=None,
+            compliance_model=lpa_params.compliance_model,
+        )
+        lpa_summary = lpa_params.summary() if hasattr(lpa_params.compliance_model, "description") else lpa_params.name
+        print(f'building LPA tree with parameters: {lpa_summary}')
+        lpa_tree.build(
+            initial_d=lpa_params.diameter,
+            d_min=lpa_params.d_min,
+            lrr=lpa_params.lrr,
+            alpha=lpa_params.alpha,
+            beta=lpa_params.beta,
+        )
 
-        rpa_tree = StructuredTree(name='RPA', time=time_array, simparams=None)
-        print(f'building RPA tree with rpa parameters: {self.tree_params["rpa"]}')
-        rpa_tree.build(initial_d=d_r, d_min=0.01, lrr=lrr_r)
+        rpa_tree = StructuredTree(
+            name='RPA',
+            time=time_array,
+            simparams=None,
+            compliance_model=rpa_params.compliance_model,
+        )
+        rpa_summary = rpa_params.summary() if hasattr(rpa_params.compliance_model, "description") else rpa_params.name
+        print(f'building RPA tree with parameters: {rpa_summary}')
+        rpa_tree.build(
+            initial_d=rpa_params.diameter,
+            d_min=rpa_params.d_min,
+            lrr=rpa_params.lrr,
+            alpha=rpa_params.alpha,
+            beta=rpa_params.beta,
+        )
 
         return lpa_tree, rpa_tree
     
@@ -207,20 +411,8 @@ class MicrovascularAdaptor:
     ) -> None:
         """
         Construct structured trees for preop/postop, adapt resistances based on flow changes,
-        and write an updated 3D coupling file.
-
-        Parameters
-        ----------
-        n_iter : int
-            Iterations for tree adaptation.
-        d_min : float
-            Minimum terminal diameter passed into StructuredTree.optimize_tree_diameter.
-        coupler_path : str
-            Where to write the adapted coupling JSON (relative to adapted_simdir.path).
-        max_workers : int | None
-            Number of worker processes. Defaults to os.cpu_count() if None.
-        parallel : bool
-            Toggle parallel execution (useful for debugging).
+        and write an updated 3D coupling file. Execution now proceeds sequentially for easier
+        debugging; `parallel` and `max_workers` are accepted for backward compatibility but ignored.
         """
         preop_svzerod_coupler = self.preop_simdir.svzerod_3Dcoupling
         preop_svzerod_data = self.preop_simdir.svzerod_data
@@ -245,40 +437,24 @@ class MicrovascularAdaptor:
 
             tasks.append((bc_name, R_preop, t, preop_flow, postop_flow, n_iter, d_min))
 
-        # 2) Execute (parallel or sequential)
-        results: dict[str, float] = {}
+        if parallel:
+            print("Parallel execution disabled; proceeding sequentially for all outlets.")
+        if max_workers is not None:
+            print("max_workers ignored: adaptation runs sequentially.")
 
-        if parallel and len(tasks) > 1:
-            if max_workers is None:
-                max_workers = os.cpu_count() or 1
-            
-            print(f'Adapting resistances in parallel using {max_workers} workers...')
-
-            # Mac/Windows note:
-            # Ensure this code runs under if __name__ == "__main__": when called from a script to avoid spawn issues.
-            with ProcessPoolExecutor(max_workers=max_workers) as ex:
-                future_map = {
-                    ex.submit(_adapt_single_bc_worker, *args): args[0]  # bc_name
-                    for args in tasks
-                }
-                for fut in as_completed(future_map):
-                    bc = future_map[fut]
-                    try:
-                        bc_name, R_adapt = fut.result()
-                    except Exception as e:
-                        # Fail fast with context; you could also choose to continue on error
-                        raise RuntimeError(f'Adaptation failed for BC "{bc}": {e}') from e
-                    results[bc_name] = R_adapt
-        else:
-            # Sequential fallback (useful for debugging/pdb)
-            for args in tasks:
-                bc_name, R_adapt = _adapt_single_bc_worker(*args)
-                results[bc_name] = R_adapt
+        # Sequential execution
+        results: Dict[str, Tuple[float, float]] = {}
+        for args in tasks:
+            bc_name, R_adapt, adapted_root_diameter = _adapt_single_bc_worker(*args)
+            results[bc_name] = (R_adapt, adapted_root_diameter)
 
         # 3) Apply results back to the (deep-copied) coupler in the main process
-        for bc_name, R_adapt in results.items():
+        for bc_name, (R_adapt, root_diameter) in results.items():
             R_preop = adapted_svzerod_coupler.bcs[bc_name].R
-            print(f'updating resistance for {bc_name} from {R_preop} to {R_adapt}')
+            if root_diameter is not None:
+                print(f'updating resistance for {bc_name} from {R_preop} to {R_adapt} (root d = {root_diameter:.4f} cm)')
+            else:
+                print(f'updating resistance for {bc_name} from {R_preop} to {R_adapt}')
             adapted_svzerod_coupler.bcs[bc_name].R = R_adapt
 
         # 4) Persist to disk
@@ -299,25 +475,30 @@ class MicrovascularAdaptor:
         adapted_svzerod_coupler = copy.deepcopy(preop_svzerod_coupler)
 
         for bc_name, coupling_block in preop_svzerod_coupler.coupling_blocks.items():
-            if 'branch' not in bc_name.lower():
-                # get the resistance from the preop simulation
-                R_preop  = preop_svzerod_coupler.bcs[bc_name].R
-                # build tree for preop resistance
-                print(f'building structured tree for resistance {R_preop}...')
-                tree = StructuredTree(name=bc_name, time=coupling_block.values['t'], simparams=None)
-                tree.optimize_tree_diameter(resistance=R_preop, d_min=d_min)
-                # get the flow from the preop, postop simulation
-                preop_flow = preop_svzerod_data.get_flow(coupling_block)
-                postop_flow = postop_svzerod_data.get_flow(coupling_block)
+            if 'branch' in bc_name.lower():
+                continue
 
-                # adapt the tree based on the flow change
-                tree.adapt_constant_wss(preop_flow, postop_flow, n_iter=n_iter)
+            R_preop = preop_svzerod_coupler.bcs[bc_name].R
+            print(f'building structured tree for resistance {R_preop}...')
+            t = coupling_block.values['t']
+            preop_flow = preop_svzerod_data.get_flow(coupling_block)
+            postop_flow = postop_svzerod_data.get_flow(coupling_block)
 
-                # update the bc with the new resistance
-                R_adapt = tree.root.R_eq
+            _, R_adapt, root_diameter = _adapt_single_bc_worker(
+                bc_name,
+                R_preop,
+                t,
+                preop_flow,
+                postop_flow,
+                n_iter,
+                d_min,
+            )
+
+            if root_diameter is not None:
+                print(f'updating resistance for {bc_name} from {R_preop} to {R_adapt} (root d = {root_diameter:.4f} cm)')
+            else:
                 print(f'updating resistance for {bc_name} from {R_preop} to {R_adapt}')
-                adapted_svzerod_coupler.bcs[bc_name].R = R_adapt
-
+            adapted_svzerod_coupler.bcs[bc_name].R = R_adapt
         
         self.adapted_simdir.svzerod_3Dcoupling = adapted_svzerod_coupler
         # change path
@@ -333,7 +514,15 @@ class MicrovascularAdaptor:
         for name, params in self.preop_simdir.svzerod_3Dcoupling.tree_params.items():
             tree = StructuredTree(name=name, time=time_array, simparams=None)
             print(f'building {name} tree with parameters: {params}')
-            tree.build_tree(initial_d=params['initial_d'], d_min=params['d_min'], lrr=params['lrr'])
+            tree.build(
+                initial_d=params['initial_d'],
+                d_min=params['d_min'],
+                lrr=params.get('lrr', _DEFAULT_LRR),
+                alpha=params.get('alpha'),
+                beta=params.get('beta'),
+                xi=params.get('xi'),
+                eta_sym=params.get('eta_sym'),
+            )
 
     def createImpedanceBCs(self):
         '''
@@ -341,8 +530,8 @@ class MicrovascularAdaptor:
         '''
         # if self.location == 'uniform':
 
-        Z_t_l_adapt, time = self.lpa_tree.compute_olufsen_impedance(self.tree_params['lpa'][0], self.tree_params['lpa'][1], self.tree_params['lpa'][2], n_procs=24, tsteps=2000)
-        Z_t_r_adapt, time = self.rpa_tree.compute_olufsen_impedance(self.tree_params['rpa'][0], self.tree_params['rpa'][1], self.tree_params['rpa'][2], n_procs=24, tsteps=2000)
+        Z_t_l_adapt, time = self.lpa_tree.compute_olufsen_impedance(n_procs=24, tsteps=2000)
+        Z_t_r_adapt, time = self.rpa_tree.compute_olufsen_impedance(n_procs=24, tsteps=2000)
 
         cap_info = vtp_info(self.postop_simdir.mesh_complete.mesh_surfaces_dir, convert_to_cm=self.convert_to_cm, pulmonary=False)
 
@@ -370,44 +559,19 @@ class MicrovascularAdaptor:
     
     def adapt_cwss_ims(self, K_arr, fig_dir: str = None):
 
-        preop_pa = self.simple_pa
-
-        # preop_pa.inflows["INFLOW"].q = [q / (self.postop_simdir.mesh_complete.n_outlets // 2) for q in preop_pa.inflows["INFLOW"].q]
-
-        # compute difference in pressure drop to get postop nonlinear resistance
-        # S_lpa_preop, S_rpa_preop = self.preop_simdir.compute_pressure_drop(steady=False)
-        # S_lpa_postop, S_rpa_postop = self.postop_simdir.compute_pressure_drop(steady=False)
-
-        postop_pa = copy.deepcopy(preop_pa)
-
-        # rescale postop stenosis coefficient
-        # postop_pa.lpa.stenosis_coefficient *= S_lpa_postop / S_lpa_preop
-        # postop_pa.vessel_map[2].stenosis_coefficient *= S_lpa_postop / S_lpa_preop
-        # postop_pa.rpa.stenosis_coefficient *= S_rpa_postop / S_rpa_preop
-        # postop_pa.vessel_map[4].stenosis_coefficient *= S_rpa_postop / S_rpa_preop
-
-        # fixed values for testing
-        postop_pa.lpa.stenosis_coefficient = 19.7
-        postop_pa.vessel_map[2].stenosis_coefficient = 19.7
-        postop_pa.rpa.stenosis_coefficient = 7.6
-        postop_pa.vessel_map[4].stenosis_coefficient = 7.6
-
-        print("rescaled postop lpa stenosis coefficient to " + str(postop_pa.lpa.stenosis_coefficient))
-        print("rescaled postop rpa stenosis coefficient to " + str(postop_pa.rpa.stenosis_coefficient))
-
-        # save pa jsons
-        preop_pa.to_json(os.path.join(self.preop_simdir.path, 'preop_simple_pa.json'))
-        postop_pa.to_json(os.path.join(self.postop_simdir.path, 'postop_simple_pa.json'))
+        # Optimize reduced-order PA (RRI) separately for preop and postop simulations,
+        # unless tuned configs already exist on disk.
+        preop_config_path, postop_config_path = self._resolve_rri_config_paths(nm_iter=5)
 
         # initialize preop and postop PAConfig objects
         preop_pa, postop_pa = initialize_from_paths(
-            os.path.join(self.preop_simdir.path, 'preop_simple_pa.json'),
-            os.path.join(self.postop_simdir.path, 'postop_simple_pa.json'),
+            preop_config_path,
+            postop_config_path,
             os.path.dirname(self.preop_simdir.path) + '/optimized_params.csv',
             os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv'
         )
         # run adaptation
-        result, flow_log, sol, postop_pa = run_adaptation(preop_pa, postop_pa, CWSSIMSAdaptation, K_arr)
+        result, flow_log, sol, postop_pa, hists = run_adaptation(preop_pa, postop_pa, CWSSIMSAdaptation, K_arr)
 
         print(f"Adaptation result: {result}")
 
@@ -417,16 +581,4 @@ class MicrovascularAdaptor:
 
         # rescale inflow
 
-        # distribute the impedance to lpa and rpa specifically
-        self.createImpedanceBCs()
-        
-        self.adapted_simdir.svzerod_3Dcoupling = self.postop_simdir.svzerod_3Dcoupling
-        # change path
-        self.adapted_simdir.svzerod_3Dcoupling.path = os.path.join(self.adapted_simdir.path, 'svzerod_3Dcoupling.json')
-        # update the config with the adapted trees
-        self.adapted_simdir.svzerod_3Dcoupling.tree_params[self.lpa_tree.name] = self.lpa_tree.to_dict()
-        self.adapted_simdir.svzerod_3Dcoupling.tree_params[self.rpa_tree.name] = self.rpa_tree.to_dict()
-
-        print("saving adapted config to " + self.adapted_simdir.svzerod_3Dcoupling.path)
-        self.adapted_simdir.svzerod_3Dcoupling.to_json(self.adapted_simdir.svzerod_3Dcoupling.path)
-
+        self._finalize_coupling_with_adapted_trees()

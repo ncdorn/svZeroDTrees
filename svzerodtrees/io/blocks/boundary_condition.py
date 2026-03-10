@@ -27,8 +27,17 @@ class BoundaryCondition():
         if self.type == 'IMPEDANCE':
             if 'tree' in self.values.keys():
                 self.tree = self.values['tree']
-            self._Z = self.values['Z']
-            self._t = self.values['t']
+            z_kernel = self.values.get('Z', self.values.get('z'))
+            if z_kernel is None:
+                raise KeyError(
+                    f"IMPEDANCE boundary condition '{self.name}' is missing kernel values; "
+                    "expected key 'z' (solver format) or legacy key 'Z'."
+                )
+            self._Z = z_kernel
+            # keep both key variants for backward compatibility
+            self.values['Z'] = z_kernel
+            self.values['z'] = z_kernel
+            self._t = self.values.get('t')
     
     @classmethod
     def from_config(cls, config):
@@ -168,5 +177,6 @@ class BoundaryCondition():
     @Z.setter
     def Z(self, new_Z):
         self._Z = new_Z
+        self.values['z'] = new_Z
         self.values['Z'] = new_Z
    
