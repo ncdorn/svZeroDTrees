@@ -2,15 +2,27 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 import json
+import os
 
 import numpy as np
 import pandas as pd
 
+from svzerodtrees.io import ConfigHandler
+from svzerodtrees.microvasculature import TreeParameters
 from svzerodtrees.simulation import SimulationDirectory
-from svzerodtrees.tune_bcs import ClinicalTargets
+from svzerodtrees.tune_bcs import (
+    ClinicalTargets,
+    FixedParam,
+    FreeParam,
+    ImpedanceTuner,
+    TuneSpace,
+    construct_impedance_trees,
+    positive,
+)
 
 
 DEFAULT_ITERATION_THRESHOLDS: dict[str, float] = {
@@ -19,6 +31,213 @@ DEFAULT_ITERATION_THRESHOLDS: dict[str, float] = {
     "mpa_mean": 3.0,
     "rpa_split": 0.05,
 }
+
+DEFAULT_IMPEDANCE_TUNING_CONFIG: dict[str, Any] = {
+    "solver": "Nelder-Mead",
+    "nm_iter": 5,
+    "n_procs": 24,
+    "grid_search_init": True,
+    "d_min": 0.01,
+    "use_mean": True,
+    "specify_diameter": True,
+    "rescale_inflow": True,
+    "convert_to_cm": False,
+    "compliance_model": "constant",
+}
+
+OPTIMIZED_PARAMS_FILENAME = "optimized_params.csv"
+OPTIMIZATION_LOG_FILENAME = "stree_impedance_optimization.log"
+PA_CONFIG_SNAPSHOT_FILENAME = "pa_config_tuning_snapshot.json"
+TUNED_ZEROD_CONFIG_FILENAME = "svzerod_3d_coupling_tuned.json"
+
+
+@contextmanager
+def _pushd(path: Path):
+    previous = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
+
+
+def _resolve_impedance_config(
+    config: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    merged = dict(DEFAULT_IMPEDANCE_TUNING_CONFIG)
+    if config is not None:
+        merged.update({k: v for k, v in config.items() if v is not None})
+
+    solver = str(merged.get("solver", "")).strip()
+    if not solver:
+        raise ValueError("impedance tuning solver cannot be empty")
+    merged["solver"] = solver
+
+    merged["nm_iter"] = int(merged["nm_iter"])
+    merged["n_procs"] = int(merged["n_procs"])
+    merged["d_min"] = float(merged["d_min"])
+    merged["grid_search_init"] = bool(merged["grid_search_init"])
+    merged["use_mean"] = bool(merged["use_mean"])
+    merged["specify_diameter"] = bool(merged["specify_diameter"])
+    merged["rescale_inflow"] = bool(merged["rescale_inflow"])
+    merged["convert_to_cm"] = bool(merged["convert_to_cm"])
+    merged["compliance_model"] = str(merged["compliance_model"]).strip().lower()
+
+    if merged["nm_iter"] <= 0:
+        raise ValueError("impedance tuning nm_iter must be > 0")
+    if merged["n_procs"] <= 0:
+        raise ValueError("impedance tuning n_procs must be > 0")
+    if merged["d_min"] <= 0.0:
+        raise ValueError("impedance tuning d_min must be > 0")
+    if merged["compliance_model"] not in {"constant", "olufsen"}:
+        raise ValueError("impedance tuning compliance_model must be constant or olufsen")
+
+    return merged
+
+
+def _build_default_tune_space(*, d_min: float, compliance_model: str) -> TuneSpace:
+    free = [
+        FreeParam("lpa.alpha", init=0.9, lb=0.1, ub=0.95),
+        FreeParam("lpa.beta", init=0.6, lb=0.1, ub=0.65),
+        FreeParam("rpa.alpha", init=0.9, lb=0.7, ub=0.99),
+        FreeParam("rpa.beta", init=0.6, lb=0.3, ub=0.9),
+    ]
+    if compliance_model == "olufsen":
+        free.extend(
+            [
+                FreeParam("comp.lpa.k2", init=-25.0, lb=-100.0, ub=-1.0),
+                FreeParam("comp.rpa.k2", init=-25.0, lb=-100.0, ub=-1.0),
+            ]
+        )
+    else:
+        free.extend(
+            [
+                FreeParam(
+                    "comp.lpa.C",
+                    init=6.6e4,
+                    lb=1.0e4,
+                    ub=2.0e5,
+                    to_native=positive,
+                    from_native=np.log,
+                ),
+                FreeParam(
+                    "comp.rpa.C",
+                    init=6.6e4,
+                    lb=1.0e4,
+                    ub=2.0e5,
+                    to_native=positive,
+                    from_native=np.log,
+                ),
+            ]
+        )
+    return TuneSpace(
+        free=free,
+        fixed=[FixedParam("lrr", 10.0), FixedParam("d_min", float(d_min))],
+        tied=[],
+    )
+
+
+def _load_tree_params(opt_csv: Path) -> tuple[TreeParameters, TreeParameters]:
+    opt_params = pd.read_csv(opt_csv)
+    if "pa" not in opt_params.columns:
+        raise ValueError("optimized_params.csv must include a 'pa' column")
+    lpa_rows = opt_params[opt_params["pa"].astype(str).str.lower() == "lpa"]
+    rpa_rows = opt_params[opt_params["pa"].astype(str).str.lower() == "rpa"]
+    if lpa_rows.empty or rpa_rows.empty:
+        raise ValueError(
+            "optimized_params.csv must include one row each for pa=lpa and pa=rpa"
+        )
+    return TreeParameters.from_row(lpa_rows), TreeParameters.from_row(rpa_rows)
+
+
+def run_impedance_tuning_for_iteration(
+    *,
+    iteration_dir: str | Path,
+    seed_config: str | Path,
+    mesh_surfaces: str | Path,
+    clinical_targets: str | Path,
+    impedance_config: Mapping[str, Any] | None = None,
+    results_dir: str | Path | None = None,
+    tuned_config_name: str = TUNED_ZEROD_CONFIG_FILENAME,
+) -> dict[str, Any]:
+    """Run impedance tuning + BC tree assignment for one tuning iteration."""
+
+    iteration_path = Path(iteration_dir)
+    output_dir = Path(results_dir) if results_dir is not None else iteration_path / "results"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    seed_config_path = Path(seed_config)
+    mesh_surfaces_path = Path(mesh_surfaces)
+    targets_path = Path(clinical_targets)
+
+    if not seed_config_path.exists():
+        raise FileNotFoundError(f"seed 0D config not found: {seed_config_path}")
+    if not mesh_surfaces_path.exists():
+        raise FileNotFoundError(f"mesh-surfaces path not found: {mesh_surfaces_path}")
+    if not targets_path.exists():
+        raise FileNotFoundError(f"clinical targets not found: {targets_path}")
+
+    tuning = _resolve_impedance_config(impedance_config)
+    targets = ClinicalTargets.from_csv(str(targets_path))
+    tune_space = _build_default_tune_space(
+        d_min=float(tuning["d_min"]),
+        compliance_model=str(tuning["compliance_model"]),
+    )
+
+    opt_log = output_dir / OPTIMIZATION_LOG_FILENAME
+    with _pushd(output_dir):
+        reduced_config = ConfigHandler.from_json(str(seed_config_path), is_pulmonary=True)
+        tuner = ImpedanceTuner(
+            reduced_config,
+            str(mesh_surfaces_path),
+            targets,
+            tune_space,
+            compliance_model=str(tuning["compliance_model"]),
+            grid_search_init=bool(tuning["grid_search_init"]),
+            rescale_inflow=bool(tuning["rescale_inflow"]),
+            n_procs=int(tuning["n_procs"]),
+            convert_to_cm=bool(tuning["convert_to_cm"]),
+            log_file=str(opt_log),
+            solver=str(tuning["solver"]),
+        )
+        tuner.tune(nm_iter=int(tuning["nm_iter"]))
+
+    optimized_csv = output_dir / OPTIMIZED_PARAMS_FILENAME
+    pa_snapshot = output_dir / PA_CONFIG_SNAPSHOT_FILENAME
+    if not optimized_csv.exists():
+        raise FileNotFoundError(
+            f"impedance tuning did not produce {OPTIMIZED_PARAMS_FILENAME}"
+        )
+    if not pa_snapshot.exists():
+        raise FileNotFoundError(
+            f"impedance tuning did not produce {PA_CONFIG_SNAPSHOT_FILENAME}"
+        )
+
+    lpa_params, rpa_params = _load_tree_params(optimized_csv)
+    tuned_config = ConfigHandler.from_json(str(seed_config_path), is_pulmonary=True)
+    construct_impedance_trees(
+        tuned_config,
+        str(mesh_surfaces_path),
+        targets.wedge_p,
+        lpa_params,
+        rpa_params,
+        d_min=float(tuning["d_min"]),
+        convert_to_cm=bool(tuning["convert_to_cm"]),
+        n_procs=int(tuning["n_procs"]),
+        use_mean=bool(tuning["use_mean"]),
+        specify_diameter=bool(tuning["specify_diameter"]),
+    )
+
+    tuned_zerod_config = output_dir / tuned_config_name
+    tuned_config.to_json(str(tuned_zerod_config))
+
+    return {
+        "optimized_params_csv": str(optimized_csv),
+        "stree_optimization_log": str(opt_log),
+        "pa_config_snapshot": str(pa_snapshot),
+        "tuned_zerod_config": str(tuned_zerod_config),
+        "impedance_config": tuning,
+    }
 
 
 def _to_float_array(values: Sequence[float]) -> np.ndarray:
