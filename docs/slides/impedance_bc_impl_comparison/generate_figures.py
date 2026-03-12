@@ -13,7 +13,6 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[3]
 SVZEROD = ROOT
-SVZT_AGENT = ROOT.parent / "svzt-agent"
 OUTDIR = Path(__file__).resolve().parent / "assets" / "generated"
 
 
@@ -22,9 +21,9 @@ def _style() -> None:
         {
             "figure.dpi": 180,
             "savefig.dpi": 180,
-            "font.size": 10,
-            "axes.titlesize": 11,
-            "axes.labelsize": 10,
+            "font.size": 11,
+            "axes.titlesize": 12,
+            "axes.labelsize": 11,
             "axes.grid": True,
             "grid.alpha": 0.25,
             "grid.linestyle": "--",
@@ -51,11 +50,11 @@ def _kernel_plot() -> None:
     if z is None:
         raise RuntimeError("Could not find OUT impedance kernel in fixture.")
 
-    fig, ax = plt.subplots(figsize=(8, 3.8))
-    ax.plot(range(len(z)), z, color="#005f73", lw=2.2)
-    ax.set_title("Impedance Kernel from pulsatileFlow_R_impedance.json")
-    ax.set_xlabel("Kernel index m")
-    ax.set_ylabel("z[m] (Pa·s/m^3)")
+    fig, ax = plt.subplots(figsize=(8.4, 3.9))
+    ax.plot(range(len(z)), z, color="#0f766e", lw=2.4)
+    ax.set_title("Impedance Kernel from Test Fixture")
+    ax.set_xlabel("Kernel index")
+    ax.set_ylabel("z[m] (Pa*s/m^3)")
     _save(fig, "kernel_plot.png")
 
 
@@ -72,94 +71,95 @@ def _flow_pressure_plot() -> None:
     one_cycle["t_cycle"] = one_cycle["time"] - cycle_start
     one_cycle["pressure_out_mmhg"] = one_cycle["pressure_out"] / 1333.22
 
-    fig, ax1 = plt.subplots(figsize=(8, 3.8))
-    ax1.plot(one_cycle["t_cycle"], one_cycle["flow_out"], color="#0a9396", lw=2)
+    fig, ax1 = plt.subplots(figsize=(8.4, 3.9))
+    ax1.plot(one_cycle["t_cycle"], one_cycle["flow_out"], color="#0a9396", lw=2.2)
     ax1.set_xlabel("Time in cycle (s)")
     ax1.set_ylabel("Flow out (mL/s)")
-    ax1.set_title("Last-Cycle Outlet Flow and Pressure (Impedance Fixture)")
+    ax1.set_title("Outlet Flow and Pressure (Last Cycle)")
 
     ax2 = ax1.twinx()
-    ax2.plot(
-        one_cycle["t_cycle"],
-        one_cycle["pressure_out_mmhg"],
-        color="#bb3e03",
-        lw=1.9,
-    )
+    ax2.plot(one_cycle["t_cycle"], one_cycle["pressure_out_mmhg"], color="#b45309", lw=2.0)
     ax2.set_ylabel("Outlet pressure (mmHg)")
 
     _save(fig, "flow_pressure_plot.png")
 
 
 def _convolution_schematic() -> None:
-    fig, ax = plt.subplots(figsize=(8, 3.8))
+    fig, ax = plt.subplots(figsize=(8.4, 3.9))
     ax.set_axis_off()
 
     eq = r"$P_{n+1}=P_d+z_0Q_{n+1}+\sum_{m=1}^{N_k-1} z_m Q_{n+1-m}$"
-    ax.text(0.02, 0.88, "Olufsen Discrete Convolution", fontsize=12, weight="bold")
-    ax.text(0.02, 0.76, eq, fontsize=14, color="#001219")
+    ax.text(0.02, 0.90, "IMPEDANCE Runtime Equation", fontsize=13, weight="bold")
+    ax.text(0.02, 0.80, eq, fontsize=15, color="#111827")
 
-    main_box = FancyBboxPatch(
-        (0.02, 0.38),
-        0.53,
-        0.27,
+    left = FancyBboxPatch(
+        (0.03, 0.40),
+        0.50,
+        0.30,
         boxstyle="round,pad=0.02,rounding_size=0.02",
-        fc="#e9f5f5",
-        ec="#0a9396",
-        lw=1.4,
+        fc="#ecfeff",
+        ec="#0e7490",
+        lw=1.5,
     )
-    ax.add_patch(main_box)
+    ax.add_patch(left)
     ax.text(
-        0.04,
-        0.56,
-        "Implicit term: z0*Q(n+1)\n"
-        "Added directly to system matrix (F).\n"
-        "Lagged terms use accepted flow history.",
-        fontsize=9.6,
-        va="center",
+        0.05,
+        0.63,
+        "Implicit term (z0*Q[n+1])",
+        fontsize=11,
+        weight="bold",
+    )
+    ax.text(
+        0.05,
+        0.49,
+        "Added directly to solver matrix.\n"
+        "Lagged terms come from accepted-flow history.",
+        fontsize=10.2,
     )
 
-    ring_box = FancyBboxPatch(
-        (0.61, 0.23),
-        0.36,
-        0.58,
+    right = FancyBboxPatch(
+        (0.58, 0.26),
+        0.38,
+        0.50,
         boxstyle="round,pad=0.02,rounding_size=0.02",
-        fc="#fff5eb",
-        ec="#ca6702",
-        lw=1.4,
+        fc="#fff7ed",
+        ec="#b45309",
+        lw=1.5,
     )
-    ax.add_patch(ring_box)
-    ax.text(0.63, 0.75, "One-cycle ring buffer", fontsize=10.5, weight="bold")
+    ax.add_patch(right)
+    ax.text(0.60, 0.70, "One-cycle ring buffer", fontsize=11, weight="bold")
 
-    y = 0.66
-    labels = ["head -> Q(n)", "Q(n-1)", "Q(n-2)", "...", "Q(n-Np+1)"]
+    labels = ["Q[n]", "Q[n-1]", "Q[n-2]", "...", "Q[n-Np+1]"]
+    y = 0.62
     for label in labels:
         ax.add_patch(
             FancyBboxPatch(
-                (0.64, y - 0.04),
+                (0.61, y - 0.04),
                 0.29,
-                0.06,
+                0.065,
                 boxstyle="round,pad=0.01,rounding_size=0.01",
-                fc="#fff",
-                ec="#bb3e03",
+                fc="#ffffff",
+                ec="#9a3412",
                 lw=1.0,
             )
         )
-        ax.text(0.655, y - 0.01, label, fontsize=9)
-        y -= 0.10
+        ax.text(0.64, y - 0.005, label, fontsize=10)
+        y -= 0.09
 
     ax.annotate(
         "",
-        xy=(0.61, 0.49),
-        xytext=(0.55, 0.49),
+        xy=(0.58, 0.52),
+        xytext=(0.53, 0.52),
         arrowprops={"arrowstyle": "->", "lw": 1.8, "color": "#7c2d12"},
     )
-    ax.text(0.50, 0.53, "lagged\nlookup", fontsize=9, ha="center", color="#7c2d12")
+
     _save(fig, "convolution_ringbuffer_schematic.png")
 
 
 def _coupling_state_diagram() -> None:
-    fig, ax = plt.subplots(figsize=(8, 3.8))
+    fig, ax = plt.subplots(figsize=(8.4, 3.9))
     ax.set_axis_off()
+    ax.text(0.02, 0.92, "3D-0D Coupling Safety (Trial / Rollback / Commit)", fontsize=13, weight="bold")
 
     def box(x: float, y: float, w: float, h: float, title: str, body: str, color: str):
         patch = FancyBboxPatch(
@@ -172,105 +172,259 @@ def _coupling_state_diagram() -> None:
             lw=1.1,
         )
         ax.add_patch(patch)
-        ax.text(x + 0.02, y + h - 0.06, title, fontsize=10.5, weight="bold")
-        ax.text(x + 0.02, y + h - 0.11, body, fontsize=8.8, va="top")
+        ax.text(x + 0.02, y + h - 0.065, title, fontsize=10.8, weight="bold")
+        ax.text(x + 0.02, y + h - 0.14, body, fontsize=9.4, va="top")
 
     box(
-        0.03,
-        0.55,
-        0.28,
-        0.35,
-        "Committed Snapshot",
-        "Stored by return_y/return_ydot\nfrom accepted 0D state.",
+        0.04,
+        0.53,
+        0.26,
+        0.30,
+        "1) Snapshot",
+        "return_y/return_ydot\nstore accepted\npersistent state.",
         "#ecfeff",
     )
     box(
         0.36,
-        0.55,
-        0.28,
-        0.35,
-        "Trial Update",
-        "update_state restores committed\npersistent memory, then applies\nincoming y/ydot for trial step.",
+        0.53,
+        0.26,
+        0.30,
+        "2) Trial reset",
+        "update_state restores\nsnapshot, then applies\ntrial y/ydot.",
         "#eef2ff",
     )
     box(
-        0.69,
-        0.55,
-        0.28,
-        0.35,
-        "run_simulation",
-        "Integrator advances.\nImpedanceBC accepts timestep\nonly after solver accept.",
+        0.68,
+        0.53,
+        0.26,
+        0.30,
+        "3) Trial run",
+        "run_simulation advances\nwithout committing\nnew history yet.",
         "#f0fdf4",
     )
     box(
-        0.19,
-        0.08,
         0.28,
-        0.32,
-        "Rollback-Safe Retry",
-        "Repeated trials from same\ncommitted state are deterministic\n(test_interface/test_04).",
+        0.13,
+        0.44,
+        0.26,
+        "4) Accept / Commit",
+        "On accepted step, snapshot updates.\nRepeated retries from the same snapshot\nstay deterministic (test_interface/test_04).",
         "#fff7ed",
-    )
-    box(
-        0.53,
-        0.08,
-        0.28,
-        0.32,
-        "Commit",
-        "Caller marks accepted state via\nreturn_y/return_ydot,\nupdating committed snapshot.",
-        "#fefce8",
     )
 
     arrows = [
-        ((0.31, 0.73), (0.36, 0.73)),
-        ((0.64, 0.73), (0.69, 0.73)),
-        ((0.83, 0.55), (0.67, 0.40)),
-        ((0.36, 0.55), (0.33, 0.40)),
-        ((0.47, 0.24), (0.53, 0.24)),
+        ((0.30, 0.68), (0.36, 0.68)),
+        ((0.62, 0.68), (0.68, 0.68)),
+        ((0.81, 0.53), (0.63, 0.39)),
+        ((0.42, 0.53), (0.46, 0.39)),
     ]
     for a, b in arrows:
-        ax.annotate("", xy=b, xytext=a, arrowprops={"arrowstyle": "->", "lw": 1.6, "color": "#1f2937"})
+        ax.annotate("", xy=b, xytext=a, arrowprops={"arrowstyle": "->", "lw": 1.7, "color": "#1f2937"})
 
     _save(fig, "coupling_state_flow.png")
 
 
 def _iteration_pipeline_diagram() -> None:
-    fig, ax = plt.subplots(figsize=(8, 3.8))
+    fig, ax = plt.subplots(figsize=(8.4, 3.9))
     ax.set_axis_off()
-    ax.text(0.02, 0.93, "3D-0D Iteration Pipeline (svzt-agent + svZeroDTrees)", fontsize=12, weight="bold")
+    ax.text(0.02, 0.92, "3D-0D Iteration Pipeline", fontsize=13, weight="bold")
 
-    stages = [
-        ("1. Run impedance tuning", "run_impedance_tuning_for_iteration\n-> tuned_zerod_config + artifacts"),
-        ("2. Submit preop 3D", "_prepare_and_submit_stage(preop)\nwait for terminal state"),
-        ("3. Extract metrics", "compute_centerline_mpa_metrics\ncompute_flow_split_metrics"),
-        ("4. Gate decision", "evaluate_iteration_gate\nconverged / not_close / needs_review"),
-        ("5A. Not close", "generate_reduced_pa_from_iteration\nseed next iteration"),
-        ("5B. Converged", "submit postop with tuned 0D BCs"),
-    ]
+    def stage(y: float, title: str, body: str) -> None:
+        patch = FancyBboxPatch(
+            (0.05, y),
+            0.90,
+            0.13,
+            boxstyle="round,pad=0.012,rounding_size=0.015",
+            fc="#f8fafc",
+            ec="#64748b",
+            lw=1.1,
+        )
+        ax.add_patch(patch)
+        ax.text(0.08, y + 0.085, title, fontsize=11.3, weight="bold")
+        ax.text(0.08, y + 0.03, body, fontsize=10.2)
 
-    y = 0.78
-    for idx, (title, body) in enumerate(stages):
-        x = 0.03 if idx < 4 else (0.03 if idx == 4 else 0.52)
-        w = 0.43 if idx >= 4 else 0.94
-        if idx < 4:
-            patch = FancyBboxPatch((x, y), w, 0.11, boxstyle="round,pad=0.015,rounding_size=0.01", fc="#f8fafc", ec="#475569", lw=1.0)
-            ax.add_patch(patch)
-            ax.text(x + 0.015, y + 0.07, title, fontsize=10, weight="bold")
-            ax.text(x + 0.015, y + 0.02, body, fontsize=8.7, va="bottom")
-            if idx < 3:
-                ax.annotate("", xy=(0.5, y - 0.01), xytext=(0.5, y - 0.05), arrowprops={"arrowstyle": "->", "lw": 1.5})
-            if idx == 3:
-                ax.annotate("", xy=(0.25, 0.34), xytext=(0.45, 0.42), arrowprops={"arrowstyle": "->", "lw": 1.5})
-                ax.annotate("", xy=(0.74, 0.34), xytext=(0.55, 0.42), arrowprops={"arrowstyle": "->", "lw": 1.5})
-            y -= 0.15
-        else:
-            color = "#ecfeff" if idx == 4 else "#f0fdf4"
-            patch = FancyBboxPatch((x, 0.2), w, 0.12, boxstyle="round,pad=0.015,rounding_size=0.01", fc=color, ec="#0f766e", lw=1.1)
-            ax.add_patch(patch)
-            ax.text(x + 0.015, 0.27, title, fontsize=10, weight="bold")
-            ax.text(x + 0.015, 0.215, body, fontsize=8.6, va="bottom")
+    stage(0.72, "1) Tune impedance BC", "Generate tuned 0D configuration")
+    stage(0.54, "2) Run preop 3D", "Launch simulation job")
+    stage(0.36, "3) Compute metrics", "Extract pressure and flow split")
+    stage(0.18, "4) Gate decision", "Converged -> postop; not close -> retune")
+
+    for y in [0.72, 0.54, 0.36]:
+        ax.annotate("", xy=(0.50, y - 0.01), xytext=(0.50, y - 0.04), arrowprops={"arrowstyle": "->", "lw": 1.8, "color": "#334155"})
 
     _save(fig, "iteration_pipeline.png")
+
+
+def _architecture_context_simple() -> None:
+    fig, ax = plt.subplots(figsize=(8.4, 3.9))
+    ax.set_axis_off()
+    ax.text(0.02, 0.93, "Where IMPEDANCE Runs", fontsize=13, weight="bold")
+
+    for y, label in [(0.60, "Full 0D"), (0.26, "3D-0D Coupling")]:
+        lane = FancyBboxPatch(
+            (0.02, y),
+            0.96,
+            0.25,
+            boxstyle="round,pad=0.01,rounding_size=0.02",
+            fc="#f8fafc",
+            ec="#cbd5e1",
+            lw=1.0,
+        )
+        ax.add_patch(lane)
+        ax.text(0.04, y + 0.2, label, fontsize=11.2, weight="bold")
+
+    def box(x: float, y: float, text: str, w: float = 0.20) -> None:
+        patch = FancyBboxPatch(
+            (x, y),
+            w,
+            0.1,
+            boxstyle="round,pad=0.01,rounding_size=0.01",
+            fc="#ffffff",
+            ec="#94a3b8",
+            lw=1.0,
+        )
+        ax.add_patch(patch)
+        ax.text(x + 0.012, y + 0.056, text, fontsize=9.6, va="center")
+
+    box(0.06, 0.67, "JSON input")
+    box(0.31, 0.67, "Model init")
+    box(0.56, 0.67, "IMPEDANCE")
+    box(0.81, 0.67, "Outputs", w=0.13)
+
+    box(0.06, 0.33, "update_state")
+    box(0.31, 0.33, "run_sim")
+    box(0.56, 0.33, "rollback-safe\nstate", w=0.22)
+    box(0.82, 0.33, "accept", w=0.12)
+
+    arrows = [
+        ((0.26, 0.72), (0.31, 0.72)),
+        ((0.51, 0.72), (0.56, 0.72)),
+        ((0.76, 0.72), (0.81, 0.72)),
+        ((0.26, 0.38), (0.31, 0.38)),
+        ((0.51, 0.38), (0.56, 0.38)),
+        ((0.78, 0.38), (0.82, 0.38)),
+    ]
+    for a, b in arrows:
+        ax.annotate("", xy=b, xytext=a, arrowprops={"arrowstyle": "->", "lw": 1.5, "color": "#475569"})
+
+    _save(fig, "architecture_context_simple.png")
+
+
+def _main_diff_touchpoints() -> None:
+    fig, ax = plt.subplots(figsize=(8.4, 3.9))
+    ax.set_axis_off()
+
+    ax.text(0.02, 0.92, "Change Footprint vs master", fontsize=13, weight="bold")
+    ax.text(
+        0.02,
+        0.85,
+        "Evidence source: impedance-bc commit set (bb926, 82ba, 161870) after merge with origin/master",
+        fontsize=9.4,
+        color="#334155",
+    )
+
+    left = FancyBboxPatch(
+        (0.03, 0.14),
+        0.44,
+        0.66,
+        boxstyle="round,pad=0.02,rounding_size=0.02",
+        fc="#ecfeff",
+        ec="#0e7490",
+        lw=1.4,
+    )
+    right = FancyBboxPatch(
+        (0.53, 0.14),
+        0.44,
+        0.66,
+        boxstyle="round,pad=0.02,rounding_size=0.02",
+        fc="#fff7ed",
+        ec="#b45309",
+        lw=1.4,
+    )
+    ax.add_patch(left)
+    ax.add_patch(right)
+
+    ax.text(0.05, 0.75, "IMPEDANCE-core changes", fontsize=11.2, weight="bold")
+    ax.text(
+        0.05,
+        0.71,
+        "- src/model/ImpedanceBC.{h,cpp}\n"
+        "- src/solve/SimulationParameters.cpp\n"
+        "- impedance test fixtures",
+        fontsize=10.0,
+        va="top",
+    )
+
+    ax.text(0.55, 0.75, "Cross-cutting support hooks", fontsize=11.2, weight="bold")
+    ax.text(
+        0.55,
+        0.71,
+        "- Block: persistent-state virtual hooks\n"
+        "- Model: get/set/clear persistent state\n"
+        "- Integrator: accept_timestep callback + dt handoff\n"
+        "- Interface: snapshot/restore for retry safety\n"
+        "- Solver: clear persistent state after steady init",
+        fontsize=9.9,
+        va="top",
+    )
+
+    ax.annotate(
+        "No broad solver architecture rewrite",
+        xy=(0.50, 0.12),
+        xytext=(0.50, 0.06),
+        ha="center",
+        fontsize=10.6,
+        weight="bold",
+    )
+
+    _save(fig, "main_diff_touchpoints.png")
+
+
+def _impedance_vs_rcr_matrix() -> None:
+    fig, ax = plt.subplots(figsize=(8.4, 3.9))
+    ax.set_axis_off()
+    ax.text(0.02, 0.92, "IMPEDANCE vs RCR (Quick Selection)", fontsize=13, weight="bold")
+
+    headers = ["Dimension", "IMPEDANCE", "RCR"]
+    rows = [
+        ("History", "One-cycle flow memory", "Compact internal state"),
+        ("Behavior", "Richer waveform effects", "Simpler approximation"),
+        ("Compute cost", "Higher", "Lower"),
+        ("Best use", "Higher-fidelity studies", "Fast baseline sweeps"),
+    ]
+    x_cols = [0.04, 0.35, 0.66]
+    col_w = [0.28, 0.28, 0.28]
+    y0 = 0.74
+    rh = 0.14
+
+    for i, h in enumerate(headers):
+        patch = FancyBboxPatch(
+            (x_cols[i], y0),
+            col_w[i],
+            0.1,
+            boxstyle="round,pad=0.01,rounding_size=0.01",
+            fc="#e2e8f0",
+            ec="#94a3b8",
+            lw=1.0,
+        )
+        ax.add_patch(patch)
+        ax.text(x_cols[i] + 0.01, y0 + 0.056, h, fontsize=10.7, weight="bold", va="center")
+
+    for ridx, (dim, imp, rcr) in enumerate(rows):
+        y = y0 - (ridx + 1) * rh
+        for i, val in enumerate([dim, imp, rcr]):
+            patch = FancyBboxPatch(
+                (x_cols[i], y),
+                col_w[i],
+                0.11,
+                boxstyle="round,pad=0.01,rounding_size=0.01",
+                fc="#ffffff",
+                ec="#cbd5e1",
+                lw=0.9,
+            )
+            ax.add_patch(patch)
+            ax.text(x_cols[i] + 0.01, y + 0.058, val, fontsize=10.1, va="center")
+
+    _save(fig, "impedance_vs_rcr_matrix.png")
 
 
 def main() -> None:
@@ -281,6 +435,9 @@ def main() -> None:
     _convolution_schematic()
     _coupling_state_diagram()
     _iteration_pipeline_diagram()
+    _architecture_context_simple()
+    _main_diff_touchpoints()
+    _impedance_vs_rcr_matrix()
     print(f"Wrote figures to {OUTDIR}")
 
 

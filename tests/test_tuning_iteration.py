@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from svzerodtrees.tuning.iteration import (
-    DEFAULT_IMPEDANCE_TUNING_CONFIG,
     OPTIMIZATION_LOG_FILENAME,
     OPTIMIZED_PARAMS_FILENAME,
     PA_CONFIG_SNAPSHOT_FILENAME,
@@ -20,6 +19,27 @@ from svzerodtrees.tuning.iteration import (
     write_iteration_decision,
     write_iteration_metrics,
 )
+
+
+def _tune_space_with_xi() -> dict[str, list[dict[str, object]]]:
+    return {
+        "free": [
+            {"name": "lpa.xi", "init": 2.3, "lb": 0.0, "ub": 6.0},
+            {"name": "lpa.eta_sym", "init": 0.6, "lb": 0.3, "ub": 0.9},
+            {"name": "rpa.xi", "init": 2.3, "lb": 0.0, "ub": 6.0},
+            {"name": "rpa.eta_sym", "init": 0.7, "lb": 0.3, "ub": 0.9},
+            {"name": "lpa.inductance", "init": 1.0, "lb": 0.0, "ub": "inf"},
+            {"name": "rpa.inductance", "init": 1.0, "lb": 0.0, "ub": "inf"},
+            {"name": "comp.lpa.k2", "init": -75.0, "lb": -100.0, "ub": -1.0},
+        ],
+        "fixed": [
+            {"name": "lrr", "value": 10.0},
+            {"name": "d_min", "value": 0.01},
+        ],
+        "tied": [
+            {"name": "comp.rpa.k2", "other": "comp.lpa.k2", "fn": "identity"},
+        ],
+    }
 
 
 def test_compute_centerline_metrics_from_values():
@@ -220,7 +240,12 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
         seed_config=seed,
         mesh_surfaces=mesh_surfaces,
         clinical_targets=targets,
-        impedance_config={"nm_iter": 7, "n_procs": 12, "use_mean": False},
+        impedance_config={
+            "nm_iter": 7,
+            "n_procs": 12,
+            "use_mean": False,
+            "tune_space": _tune_space_with_xi(),
+        },
     )
 
     assert Path(result["optimized_params_csv"]).name == OPTIMIZED_PARAMS_FILENAME
@@ -233,8 +258,11 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
     assert calls["construct"]["kwargs"]["n_procs"] == 12
     assert calls["construct"]["kwargs"]["use_mean"] is False
     free_names = [param.name for param in calls["tune_space"].free]
-    assert "lpa.xi" in free_names
-    assert "rpa.inductance" in free_names
+    assert free_names == [entry["name"] for entry in _tune_space_with_xi()["free"]]
+    assert "lpa.alpha" not in free_names
+    assert "rpa.alpha" not in free_names
+    assert "lpa.beta" not in free_names
+    assert "rpa.beta" not in free_names
 
 
 def test_run_impedance_tuning_for_iteration_missing_snapshot_raises(monkeypatch, tmp_path: Path):
@@ -279,6 +307,7 @@ def test_run_impedance_tuning_for_iteration_missing_snapshot_raises(monkeypatch,
             seed_config=seed,
             mesh_surfaces=mesh_surfaces,
             clinical_targets=targets,
+            impedance_config={"tune_space": _tune_space_with_xi()},
         )
 
 
@@ -338,25 +367,16 @@ def test_run_impedance_tuning_for_iteration_missing_required_xi_raises(monkeypat
             seed_config=seed,
             mesh_surfaces=mesh_surfaces,
             clinical_targets=targets,
+            impedance_config={"tune_space": _tune_space_with_xi()},
         )
 
 
-def test_default_impedance_tune_space_and_compliance():
-    resolved = _resolve_impedance_config(None)
-    assert resolved["compliance_model"] == "olufsen"
-    free_names = [entry["name"] for entry in resolved["tune_space"]["free"]]
-    assert free_names == [
-        "lpa.xi",
-        "lpa.eta_sym",
-        "rpa.xi",
-        "rpa.eta_sym",
-        "lpa.inductance",
-        "rpa.inductance",
-        "comp.lpa.k2",
-    ]
-    tied_names = [entry["name"] for entry in resolved["tune_space"]["tied"]]
-    assert tied_names == ["comp.rpa.k2"]
-    assert DEFAULT_IMPEDANCE_TUNING_CONFIG["tune_space"]["free"][4]["ub"] == "inf"
+def test_resolve_impedance_config_requires_explicit_tune_space():
+    with pytest.raises(ValueError, match="must include explicit tune_space"):
+        _resolve_impedance_config(None)
+
+    with pytest.raises(ValueError, match="must include explicit tune_space"):
+        _resolve_impedance_config({"solver": "Nelder-Mead"})
 
 
 def test_build_tune_space_from_config_supports_inf_and_transforms():
@@ -420,3 +440,8 @@ def test_resolve_impedance_config_invalid_inf_string_raises():
                 }
             }
         )
+
+
+def test_resolve_impedance_config_missing_tune_space_keys_raises():
+    with pytest.raises(ValueError, match="must define keys: free, fixed, tied"):
+        _resolve_impedance_config({"tune_space": {"free": []}})

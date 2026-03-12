@@ -37,7 +37,6 @@ class BoundaryCondition():
             # keep both key variants for backward compatibility
             self.values['Z'] = z_kernel
             self.values['z'] = z_kernel
-            self._t = self.values.get('t')
     
     @classmethod
     def from_config(cls, config):

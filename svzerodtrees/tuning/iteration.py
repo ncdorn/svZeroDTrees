@@ -45,24 +45,6 @@ DEFAULT_IMPEDANCE_TUNING_CONFIG: dict[str, Any] = {
     "rescale_inflow": True,
     "convert_to_cm": False,
     "compliance_model": "olufsen",
-    "tune_space": {
-        "free": [
-            {"name": "lpa.xi", "init": 2.3, "lb": 0.0, "ub": 6.0},
-            {"name": "lpa.eta_sym", "init": 0.6, "lb": 0.3, "ub": 0.9},
-            {"name": "rpa.xi", "init": 2.3, "lb": 0.0, "ub": 6.0},
-            {"name": "rpa.eta_sym", "init": 0.7, "lb": 0.3, "ub": 0.9},
-            {"name": "lpa.inductance", "init": 1.0, "lb": 0.0, "ub": "inf"},
-            {"name": "rpa.inductance", "init": 1.0, "lb": 0.0, "ub": "inf"},
-            {"name": "comp.lpa.k2", "init": -75.0, "lb": -100.0, "ub": -1.0},
-        ],
-        "fixed": [
-            {"name": "lrr", "value": 10.0},
-            {"name": "d_min", "value": 0.01},
-        ],
-        "tied": [
-            {"name": "comp.rpa.k2", "other": "comp.lpa.k2", "fn": "identity"},
-        ],
-    },
 }
 
 OPTIMIZED_PARAMS_FILENAME = "optimized_params.csv"
@@ -84,15 +66,20 @@ def _pushd(path: Path):
 def _resolve_impedance_config(
     config: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
+    if config is None or config.get("tune_space") is None:
+        raise ValueError(
+            "impedance tuning config must include explicit tune_space with keys "
+            "free, fixed, and tied"
+        )
+
     merged = dict(DEFAULT_IMPEDANCE_TUNING_CONFIG)
-    if config is not None:
-        for key, value in config.items():
-            if value is None:
-                continue
-            if key == "tune_space":
-                merged["tune_space"] = value
-            else:
-                merged[key] = value
+    for key, value in config.items():
+        if value is None:
+            continue
+        if key == "tune_space":
+            merged["tune_space"] = value
+        else:
+            merged[key] = value
 
     solver = str(merged.get("solver", "")).strip()
     if not solver:
@@ -158,9 +145,17 @@ def _validate_unique_names(
 
 def _normalize_tune_space_config(tune_space: Any) -> dict[str, list[dict[str, Any]]]:
     if tune_space is None:
-        tune_space = DEFAULT_IMPEDANCE_TUNING_CONFIG["tune_space"]
+        raise ValueError(
+            "impedance tune_space is required and must be a mapping with keys "
+            "free, fixed, and tied"
+        )
     if not isinstance(tune_space, Mapping):
         raise ValueError("impedance tune_space must be a mapping")
+    missing_keys = [key for key in ("free", "fixed", "tied") if key not in tune_space]
+    if missing_keys:
+        raise ValueError(
+            "impedance tune_space must define keys: free, fixed, tied"
+        )
 
     free_raw = tune_space.get("free", [])
     fixed_raw = tune_space.get("fixed", [])
