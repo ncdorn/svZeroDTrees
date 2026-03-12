@@ -1,6 +1,7 @@
 import io
 import builtins
 import numpy as np
+import pandas as pd
 import pytest
 from types import SimpleNamespace
 
@@ -22,7 +23,7 @@ from svzerodtrees.tune_bcs.tune_space import (
 )
 from svzerodtrees.tune_bcs.impedance_tuner import ImpedanceTuner
 from svzerodtrees.tune_bcs.rcr_tuner import RCRTuner
-from svzerodtrees.microvasculature.structured_tree.asymmetry import alpha_beta_from_xi_eta
+from svzerodtrees.microvasculature.structured_tree.asymmetry import alpha_beta_from_xi_eta, xi_from_alpha_beta
 
 
 def _validate_config_connectivity(config):
@@ -461,6 +462,57 @@ def test_impedance_tuner_build_tree_params_uses_xi_eta_sym():
     assert rpa_params.beta == pytest.approx(expected_beta)
     assert lpa_params.xi == pytest.approx(xi)
     assert lpa_params.eta_sym == pytest.approx(eta)
+
+
+def test_tree_parameters_from_row_derives_xi_when_csv_value_missing():
+    expected_xi = 2.3
+    alpha, beta = alpha_beta_from_xi_eta(expected_xi, 0.65)
+    row = pd.DataFrame(
+        [
+            {
+                "pa": "lpa",
+                "lrr": 10.0,
+                "diameter": 0.3,
+                "d_min": 0.01,
+                "alpha": alpha,
+                "beta": beta,
+                "xi": np.nan,
+                "eta_sym": beta / alpha,
+                "inductance": 0.0,
+                "compliance model": "ConstantCompliance",
+                "Eh/r": 66000.0,
+            }
+        ]
+    )
+
+    params = TreeParameters.from_row(row)
+
+    assert params.xi == pytest.approx(expected_xi, rel=1e-6)
+
+
+def test_xi_from_alpha_beta_round_trip():
+    xi = 2.8
+    alpha, beta = alpha_beta_from_xi_eta(xi, 0.7)
+    assert xi_from_alpha_beta(alpha, beta) == pytest.approx(xi, rel=1e-6)
+
+
+def test_tree_parameters_to_csv_row_includes_derived_xi():
+    target_xi = 2.1
+    alpha, beta = alpha_beta_from_xi_eta(target_xi, 0.6)
+    params = TreeParameters(
+        name="lpa",
+        lrr=10.0,
+        diameter=0.3,
+        d_min=0.01,
+        alpha=alpha,
+        beta=beta,
+        xi=None,
+        eta_sym=None,
+        compliance_model=ConstantCompliance(66000.0),
+    )
+
+    row = params.to_csv_row(loss=1.0, flow_split=0.5, p_mpa=[10.0, 5.0, 8.0])
+    assert row["xi"] == pytest.approx(target_xi, rel=1e-6)
 
 
 def test_impedance_tuner_loss_fn_computes_weighted_loss():

@@ -1,7 +1,18 @@
 import pandas as pd
-from pathlib import Path
 from .compliance import *
-from .structured_tree.asymmetry import resolve_branch_scaling
+from .structured_tree.asymmetry import resolve_branch_scaling, xi_from_alpha_beta
+
+
+def _optional_float(value):
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(numeric):
+        return None
+    return numeric
 
 class TreeParameters:
     """
@@ -30,12 +41,17 @@ class TreeParameters:
         self.lrr = lrr
         self.diameter = diameter
         self.d_min = d_min
-        self.xi = xi
-        self.eta_sym = eta_sym
+        self.xi = _optional_float(xi)
+        self.eta_sym = _optional_float(eta_sym)
         self.alpha, self.beta = resolve_branch_scaling(
-            alpha, beta, xi, eta_sym, default_alpha=None, default_beta=None)
+            alpha, beta, self.xi, self.eta_sym, default_alpha=None, default_beta=None)
         if self.eta_sym is None and self.alpha:
             self.eta_sym = self.beta / self.alpha
+        if self.xi is None and self.alpha is not None and self.beta is not None:
+            try:
+                self.xi = xi_from_alpha_beta(self.alpha, self.beta)
+            except ValueError:
+                self.xi = None
         self.compliance_model = compliance_model 
         self.inductance = inductance
 
@@ -56,10 +72,10 @@ class TreeParameters:
         lrr = row["lrr"].values[0]
         diameter = row["diameter"].values[0]
         d_min = row["d_min"].values[0]
-        alpha = row["alpha"].values[0] if "alpha" in row else None
-        beta = row["beta"].values[0] if "beta" in row else None
-        xi = row["xi"].values[0] if "xi" in row else None
-        eta_sym = row["eta_sym"].values[0] if "eta_sym" in row else None
+        alpha = _optional_float(row["alpha"].values[0]) if "alpha" in row else None
+        beta = _optional_float(row["beta"].values[0]) if "beta" in row else None
+        xi = _optional_float(row["xi"].values[0]) if "xi" in row else None
+        eta_sym = _optional_float(row["eta_sym"].values[0]) if "eta_sym" in row else None
         if "inductance" in row:
             inductance = row["inductance"].values[0]
         elif "inertance" in row:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 import json
 import os
 
@@ -19,9 +19,11 @@ from svzerodtrees.tune_bcs import (
     FixedParam,
     FreeParam,
     ImpedanceTuner,
+    TiedParam,
     TuneSpace,
     construct_impedance_trees,
     positive,
+    unit_interval,
 )
 
 
@@ -42,7 +44,25 @@ DEFAULT_IMPEDANCE_TUNING_CONFIG: dict[str, Any] = {
     "specify_diameter": True,
     "rescale_inflow": True,
     "convert_to_cm": False,
-    "compliance_model": "constant",
+    "compliance_model": "olufsen",
+    "tune_space": {
+        "free": [
+            {"name": "lpa.xi", "init": 2.3, "lb": 0.0, "ub": 6.0},
+            {"name": "lpa.eta_sym", "init": 0.6, "lb": 0.3, "ub": 0.9},
+            {"name": "rpa.xi", "init": 2.3, "lb": 0.0, "ub": 6.0},
+            {"name": "rpa.eta_sym", "init": 0.7, "lb": 0.3, "ub": 0.9},
+            {"name": "lpa.inductance", "init": 1.0, "lb": 0.0, "ub": "inf"},
+            {"name": "rpa.inductance", "init": 1.0, "lb": 0.0, "ub": "inf"},
+            {"name": "comp.lpa.k2", "init": -75.0, "lb": -100.0, "ub": -1.0},
+        ],
+        "fixed": [
+            {"name": "lrr", "value": 10.0},
+            {"name": "d_min", "value": 0.01},
+        ],
+        "tied": [
+            {"name": "comp.rpa.k2", "other": "comp.lpa.k2", "fn": "identity"},
+        ],
+    },
 }
 
 OPTIMIZED_PARAMS_FILENAME = "optimized_params.csv"
@@ -66,7 +86,13 @@ def _resolve_impedance_config(
 ) -> dict[str, Any]:
     merged = dict(DEFAULT_IMPEDANCE_TUNING_CONFIG)
     if config is not None:
-        merged.update({k: v for k, v in config.items() if v is not None})
+        for key, value in config.items():
+            if value is None:
+                continue
+            if key == "tune_space":
+                merged["tune_space"] = value
+            else:
+                merged[key] = value
 
     solver = str(merged.get("solver", "")).strip()
     if not solver:
@@ -82,6 +108,7 @@ def _resolve_impedance_config(
     merged["rescale_inflow"] = bool(merged["rescale_inflow"])
     merged["convert_to_cm"] = bool(merged["convert_to_cm"])
     merged["compliance_model"] = str(merged["compliance_model"]).strip().lower()
+    merged["tune_space"] = _normalize_tune_space_config(merged.get("tune_space"))
 
     if merged["nm_iter"] <= 0:
         raise ValueError("impedance tuning nm_iter must be > 0")
@@ -95,46 +122,223 @@ def _resolve_impedance_config(
     return merged
 
 
-def _build_default_tune_space(*, d_min: float, compliance_model: str) -> TuneSpace:
+def _logit(value: float) -> float:
+    numeric = float(value)
+    if not (0.0 < numeric < 1.0):
+        raise ValueError("logit transform requires 0 < x < 1")
+    return float(np.log(numeric / (1.0 - numeric)))
+
+
+def _parse_bound(value: float | int | str) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    token = str(value).strip().lower()
+    if token in {"inf", "+inf"}:
+        return float("inf")
+    if token == "-inf":
+        return float("-inf")
+    raise ValueError("bound strings must be one of inf, +inf, -inf")
+
+
+def _name_list(items: Sequence[Mapping[str, Any]], key: str) -> list[str]:
+    return [str(item.get(key, "")).strip() for item in items]
+
+
+def _validate_unique_names(
+    items: Sequence[Mapping[str, Any]],
+    *,
+    key: str,
+    label: str,
+) -> None:
+    names = _name_list(items, key)
+    duplicates = sorted({name for name in names if names.count(name) > 1 and name})
+    if duplicates:
+        raise ValueError(f"{label} contains duplicate names: {', '.join(duplicates)}")
+
+
+def _normalize_tune_space_config(tune_space: Any) -> dict[str, list[dict[str, Any]]]:
+    if tune_space is None:
+        tune_space = DEFAULT_IMPEDANCE_TUNING_CONFIG["tune_space"]
+    if not isinstance(tune_space, Mapping):
+        raise ValueError("impedance tune_space must be a mapping")
+
+    free_raw = tune_space.get("free", [])
+    fixed_raw = tune_space.get("fixed", [])
+    tied_raw = tune_space.get("tied", [])
+    if not isinstance(free_raw, list) or not isinstance(fixed_raw, list) or not isinstance(tied_raw, list):
+        raise ValueError("tune_space.free, tune_space.fixed, and tune_space.tied must be lists")
+    if not free_raw:
+        raise ValueError("tune_space.free cannot be empty")
+
+    normalized_free: list[dict[str, Any]] = []
+    normalized_fixed: list[dict[str, Any]] = []
+    normalized_tied: list[dict[str, Any]] = []
+
+    for entry in free_raw:
+        if not isinstance(entry, Mapping):
+            raise ValueError("tune_space.free entries must be mappings")
+        name = str(entry.get("name", "")).strip()
+        if not name:
+            raise ValueError("tune_space.free entries require non-empty name")
+        to_native = str(entry.get("to_native", "identity")).strip().lower()
+        from_native = str(entry.get("from_native", "identity")).strip().lower()
+        if to_native not in {"identity", "positive", "unit_interval"}:
+            raise ValueError(
+                f"unsupported to_native transform '{to_native}' for free param '{name}'"
+            )
+        if from_native not in {"identity", "log", "logit"}:
+            raise ValueError(
+                f"unsupported from_native transform '{from_native}' for free param '{name}'"
+            )
+        lb = _parse_bound(entry.get("lb"))
+        ub = _parse_bound(entry.get("ub"))
+        if lb >= ub:
+            raise ValueError(f"free param '{name}' must satisfy lb < ub")
+        normalized_free.append(
+            {
+                "name": name,
+                "init": float(entry.get("init")),
+                "lb": lb,
+                "ub": ub,
+                "to_native": to_native,
+                "from_native": from_native,
+            }
+        )
+
+    for entry in fixed_raw:
+        if not isinstance(entry, Mapping):
+            raise ValueError("tune_space.fixed entries must be mappings")
+        name = str(entry.get("name", "")).strip()
+        if not name:
+            raise ValueError("tune_space.fixed entries require non-empty name")
+        normalized_fixed.append(
+            {
+                "name": name,
+                "value": float(entry.get("value")),
+            }
+        )
+
+    for entry in tied_raw:
+        if not isinstance(entry, Mapping):
+            raise ValueError("tune_space.tied entries must be mappings")
+        name = str(entry.get("name", "")).strip()
+        other = str(entry.get("other", "")).strip()
+        if not name or not other:
+            raise ValueError("tune_space.tied entries require non-empty name and other")
+        fn = str(entry.get("fn", "identity")).strip().lower()
+        if fn != "identity":
+            raise ValueError(
+                f"unsupported tied fn '{fn}' for tied param '{name}'; only identity is supported"
+            )
+        normalized_tied.append({"name": name, "other": other, "fn": fn})
+
+    _validate_unique_names(normalized_free, key="name", label="tune_space.free")
+    _validate_unique_names(normalized_fixed, key="name", label="tune_space.fixed")
+    _validate_unique_names(normalized_tied, key="name", label="tune_space.tied")
+
+    return {
+        "free": normalized_free,
+        "fixed": normalized_fixed,
+        "tied": normalized_tied,
+    }
+
+
+def _resolve_to_native(name: str) -> Callable[[float], float]:
+    mapping: dict[str, Callable[[float], float]] = {
+        "identity": lambda value: float(value),
+        "positive": positive,
+        "unit_interval": unit_interval,
+    }
+    if name not in mapping:
+        raise ValueError(f"unsupported to_native transform '{name}'")
+    return mapping[name]
+
+
+def _resolve_from_native(name: str) -> Callable[[float], float]:
+    mapping: dict[str, Callable[[float], float]] = {
+        "identity": lambda value: float(value),
+        "log": np.log,
+        "logit": _logit,
+    }
+    if name not in mapping:
+        raise ValueError(f"unsupported from_native transform '{name}'")
+    return mapping[name]
+
+
+def _build_tune_space_from_config(tune_space_cfg: Mapping[str, Any]) -> TuneSpace:
+    free_entries = tune_space_cfg.get("free", [])
+    fixed_entries = tune_space_cfg.get("fixed", [])
+    tied_entries = tune_space_cfg.get("tied", [])
+
     free = [
-        FreeParam("lpa.alpha", init=0.9, lb=0.1, ub=0.95),
-        FreeParam("lpa.beta", init=0.6, lb=0.1, ub=0.65),
-        FreeParam("rpa.alpha", init=0.9, lb=0.7, ub=0.99),
-        FreeParam("rpa.beta", init=0.6, lb=0.3, ub=0.9),
+        FreeParam(
+            str(entry["name"]),
+            init=float(entry["init"]),
+            lb=float(entry["lb"]),
+            ub=float(entry["ub"]),
+            to_native=_resolve_to_native(str(entry.get("to_native", "identity"))),
+            from_native=_resolve_from_native(str(entry.get("from_native", "identity"))),
+        )
+        for entry in free_entries
     ]
-    if compliance_model == "olufsen":
-        free.extend(
-            [
-                FreeParam("comp.lpa.k2", init=-25.0, lb=-100.0, ub=-1.0),
-                FreeParam("comp.rpa.k2", init=-25.0, lb=-100.0, ub=-1.0),
-            ]
+    fixed = [
+        FixedParam(str(entry["name"]), float(entry["value"]))
+        for entry in fixed_entries
+    ]
+    tied = [
+        TiedParam(
+            str(entry["name"]),
+            str(entry["other"]),
+            fn=(lambda value: float(value)),
         )
-    else:
-        free.extend(
-            [
-                FreeParam(
-                    "comp.lpa.C",
-                    init=6.6e4,
-                    lb=1.0e4,
-                    ub=2.0e5,
-                    to_native=positive,
-                    from_native=np.log,
-                ),
-                FreeParam(
-                    "comp.rpa.C",
-                    init=6.6e4,
-                    lb=1.0e4,
-                    ub=2.0e5,
-                    to_native=positive,
-                    from_native=np.log,
-                ),
-            ]
+        for entry in tied_entries
+    ]
+    return TuneSpace(free=free, fixed=fixed, tied=tied)
+
+
+def _required_xi_pa_labels(tune_space_cfg: Mapping[str, Any]) -> set[str]:
+    names: set[str] = set()
+    for section in ("free", "fixed", "tied"):
+        for entry in tune_space_cfg.get(section, []):
+            names.add(str(entry.get("name", "")).strip().lower())
+    required: set[str] = set()
+    if "lpa.xi" in names:
+        required.add("lpa")
+    if "rpa.xi" in names:
+        required.add("rpa")
+    return required
+
+
+def _validate_required_xi_in_optimized_csv(
+    *,
+    optimized_csv: Path,
+    required_pa: set[str],
+) -> None:
+    if not required_pa:
+        return
+    opt_params = pd.read_csv(optimized_csv)
+    if "pa" not in opt_params.columns:
+        raise ValueError("optimized_params.csv must include a 'pa' column")
+    if "xi" not in opt_params.columns:
+        required = ", ".join(f"{pa}.xi" for pa in sorted(required_pa))
+        raise ValueError(
+            "optimized_params.csv must include an 'xi' column because tune_space "
+            f"includes {required}"
         )
-    return TuneSpace(
-        free=free,
-        fixed=[FixedParam("lrr", 10.0), FixedParam("d_min", float(d_min))],
-        tied=[],
-    )
+    for pa in sorted(required_pa):
+        rows = opt_params[opt_params["pa"].astype(str).str.lower() == pa]
+        if rows.empty:
+            raise ValueError(
+                f"optimized_params.csv must include a row for pa={pa} "
+                f"because tune_space includes {pa}.xi"
+            )
+        xi_values = pd.to_numeric(rows["xi"], errors="coerce").to_numpy(dtype=float)
+        finite_mask = np.isfinite(xi_values)
+        if not finite_mask.any():
+            raise ValueError(
+                f"optimized_params.csv must include a finite xi value for pa={pa} "
+                f"because tune_space includes {pa}.xi"
+            )
 
 
 def _load_tree_params(opt_csv: Path) -> tuple[TreeParameters, TreeParameters]:
@@ -178,11 +382,9 @@ def run_impedance_tuning_for_iteration(
         raise FileNotFoundError(f"clinical targets not found: {targets_path}")
 
     tuning = _resolve_impedance_config(impedance_config)
+    required_xi_pa = _required_xi_pa_labels(tuning["tune_space"])
     targets = ClinicalTargets.from_csv(str(targets_path))
-    tune_space = _build_default_tune_space(
-        d_min=float(tuning["d_min"]),
-        compliance_model=str(tuning["compliance_model"]),
-    )
+    tune_space = _build_tune_space_from_config(tuning["tune_space"])
 
     opt_log = output_dir / OPTIMIZATION_LOG_FILENAME
     with _pushd(output_dir):
@@ -213,6 +415,10 @@ def run_impedance_tuning_for_iteration(
             f"impedance tuning did not produce {PA_CONFIG_SNAPSHOT_FILENAME}"
         )
 
+    _validate_required_xi_in_optimized_csv(
+        optimized_csv=optimized_csv,
+        required_pa=required_xi_pa,
+    )
     lpa_params, rpa_params = _load_tree_params(optimized_csv)
     tuned_config = ConfigHandler.from_json(str(seed_config_path), is_pulmonary=True)
     construct_impedance_trees(

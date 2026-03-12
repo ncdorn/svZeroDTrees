@@ -30,6 +30,55 @@ def alpha_beta_from_xi_eta(xi: float, eta_sym: float) -> Tuple[float, float]:
     return float(alpha), float(beta)
 
 
+def xi_from_alpha_beta(
+    alpha: float,
+    beta: float,
+    *,
+    tol: float = 1e-10,
+    max_iter: int = 200,
+) -> float:
+    """
+    Infer xi from alpha and beta by solving:
+        alpha**xi + beta**xi = 1
+    for xi > 0.
+    """
+    alpha = float(alpha)
+    beta = float(beta)
+    if not math.isfinite(alpha) or not (0.0 < alpha < 1.0):
+        raise ValueError(f"alpha must satisfy 0 < alpha < 1, got {alpha}.")
+    if not math.isfinite(beta) or not (0.0 < beta < 1.0):
+        raise ValueError(f"beta must satisfy 0 < beta < 1, got {beta}.")
+
+    # Symmetric branch has a closed form.
+    if math.isclose(alpha, beta, rel_tol=tol, abs_tol=tol):
+        return float(math.log(0.5) / math.log(alpha))
+
+    def f(xi: float) -> float:
+        return math.pow(alpha, xi) + math.pow(beta, xi) - 1.0
+
+    lo = 1e-12
+    hi = 1.0
+    f_hi = f(hi)
+    while f_hi > 0.0 and hi < 1e12:
+        hi *= 2.0
+        f_hi = f(hi)
+    if f_hi > 0.0:
+        raise ValueError(
+            "could not bracket xi root from alpha/beta; inputs may be invalid"
+        )
+
+    for _ in range(max_iter):
+        mid = 0.5 * (lo + hi)
+        f_mid = f(mid)
+        if abs(f_mid) <= tol:
+            return float(mid)
+        if f_mid > 0.0:
+            lo = mid
+        else:
+            hi = mid
+    return float(0.5 * (lo + hi))
+
+
 def resolve_branch_scaling(alpha=None,
                            beta=None,
                            xi=None,

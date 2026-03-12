@@ -6,9 +6,12 @@ from pathlib import Path
 import pytest
 
 from svzerodtrees.tuning.iteration import (
+    DEFAULT_IMPEDANCE_TUNING_CONFIG,
     OPTIMIZATION_LOG_FILENAME,
     OPTIMIZED_PARAMS_FILENAME,
     PA_CONFIG_SNAPSHOT_FILENAME,
+    _build_tune_space_from_config,
+    _resolve_impedance_config,
     compute_centerline_mpa_metrics,
     compute_flow_split_metrics,
     evaluate_iteration_gate,
@@ -165,16 +168,17 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
             return cls()
 
     class DummyTuner:
-        def __init__(self, *_args, **kwargs):
+        def __init__(self, *args, **kwargs):
+            calls["tune_space"] = args[3]
             calls["tuner_kwargs"] = kwargs
 
         def tune(self, nm_iter: int = 1):
             calls["nm_iter"] = nm_iter
             out_dir = Path.cwd()
             (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
-                "pa,alpha,beta,d_min,lrr,diameter,compliance_model,C\n"
-                "lpa,0.9,0.6,0.01,10.0,0.3,constant,66000\n"
-                "rpa,0.9,0.6,0.01,10.0,0.3,constant,66000\n",
+                "pa,alpha,beta,xi,d_min,lrr,diameter,compliance_model,C\n"
+                "lpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n"
+                "rpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n",
                 encoding="utf-8",
             )
             (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
@@ -228,6 +232,9 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
     assert calls["construct"]["wedge_p"] == 12.0
     assert calls["construct"]["kwargs"]["n_procs"] == 12
     assert calls["construct"]["kwargs"]["use_mean"] is False
+    free_names = [param.name for param in calls["tune_space"].free]
+    assert "lpa.xi" in free_names
+    assert "rpa.inductance" in free_names
 
 
 def test_run_impedance_tuning_for_iteration_missing_snapshot_raises(monkeypatch, tmp_path: Path):
@@ -272,4 +279,144 @@ def test_run_impedance_tuning_for_iteration_missing_snapshot_raises(monkeypatch,
             seed_config=seed,
             mesh_surfaces=mesh_surfaces,
             clinical_targets=targets,
+        )
+
+
+def test_run_impedance_tuning_for_iteration_missing_required_xi_raises(monkeypatch, tmp_path: Path):
+    seed = tmp_path / "simplified_nonlinear_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    iteration_dir = tmp_path / "iter-01"
+    seed.write_text("{\"seed\": true}", encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+
+    class DummyConfigHandler:
+        @classmethod
+        def from_json(cls, _path: str, is_pulmonary: bool = False):
+            return cls()
+
+        def to_json(self, path: str):
+            Path(path).write_text("{}", encoding="utf-8")
+
+    class DummyClinicalTargets:
+        wedge_p = 10.0
+
+        @classmethod
+        def from_csv(cls, _path: str):
+            return cls()
+
+    class DummyTuner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def tune(self, nm_iter: int = 1):
+            _ = nm_iter
+            out_dir = Path.cwd()
+            (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
+                "pa,alpha,beta,d_min,lrr,diameter,compliance_model,C\n"
+                "lpa,0.9,0.6,0.01,10.0,0.3,constant,66000\n"
+                "rpa,0.9,0.6,0.01,10.0,0.3,constant,66000\n",
+                encoding="utf-8",
+            )
+            (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
+                "{\"snapshot\": true}",
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration._load_tree_params",
+        lambda _path: (_ for _ in ()).throw(AssertionError("_load_tree_params should not be called")),
+    )
+
+    with pytest.raises(ValueError, match="must include an 'xi' column"):
+        run_impedance_tuning_for_iteration(
+            iteration_dir=iteration_dir,
+            seed_config=seed,
+            mesh_surfaces=mesh_surfaces,
+            clinical_targets=targets,
+        )
+
+
+def test_default_impedance_tune_space_and_compliance():
+    resolved = _resolve_impedance_config(None)
+    assert resolved["compliance_model"] == "olufsen"
+    free_names = [entry["name"] for entry in resolved["tune_space"]["free"]]
+    assert free_names == [
+        "lpa.xi",
+        "lpa.eta_sym",
+        "rpa.xi",
+        "rpa.eta_sym",
+        "lpa.inductance",
+        "rpa.inductance",
+        "comp.lpa.k2",
+    ]
+    tied_names = [entry["name"] for entry in resolved["tune_space"]["tied"]]
+    assert tied_names == ["comp.rpa.k2"]
+    assert DEFAULT_IMPEDANCE_TUNING_CONFIG["tune_space"]["free"][4]["ub"] == "inf"
+
+
+def test_build_tune_space_from_config_supports_inf_and_transforms():
+    cfg = {
+        "free": [
+            {
+                "name": "lpa.inductance",
+                "init": 1.0,
+                "lb": 0.0,
+                "ub": "inf",
+                "to_native": "positive",
+                "from_native": "log",
+            }
+        ],
+        "fixed": [{"name": "lrr", "value": 10.0}],
+        "tied": [{"name": "rpa.inductance", "other": "lpa.inductance", "fn": "identity"}],
+    }
+    tune_space = _build_tune_space_from_config(_resolve_impedance_config({"tune_space": cfg})["tune_space"])
+    assert len(tune_space.free) == 1
+    assert tune_space.free[0].name == "lpa.inductance"
+    assert tune_space.free[0].ub == pytest.approx(float("inf"))
+    assert tune_space.tied[0].name == "rpa.inductance"
+
+
+def test_resolve_impedance_config_invalid_transform_raises():
+    with pytest.raises(ValueError, match="to_native"):
+        _resolve_impedance_config(
+            {
+                "tune_space": {
+                    "free": [
+                        {
+                            "name": "lpa.inductance",
+                            "init": 1.0,
+                            "lb": 0.0,
+                            "ub": "inf",
+                            "to_native": "bad",
+                        }
+                    ],
+                    "fixed": [],
+                    "tied": [],
+                }
+            }
+        )
+
+
+def test_resolve_impedance_config_invalid_inf_string_raises():
+    with pytest.raises(ValueError, match="bound strings"):
+        _resolve_impedance_config(
+            {
+                "tune_space": {
+                    "free": [
+                        {
+                            "name": "lpa.inductance",
+                            "init": 1.0,
+                            "lb": 0.0,
+                            "ub": "infinity",
+                        }
+                    ],
+                    "fixed": [],
+                    "tied": [],
+                }
+            }
         )
