@@ -177,7 +177,7 @@ def prepare_adapted_simdir(postop_dir, adapted_dir):
 '''
 
 def setup_simdir_from_mesh(sim_dir, zerod_config, 
-                           svfsiplus_path='/home/users/ndorn/svfsiplus-build/svFSI-build/mysvfsi'):
+                           svfsiplus_path='/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics'):
     '''
     setup a simulation directory solely from a mesh-complete.
     :param sim_dir: path to the simulation directory where the mesh complete is located
@@ -215,7 +215,7 @@ def setup_simdir_from_mesh(sim_dir, zerod_config,
     # os.system('cp ' + inflow_file + ' ' + sim_dir)
 
 
-def setup_svfsi_simdir(sim_dir, zerod_config, svfsi_path='/home/users/ndorn/svfsiplus-build/svFSI-build/mysvfsi'):
+def setup_svfsi_simdir(sim_dir, zerod_config, svfsi_path='/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics'):
 
     # need to write a method to create a svfsiplus.xml file
     pass
@@ -443,7 +443,7 @@ def get_inflow_period(inflow_file):
 
 
 def write_svfsi_runscript(sim_dir,
-                          svfsiplus_path='/home/users/ndorn/svfsiplus-build/svFSI-build/mysvfsi',
+                          svfsiplus_path='/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics',
                           hours=6, nodes=2, procs_per_node=24):
     '''
     write a bash script to submit a job on sherlock'''
