@@ -21,6 +21,11 @@ def test_active_impedance_json_fixtures_use_canonical_schema():
         payload = json.loads(fixture_path.read_text(encoding="utf-8"))
         impedance_bcs = list(_iter_impedance_bcs(payload))
         assert impedance_bcs, f"{fixture_path.name} should contain at least one IMPEDANCE BC"
+        simparams = payload["simulation_parameters"]
+        points_per_cycle = simparams.get("number_of_time_pts_per_cardiac_cycle")
+        assert points_per_cycle is not None, (
+            f"{fixture_path.name} missing number_of_time_pts_per_cardiac_cycle for IMPEDANCE BCs"
+        )
         for bc_config in impedance_bcs:
             values = bc_config["bc_values"]
             assert "z" in values, f"{fixture_path.name}:{bc_config['bc_name']} missing z"
@@ -28,3 +33,11 @@ def test_active_impedance_json_fixtures_use_canonical_schema():
             assert "Z" not in values, f"{fixture_path.name}:{bc_config['bc_name']} contains legacy Z"
             assert "tree" not in values, f"{fixture_path.name}:{bc_config['bc_name']} contains legacy tree"
             assert "t" not in values, f"{fixture_path.name}:{bc_config['bc_name']} contains legacy t"
+            assert points_per_cycle == len(values["z"]) + 1, (
+                f"{fixture_path.name}:{bc_config['bc_name']} must satisfy "
+                "number_of_time_pts_per_cardiac_cycle = len(z) + 1"
+            )
+        if simparams.get("coupled_simulation"):
+            assert simparams.get("number_of_time_pts") == 2, (
+                f"{fixture_path.name} coupled IMPEDANCE config must keep number_of_time_pts = 2"
+            )

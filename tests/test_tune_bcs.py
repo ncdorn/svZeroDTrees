@@ -80,7 +80,7 @@ def _build_pa_config(flow_profile):
     )
     sim_params = SimParams(
         {
-            "number_of_time_pts_per_cardiac_cycle": len(flow_profile),
+            "number_of_time_pts_per_cardiac_cycle": len(flow_profile) + 1,
             "number_of_cardiac_cycles": 1,
             "output_all_cycles": False,
         }
@@ -130,6 +130,11 @@ class DummyImpedancePAConfig:
         with open(path, "w", encoding="utf-8") as ff:
             json.dump(
                 {
+                    "simulation_parameters": {
+                        "number_of_time_pts_per_cardiac_cycle": 2,
+                        "number_of_cardiac_cycles": 1,
+                        "output_all_cycles": False,
+                    },
                     "boundary_conditions": [
                         {
                             "bc_name": "LPA_BC",
@@ -249,6 +254,24 @@ def test_pa_config_to_json_rejects_legacy_impedance_bc(tmp_path):
         pa_config.to_json(tmp_path / "pa_config.json")
 
 
+def test_pa_config_to_json_rejects_impedance_timestep_mismatch(tmp_path):
+    pa_config = _build_pa_config([10.0, 10.0])
+    pa_config.simparams.number_of_time_pts_per_cardiac_cycle = 2
+    pa_config.bcs["LPA_BC"] = BoundaryCondition.from_config(
+        {
+            "bc_name": "LPA_BC",
+            "bc_type": "IMPEDANCE",
+            "bc_values": {"z": [100.0, 50.0], "Pd": 12.0},
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="number_of_time_pts_per_cardiac_cycle = len\\(z\\) \\+ 1",
+    ):
+        pa_config.to_json(tmp_path / "pa_config.json")
+
+
 def test_config_handler_to_json_rejects_legacy_impedance_bc(tmp_path):
     config_handler = ConfigHandler.blank_threed_coupler(str(tmp_path / "blank.json"))
 
@@ -263,6 +286,41 @@ def test_config_handler_to_json_rejects_legacy_impedance_bc(tmp_path):
     config_handler.bcs["OUT"] = LegacyBoundary()
 
     with pytest.raises(ValueError, match="unsupported keys: tree"):
+        config_handler.to_json(tmp_path / "threed.json")
+
+
+def test_config_handler_to_json_rejects_coupled_impedance_missing_cycle_points(tmp_path):
+    config_handler = ConfigHandler.blank_threed_coupler(str(tmp_path / "blank.json"))
+    config_handler.simparams.cardiac_period = 1.0
+    config_handler.bcs["OUT"] = BoundaryCondition.from_config(
+        {
+            "bc_name": "OUT",
+            "bc_type": "IMPEDANCE",
+            "bc_values": {"z": [100.0], "Pd": 12.0},
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="coupled config with IMPEDANCE boundary conditions requires simulation_parameters.number_of_time_pts_per_cardiac_cycle",
+    ):
+        config_handler.to_json(tmp_path / "threed.json")
+
+
+def test_config_handler_to_json_rejects_coupled_impedance_wrong_interface_step_count(tmp_path):
+    config_handler = ConfigHandler.blank_threed_coupler(str(tmp_path / "blank.json"))
+    config_handler.simparams.number_of_time_pts = 3
+    config_handler.simparams.number_of_time_pts_per_cardiac_cycle = 2
+    config_handler.simparams.cardiac_period = 1.0
+    config_handler.bcs["OUT"] = BoundaryCondition.from_config(
+        {
+            "bc_name": "OUT",
+            "bc_type": "IMPEDANCE",
+            "bc_values": {"z": [100.0], "Pd": 12.0},
+        }
+    )
+
+    with pytest.raises(ValueError, match="number_of_time_pts = 2; got 3"):
         config_handler.to_json(tmp_path / "threed.json")
 
 
@@ -306,8 +364,9 @@ def test_pa_config_simulate_runs_with_impedance_trees(monkeypatch):
         def build(self, **kwargs):
             self._build_kwargs = kwargs
 
-        def compute_olufsen_impedance(self, n_procs=1):
+        def compute_olufsen_impedance(self, n_procs=1, tsteps=None):
             self._n_procs = n_procs
+            self._tsteps = tsteps
 
         def create_impedance_bc(self, bc_name, outlet_id, pd):
             return BoundaryCondition.from_config(
@@ -315,7 +374,7 @@ def test_pa_config_simulate_runs_with_impedance_trees(monkeypatch):
                     "bc_name": bc_name,
                     "bc_type": "IMPEDANCE",
                     "bc_values": {
-                        "z": [100.0],
+                        "z": [100.0, 50.0],
                         "Pd": pd,
                     },
                 }
@@ -362,6 +421,8 @@ def test_pa_config_simulate_runs_with_impedance_trees(monkeypatch):
 
     assert pa_config.rpa_split == pytest.approx(0.5)
     assert pa_config.P_mpa[0] == pytest.approx(20.0)
+    assert pa_config.lpa_tree._tsteps == pa_config.simparams.number_of_time_pts_per_cardiac_cycle - 1
+    assert pa_config.rpa_tree._tsteps == pa_config.simparams.number_of_time_pts_per_cardiac_cycle - 1
 
 
 def test_impedance_tuner_build_tree_params_uses_defaults():
@@ -411,8 +472,9 @@ def test_impedance_tuning_with_inductance_builds_valid_threed_config(monkeypatch
         def build(self, **kwargs):
             self._build_kwargs = kwargs
 
-        def compute_olufsen_impedance(self, n_procs=1):
+        def compute_olufsen_impedance(self, n_procs=1, tsteps=None):
             self._n_procs = n_procs
+            self._tsteps = tsteps
 
         def create_impedance_bc(self, bc_name, outlet_id, pd):
             return BoundaryCondition.from_config(
@@ -420,7 +482,7 @@ def test_impedance_tuning_with_inductance_builds_valid_threed_config(monkeypatch
                     "bc_name": bc_name,
                     "bc_type": "IMPEDANCE",
                     "bc_values": {
-                        "z": [100.0],
+                        "z": [100.0, 50.0],
                         "Pd": pd,
                     },
                 }
@@ -476,6 +538,11 @@ def test_impedance_tuning_with_inductance_builds_valid_threed_config(monkeypatch
 
     errors = _validate_config_connectivity(threed_coupler.config)
     assert not errors, "\n".join(errors)
+    assert threed_coupler.config["simulation_parameters"]["number_of_time_pts"] == 2
+    assert (
+        threed_coupler.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"]
+        == pa_config.simparams.number_of_time_pts_per_cardiac_cycle
+    )
 
 
 def test_impedance_tuner_build_tree_params_uses_xi_eta_sym():
@@ -653,6 +720,11 @@ def test_impedance_tuner_loss_fn_hard_fails_legacy_snapshot():
             with open(path, "w", encoding="utf-8") as ff:
                 json.dump(
                     {
+                        "simulation_parameters": {
+                            "number_of_time_pts_per_cardiac_cycle": 2,
+                            "number_of_cardiac_cycles": 1,
+                            "output_all_cycles": False,
+                        },
                         "boundary_conditions": [
                             {
                                 "bc_name": "LPA_BC",
@@ -665,6 +737,65 @@ def test_impedance_tuner_loss_fn_hard_fails_legacy_snapshot():
                 )
 
     pa_config = LegacySnapshotPAConfig(clinical_targets)
+    x0, _ = tune_space.pack_init_and_bounds()
+
+    loss = tuner.loss_fn(x0, pa_config)
+
+    assert loss == pytest.approx(1e9)
+
+
+def test_impedance_tuner_loss_fn_hard_fails_timestep_mismatch_snapshot():
+    clinical_targets = ClinicalTargets(mpa_p=[30.0, 15.0, 22.0], rpa_split=0.55, wedge_p=12.0, q=5.0)
+    tune_space = TuneSpace(
+        free=[
+            FreeParam("comp.lpa.C", init=6.6e4, lb=1.0e4, ub=2.0e5),
+            FreeParam("comp.rpa.C", init=7.0e4, lb=1.0e4, ub=2.0e5),
+            FreeParam("lpa.alpha", init=0.9, lb=0.5, ub=0.99),
+            FreeParam("lpa.beta", init=0.6, lb=0.3, ub=0.9),
+            FreeParam("rpa.alpha", init=0.88, lb=0.5, ub=0.99),
+            FreeParam("rpa.beta", init=0.58, lb=0.3, ub=0.9),
+            FreeParam("lrr", init=9.0, lb=4.0, ub=20.0),
+        ],
+        fixed=[FixedParam("d_min", 0.02)],
+        tied=[],
+    )
+    tuner = ImpedanceTuner(
+        config_handler=SimpleNamespace(),
+        mesh_surfaces_path="mesh",
+        clinical_targets=clinical_targets,
+        tune_space=tune_space,
+        compliance_model="constant",
+    )
+    tuner.n_procs = 2
+    tuner._geom_defaults = {
+        "lpa.default_diameter": 0.30,
+        "rpa.default_diameter": 0.32,
+        "n_outlets_scale": 1.0,
+    }
+
+    class TimingMismatchSnapshotPAConfig(DummyImpedancePAConfig):
+        def to_json(self, path):
+            self.last_json = path
+            with open(path, "w", encoding="utf-8") as ff:
+                json.dump(
+                    {
+                        "simulation_parameters": {
+                            "number_of_time_pts_per_cardiac_cycle": 1,
+                            "number_of_cardiac_cycles": 1,
+                            "output_all_cycles": False,
+                        },
+                        "boundary_conditions": [
+                            {
+                                "bc_name": "LPA_BC",
+                                "bc_type": "IMPEDANCE",
+                                "bc_values": {"z": [1.0], "Pd": 12.0},
+                            }
+                        ]
+                    },
+                    ff,
+                )
+
+    pa_config = TimingMismatchSnapshotPAConfig(clinical_targets)
     x0, _ = tune_space.pack_init_and_bounds()
 
     loss = tuner.loss_fn(x0, pa_config)

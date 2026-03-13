@@ -10,7 +10,11 @@ import matplotlib.pyplot as plt
 
 # svzerodtrees imports
 from ..io.blocks import Vessel, BoundaryCondition, SimParams
-from ..io.blocks.boundary_condition import validate_boundary_condition_configs
+from ..io.blocks.boundary_condition import (
+    resolve_impedance_timepoint_contract,
+    validate_boundary_condition_configs,
+    validate_impedance_timing_config,
+)
 from .clinical_targets import ClinicalTargets
 from ..microvasculature import StructuredTree, TreeParameters
 from ..io.blocks import Junction
@@ -154,6 +158,7 @@ class PAConfig():
         '''
 
         validate_boundary_condition_configs(self.config.get("boundary_conditions", []))
+        validate_impedance_timing_config(self.config)
         with open(output_file, 'w') as ff:
             json.dump(self.config, ff, indent=4)
 
@@ -246,8 +251,13 @@ class PAConfig():
         self.lpa_dist.L = lpa_params.inductance
         self.rpa_dist.L = rpa_params.inductance
 
-        # use same number of tsteps to build tree as simparams
-        time_array = np.linspace(0, self.inflow.t[-1], self.simparams.number_of_time_pts_per_cardiac_cycle).tolist()
+        _, sample_count, kernel_steps = resolve_impedance_timepoint_contract(
+            self.simparams.to_dict()
+        )
+
+        # Inflow samples include both period endpoints; the impedance kernel spans
+        # the intervals between them.
+        time_array = np.linspace(0, self.inflow.t[-1], sample_count).tolist()
 
         self.lpa_tree = StructuredTree(name='lpa_tree', 
                                        time=time_array, 
@@ -261,7 +271,7 @@ class PAConfig():
                                  beta=lpa_params.beta)
 
         # compute the impedance in frequency domain NEED TO SUB IN COMPLIANCE MODEL
-        self.lpa_tree.compute_olufsen_impedance(n_procs=n_procs)
+        self.lpa_tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
 
         self.bcs["LPA_BC"] = self.lpa_tree.create_impedance_bc(
             "LPA_BC",
@@ -281,7 +291,7 @@ class PAConfig():
                                  beta=rpa_params.beta)
 
         # compute the impedance in frequency domain
-        self.rpa_tree.compute_olufsen_impedance(n_procs=n_procs)
+        self.rpa_tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
 
         self.bcs["RPA_BC"] = self.rpa_tree.create_impedance_bc(
             "RPA_BC",

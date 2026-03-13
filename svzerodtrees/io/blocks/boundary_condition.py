@@ -23,6 +23,18 @@ def _ensure_finite_numeric(value, *, bc_name: str, field_name: str) -> float:
     return numeric
 
 
+def _ensure_positive_int(value, *, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a positive integer")
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a positive integer") from exc
+    if numeric <= 0:
+        raise ValueError(f"{field_name} must be a positive integer")
+    return numeric
+
+
 def validate_impedance_bc_values(values: Mapping, *, bc_name: str) -> dict:
     if not isinstance(values, Mapping):
         raise ValueError(
@@ -117,6 +129,101 @@ def validate_boundary_condition_config(config: Mapping) -> dict:
 
 def validate_boundary_condition_configs(configs: Sequence[Mapping]) -> list[dict]:
     return [validate_boundary_condition_config(config) for config in configs]
+
+
+def resolve_impedance_timepoint_contract(simparams: Mapping) -> tuple[str, int, int]:
+    if not isinstance(simparams, Mapping):
+        raise ValueError("simulation_parameters must be a mapping")
+
+    points_per_cycle = simparams.get("number_of_time_pts_per_cardiac_cycle")
+    if points_per_cycle is None:
+        raise ValueError(
+            "configs with IMPEDANCE boundary conditions require "
+            "simulation_parameters.number_of_time_pts_per_cardiac_cycle"
+        )
+
+    resolved_points_per_cycle = _ensure_positive_int(
+        points_per_cycle,
+        field_name="simulation_parameters.number_of_time_pts_per_cardiac_cycle",
+    )
+    if resolved_points_per_cycle < 2:
+        raise ValueError(
+            "simulation_parameters.number_of_time_pts_per_cardiac_cycle must be >= 2"
+        )
+    return (
+        "number_of_time_pts_per_cardiac_cycle",
+        resolved_points_per_cycle,
+        resolved_points_per_cycle - 1,
+    )
+
+
+def validate_impedance_timing_config(config: Mapping) -> None:
+    if not isinstance(config, Mapping):
+        raise ValueError("config must be a mapping")
+
+    validated_bcs = validate_boundary_condition_configs(
+        config.get("boundary_conditions", [])
+    )
+    impedance_bcs = [
+        bc_config for bc_config in validated_bcs if bc_config.get("bc_type") == "IMPEDANCE"
+    ]
+    if not impedance_bcs:
+        return
+
+    simparams = config.get("simulation_parameters")
+    if not isinstance(simparams, Mapping):
+        raise ValueError(
+            "configs with IMPEDANCE boundary conditions require simulation_parameters"
+        )
+
+    coupled = bool(simparams.get("coupled_simulation", False))
+    mode_label = "coupled" if coupled else "non-coupled"
+
+    number_of_time_pts = simparams.get("number_of_time_pts")
+    if coupled:
+        if number_of_time_pts is None:
+            raise ValueError(
+                "coupled config with IMPEDANCE boundary conditions requires "
+                "simulation_parameters.number_of_time_pts = 2"
+            )
+        resolved_number_of_time_pts = _ensure_positive_int(
+            number_of_time_pts,
+            field_name="simulation_parameters.number_of_time_pts",
+        )
+        if resolved_number_of_time_pts != 2:
+            raise ValueError(
+                "coupled config with IMPEDANCE boundary conditions requires "
+                "simulation_parameters.number_of_time_pts = 2; got "
+                f"{resolved_number_of_time_pts}"
+            )
+    else:
+        resolved_number_of_time_pts = (
+            _ensure_positive_int(
+                number_of_time_pts,
+                field_name="simulation_parameters.number_of_time_pts",
+            )
+            if number_of_time_pts is not None
+            else None
+        )
+
+    if "number_of_time_pts_per_cardiac_cycle" not in simparams:
+        raise ValueError(
+            f"{mode_label} config with IMPEDANCE boundary conditions requires "
+            "simulation_parameters.number_of_time_pts_per_cardiac_cycle"
+        )
+    _, points_per_cycle, _ = resolve_impedance_timepoint_contract(simparams)
+
+    for bc_config in impedance_bcs:
+        bc_name = bc_config["bc_name"]
+        kernel_size = len(bc_config["bc_values"]["z"])
+        if kernel_size + 1 != points_per_cycle:
+            raise ValueError(
+                f"{mode_label} IMPEDANCE boundary condition '{bc_name}' requires "
+                "simulation_parameters.number_of_time_pts_per_cardiac_cycle = len(z) + 1; "
+                f"got number_of_time_pts={resolved_number_of_time_pts}, "
+                f"number_of_time_pts_per_cardiac_cycle={points_per_cycle}, "
+                f"len(z)={kernel_size}"
+            )
 
 
 class BoundaryCondition():

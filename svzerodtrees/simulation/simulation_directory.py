@@ -13,6 +13,7 @@ from ..io.blocks import *
 from ..tune_bcs import construct_impedance_trees, ClinicalTargets
 from .input_builders.simulation_file import SimulationFile
 from ..microvasculature import StructuredTree
+from ..io.blocks.boundary_condition import resolve_impedance_timepoint_contract
 
 _DEFAULT_TREE_LRR = 10.0
 
@@ -1395,6 +1396,9 @@ class SimulationDirectory:
             # add the inflows to the svzerod_3Dcoupling
             tsteps = int(input('number of time steps for inflow (default 512): ') or 512)
             self.svzerod_3Dcoupling.simparams.number_of_time_pts_per_cardiac_cycle = tsteps
+            _, _, kernel_steps = resolve_impedance_timepoint_contract(
+                self.svzerod_3Dcoupling.simparams.to_dict()
+            )
             bc_idx = 0
             for vtp in self.mesh_complete.mesh_surfaces.values():
                 if 'inflow' in vtp.filename.lower():
@@ -1426,7 +1430,7 @@ class SimulationDirectory:
                     tree.build(initial_d=cap_d, d_min=d_min, lrr=_DEFAULT_TREE_LRR)
 
                     # compute the impedance in frequency domain
-                    tree.compute_olufsen_impedance()
+                    tree.compute_olufsen_impedance(tsteps=kernel_steps)
 
                     bc_name = f'IMPEDANCE_{bc_idx}'
 

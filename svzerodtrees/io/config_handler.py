@@ -2,7 +2,10 @@ import json
 import pickle
 import os
 from svzerodtrees.utils import *
-from .blocks.boundary_condition import validate_boundary_condition_configs
+from .blocks.boundary_condition import (
+    validate_boundary_condition_configs,
+    validate_impedance_timing_config,
+)
 from .result_handler import ResultHandler
 from .inflow_handler import Inflow
 from .blocks import *
@@ -109,6 +112,7 @@ class ConfigHandler():
         '''
 
         validate_boundary_condition_configs(self.config.get("boundary_conditions", []))
+        validate_impedance_timing_config(self.config)
         with open(file_name, 'w') as ff:
             json.dump(self.config, ff, indent=4)
 
@@ -132,6 +136,7 @@ class ConfigHandler():
 
 
         validate_boundary_condition_configs(self.config.get("boundary_conditions", []))
+        validate_impedance_timing_config(self.config)
         with open(file_name, 'w') as ff:
             json.dump(self.config, ff, indent=4)
         
@@ -661,16 +666,28 @@ class ConfigHandler():
         # assemble config to account for any changes made to the config
         self.assemble_config()
 
+        simparams_config = {
+            "density": 1.06,
+            "viscosity": 0.04,
+            "coupled_simulation": True,
+            "number_of_time_pts": 2,
+            "output_all_cycles": True,
+            "steady_initial": False,
+        }
+        if hasattr(self.simparams, "number_of_time_pts_per_cardiac_cycle"):
+            simparams_config["number_of_time_pts_per_cardiac_cycle"] = (
+                self.simparams.number_of_time_pts_per_cardiac_cycle
+            )
+        if hasattr(self.simparams, "external_step_size"):
+            simparams_config["external_step_size"] = self.simparams.external_step_size
+        if hasattr(self.simparams, "cardiac_period"):
+            simparams_config["cardiac_period"] = self.simparams.cardiac_period
+        elif "INFLOW" in self.bcs and hasattr(self.bcs["INFLOW"], "t"):
+            simparams_config["cardiac_period"] = max(self.bcs["INFLOW"].t)
+
         threed_coupler = ConfigHandler(
             {
-                "simulation_parameters": {
-                    "density": 1.06,
-                    "viscosity": 0.04,
-                    "coupled_simulation": True,
-                    "number_of_time_pts": 2,
-                    "output_all_cycles": True,
-                    "steady_initial": False
-                },
+                "simulation_parameters": simparams_config,
                 "external_solver_coupling_blocks": [],
                 "boundary_conditions": [],
                 "vessels": [],

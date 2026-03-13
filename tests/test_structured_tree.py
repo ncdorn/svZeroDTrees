@@ -4,7 +4,10 @@ import pytest
 from svzerodtrees.microvasculature.structured_tree.structuredtree import StructuredTree
 from svzerodtrees.io.blocks.simulation_parameters import SimParams
 from svzerodtrees.microvasculature.compliance.constant import ConstantCompliance
-from svzerodtrees.io.blocks.boundary_condition import BoundaryCondition
+from svzerodtrees.io.blocks.boundary_condition import (
+    BoundaryCondition,
+    validate_impedance_timing_config,
+)
 
 
 @pytest.fixture
@@ -130,5 +133,44 @@ def test_impedance_bc_rejects_legacy_or_invalid_schema(bc_values, message):
                 "bc_name": "OUT",
                 "bc_type": "IMPEDANCE",
                 "bc_values": bc_values,
+            }
+        )
+
+
+def test_validate_impedance_timing_config_rejects_noncoupled_mismatch():
+    with pytest.raises(ValueError, match="number_of_time_pts_per_cardiac_cycle = len\\(z\\) \\+ 1"):
+        validate_impedance_timing_config(
+            {
+                "simulation_parameters": {
+                    "number_of_cardiac_cycles": 1,
+                    "number_of_time_pts_per_cardiac_cycle": 2,
+                },
+                "boundary_conditions": [
+                    {
+                        "bc_name": "OUT",
+                        "bc_type": "IMPEDANCE",
+                        "bc_values": {"z": [10.0, 2.0], "Pd": 3.0},
+                    }
+                ],
+            }
+        )
+
+
+def test_validate_impedance_timing_config_rejects_coupled_wrong_number_of_time_pts():
+    with pytest.raises(ValueError, match="number_of_time_pts = 2; got 3"):
+        validate_impedance_timing_config(
+            {
+                "simulation_parameters": {
+                    "coupled_simulation": True,
+                    "number_of_time_pts": 3,
+                    "number_of_time_pts_per_cardiac_cycle": 2,
+                },
+                "boundary_conditions": [
+                    {
+                        "bc_name": "OUT",
+                        "bc_type": "IMPEDANCE",
+                        "bc_values": {"z": [10.0], "Pd": 3.0},
+                    }
+                ],
             }
         )

@@ -1,6 +1,7 @@
 
 import numpy as np
 from ..io import *
+from ..io.blocks.boundary_condition import resolve_impedance_timepoint_contract
 from ..utils import *
 from ..microvasculature import StructuredTree, TreeParameters
 from ..simulation.threedutils import vtp_info
@@ -85,6 +86,9 @@ def construct_impedance_trees(config_handler,
             print(f'RPA std diameter: {rpa_std_dia}')
 
 
+        _, _, kernel_steps = resolve_impedance_timepoint_contract(
+            config_handler.simparams.to_dict()
+        )
         time_array = config_handler.inflows[next(iter(config_handler.inflows))].t
 
         lpa_tree = StructuredTree(name='LPA', time=time_array, simparams=config_handler.simparams, compliance_model=lpa_params.compliance_model)
@@ -99,7 +103,7 @@ def construct_impedance_trees(config_handler,
             xi=lpa_params.xi,
             eta_sym=lpa_params.eta_sym,
         )
-        lpa_tree.compute_olufsen_impedance(n_procs=n_procs)
+        lpa_tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
         lpa_tree.plot_stiffness(path='lpa_stiffness_plot.png')
 
         # add tree to config handler
@@ -117,7 +121,7 @@ def construct_impedance_trees(config_handler,
             xi=rpa_params.xi,
             eta_sym=rpa_params.eta_sym,
         )
-        rpa_tree.compute_olufsen_impedance(n_procs=n_procs)
+        rpa_tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
         rpa_tree.plot_stiffness(path='rpa_stiffness_plot.png')
 
         # add tree to config handler
@@ -146,6 +150,9 @@ def construct_impedance_trees(config_handler,
             
     else:
         '''build a unique tree for each outlet'''
+        _, _, kernel_steps = resolve_impedance_timepoint_contract(
+            config_handler.simparams.to_dict()
+        )
         for idx, (cap_name, area) in enumerate(cap_info.items()):
 
             print(f'generating tree {idx} of {len(cap_info)} for cap {cap_name}...')
@@ -177,7 +184,7 @@ def construct_impedance_trees(config_handler,
             )
 
             # compute the impedance in frequency domain
-            tree.compute_olufsen_impedance(n_procs=n_procs)
+            tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
 
             # add tree to config handler
             config_handler.tree_params[tree.name] = tree.to_dict()

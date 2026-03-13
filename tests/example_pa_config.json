@@ -2102,7 +2102,7 @@
         "density": 1.06,
         "model_name": "pa_reduced",
         "number_of_cardiac_cycles": 5,
-        "number_of_time_pts_per_cardiac_cycle": 500,
+        "number_of_time_pts_per_cardiac_cycle": 501,
         "viscosity": 0.04
     },
     "vessels": [

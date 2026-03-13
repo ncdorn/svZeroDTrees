@@ -12,7 +12,10 @@ import numpy as np
 import pandas as pd
 
 from svzerodtrees.io import ConfigHandler
-from svzerodtrees.io.blocks.boundary_condition import validate_boundary_condition_configs
+from svzerodtrees.io.blocks.boundary_condition import (
+    validate_boundary_condition_configs,
+    validate_impedance_timing_config,
+)
 from svzerodtrees.microvasculature import TreeParameters
 from svzerodtrees.simulation import SimulationDirectory
 from svzerodtrees.tune_bcs import (
@@ -354,6 +357,7 @@ def _validate_impedance_artifact(path: Path) -> None:
     with path.open(encoding="utf-8") as ff:
         payload = json.load(ff)
     validate_boundary_condition_configs(payload.get("boundary_conditions", []))
+    validate_impedance_timing_config(payload)
 
 
 def run_impedance_tuning_for_iteration(

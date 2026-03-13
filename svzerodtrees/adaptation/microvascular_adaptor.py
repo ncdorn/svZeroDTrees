@@ -10,6 +10,7 @@ from scipy.optimize import minimize_scalar
 import pandas as pd
 
 from ..io import ConfigHandler
+from ..io.blocks.boundary_condition import resolve_impedance_timepoint_contract
 from ..microvasculature import StructuredTree, TreeParameters
 from ..simulation.simulation_directory import SimulationDirectory
 from ..simulation.threedutils import vtp_info
@@ -24,6 +25,11 @@ _DEFAULT_ALPHA = 0.9
 _DEFAULT_BETA = 0.6
 _DEFAULT_LRR = 10.0
 _MIN_FLOW_EPS = 1e-8
+
+
+def _impedance_kernel_steps_from_simparams(simparams) -> int:
+    _, _, kernel_steps = resolve_impedance_timepoint_contract(simparams.to_dict())
+    return kernel_steps
 
 
 def _optimize_tree_for_resistance(
@@ -217,8 +223,9 @@ class MicrovascularAdaptor:
 
         if fig_dir is not None:
             print("computing preop impedance! \n")
-            Z_t_l_pre, time = self.lpa_tree.compute_olufsen_impedance(n_procs=24)
-            Z_t_r_pre, time = self.rpa_tree.compute_olufsen_impedance(n_procs=24)
+            kernel_steps = _impedance_kernel_steps_from_simparams(self.simple_pa.simparams)
+            Z_t_l_pre, time = self.lpa_tree.compute_olufsen_impedance(n_procs=24, tsteps=kernel_steps)
+            Z_t_r_pre, time = self.rpa_tree.compute_olufsen_impedance(n_procs=24, tsteps=kernel_steps)
             self.lpa_tree.plot_stiffness(path=os.path.join(fig_dir, 'lpa_stiffness_preop.png'))
             self.rpa_tree.plot_stiffness(path=os.path.join(fig_dir, 'rpa_stiffness_preop.png'))
 
@@ -235,8 +242,9 @@ class MicrovascularAdaptor:
             self.rpa_tree.adapt_wss_ims(Q=preop_rpa_flow, Q_new=postop_rpa_flow, n_iter=self.n_iter)
 
         print("computing adapted impedance! \n")
-        Z_t_l_adapt, time = self.lpa_tree.compute_olufsen_impedance(n_procs=24)
-        Z_t_r_adapt, time = self.rpa_tree.compute_olufsen_impedance(n_procs=24)
+        kernel_steps = _impedance_kernel_steps_from_simparams(self.simple_pa.simparams)
+        Z_t_l_adapt, time = self.lpa_tree.compute_olufsen_impedance(n_procs=24, tsteps=kernel_steps)
+        Z_t_r_adapt, time = self.rpa_tree.compute_olufsen_impedance(n_procs=24, tsteps=kernel_steps)
 
         if fig_dir is not None:
             # plot the preop and postop impedance
@@ -530,8 +538,17 @@ class MicrovascularAdaptor:
         '''
         # if self.location == 'uniform':
 
-        Z_t_l_adapt, time = self.lpa_tree.compute_olufsen_impedance(n_procs=24, tsteps=2000)
-        Z_t_r_adapt, time = self.rpa_tree.compute_olufsen_impedance(n_procs=24, tsteps=2000)
+        kernel_steps = _impedance_kernel_steps_from_simparams(
+            self.postop_simdir.svzerod_3Dcoupling.simparams
+        )
+        Z_t_l_adapt, time = self.lpa_tree.compute_olufsen_impedance(
+            n_procs=24,
+            tsteps=kernel_steps,
+        )
+        Z_t_r_adapt, time = self.rpa_tree.compute_olufsen_impedance(
+            n_procs=24,
+            tsteps=kernel_steps,
+        )
 
         cap_info = vtp_info(self.postop_simdir.mesh_complete.mesh_surfaces_dir, convert_to_cm=self.convert_to_cm, pulmonary=False)
 

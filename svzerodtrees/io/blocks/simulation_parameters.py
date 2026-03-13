@@ -8,6 +8,8 @@ class SimParams():
             self.coupled_simulation = config['coupled_simulation']
         if 'number_of_time_pts' in config.keys():
             self.number_of_time_pts = config["number_of_time_pts"]
+        if 'external_step_size' in config.keys():
+            self.external_step_size = config["external_step_size"]
         if 'output_all_cycles' in config.keys():
             self.output_all_cycles = config["output_all_cycles"]
         if 'steady_initial' in config.keys():
@@ -16,6 +18,8 @@ class SimParams():
             self.density = config['density']
         if 'model_name' in config.keys():
             self.model_name = config['model_name']
+        if 'cardiac_period' in config.keys():
+            self.cardiac_period = config['cardiac_period']
         if 'number_of_cardiac_cycles' in config.keys():
             self.number_of_cardiac_cycles = config['number_of_cardiac_cycles']
         if 'number_of_time_pts_per_cardiac_cycle' in config.keys():
