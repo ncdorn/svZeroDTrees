@@ -2,6 +2,7 @@ import json
 import pickle
 import os
 from svzerodtrees.utils import *
+from .blocks.boundary_condition import validate_boundary_condition_configs
 from .result_handler import ResultHandler
 from .inflow_handler import Inflow
 from .blocks import *
@@ -107,6 +108,7 @@ class ConfigHandler():
         :param file_name: name of the file to write to
         '''
 
+        validate_boundary_condition_configs(self.config.get("boundary_conditions", []))
         with open(file_name, 'w') as ff:
             json.dump(self.config, ff, indent=4)
 
@@ -129,6 +131,7 @@ class ConfigHandler():
                     outlet_idx += 1
 
 
+        validate_boundary_condition_configs(self.config.get("boundary_conditions", []))
         with open(file_name, 'w') as ff:
             json.dump(self.config, ff, indent=4)
         

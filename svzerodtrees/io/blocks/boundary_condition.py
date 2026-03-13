@@ -1,13 +1,134 @@
 
+from __future__ import annotations
+
+import math
+from collections.abc import Mapping, Sequence
+
+
+_ALLOWED_IMPEDANCE_KEYS = {"z", "Pd", "convolution_mode", "num_kernel_terms"}
+_FORBIDDEN_IMPEDANCE_KEYS = {"Z", "tree", "t"}
+
+
+def _ensure_finite_numeric(value, *, bc_name: str, field_name: str) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"IMPEDANCE boundary condition '{bc_name}' field '{field_name}' must be numeric"
+        ) from exc
+    if not math.isfinite(numeric):
+        raise ValueError(
+            f"IMPEDANCE boundary condition '{bc_name}' field '{field_name}' must be finite"
+        )
+    return numeric
+
+
+def validate_impedance_bc_values(values: Mapping, *, bc_name: str) -> dict:
+    if not isinstance(values, Mapping):
+        raise ValueError(
+            f"IMPEDANCE boundary condition '{bc_name}' bc_values must be a mapping"
+        )
+
+    keys = set(values.keys())
+    invalid_keys = sorted((keys - _ALLOWED_IMPEDANCE_KEYS) | (keys & _FORBIDDEN_IMPEDANCE_KEYS))
+    if invalid_keys:
+        raise ValueError(
+            f"IMPEDANCE boundary condition '{bc_name}' contains unsupported keys: "
+            + ", ".join(invalid_keys)
+        )
+
+    missing = [key for key in ("z", "Pd") if key not in values]
+    if missing:
+        raise ValueError(
+            f"IMPEDANCE boundary condition '{bc_name}' is missing required keys: "
+            + ", ".join(missing)
+        )
+
+    kernel = values["z"]
+    if isinstance(kernel, (str, bytes)):
+        raise ValueError(
+            f"IMPEDANCE boundary condition '{bc_name}' field 'z' must be a non-empty numeric sequence"
+        )
+    try:
+        normalized_kernel = [
+            _ensure_finite_numeric(entry, bc_name=bc_name, field_name="z")
+            for entry in kernel
+        ]
+    except TypeError as exc:
+        raise ValueError(
+            f"IMPEDANCE boundary condition '{bc_name}' field 'z' must be a non-empty numeric sequence"
+        ) from exc
+    if not normalized_kernel:
+        raise ValueError(
+            f"IMPEDANCE boundary condition '{bc_name}' field 'z' must be a non-empty numeric sequence"
+        )
+
+    normalized = {
+        "z": normalized_kernel,
+        "Pd": _ensure_finite_numeric(values["Pd"], bc_name=bc_name, field_name="Pd"),
+    }
+
+    mode = values.get("convolution_mode")
+    if mode is not None:
+        normalized_mode = str(mode).strip().lower()
+        if normalized_mode not in {"exact", "truncated"}:
+            raise ValueError(
+                f"IMPEDANCE boundary condition '{bc_name}' field 'convolution_mode' "
+                "must be 'exact' or 'truncated'"
+            )
+        normalized["convolution_mode"] = normalized_mode
+
+    num_terms = values.get("num_kernel_terms")
+    if num_terms is not None:
+        if normalized.get("convolution_mode") != "truncated":
+            raise ValueError(
+                f"IMPEDANCE boundary condition '{bc_name}' field 'num_kernel_terms' "
+                "requires convolution_mode='truncated'"
+            )
+        try:
+            normalized_terms = int(num_terms)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"IMPEDANCE boundary condition '{bc_name}' field 'num_kernel_terms' must be a positive integer"
+            ) from exc
+        if normalized_terms <= 0:
+            raise ValueError(
+                f"IMPEDANCE boundary condition '{bc_name}' field 'num_kernel_terms' must be a positive integer"
+            )
+        normalized["num_kernel_terms"] = normalized_terms
+
+    return normalized
+
+
+def validate_boundary_condition_config(config: Mapping) -> dict:
+    if not isinstance(config, Mapping):
+        raise ValueError("boundary condition config must be a mapping")
+    bc_name = str(config.get("bc_name", "")).strip() or "<unknown>"
+    bc_type = config.get("bc_type")
+    values = config.get("bc_values")
+    if bc_type == "IMPEDANCE":
+        values = validate_impedance_bc_values(values, bc_name=bc_name)
+    return {
+        "bc_name": bc_name,
+        "bc_type": bc_type,
+        "bc_values": dict(values) if isinstance(values, Mapping) else values,
+    }
+
+
+def validate_boundary_condition_configs(configs: Sequence[Mapping]) -> list[dict]:
+    return [validate_boundary_condition_config(config) for config in configs]
+
+
 class BoundaryCondition():
     '''
     class to handle boundary conditions
     '''
 
     def __init__(self, config: dict):
-        self.name = config['bc_name']
-        self.type = config['bc_type']
-        self.values = config['bc_values']
+        validated = validate_boundary_condition_config(config)
+        self.name = validated['bc_name']
+        self.type = validated['bc_type']
+        self.values = validated['bc_values']
         if self.type == 'RESISTANCE':
             self._R = self.values['R']
         
@@ -25,18 +146,7 @@ class BoundaryCondition():
             self._t = self.values['t']
         
         if self.type == 'IMPEDANCE':
-            if 'tree' in self.values.keys():
-                self.tree = self.values['tree']
-            z_kernel = self.values.get('Z', self.values.get('z'))
-            if z_kernel is None:
-                raise KeyError(
-                    f"IMPEDANCE boundary condition '{self.name}' is missing kernel values; "
-                    "expected key 'z' (solver format) or legacy key 'Z'."
-                )
-            self._Z = z_kernel
-            # keep both key variants for backward compatibility
-            self.values['Z'] = z_kernel
-            self.values['z'] = z_kernel
+            self._Z = self.values['z']
     
     @classmethod
     def from_config(cls, config):
@@ -175,7 +285,10 @@ class BoundaryCondition():
     
     @Z.setter
     def Z(self, new_Z):
-        self._Z = new_Z
-        self.values['z'] = new_Z
-        self.values['Z'] = new_Z
+        normalized = validate_impedance_bc_values(
+            {**self.values, 'z': new_Z},
+            bc_name=self.name,
+        )
+        self._Z = normalized['z']
+        self.values = normalized
    

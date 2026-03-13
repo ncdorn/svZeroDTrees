@@ -1,5 +1,6 @@
 import io
 import builtins
+import json
 import numpy as np
 import pandas as pd
 import pytest
@@ -126,6 +127,24 @@ class DummyImpedancePAConfig:
 
     def to_json(self, path):
         self.last_json = path
+        with open(path, "w", encoding="utf-8") as ff:
+            json.dump(
+                {
+                    "boundary_conditions": [
+                        {
+                            "bc_name": "LPA_BC",
+                            "bc_type": "IMPEDANCE",
+                            "bc_values": {"z": [1.0], "Pd": 12.0},
+                        },
+                        {
+                            "bc_name": "RPA_BC",
+                            "bc_type": "IMPEDANCE",
+                            "bc_values": {"z": [1.0], "Pd": 12.0},
+                        },
+                    ]
+                },
+                ff,
+            )
 
     def simulate(self):
         self.sim_calls += 1
@@ -213,6 +232,40 @@ def test_pa_config_assemble_config_contains_all_blocks():
     }
 
 
+def test_pa_config_to_json_rejects_legacy_impedance_bc(tmp_path):
+    pa_config = _build_pa_config([10.0, 10.0])
+
+    class LegacyBoundary:
+        def to_dict(self):
+            return {
+                "bc_name": "LPA_BC",
+                "bc_type": "IMPEDANCE",
+                "bc_values": {"Z": [100.0], "Pd": 12.0},
+            }
+
+    pa_config.bcs["LPA_BC"] = LegacyBoundary()
+
+    with pytest.raises(ValueError, match="unsupported keys: Z"):
+        pa_config.to_json(tmp_path / "pa_config.json")
+
+
+def test_config_handler_to_json_rejects_legacy_impedance_bc(tmp_path):
+    config_handler = ConfigHandler.blank_threed_coupler(str(tmp_path / "blank.json"))
+
+    class LegacyBoundary:
+        def to_dict(self):
+            return {
+                "bc_name": "OUT",
+                "bc_type": "IMPEDANCE",
+                "bc_values": {"tree": 0, "z": [100.0], "Pd": 12.0},
+            }
+
+    config_handler.bcs["OUT"] = LegacyBoundary()
+
+    with pytest.raises(ValueError, match="unsupported keys: tree"):
+        config_handler.to_json(tmp_path / "threed.json")
+
+
 def test_tune_space_packs_and_resolves_parameters():
     tune_space = TuneSpace(
         free=[
@@ -262,8 +315,7 @@ def test_pa_config_simulate_runs_with_impedance_trees(monkeypatch):
                     "bc_name": bc_name,
                     "bc_type": "IMPEDANCE",
                     "bc_values": {
-                        "Z": [100.0],
-                        "t": [0.0, 1.0],
+                        "z": [100.0],
                         "Pd": pd,
                     },
                 }
@@ -368,8 +420,7 @@ def test_impedance_tuning_with_inductance_builds_valid_threed_config(monkeypatch
                     "bc_name": bc_name,
                     "bc_type": "IMPEDANCE",
                     "bc_values": {
-                        "Z": [100.0],
-                        "t": [0.0, 1.0],
+                        "z": [100.0],
                         "Pd": pd,
                     },
                 }
@@ -565,6 +616,60 @@ def test_impedance_tuner_loss_fn_computes_weighted_loss():
     assert pa_config.last_json == "pa_config_tuning_snapshot.json"
     assert loss == pytest.approx(expected)
     assert pa_config.created[2] == 2
+
+
+def test_impedance_tuner_loss_fn_hard_fails_legacy_snapshot():
+    clinical_targets = ClinicalTargets(mpa_p=[30.0, 15.0, 22.0], rpa_split=0.55, wedge_p=12.0, q=5.0)
+    tune_space = TuneSpace(
+        free=[
+            FreeParam("comp.lpa.C", init=6.6e4, lb=1.0e4, ub=2.0e5),
+            FreeParam("comp.rpa.C", init=7.0e4, lb=1.0e4, ub=2.0e5),
+            FreeParam("lpa.alpha", init=0.9, lb=0.5, ub=0.99),
+            FreeParam("lpa.beta", init=0.6, lb=0.3, ub=0.9),
+            FreeParam("rpa.alpha", init=0.88, lb=0.5, ub=0.99),
+            FreeParam("rpa.beta", init=0.58, lb=0.3, ub=0.9),
+            FreeParam("lrr", init=9.0, lb=4.0, ub=20.0),
+        ],
+        fixed=[FixedParam("d_min", 0.02)],
+        tied=[],
+    )
+    tuner = ImpedanceTuner(
+        config_handler=SimpleNamespace(),
+        mesh_surfaces_path="mesh",
+        clinical_targets=clinical_targets,
+        tune_space=tune_space,
+        compliance_model="constant",
+    )
+    tuner.n_procs = 2
+    tuner._geom_defaults = {
+        "lpa.default_diameter": 0.30,
+        "rpa.default_diameter": 0.32,
+        "n_outlets_scale": 1.0,
+    }
+
+    class LegacySnapshotPAConfig(DummyImpedancePAConfig):
+        def to_json(self, path):
+            self.last_json = path
+            with open(path, "w", encoding="utf-8") as ff:
+                json.dump(
+                    {
+                        "boundary_conditions": [
+                            {
+                                "bc_name": "LPA_BC",
+                                "bc_type": "IMPEDANCE",
+                                "bc_values": {"tree": 0, "z": [1.0], "Pd": 12.0},
+                            }
+                        ]
+                    },
+                    ff,
+                )
+
+    pa_config = LegacySnapshotPAConfig(clinical_targets)
+    x0, _ = tune_space.pack_init_and_bounds()
+
+    loss = tuner.loss_fn(x0, pa_config)
+
+    assert loss == pytest.approx(1e9)
 
 
 def test_impedance_tuner_grid_search_init_selects_best_candidate(monkeypatch):

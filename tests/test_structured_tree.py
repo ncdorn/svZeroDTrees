@@ -65,11 +65,9 @@ def test_create_impedance_bc_serializes_kernel(simple_tree):
     bc = simple_tree.create_impedance_bc("test_imp_bc", tree_id=tree_id, Pd=pd_value)
     assert isinstance(bc, BoundaryCondition)
     assert bc.type == "IMPEDANCE"
-    assert bc.values["tree"] == tree_id
     assert bc.values["Pd"] == pytest.approx(pd_value)
     assert bc.values["z"] == pytest.approx(kernel.tolist())
-    assert bc.values["Z"] == pytest.approx(kernel.tolist())
-    assert bc.values["t"] == simple_tree.time
+    assert set(bc.values) == {"z", "Pd"}
 
 
 def test_impedance_bc_accepts_solver_schema():
@@ -86,5 +84,51 @@ def test_impedance_bc_accepts_solver_schema():
 
     assert bc.Z == pytest.approx([10.0, 2.0, 1.0])
     assert bc.values["z"] == pytest.approx([10.0, 2.0, 1.0])
-    assert bc.values["Z"] == pytest.approx([10.0, 2.0, 1.0])
+    assert "Z" not in bc.values
 
+
+def test_impedance_bc_accepts_solver_options():
+    bc = BoundaryCondition.from_config(
+        {
+            "bc_name": "OUT",
+            "bc_type": "IMPEDANCE",
+            "bc_values": {
+                "z": [10.0, 2.0, 1.0],
+                "Pd": 3.0,
+                "convolution_mode": "truncated",
+                "num_kernel_terms": 3,
+            },
+        }
+    )
+
+    assert bc.values["convolution_mode"] == "truncated"
+    assert bc.values["num_kernel_terms"] == 3
+
+
+@pytest.mark.parametrize(
+    "bc_values, message",
+    [
+        ({"Z": [10.0, 2.0, 1.0], "Pd": 3.0}, "unsupported keys: Z"),
+        ({"z": [10.0, 2.0, 1.0], "Pd": 3.0, "tree": 0}, "unsupported keys: tree"),
+        ({"z": [10.0, 2.0, 1.0], "Pd": 3.0, "t": [0.0, 1.0]}, "unsupported keys: t"),
+        ({"Pd": 3.0}, "missing required keys: z"),
+        ({"z": [10.0, 2.0, 1.0]}, "missing required keys: Pd"),
+        (
+            {"z": [10.0, 2.0, 1.0], "Pd": 3.0, "convolution_mode": "exact", "num_kernel_terms": 3},
+            "requires convolution_mode='truncated'",
+        ),
+        (
+            {"z": [10.0, 2.0, 1.0], "Pd": 3.0, "extra": 1},
+            "unsupported keys: extra",
+        ),
+    ],
+)
+def test_impedance_bc_rejects_legacy_or_invalid_schema(bc_values, message):
+    with pytest.raises(ValueError, match=message):
+        BoundaryCondition.from_config(
+            {
+                "bc_name": "OUT",
+                "bc_type": "IMPEDANCE",
+                "bc_values": bc_values,
+            }
+        )

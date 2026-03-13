@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 
 # svzerodtrees imports
 from ..io.blocks import Vessel, BoundaryCondition, SimParams
+from ..io.blocks.boundary_condition import validate_boundary_condition_configs
 from .clinical_targets import ClinicalTargets
 from ..microvasculature import StructuredTree, TreeParameters
 from ..io.blocks import Junction
@@ -152,6 +153,7 @@ class PAConfig():
         write the config to a json file
         '''
 
+        validate_boundary_condition_configs(self.config.get("boundary_conditions", []))
         with open(output_file, 'w') as ff:
             json.dump(self.config, ff, indent=4)
 

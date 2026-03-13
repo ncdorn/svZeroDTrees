@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from svzerodtrees.io import ConfigHandler
+from svzerodtrees.io.blocks.boundary_condition import validate_boundary_condition_configs
 from svzerodtrees.microvasculature import TreeParameters
 from svzerodtrees.simulation import SimulationDirectory
 from svzerodtrees.tune_bcs import (
@@ -349,6 +350,12 @@ def _load_tree_params(opt_csv: Path) -> tuple[TreeParameters, TreeParameters]:
     return TreeParameters.from_row(lpa_rows), TreeParameters.from_row(rpa_rows)
 
 
+def _validate_impedance_artifact(path: Path) -> None:
+    with path.open(encoding="utf-8") as ff:
+        payload = json.load(ff)
+    validate_boundary_condition_configs(payload.get("boundary_conditions", []))
+
+
 def run_impedance_tuning_for_iteration(
     *,
     iteration_dir: str | Path,
@@ -409,6 +416,7 @@ def run_impedance_tuning_for_iteration(
         raise FileNotFoundError(
             f"impedance tuning did not produce {PA_CONFIG_SNAPSHOT_FILENAME}"
         )
+    _validate_impedance_artifact(pa_snapshot)
 
     _validate_required_xi_in_optimized_csv(
         optimized_csv=optimized_csv,
@@ -431,6 +439,7 @@ def run_impedance_tuning_for_iteration(
 
     tuned_zerod_config = output_dir / tuned_config_name
     tuned_config.to_json(str(tuned_zerod_config))
+    _validate_impedance_artifact(tuned_zerod_config)
 
     return {
         "optimized_params_csv": str(optimized_csv),

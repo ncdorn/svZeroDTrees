@@ -6,7 +6,8 @@ from ..tune_bcs.pa_config import PAConfig
 from ..microvasculature import TreeParameters, compliance as comp_mod
 from ..microvasculature.structured_tree.asymmetry import resolve_branch_scaling
 from ..tune_bcs.tune_space import TuneSpace
-import csv, math, os
+from ..io.blocks.boundary_condition import validate_boundary_condition_configs
+import csv, json, math, os
 
 class ImpedanceTuner(BoundaryConditionTuner):
     def __init__(self,
@@ -305,6 +306,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
             lpa_params, rpa_params = self._build_tree_params(params)
             pa_config.create_impedance_trees(lpa_params, rpa_params, self.n_procs)
             pa_config.to_json('pa_config_tuning_snapshot.json')
+            with open('pa_config_tuning_snapshot.json', encoding='utf-8') as ff:
+                validate_boundary_condition_configs(json.load(ff).get("boundary_conditions", []))
             # sanity check
             if (np.isnan(pa_config.bcs['LPA_BC'].Z[0]) or
                 np.isnan(pa_config.bcs['RPA_BC'].Z[0])):

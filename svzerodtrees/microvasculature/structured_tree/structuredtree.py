@@ -694,12 +694,7 @@ class StructuredTree:
             "bc_name": f"{name}",
             "bc_type": "IMPEDANCE",
             "bc_values": {
-                "tree": tree_id,
-                # lowercase `z` is the current svZeroDSolver input field
                 "z": self.Z_t.tolist(),
-                # keep legacy fields for compatibility with existing svzerodtrees code paths
-                "Z": self.Z_t.tolist(),
-                "t": self.time,
                 "Pd": Pd,
             }
         })

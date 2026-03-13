@@ -176,7 +176,20 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
             return cls(path)
 
         def to_json(self, path: str):
-            Path(path).write_text("{\"tuned\": true}", encoding="utf-8")
+            Path(path).write_text(
+                json.dumps(
+                    {
+                        "boundary_conditions": [
+                            {
+                                "bc_name": "OUT",
+                                "bc_type": "IMPEDANCE",
+                                "bc_values": {"z": [1.0, 0.5], "Pd": 12.0},
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
             calls["to_json"] = path
 
     class DummyClinicalTargets:
@@ -202,7 +215,17 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
                 encoding="utf-8",
             )
             (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
-                "{\"snapshot\": true}",
+                json.dumps(
+                    {
+                        "boundary_conditions": [
+                            {
+                                "bc_name": "OUT",
+                                "bc_type": "IMPEDANCE",
+                                "bc_values": {"z": [1.0, 0.5], "Pd": 12.0},
+                            }
+                        ]
+                    }
+                ),
                 encoding="utf-8",
             )
             Path(str(calls["tuner_kwargs"]["log_file"])).write_text("log", encoding="utf-8")
@@ -349,7 +372,7 @@ def test_run_impedance_tuning_for_iteration_missing_required_xi_raises(monkeypat
                 encoding="utf-8",
             )
             (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
-                "{\"snapshot\": true}",
+                json.dumps({"boundary_conditions": []}),
                 encoding="utf-8",
             )
 
@@ -362,6 +385,159 @@ def test_run_impedance_tuning_for_iteration_missing_required_xi_raises(monkeypat
     )
 
     with pytest.raises(ValueError, match="must include an 'xi' column"):
+        run_impedance_tuning_for_iteration(
+            iteration_dir=iteration_dir,
+            seed_config=seed,
+            mesh_surfaces=mesh_surfaces,
+            clinical_targets=targets,
+            impedance_config={"tune_space": _tune_space_with_xi()},
+        )
+
+
+def test_run_impedance_tuning_for_iteration_rejects_legacy_snapshot(monkeypatch, tmp_path: Path):
+    seed = tmp_path / "simplified_nonlinear_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    iteration_dir = tmp_path / "iter-01"
+    seed.write_text("{\"seed\": true}", encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+
+    class DummyConfigHandler:
+        @classmethod
+        def from_json(cls, _path: str, is_pulmonary: bool = False):
+            return cls()
+
+        def to_json(self, path: str):
+            Path(path).write_text(json.dumps({"boundary_conditions": []}), encoding="utf-8")
+
+    class DummyClinicalTargets:
+        wedge_p = 10.0
+
+        @classmethod
+        def from_csv(cls, _path: str):
+            return cls()
+
+    class DummyTuner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def tune(self, nm_iter: int = 1):
+            _ = nm_iter
+            out_dir = Path.cwd()
+            (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
+                "pa,alpha,beta,xi,d_min,lrr,diameter,compliance_model,C\n"
+                "lpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n"
+                "rpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n",
+                encoding="utf-8",
+            )
+            (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
+                json.dumps(
+                    {
+                        "boundary_conditions": [
+                            {
+                                "bc_name": "OUT",
+                                "bc_type": "IMPEDANCE",
+                                "bc_values": {"Z": [1.0], "Pd": 10.0},
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
+
+    with pytest.raises(ValueError, match="unsupported keys: Z"):
+        run_impedance_tuning_for_iteration(
+            iteration_dir=iteration_dir,
+            seed_config=seed,
+            mesh_surfaces=mesh_surfaces,
+            clinical_targets=targets,
+            impedance_config={"tune_space": _tune_space_with_xi()},
+        )
+
+
+def test_run_impedance_tuning_for_iteration_rejects_legacy_tuned_config(monkeypatch, tmp_path: Path):
+    seed = tmp_path / "simplified_nonlinear_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    iteration_dir = tmp_path / "iter-01"
+    seed.write_text("{\"seed\": true}", encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+
+    class DummyConfigHandler:
+        @classmethod
+        def from_json(cls, _path: str, is_pulmonary: bool = False):
+            return cls()
+
+        def to_json(self, path: str):
+            Path(path).write_text(
+                json.dumps(
+                    {
+                        "boundary_conditions": [
+                            {
+                                "bc_name": "OUT",
+                                "bc_type": "IMPEDANCE",
+                                "bc_values": {"tree": 0, "z": [1.0], "Pd": 10.0},
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+    class DummyClinicalTargets:
+        wedge_p = 10.0
+
+        @classmethod
+        def from_csv(cls, _path: str):
+            return cls()
+
+    class DummyTuner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def tune(self, nm_iter: int = 1):
+            _ = nm_iter
+            out_dir = Path.cwd()
+            (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
+                "pa,alpha,beta,xi,d_min,lrr,diameter,compliance_model,C\n"
+                "lpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n"
+                "rpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n",
+                encoding="utf-8",
+            )
+            (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
+                json.dumps(
+                    {
+                        "boundary_conditions": [
+                            {
+                                "bc_name": "OUT",
+                                "bc_type": "IMPEDANCE",
+                                "bc_values": {"z": [1.0], "Pd": 10.0},
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration._load_tree_params",
+        lambda _path: ("lpa-params", "rpa-params"),
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration.construct_impedance_trees",
+        lambda *args, **kwargs: None,
+    )
+
+    with pytest.raises(ValueError, match="unsupported keys: tree"):
         run_impedance_tuning_for_iteration(
             iteration_dir=iteration_dir,
             seed_config=seed,
