@@ -52,7 +52,6 @@ def _impedance_artifact_payload(
     inflow_t: list[float] | None = None,
 ) -> dict[str, object]:
     simparams: dict[str, object] = {
-        "number_of_time_pts_per_cardiac_cycle": number_of_time_pts_per_cardiac_cycle,
         "cardiac_period": 1.0,
         "output_all_cycles": False,
         "steady_initial": False,
@@ -61,11 +60,19 @@ def _impedance_artifact_payload(
         simparams["coupled_simulation"] = True
         simparams["number_of_time_pts"] = number_of_time_pts
         simparams["external_step_size"] = 1.0
+        simparams["density"] = 1.06
+        simparams["viscosity"] = 0.04
     else:
+        simparams["number_of_time_pts_per_cardiac_cycle"] = number_of_time_pts_per_cardiac_cycle
         simparams["number_of_cardiac_cycles"] = 1
 
-    resolved_inflow_q = inflow_q if inflow_q is not None else [1.0, 1.0]
-    resolved_inflow_t = inflow_t if inflow_t is not None else [0.0, 1.0]
+    if coupled and inflow_t is None:
+        sample_count = len(list(bc_values.get("z", []))) + 1
+        resolved_inflow_t = [idx / max(sample_count - 1, 1) for idx in range(sample_count)]
+    else:
+        resolved_inflow_t = inflow_t if inflow_t is not None else [0.0, 1.0]
+
+    resolved_inflow_q = inflow_q if inflow_q is not None else [1.0] * len(resolved_inflow_t)
     return {
         "simulation_parameters": simparams,
         "boundary_conditions": [

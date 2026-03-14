@@ -86,7 +86,7 @@ def map_0d_on_centerline(centerline, config_handler, result_handler, timestep, o
         results = result_handler.format_result_for_cl_projection(timestep)
         results["time"] = config_handler.get_time_series()
 
-        n_t = config_handler.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"]
+        n_t = len(results["time"])
 
         # add vessel properties to results (path distance and vessel resistance)
         for vessel in config_handler.config["vessels"]:

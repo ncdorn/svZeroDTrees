@@ -241,14 +241,84 @@ def test_validate_impedance_timing_config_rejects_coupled_wrong_number_of_time_p
                 "simulation_parameters": {
                     "coupled_simulation": True,
                     "number_of_time_pts": 3,
-                    "number_of_time_pts_per_cardiac_cycle": 2,
+                    "output_all_cycles": True,
+                    "steady_initial": False,
+                    "density": 1.06,
+                    "viscosity": 0.04,
+                    "external_step_size": 1.0,
+                    "cardiac_period": 1.0,
                 },
                 "boundary_conditions": [
+                    {
+                        "bc_name": "INFLOW",
+                        "bc_type": "FLOW",
+                        "bc_values": {"Q": [1.0, 1.0], "t": [0.0, 1.0]},
+                    },
                     {
                         "bc_name": "OUT",
                         "bc_type": "IMPEDANCE",
                         "bc_values": {"z": [10.0], "Pd": 3.0},
                     }
+                ],
+            }
+        )
+
+
+def test_validate_impedance_timing_config_rejects_coupled_extra_simparam_keys():
+    with pytest.raises(ValueError, match="does not allow extra simulation_parameters keys"):
+        validate_impedance_timing_config(
+            {
+                "simulation_parameters": {
+                    "coupled_simulation": True,
+                    "number_of_time_pts": 2,
+                    "output_all_cycles": True,
+                    "steady_initial": False,
+                    "density": 1.06,
+                    "viscosity": 0.04,
+                    "external_step_size": 1.0,
+                    "cardiac_period": 1.0,
+                    "number_of_time_pts_per_cardiac_cycle": 2,
+                },
+                "boundary_conditions": [
+                    {
+                        "bc_name": "INFLOW",
+                        "bc_type": "FLOW",
+                        "bc_values": {"Q": [1.0, 1.0], "t": [0.0, 1.0]},
+                    },
+                    {
+                        "bc_name": "OUT",
+                        "bc_type": "IMPEDANCE",
+                        "bc_values": {"z": [1.0], "Pd": 3.0},
+                    },
+                ],
+            }
+        )
+
+
+def test_validate_impedance_timing_config_rejects_coupled_missing_cardiac_period():
+    with pytest.raises(ValueError, match="simulation_parameters keys: cardiac_period"):
+        validate_impedance_timing_config(
+            {
+                "simulation_parameters": {
+                    "coupled_simulation": True,
+                    "number_of_time_pts": 2,
+                    "output_all_cycles": True,
+                    "steady_initial": False,
+                    "density": 1.06,
+                    "viscosity": 0.04,
+                    "external_step_size": 1.0,
+                },
+                "boundary_conditions": [
+                    {
+                        "bc_name": "INFLOW",
+                        "bc_type": "FLOW",
+                        "bc_values": {"Q": [1.0, 1.0], "t": [0.0, 1.0]},
+                    },
+                    {
+                        "bc_name": "OUT",
+                        "bc_type": "IMPEDANCE",
+                        "bc_values": {"z": [1.0], "Pd": 3.0},
+                    },
                 ],
             }
         )

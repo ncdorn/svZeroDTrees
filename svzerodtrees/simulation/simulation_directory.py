@@ -7,13 +7,13 @@ import copy
 import time
 import os
 import math
+import subprocess
 from .input_builders import *
 from ..tune_bcs import ClinicalTargets
 from ..io.blocks import *
 from ..tune_bcs import construct_impedance_trees, ClinicalTargets
 from .input_builders.simulation_file import SimulationFile
 from ..microvasculature import StructuredTree
-from ..io.blocks.boundary_condition import resolve_impedance_timepoint_contract
 
 _DEFAULT_TREE_LRR = 10.0
 
@@ -205,15 +205,16 @@ class SimulationDirectory:
     def run(self):
         '''
         run the simulation'''
-
-        os.chdir(self.path)
-
         self.check_files(verbose=False)
-
-        os.system('clean')
-        os.system(f'sbatch {self.solver_runscript.path}')
-
-        os.chdir("..")
+        try:
+            subprocess.run(["clean"], cwd=self.path, check=False, capture_output=True, text=True)
+        except FileNotFoundError:
+            pass
+        subprocess.run(
+            ["sbatch", os.path.basename(self.solver_runscript.path)],
+            cwd=self.path,
+            check=True,
+        )
 
     def check_files(self, verbose=True):
         '''
@@ -306,6 +307,10 @@ class SimulationDirectory:
             config_file = None
             if self.svzerod_3Dcoupling is not None:
                 config_file = os.path.basename(self.svzerod_3Dcoupling.path)
+                self.svzerod_3Dcoupling.simparams.external_step_size = dt
+                if inflow_period is not None:
+                    self.svzerod_3Dcoupling.simparams.cardiac_period = inflow_period
+                self.svzerod_3Dcoupling.to_json(self.svzerod_3Dcoupling.path)
             self.svFSIxml.write(self.mesh_complete,
                                 n_tsteps=n_tsteps,
                                 dt=dt,
@@ -331,7 +336,13 @@ class SimulationDirectory:
                 procs_per_node = sim_config['procs_per_node']
                 memory = sim_config['memory']
                 hours = sim_config['hours']
-            self.solver_runscript.write(nodes=nodes, procs_per_node=procs_per_node, hours=hours, memory=memory)
+            self.solver_runscript.write(
+                nodes=nodes,
+                procs_per_node=procs_per_node,
+                hours=hours,
+                memory=memory,
+                working_dir=self.path,
+            )
 
 
         if self.svFSIxml.is_written:
@@ -366,7 +377,6 @@ class SimulationDirectory:
 
         # add the inflows to the svzerod_3Dcoupling
         tsteps = 100
-        self.svzerod_3Dcoupling.simparams.number_of_time_pts_per_cardiac_cycle = tsteps
         bc_idx = 0
         for vtp in self.mesh_complete.mesh_surfaces.values():
             if 'inflow' in vtp.filename.lower():
@@ -1395,10 +1405,7 @@ class SimulationDirectory:
 
             # add the inflows to the svzerod_3Dcoupling
             tsteps = int(input('number of time steps for inflow (default 512): ') or 512)
-            self.svzerod_3Dcoupling.simparams.number_of_time_pts_per_cardiac_cycle = tsteps
-            _, _, kernel_steps = resolve_impedance_timepoint_contract(
-                self.svzerod_3Dcoupling.simparams.to_dict()
-            )
+            kernel_steps = max(tsteps - 1, 1)
             bc_idx = 0
             for vtp in self.mesh_complete.mesh_surfaces.values():
                 if 'inflow' in vtp.filename.lower():

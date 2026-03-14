@@ -9,6 +9,16 @@ import numpy as np
 
 _ALLOWED_IMPEDANCE_KEYS = {"z", "Pd", "convolution_mode", "num_kernel_terms"}
 _FORBIDDEN_IMPEDANCE_KEYS = {"Z", "tree", "t"}
+_COUPLED_IMPEDANCE_SIMPARAM_KEYS = {
+    "coupled_simulation",
+    "number_of_time_pts",
+    "output_all_cycles",
+    "steady_initial",
+    "density",
+    "viscosity",
+    "external_step_size",
+    "cardiac_period",
+}
 
 
 def _ensure_finite_numeric(value, *, label: str) -> float:
@@ -318,6 +328,138 @@ def resolve_impedance_timepoint_contract(simparams: Mapping) -> tuple[str, int, 
     )
 
 
+def _resolve_flow_sample_count_config(config: Mapping, *, bc_name: str = "INFLOW") -> int:
+    flow_config = _find_boundary_condition_config(config, bc_name=bc_name)
+    resolved_name = str(bc_name).strip() or "<unknown>"
+    bc_type = str(flow_config.get("bc_type", "")).strip()
+    if bc_type != "FLOW":
+        raise ValueError(
+            f"boundary condition '{resolved_name}' must have bc_type 'FLOW'; got '{bc_type or '<missing>'}'"
+        )
+
+    values = flow_config.get("bc_values")
+    if not isinstance(values, Mapping):
+        raise ValueError(
+            f"FLOW boundary condition '{resolved_name}' bc_values must be a mapping"
+        )
+
+    missing = [key for key in ("Q", "t") if key not in values]
+    if missing:
+        raise ValueError(
+            f"FLOW boundary condition '{resolved_name}' is missing required keys: "
+            + ", ".join(missing)
+        )
+
+    flow_values = _ensure_numeric_sequence(
+        values.get("Q"),
+        bc_name=resolved_name,
+        field_name="Q",
+        bc_type="FLOW",
+    )
+    time_values = _ensure_numeric_sequence(
+        values.get("t"),
+        bc_name=resolved_name,
+        field_name="t",
+        bc_type="FLOW",
+    )
+    if len(flow_values) != len(time_values):
+        raise ValueError(
+            f"FLOW boundary condition '{resolved_name}' fields 'Q' and 't' must have the same length"
+        )
+    if len(time_values) < 2:
+        raise ValueError(
+            f"FLOW boundary condition '{resolved_name}' requires at least 2 samples"
+        )
+    return len(time_values)
+
+
+def resolve_coupled_impedance_timepoint_contract(config: Mapping) -> tuple[int, int]:
+    if not isinstance(config, Mapping):
+        raise ValueError("config must be a mapping")
+
+    simparams = config.get("simulation_parameters")
+    if not isinstance(simparams, Mapping):
+        raise ValueError(
+            "configs with IMPEDANCE boundary conditions require simulation_parameters"
+        )
+
+    simparam_keys = set(simparams.keys())
+    missing_keys = sorted(_COUPLED_IMPEDANCE_SIMPARAM_KEYS - simparam_keys)
+    if missing_keys:
+        raise ValueError(
+            "coupled config with IMPEDANCE boundary conditions requires simulation_parameters keys: "
+            + ", ".join(missing_keys)
+        )
+    extra_keys = sorted(simparam_keys - _COUPLED_IMPEDANCE_SIMPARAM_KEYS)
+    if extra_keys:
+        raise ValueError(
+            "coupled config with IMPEDANCE boundary conditions does not allow extra "
+            "simulation_parameters keys: "
+            + ", ".join(extra_keys)
+        )
+
+    if not bool(simparams.get("coupled_simulation", False)):
+        raise ValueError(
+            "resolve_coupled_impedance_timepoint_contract requires coupled_simulation = true"
+        )
+
+    resolved_number_of_time_pts = _ensure_positive_int(
+        simparams.get("number_of_time_pts"),
+        field_name="simulation_parameters.number_of_time_pts",
+    )
+    if resolved_number_of_time_pts != 2:
+        raise ValueError(
+            "coupled config with IMPEDANCE boundary conditions requires "
+            "simulation_parameters.number_of_time_pts = 2; got "
+            f"{resolved_number_of_time_pts}"
+        )
+
+    if simparams.get("external_step_size") is None:
+        raise ValueError(
+            "coupled config with IMPEDANCE boundary conditions requires "
+            "simulation_parameters.external_step_size"
+        )
+    external_step_size = _ensure_finite_numeric(
+        simparams.get("external_step_size"),
+        label="simulation_parameters.external_step_size",
+    )
+    if external_step_size <= 0.0:
+        raise ValueError("simulation_parameters.external_step_size must be > 0")
+
+    if simparams.get("cardiac_period") is None:
+        raise ValueError(
+            "coupled config with IMPEDANCE boundary conditions requires "
+            "simulation_parameters.cardiac_period"
+        )
+    cardiac_period = _ensure_finite_numeric(
+        simparams.get("cardiac_period"),
+        label="simulation_parameters.cardiac_period",
+    )
+    if cardiac_period <= 0.0:
+        raise ValueError("simulation_parameters.cardiac_period must be > 0")
+
+    validated_bcs = validate_boundary_condition_configs(
+        config.get("boundary_conditions", [])
+    )
+    impedance_bcs = [
+        bc_config for bc_config in validated_bcs if bc_config.get("bc_type") == "IMPEDANCE"
+    ]
+    if not impedance_bcs:
+        raise ValueError(
+            "coupled config with IMPEDANCE boundary conditions requires at least one IMPEDANCE boundary condition"
+        )
+
+    sample_count = _resolve_flow_sample_count_config(config)
+    kernel_sizes = {len(bc_config["bc_values"]["z"]) for bc_config in impedance_bcs}
+    if len(kernel_sizes) != 1:
+        raise ValueError(
+            "coupled IMPEDANCE boundary conditions must all use the same len(z); got "
+            + ", ".join(str(size) for size in sorted(kernel_sizes))
+        )
+
+    return sample_count, next(iter(kernel_sizes))
+
+
 def validate_impedance_timing_config(config: Mapping) -> None:
     if not isinstance(config, Mapping):
         raise ValueError("config must be a mapping")
@@ -342,21 +484,8 @@ def validate_impedance_timing_config(config: Mapping) -> None:
 
     number_of_time_pts = simparams.get("number_of_time_pts")
     if coupled:
-        if number_of_time_pts is None:
-            raise ValueError(
-                "coupled config with IMPEDANCE boundary conditions requires "
-                "simulation_parameters.number_of_time_pts = 2"
-            )
-        resolved_number_of_time_pts = _ensure_positive_int(
-            number_of_time_pts,
-            field_name="simulation_parameters.number_of_time_pts",
-        )
-        if resolved_number_of_time_pts != 2:
-            raise ValueError(
-                "coupled config with IMPEDANCE boundary conditions requires "
-                "simulation_parameters.number_of_time_pts = 2; got "
-                f"{resolved_number_of_time_pts}"
-            )
+        resolve_coupled_impedance_timepoint_contract(config)
+        return
     else:
         resolved_number_of_time_pts = (
             _ensure_positive_int(

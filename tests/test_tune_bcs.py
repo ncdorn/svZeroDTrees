@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import svzerodtrees.tune_bcs.rcr_tuner as rcr_module
 
 from svzerodtrees.io.blocks import BoundaryCondition, SimParams, Vessel
+from svzerodtrees.io.blocks.boundary_condition import resolve_coupled_impedance_timepoint_contract
 from svzerodtrees.microvasculature import TreeParameters
 from svzerodtrees.microvasculature.compliance import ConstantCompliance
 from svzerodtrees.tune_bcs.clinical_targets import ClinicalTargets
@@ -306,7 +307,7 @@ def test_config_handler_to_json_rejects_legacy_impedance_bc(tmp_path):
         config_handler.to_json(tmp_path / "threed.json")
 
 
-def test_config_handler_to_json_rejects_coupled_impedance_missing_cycle_points(tmp_path):
+def test_config_handler_to_json_rejects_coupled_impedance_missing_external_step_size(tmp_path):
     config_handler = ConfigHandler.blank_threed_coupler(str(tmp_path / "blank.json"))
     config_handler.simparams.cardiac_period = 1.0
     config_handler.bcs["OUT"] = BoundaryCondition.from_config(
@@ -319,16 +320,26 @@ def test_config_handler_to_json_rejects_coupled_impedance_missing_cycle_points(t
 
     with pytest.raises(
         ValueError,
-        match="coupled config with IMPEDANCE boundary conditions requires simulation_parameters.number_of_time_pts_per_cardiac_cycle",
+        match="simulation_parameters.external_step_size",
     ):
         config_handler.to_json(tmp_path / "threed.json")
 
 
-def test_config_handler_to_json_rejects_coupled_impedance_wrong_interface_step_count(tmp_path):
+def test_config_handler_to_json_canonicalizes_coupled_simulation_parameters(tmp_path):
     config_handler = ConfigHandler.blank_threed_coupler(str(tmp_path / "blank.json"))
     config_handler.simparams.number_of_time_pts = 3
-    config_handler.simparams.number_of_time_pts_per_cardiac_cycle = 2
+    config_handler.simparams.number_of_time_pts_per_cardiac_cycle = 99
+    config_handler.simparams.external_step_size = 1.0
     config_handler.simparams.cardiac_period = 1.0
+    config_handler.set_inflow(
+        BoundaryCondition.from_config(
+            {
+                "bc_name": "INFLOW",
+                "bc_type": "FLOW",
+                "bc_values": {"Q": [4.0, 4.0], "t": [0.0, 1.0]},
+            }
+        )
+    )
     config_handler.bcs["OUT"] = BoundaryCondition.from_config(
         {
             "bc_name": "OUT",
@@ -337,8 +348,48 @@ def test_config_handler_to_json_rejects_coupled_impedance_wrong_interface_step_c
         }
     )
 
-    with pytest.raises(ValueError, match="number_of_time_pts = 2; got 3"):
-        config_handler.to_json(tmp_path / "threed.json")
+    out_path = tmp_path / "threed.json"
+    config_handler.to_json(out_path)
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+
+    assert payload["simulation_parameters"] == {
+        "coupled_simulation": True,
+        "number_of_time_pts": 2,
+        "output_all_cycles": True,
+        "steady_initial": False,
+        "density": 1.06,
+        "viscosity": 0.04,
+        "external_step_size": 1.0,
+        "cardiac_period": 1.0,
+    }
+
+
+def test_coupled_config_uses_inflow_samples_for_time_series_and_kernel_contract(tmp_path):
+    config_handler = ConfigHandler.blank_threed_coupler(str(tmp_path / "blank.json"))
+    config_handler.simparams.external_step_size = 0.5
+    config_handler.simparams.cardiac_period = 1.0
+    config_handler.set_inflow(
+        BoundaryCondition.from_config(
+            {
+                "bc_name": "INFLOW",
+                "bc_type": "FLOW",
+                "bc_values": {"Q": [4.0, 4.0], "t": [0.0, 1.0]},
+            }
+        )
+    )
+    config_handler.bcs["OUT"] = BoundaryCondition.from_config(
+        {
+            "bc_name": "OUT",
+            "bc_type": "IMPEDANCE",
+            "bc_values": {"z": [100.0], "Pd": 12.0},
+        }
+    )
+
+    sample_count, kernel_steps = resolve_coupled_impedance_timepoint_contract(config_handler.config)
+
+    assert sample_count == 2
+    assert kernel_steps == 1
+    assert config_handler.get_time_series().tolist() == pytest.approx([0.0, 1.0])
 
 
 def test_tune_space_packs_and_resolves_parameters():
@@ -555,11 +606,17 @@ def test_impedance_tuning_with_inductance_builds_valid_threed_config(monkeypatch
 
     errors = _validate_config_connectivity(threed_coupler.config)
     assert not errors, "\n".join(errors)
-    assert threed_coupler.config["simulation_parameters"]["number_of_time_pts"] == 2
-    assert (
-        threed_coupler.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"]
-        == pa_config.simparams.number_of_time_pts_per_cardiac_cycle
-    )
+    simparams = threed_coupler.config["simulation_parameters"]
+    assert simparams == {
+        "coupled_simulation": True,
+        "number_of_time_pts": 2,
+        "output_all_cycles": True,
+        "steady_initial": False,
+        "density": 1.06,
+        "viscosity": 0.04,
+        "external_step_size": pytest.approx(1.0 / (pa_config.simparams.number_of_time_pts_per_cardiac_cycle - 1)),
+        "cardiac_period": pytest.approx(1.0),
+    }
 
 
 def test_impedance_tuner_build_tree_params_uses_xi_eta_sym():

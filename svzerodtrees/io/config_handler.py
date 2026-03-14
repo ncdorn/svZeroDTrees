@@ -1,6 +1,7 @@
 import json
 import pickle
 import os
+import math
 from svzerodtrees.utils import *
 from .blocks.boundary_condition import (
     validate_boundary_condition_configs,
@@ -233,7 +234,10 @@ class ConfigHandler():
         self._config['junctions'] = [junction.to_dict() for junction in self.junctions.values()]
 
         # add the simulation parameters
-        self._config['simulation_parameters'] = self.simparams.to_dict()
+        if bool(getattr(self.simparams, "coupled_simulation", False)) or self.threed_interface:
+            self._config['simulation_parameters'] = self._canonical_coupled_simulation_parameters()
+        else:
+            self._config['simulation_parameters'] = self.simparams.to_dict()
 
         # add the valves
         if hasattr(self, 'valves'):
@@ -251,6 +255,70 @@ class ConfigHandler():
         
         if hasattr(self, 'tree_params'):
             self._config['trees'] = list(self.tree_params.values())
+
+    def _resolve_coupled_cardiac_period(self):
+        period = getattr(self.simparams, "cardiac_period", None)
+        if period is not None:
+            try:
+                resolved = float(period)
+            except (TypeError, ValueError):
+                resolved = None
+            else:
+                if math.isfinite(resolved) and resolved > 0.0:
+                    return resolved
+
+        inflow_bc = self.bcs.get("INFLOW")
+        inflow_times = getattr(inflow_bc, "t", None)
+        if inflow_times:
+            try:
+                times_arr = np.asarray(inflow_times, dtype=float)
+            except Exception:
+                return None
+            if times_arr.size >= 2:
+                span = float(times_arr.max() - times_arr.min())
+                if math.isfinite(span) and span > 0.0:
+                    return span
+        return None
+
+    def _resolve_coupled_external_step_size(self, cardiac_period):
+        step_size = getattr(self.simparams, "external_step_size", None)
+        if step_size is not None:
+            try:
+                resolved = float(step_size)
+            except (TypeError, ValueError):
+                resolved = None
+            else:
+                if math.isfinite(resolved) and resolved > 0.0:
+                    return resolved
+
+        points_per_cycle = getattr(self.simparams, "number_of_time_pts_per_cardiac_cycle", None)
+        if points_per_cycle is None or cardiac_period is None:
+            return None
+        try:
+            resolved_points = int(points_per_cycle)
+        except (TypeError, ValueError):
+            return None
+        if resolved_points < 2:
+            return None
+
+        step_size = float(cardiac_period) / float(resolved_points - 1)
+        if math.isfinite(step_size) and step_size > 0.0:
+            return step_size
+        return None
+
+    def _canonical_coupled_simulation_parameters(self):
+        cardiac_period = self._resolve_coupled_cardiac_period()
+        external_step_size = self._resolve_coupled_external_step_size(cardiac_period)
+        return {
+            "coupled_simulation": True,
+            "number_of_time_pts": 2,
+            "output_all_cycles": True,
+            "steady_initial": False,
+            "density": 1.06,
+            "viscosity": 0.04,
+            "external_step_size": external_step_size,
+            "cardiac_period": cardiac_period,
+        }
 
 
     def plot_inflow(self):
@@ -332,6 +400,12 @@ class ConfigHandler():
         '''
         get the time series from the config
         '''
+        simparams = self.config["simulation_parameters"]
+        if simparams.get("coupled_simulation", False):
+            for bc_config in self.config["boundary_conditions"]:
+                if str(bc_config.get("bc_type", "")).strip().upper() == "FLOW":
+                    return np.asarray(bc_config["bc_values"]["t"], dtype=float)
+            raise ValueError("coupled config requires a FLOW boundary condition to resolve time series")
 
         return np.linspace(min(self.config["boundary_conditions"][0]["bc_values"]["t"]), 
                            max(self.config["boundary_conditions"][0]["bc_values"]["t"]), 
@@ -666,24 +740,7 @@ class ConfigHandler():
         # assemble config to account for any changes made to the config
         self.assemble_config()
 
-        simparams_config = {
-            "density": 1.06,
-            "viscosity": 0.04,
-            "coupled_simulation": True,
-            "number_of_time_pts": 2,
-            "output_all_cycles": True,
-            "steady_initial": False,
-        }
-        if hasattr(self.simparams, "number_of_time_pts_per_cardiac_cycle"):
-            simparams_config["number_of_time_pts_per_cardiac_cycle"] = (
-                self.simparams.number_of_time_pts_per_cardiac_cycle
-            )
-        if hasattr(self.simparams, "external_step_size"):
-            simparams_config["external_step_size"] = self.simparams.external_step_size
-        if hasattr(self.simparams, "cardiac_period"):
-            simparams_config["cardiac_period"] = self.simparams.cardiac_period
-        elif "INFLOW" in self.bcs and hasattr(self.bcs["INFLOW"], "t"):
-            simparams_config["cardiac_period"] = max(self.bcs["INFLOW"].t)
+        simparams_config = self._canonical_coupled_simulation_parameters()
 
         threed_coupler = ConfigHandler(
             {

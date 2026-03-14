@@ -1,3 +1,5 @@
+import os
+
 from .simulation_file import SimulationFile
 
 
@@ -25,7 +27,8 @@ class SolverRunscript(SimulationFile):
               procs_per_node=24, 
               hours=6, 
               memory=16,
-              svfsiplus_path='/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics'):
+              svfsiplus_path='/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics',
+              working_dir=None):
         '''
         write the solver runscript file'''
 
@@ -34,6 +37,9 @@ class SolverRunscript(SimulationFile):
         self.hours = hours
         self.memory = memory
         self.svfsiplus_path = svfsiplus_path
+        self.working_dir = os.path.abspath(working_dir or os.path.dirname(self.path))
+        output_path = os.path.join(self.working_dir, "svFlowSolver.o%j")
+        error_path = os.path.join(self.working_dir, "svFlowSolver.e%j")
 
         print('writing solver runscript file...')
 
@@ -42,10 +48,11 @@ class SolverRunscript(SimulationFile):
             ff.write("#name of your job \n")
             ff.write("#SBATCH --job-name=svFlowSolver\n")
             ff.write("#SBATCH --partition=amarsden\n\n")
+            ff.write(f"#SBATCH --chdir={self.working_dir}\n\n")
             ff.write("# Specify the name of the output file. The %j specifies the job ID\n")
-            ff.write("#SBATCH --output=svFlowSolver.o%j\n\n")
+            ff.write(f"#SBATCH --output={output_path}\n\n")
             ff.write("# Specify the name of the error file. The %j specifies the job ID \n")
-            ff.write("#SBATCH --error=svFlowSolver.e%j\n\n")
+            ff.write(f"#SBATCH --error={error_path}\n\n")
             ff.write("# The walltime you require for your job \n")
             ff.write(f"#SBATCH --time={hours}:00:00\n\n")
             ff.write("# Job priority. Leave as normal for now \n")
@@ -72,6 +79,7 @@ class SolverRunscript(SimulationFile):
             ff.write("ml qt\n")
             ff.write("ml gcc/14.2.0\n")
             ff.write("ml cmake\n\n")
+            ff.write(f"cd {self.working_dir}\n")
             ff.write(f"srun {svfsiplus_path} svFSIplus.xml\n")
         
         self.is_written = True

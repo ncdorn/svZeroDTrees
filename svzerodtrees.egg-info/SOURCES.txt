@@ -1,5 +1,6 @@
 README.md
 pyproject.toml
+docs/slides/impedance_bc_impl_comparison/generate_figures.py
 examples/AS1_SU0308_analysis.py
 examples/run_experiment.py
 examples/construct_tree/construct_trees.py
@@ -102,12 +103,18 @@ svzerodtrees/tune_bcs/tune_space.py
 svzerodtrees/tune_bcs/utils.py
 svzerodtrees/tune_bcs/sensitivity/__init__.py
 svzerodtrees/tune_bcs/sensitivity/structured_tree_sensitivity.py
+svzerodtrees/tuning/__init__.py
+svzerodtrees/tuning/iteration.py
 tests/test_cli_dispatch.py
 tests/test_config_validation.py
+tests/test_impedance_bc_schema.py
 tests/test_pipeline_mapping.py
 tests/test_simulation.py
+tests/test_solver_runscript.py
 tests/test_structured_tree.py
+tests/test_svmp_xml.py
 tests/test_tune_bcs.py
+tests/test_tuning_iteration.py
 workflows/AS1_vessel_analysis.py
 workflows/LPA_RPA_adapt.py
 workflows/threed_analysis.py
