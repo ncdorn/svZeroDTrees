@@ -116,7 +116,15 @@ class ImpedanceTuner(BoundaryConditionTuner):
         return float(np.mean(flow))
 
     def _resolve_expected_snapshot_cardiac_output(self, inflow_bc) -> float:
-        cardiac_output = self._compute_inflow_cardiac_output(inflow_bc)
+        if self.inflow_path is not None:
+            cardiac_output = mean_flow_from_path(self.inflow_path)
+        elif not self.rescale_inflow:
+            cardiac_output = self._compute_boundary_condition_mean_flow(inflow_bc)
+        else:
+            raise ValueError(
+                "rescale_inflow=True requires inflow_path so snapshot scaling uses "
+                "the patient inflow.csv mean flow as the source of truth"
+            )
         if not self.rescale_inflow:
             return cardiac_output
 

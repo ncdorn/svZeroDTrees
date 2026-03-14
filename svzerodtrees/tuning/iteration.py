@@ -367,6 +367,11 @@ def _expected_snapshot_inflow_cardiac_output(
 ) -> float:
     if inflow_path is not None:
         cardiac_output = mean_flow_from_path(str(inflow_path))
+    elif rescale_inflow:
+        raise ValueError(
+            "rescale_inflow=True requires inflow_path so snapshot scaling uses "
+            "the patient inflow.csv mean flow as the source of truth"
+        )
     else:
         with seed_config.open(encoding="utf-8") as ff:
             payload = json.load(ff)

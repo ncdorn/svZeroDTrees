@@ -210,6 +210,15 @@ class DummyRCRPAConfig:
         self.last_plot = path
 
 
+def _write_constant_inflow_csv(tmp_path, mean_flow):
+    inflow_path = tmp_path / "inflow.csv"
+    inflow_path.write_text(
+        f"t,q\n0.0,{float(mean_flow)}\n1.0,{float(mean_flow)}\n",
+        encoding="utf-8",
+    )
+    return inflow_path
+
+
 def test_pa_config_initializes_resistance_bcs_for_steady_inflow():
     pa_config = _build_pa_config([10.0, 10.0])
     pa_config.initialize_resistance_bcs()
@@ -829,6 +838,7 @@ def test_impedance_tuner_tune_rescales_snapshot_inflow(monkeypatch, tmp_path):
         tied=[],
     )
     pa_config = DummyImpedancePAConfig(clinical_targets)
+    inflow_path = _write_constant_inflow_csv(tmp_path, 5.0)
 
     def _fake_prepare(self):
         self._geom_defaults = {
@@ -851,6 +861,7 @@ def test_impedance_tuner_tune_rescales_snapshot_inflow(monkeypatch, tmp_path):
         tune_space=tune_space,
         compliance_model="constant",
         log_file=str(tmp_path / "tune.log"),
+        inflow_path=str(inflow_path),
     )
 
     tuner.tune(nm_iter=1)
@@ -877,8 +888,7 @@ def test_impedance_tuner_tune_uses_inflow_file_mean_flow_source(monkeypatch, tmp
         tied=[],
     )
     pa_config = DummyImpedancePAConfig(clinical_targets)
-    inflow_path = tmp_path / "inflow.csv"
-    inflow_path.write_text("t,q\n0.0,8.0\n1.0,8.0\n", encoding="utf-8")
+    inflow_path = _write_constant_inflow_csv(tmp_path, 8.0)
 
     def _fake_prepare(self):
         self._geom_defaults = {
@@ -1000,6 +1010,7 @@ def test_impedance_tuner_tune_rejects_invalid_outlet_scale(monkeypatch, tmp_path
         ],
         tied=[],
     )
+    inflow_path = _write_constant_inflow_csv(tmp_path, 5.0)
 
     def _fake_prepare(self):
         self._geom_defaults = {
@@ -1022,9 +1033,55 @@ def test_impedance_tuner_tune_rejects_invalid_outlet_scale(monkeypatch, tmp_path
         tune_space=tune_space,
         compliance_model="constant",
         log_file=str(tmp_path / "tune.log"),
+        inflow_path=str(inflow_path),
     )
 
     with pytest.raises(ValueError, match="invalid pulmonary outlet scale"):
+        tuner.tune(nm_iter=1)
+
+
+def test_impedance_tuner_tune_requires_inflow_path_when_rescaling(monkeypatch, tmp_path):
+    clinical_targets = ClinicalTargets(mpa_p=[30.0, 15.0, 22.0], rpa_split=0.55, wedge_p=12.0, q=5.0)
+    tune_space = TuneSpace(
+        free=[
+            FreeParam("comp.lpa.C", init=6.6e4, lb=1.0e4, ub=2.0e5),
+            FreeParam("comp.rpa.C", init=7.0e4, lb=1.0e4, ub=2.0e5),
+        ],
+        fixed=[
+            FixedParam("lpa.alpha", 0.9),
+            FixedParam("lpa.beta", 0.6),
+            FixedParam("rpa.alpha", 0.88),
+            FixedParam("rpa.beta", 0.58),
+            FixedParam("lrr", 9.0),
+            FixedParam("d_min", 0.02),
+        ],
+        tied=[],
+    )
+
+    def _fake_prepare(self):
+        self._geom_defaults = {
+            "lpa.default_diameter": 0.30,
+            "rpa.default_diameter": 0.32,
+            "n_outlets_scale": 2.0,
+        }
+
+    monkeypatch.setattr(ImpedanceTuner, "_prepare_geometry_defaults", _fake_prepare)
+    monkeypatch.setattr(
+        ImpedanceTuner,
+        "_make_pa_config",
+        lambda self: DummyImpedancePAConfig(clinical_targets),
+    )
+
+    tuner = ImpedanceTuner(
+        config_handler=SimpleNamespace(path=str(tmp_path), vessel_map={0: object()}),
+        mesh_surfaces_path="mesh",
+        clinical_targets=clinical_targets,
+        tune_space=tune_space,
+        compliance_model="constant",
+        log_file=str(tmp_path / "tune.log"),
+    )
+
+    with pytest.raises(ValueError, match="rescale_inflow=True requires inflow_path"):
         tuner.tune(nm_iter=1)
 
 

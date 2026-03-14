@@ -100,6 +100,15 @@ def _seed_config_payload(
     }
 
 
+def _write_constant_inflow_csv(tmp_path: Path, mean_flow: float) -> Path:
+    inflow_path = tmp_path / "inflow.csv"
+    inflow_path.write_text(
+        f"t,q\n0.0,{float(mean_flow)}\n1.0,{float(mean_flow)}\n",
+        encoding="utf-8",
+    )
+    return inflow_path
+
+
 def test_compute_centerline_metrics_from_values():
     metrics = compute_centerline_mpa_metrics(pressure_values=[10.0, 20.0, 15.0, 13.0])
     assert metrics["mpa_sys"] == pytest.approx(20.0)
@@ -217,6 +226,7 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
     seed = tmp_path / "simplified_nonlinear_zerod.json"
     mesh_surfaces = tmp_path / "mesh-surfaces"
     targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
     iteration_dir = tmp_path / "iter-01"
     seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
@@ -312,6 +322,7 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
         seed_config=seed,
         mesh_surfaces=mesh_surfaces,
         clinical_targets=targets,
+        inflow_path=inflow_path,
         impedance_config={
             "nm_iter": 7,
             "n_procs": 12,
@@ -342,6 +353,7 @@ def test_run_impedance_tuning_for_iteration_missing_snapshot_raises(monkeypatch,
     seed = tmp_path / "simplified_nonlinear_zerod.json"
     mesh_surfaces = tmp_path / "mesh-surfaces"
     targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
     iteration_dir = tmp_path / "iter-01"
     seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
@@ -381,6 +393,7 @@ def test_run_impedance_tuning_for_iteration_missing_snapshot_raises(monkeypatch,
             seed_config=seed,
             mesh_surfaces=mesh_surfaces,
             clinical_targets=targets,
+            inflow_path=inflow_path,
             impedance_config={"tune_space": _tune_space_with_xi()},
         )
 
@@ -389,6 +402,7 @@ def test_run_impedance_tuning_for_iteration_missing_required_xi_raises(monkeypat
     seed = tmp_path / "simplified_nonlinear_zerod.json"
     mesh_surfaces = tmp_path / "mesh-surfaces"
     targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
     iteration_dir = tmp_path / "iter-01"
     seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
@@ -447,6 +461,7 @@ def test_run_impedance_tuning_for_iteration_missing_required_xi_raises(monkeypat
             seed_config=seed,
             mesh_surfaces=mesh_surfaces,
             clinical_targets=targets,
+            inflow_path=inflow_path,
             impedance_config={"tune_space": _tune_space_with_xi()},
         )
 
@@ -455,6 +470,7 @@ def test_run_impedance_tuning_for_iteration_rejects_legacy_snapshot(monkeypatch,
     seed = tmp_path / "simplified_nonlinear_zerod.json"
     mesh_surfaces = tmp_path / "mesh-surfaces"
     targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
     iteration_dir = tmp_path / "iter-01"
     seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
@@ -519,6 +535,7 @@ def test_run_impedance_tuning_for_iteration_rejects_legacy_snapshot(monkeypatch,
             seed_config=seed,
             mesh_surfaces=mesh_surfaces,
             clinical_targets=targets,
+            inflow_path=inflow_path,
             impedance_config={"tune_space": _tune_space_with_xi()},
         )
 
@@ -527,6 +544,7 @@ def test_run_impedance_tuning_for_iteration_rejects_legacy_tuned_config(monkeypa
     seed = tmp_path / "simplified_nonlinear_zerod.json"
     mesh_surfaces = tmp_path / "mesh-surfaces"
     targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
     iteration_dir = tmp_path / "iter-01"
     seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
@@ -597,6 +615,7 @@ def test_run_impedance_tuning_for_iteration_rejects_legacy_tuned_config(monkeypa
             seed_config=seed,
             mesh_surfaces=mesh_surfaces,
             clinical_targets=targets,
+            inflow_path=inflow_path,
             impedance_config={"tune_space": _tune_space_with_xi()},
         )
 
@@ -605,6 +624,7 @@ def test_run_impedance_tuning_for_iteration_rejects_snapshot_timestep_mismatch(m
     seed = tmp_path / "simplified_nonlinear_zerod.json"
     mesh_surfaces = tmp_path / "mesh-surfaces"
     targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
     iteration_dir = tmp_path / "iter-01"
     seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
@@ -666,6 +686,7 @@ def test_run_impedance_tuning_for_iteration_rejects_snapshot_timestep_mismatch(m
             seed_config=seed,
             mesh_surfaces=mesh_surfaces,
             clinical_targets=targets,
+            inflow_path=inflow_path,
             impedance_config={"tune_space": _tune_space_with_xi()},
         )
 
@@ -674,6 +695,7 @@ def test_run_impedance_tuning_for_iteration_rejects_coupled_tuned_config_wrong_n
     seed = tmp_path / "simplified_nonlinear_zerod.json"
     mesh_surfaces = tmp_path / "mesh-surfaces"
     targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
     iteration_dir = tmp_path / "iter-01"
     seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
@@ -744,6 +766,7 @@ def test_run_impedance_tuning_for_iteration_rejects_coupled_tuned_config_wrong_n
             seed_config=seed,
             mesh_surfaces=mesh_surfaces,
             clinical_targets=targets,
+            inflow_path=inflow_path,
             impedance_config={"tune_space": _tune_space_with_xi()},
         )
 
@@ -752,6 +775,7 @@ def test_run_impedance_tuning_for_iteration_rejects_snapshot_inflow_mismatch(mon
     seed = tmp_path / "simplified_nonlinear_zerod.json"
     mesh_surfaces = tmp_path / "mesh-surfaces"
     targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
     iteration_dir = tmp_path / "iter-01"
     seed.write_text(json.dumps(_seed_config_payload(inflow_q=[6.0, 6.0])), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
@@ -814,6 +838,7 @@ def test_run_impedance_tuning_for_iteration_rejects_snapshot_inflow_mismatch(mon
             seed_config=seed,
             mesh_surfaces=mesh_surfaces,
             clinical_targets=targets,
+            inflow_path=inflow_path,
             impedance_config={"tune_space": _tune_space_with_xi()},
         )
 
@@ -822,6 +847,7 @@ def test_run_impedance_tuning_for_iteration_accepts_scaled_snapshot_inflow(monke
     seed = tmp_path / "simplified_nonlinear_zerod.json"
     mesh_surfaces = tmp_path / "mesh-surfaces"
     targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
     iteration_dir = tmp_path / "iter-01"
     seed.write_text(json.dumps(_seed_config_payload(inflow_q=[6.0, 6.0])), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
@@ -891,6 +917,7 @@ def test_run_impedance_tuning_for_iteration_accepts_scaled_snapshot_inflow(monke
         seed_config=seed,
         mesh_surfaces=mesh_surfaces,
         clinical_targets=targets,
+        inflow_path=inflow_path,
         impedance_config={"tune_space": _tune_space_with_xi()},
     )
 
@@ -1059,6 +1086,37 @@ def test_run_impedance_tuning_for_iteration_uses_inflow_file_mean_source(monkeyp
     )
 
     assert Path(result["pa_config_snapshot"]).name == PA_CONFIG_SNAPSHOT_FILENAME
+
+
+def test_run_impedance_tuning_for_iteration_requires_inflow_path_when_rescaling(tmp_path: Path):
+    seed = tmp_path / "simplified_nonlinear_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    iteration_dir = tmp_path / "iter-01"
+    seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+
+    class DummyClinicalTargets:
+        wedge_p = 10.0
+
+        @classmethod
+        def from_csv(cls, _path: str):
+            return cls()
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
+    with pytest.raises(ValueError, match="rescale_inflow=True requires inflow_path"):
+        try:
+            run_impedance_tuning_for_iteration(
+                iteration_dir=iteration_dir,
+                seed_config=seed,
+                mesh_surfaces=mesh_surfaces,
+                clinical_targets=targets,
+                impedance_config={"tune_space": _tune_space_with_xi()},
+            )
+        finally:
+            monkeypatch.undo()
 
 
 def test_resolve_impedance_config_requires_explicit_tune_space():
