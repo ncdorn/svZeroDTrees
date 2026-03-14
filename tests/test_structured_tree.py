@@ -6,6 +6,7 @@ from svzerodtrees.io.blocks.simulation_parameters import SimParams
 from svzerodtrees.microvasculature.compliance.constant import ConstantCompliance
 from svzerodtrees.io.blocks.boundary_condition import (
     BoundaryCondition,
+    validate_flow_cardiac_output_config,
     validate_impedance_timing_config,
 )
 
@@ -22,6 +23,83 @@ def simple_tree():
     )
     tree.build(initial_d=1.0, d_min=0.6, alpha=0.5, beta=0.5, lrr=2.0)
     return tree
+
+
+def _legacy_zero_termination_kernel(tree: StructuredTree, *, tsteps: int) -> np.ndarray:
+    """Reference the pre-vectorized recursive tree impedance implementation."""
+    store = tree.store
+    diameter = np.asarray(store.d, dtype=np.float64)
+    area = np.pi * (diameter / 2.0) ** 2
+    length = float(store.lrr) * (diameter / 2.0)
+    left = np.asarray(store.left, dtype=np.int32)
+    right = np.asarray(store.right, dtype=np.int32)
+    collapsed = np.asarray(store.collapsed, dtype=bool)
+    density = float(store.density)
+    viscosity = float(store.eta)
+    compliance_model = store.compliance_model
+
+    period = max(tree.time) * tree.q / tree.Lr**3
+    df = 1.0 / period
+    omega = np.array(
+        [i * df * 2.0 * np.pi for i in range(-tsteps // 2, tsteps // 2)],
+        dtype=np.float64,
+    )
+
+    def _z0_dc(idx: int) -> float:
+        radius = diameter[idx] / 2.0
+        segment_resistance = 8.0 * viscosity * length[idx] / (np.pi * radius**4)
+        if collapsed[idx]:
+            return float(segment_resistance)
+        z_left = _z0_dc(int(left[idx]))
+        z_right = _z0_dc(int(right[idx]))
+        return float(segment_resistance + 1.0 / (1.0 / z_left + 1.0 / z_right))
+
+    def _z0(idx: int, omega_value: float) -> complex:
+        if collapsed[idx]:
+            z_load = 0.0
+        else:
+            z_left = _z0(int(left[idx]), omega_value)
+            z_right = _z0(int(right[idx]), omega_value)
+            z_load = 1.0 / (1.0 / z_left + 1.0 / z_right)
+
+        if omega_value == 0.0:
+            return complex(_z0_dc(idx), 0.0)
+
+        eh_over_r = compliance_model.evaluate(diameter[idx] / 2.0)
+        compliance = 3.0 * area[idx] / (2.0 * eh_over_r)
+        wom = diameter[idx] / 2.0 * np.sqrt(omega_value * density / viscosity)
+        if wom > 3.0:
+            term = np.sqrt(
+                1.0
+                - 2.0 / 1j**0.5 / wom * (1.0 + 1.0 / (2.0 * wom))
+            )
+        elif wom > 2.0:
+            term = (
+                (3.0 - wom) * np.sqrt(1j * wom**2.0 / 8.0 + wom**4.0 / 48.0)
+                + (wom - 2.0)
+                * np.sqrt(
+                    1.0
+                    - 2.0 / 1j**0.5 / wom * (1.0 + 1.0 / (2.0 * wom))
+                )
+            )
+        elif wom == 0.0:
+            term = 0.0
+        else:
+            term = np.sqrt(1j * wom**2 / 8.0 + wom**4 / 48.0)
+
+        g_omega = np.sqrt(compliance * area[idx] / density) * term
+        c_omega = np.sqrt(area[idx] / compliance / density) * term
+        kappa = omega_value * length[idx] / c_omega
+        t1 = 1j * np.sin(kappa) / g_omega + np.cos(kappa) * z_load
+        t2 = np.cos(kappa) + 1j * g_omega * z_load * np.sin(kappa)
+        return t1 / t2
+
+    z_omega = np.zeros(len(omega), dtype=complex)
+    for idx in range(0, tsteps // 2 + 1):
+        z_omega[idx] = np.conjugate(_z0(0, abs(float(omega[idx]))))
+    z_omega_half = z_omega[: tsteps // 2]
+    z_omega[tsteps // 2 + 1 :] = np.conjugate(np.flipud(z_omega_half[:-1]))
+    return np.real(np.fft.ifft(np.fft.ifftshift(z_omega)))
 
 
 def test_segment_resistances_requires_built_store():
@@ -174,3 +252,97 @@ def test_validate_impedance_timing_config_rejects_coupled_wrong_number_of_time_p
                 ],
             }
         )
+
+
+def test_validate_flow_cardiac_output_config_accepts_matching_inflow():
+    measured = validate_flow_cardiac_output_config(
+        {
+            "boundary_conditions": [
+                {
+                    "bc_name": "INFLOW",
+                    "bc_type": "FLOW",
+                    "bc_values": {
+                        "Q": [2.0, 2.0],
+                        "t": [0.0, 1.0],
+                    },
+                }
+            ]
+        },
+        expected_cardiac_output=2.0,
+    )
+
+    assert measured == pytest.approx(2.0)
+
+
+def test_validate_flow_cardiac_output_config_rejects_mismatched_output():
+    with pytest.raises(ValueError, match="expected 1.5, got 2"):
+        validate_flow_cardiac_output_config(
+            {
+                "boundary_conditions": [
+                    {
+                        "bc_name": "INFLOW",
+                        "bc_type": "FLOW",
+                        "bc_values": {
+                            "Q": [2.0, 2.0],
+                            "t": [0.0, 1.0],
+                        },
+                    }
+                ]
+            },
+            expected_cardiac_output=1.5,
+        )
+
+
+def test_validate_flow_cardiac_output_config_rejects_malformed_inflow():
+    with pytest.raises(ValueError, match="must have the same length"):
+        validate_flow_cardiac_output_config(
+            {
+                "boundary_conditions": [
+                    {
+                        "bc_name": "INFLOW",
+                        "bc_type": "FLOW",
+                        "bc_values": {
+                            "Q": [2.0, 2.0],
+                            "t": [0.0],
+                        },
+                    }
+                ]
+            },
+            expected_cardiac_output=2.0,
+        )
+
+
+def test_validate_flow_cardiac_output_config_uses_mean_for_nonunit_period():
+    measured = validate_flow_cardiac_output_config(
+        {
+            "boundary_conditions": [
+                {
+                    "bc_name": "INFLOW",
+                    "bc_type": "FLOW",
+                    "bc_values": {
+                        "Q": [2.0, 2.0, 2.0],
+                        "t": [0.0, 0.4, 0.8],
+                    },
+                }
+            ]
+        },
+        expected_cardiac_output=2.0,
+    )
+
+    assert measured == pytest.approx(2.0)
+
+
+def test_compute_olufsen_impedance_defaults_to_legacy_zero_termination(simple_tree):
+    tsteps = 2
+    expected = _legacy_zero_termination_kernel(simple_tree, tsteps=tsteps)
+    actual, _ = simple_tree.compute_olufsen_impedance(tsteps=tsteps)
+    np.testing.assert_allclose(np.asarray(actual), expected, rtol=1e-5, atol=1e-5)
+
+
+def test_compute_olufsen_impedance_reflectionless_is_opt_in(simple_tree):
+    zero_kernel, _ = simple_tree.compute_olufsen_impedance(tsteps=2, leaf_termination="zero")
+    reflectionless_kernel, _ = simple_tree.compute_olufsen_impedance(
+        tsteps=2,
+        leaf_termination="reflectionless",
+    )
+    assert np.max(np.abs(np.asarray(zero_kernel) - np.asarray(reflectionless_kernel))) > 1e-6

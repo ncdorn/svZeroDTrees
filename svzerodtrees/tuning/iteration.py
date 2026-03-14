@@ -12,12 +12,16 @@ import numpy as np
 import pandas as pd
 
 from svzerodtrees.io import ConfigHandler
+from svzerodtrees.io.inflow_handler import mean_flow_from_path
 from svzerodtrees.io.blocks.boundary_condition import (
+    _resolve_flow_mean_config,
     validate_boundary_condition_configs,
+    validate_flow_cardiac_output_config,
     validate_impedance_timing_config,
 )
 from svzerodtrees.microvasculature import TreeParameters
 from svzerodtrees.simulation import SimulationDirectory
+from svzerodtrees.simulation.threedutils import get_pa_outlet_scale
 from svzerodtrees.tune_bcs import (
     ClinicalTargets,
     FixedParam,
@@ -353,11 +357,42 @@ def _load_tree_params(opt_csv: Path) -> tuple[TreeParameters, TreeParameters]:
     return TreeParameters.from_row(lpa_rows), TreeParameters.from_row(rpa_rows)
 
 
-def _validate_impedance_artifact(path: Path) -> None:
+def _expected_snapshot_inflow_cardiac_output(
+    *,
+    seed_config: Path,
+    mesh_surfaces: Path,
+    rescale_inflow: bool,
+    convert_to_cm: bool,
+    inflow_path: str | Path | None = None,
+) -> float:
+    if inflow_path is not None:
+        cardiac_output = mean_flow_from_path(str(inflow_path))
+    else:
+        with seed_config.open(encoding="utf-8") as ff:
+            payload = json.load(ff)
+        cardiac_output = _resolve_flow_mean_config(payload, bc_name="INFLOW")
+    if not rescale_inflow:
+        return cardiac_output
+
+    scale = float(get_pa_outlet_scale(str(mesh_surfaces), convert_to_cm=convert_to_cm))
+    if not np.isfinite(scale) or scale <= 0.0:
+        raise ValueError(f"invalid pulmonary outlet scale for inflow rescaling: {scale}")
+    return cardiac_output / scale
+
+
+def _validate_impedance_artifact(
+    path: Path,
+    expected_inflow_cardiac_output: float | None = None,
+) -> None:
     with path.open(encoding="utf-8") as ff:
         payload = json.load(ff)
     validate_boundary_condition_configs(payload.get("boundary_conditions", []))
     validate_impedance_timing_config(payload)
+    if expected_inflow_cardiac_output is not None:
+        validate_flow_cardiac_output_config(
+            payload,
+            expected_cardiac_output=expected_inflow_cardiac_output,
+        )
 
 
 def run_impedance_tuning_for_iteration(
@@ -366,6 +401,7 @@ def run_impedance_tuning_for_iteration(
     seed_config: str | Path,
     mesh_surfaces: str | Path,
     clinical_targets: str | Path,
+    inflow_path: str | Path | None = None,
     impedance_config: Mapping[str, Any] | None = None,
     results_dir: str | Path | None = None,
     tuned_config_name: str = TUNED_ZEROD_CONFIG_FILENAME,
@@ -391,6 +427,13 @@ def run_impedance_tuning_for_iteration(
     required_xi_pa = _required_xi_pa_labels(tuning["tune_space"])
     targets = ClinicalTargets.from_csv(str(targets_path))
     tune_space = _build_tune_space_from_config(tuning["tune_space"])
+    expected_snapshot_co = _expected_snapshot_inflow_cardiac_output(
+        seed_config=seed_config_path,
+        mesh_surfaces=mesh_surfaces_path,
+        rescale_inflow=bool(tuning["rescale_inflow"]),
+        convert_to_cm=bool(tuning["convert_to_cm"]),
+        inflow_path=inflow_path,
+    )
 
     opt_log = output_dir / OPTIMIZATION_LOG_FILENAME
     with _pushd(output_dir):
@@ -407,6 +450,7 @@ def run_impedance_tuning_for_iteration(
             convert_to_cm=bool(tuning["convert_to_cm"]),
             log_file=str(opt_log),
             solver=str(tuning["solver"]),
+            inflow_path=str(inflow_path) if inflow_path is not None else None,
         )
         tuner.tune(nm_iter=int(tuning["nm_iter"]))
 
@@ -420,7 +464,10 @@ def run_impedance_tuning_for_iteration(
         raise FileNotFoundError(
             f"impedance tuning did not produce {PA_CONFIG_SNAPSHOT_FILENAME}"
         )
-    _validate_impedance_artifact(pa_snapshot)
+    _validate_impedance_artifact(
+        pa_snapshot,
+        expected_inflow_cardiac_output=expected_snapshot_co,
+    )
 
     _validate_required_xi_in_optimized_csv(
         optimized_csv=optimized_csv,

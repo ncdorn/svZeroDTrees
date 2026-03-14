@@ -1,13 +1,15 @@
 from .base import BoundaryConditionTuner
 import numpy as np
 from scipy.optimize import minimize
-from ..simulation.threedutils import vtp_info
+from ..simulation.threedutils import pa_outlet_scale_from_branch_counts, vtp_info
 from ..tune_bcs.pa_config import PAConfig
 from ..microvasculature import TreeParameters, compliance as comp_mod
 from ..microvasculature.structured_tree.asymmetry import resolve_branch_scaling
 from ..tune_bcs.tune_space import TuneSpace
+from ..io.inflow_handler import mean_flow_from_path
 from ..io.blocks.boundary_condition import (
     validate_boundary_condition_configs,
+    validate_flow_cardiac_output_config,
     validate_impedance_timing_config,
 )
 import csv, json, math, os
@@ -29,7 +31,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
                  convert_to_cm=True,
                  log_file=None,
                  maxiter=200,
-                 solver="Powell"):
+                 solver="Powell",
+                 inflow_path=None):
         super().__init__(config_handler, mesh_surfaces_path, clinical_targets)
         self.tune_space = tune_space
         self.compliance_model = (compliance_model or "").lower()
@@ -44,6 +47,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self.log_file = log_file
         self.maxiter = maxiter
         self.solver = solver
+        self.inflow_path = os.path.abspath(inflow_path) if inflow_path is not None else None
 
         # grid search params
         self.grid_search_init = grid_search_init
@@ -56,6 +60,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self._loss_weights = None
         self._last_loss_breakdown = {}
         self._opt_csv_path = None
+        self._expected_snapshot_cardiac_output = None
 
 
     # ---- Internal helpers ---- #
@@ -93,8 +98,34 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self._geom_defaults = {
             "rpa.default_diameter": rpa_mean_d,
             "lpa.default_diameter": lpa_mean_d,
-            "n_outlets_scale": float((len(lpa_info) + len(rpa_info)))/2.0
+            "n_outlets_scale": pa_outlet_scale_from_branch_counts(
+                len(lpa_info),
+                len(rpa_info),
+            ),
         }
+
+    def _compute_inflow_cardiac_output(self, inflow_bc) -> float:
+        if self.inflow_path is not None:
+            return mean_flow_from_path(self.inflow_path)
+        flow = np.asarray(inflow_bc.Q, dtype=float)
+        return float(np.mean(flow))
+
+    @staticmethod
+    def _compute_boundary_condition_mean_flow(inflow_bc) -> float:
+        flow = np.asarray(inflow_bc.Q, dtype=float)
+        return float(np.mean(flow))
+
+    def _resolve_expected_snapshot_cardiac_output(self, inflow_bc) -> float:
+        cardiac_output = self._compute_inflow_cardiac_output(inflow_bc)
+        if not self.rescale_inflow:
+            return cardiac_output
+
+        scale = float(self._geom_defaults["n_outlets_scale"])
+        if not np.isfinite(scale) or scale <= 0.0:
+            raise ValueError(
+                f"invalid pulmonary outlet scale for inflow rescaling: {scale}"
+            )
+        return cardiac_output / scale
 
     def _build_compliance(self, side: str, params: dict[str, float]):
         if self.compliance_model == "olufsen":
@@ -195,11 +226,18 @@ class ImpedanceTuner(BoundaryConditionTuner):
 
         self._prepare_geometry_defaults()
         pa_config = self._make_pa_config()
+        self._expected_snapshot_cardiac_output = self._resolve_expected_snapshot_cardiac_output(
+            pa_config.bcs["INFLOW"]
+        )
 
         if self.rescale_inflow:
-            scale = self._geom_defaults["n_outlets_scale"]
-            if scale and scale > 0:
-                pa_config.bcs['INFLOW'].Q = [q / scale for q in pa_config.bcs['INFLOW'].Q]
+            current_mean_flow = self._compute_boundary_condition_mean_flow(pa_config.bcs["INFLOW"])
+            if not np.isfinite(current_mean_flow) or current_mean_flow == 0.0:
+                raise ValueError(
+                    f"invalid inflow mean flow for rescaling: {current_mean_flow}"
+                )
+            scale_factor = self._expected_snapshot_cardiac_output / current_mean_flow
+            pa_config.bcs['INFLOW'].Q = [q * scale_factor for q in pa_config.bcs['INFLOW'].Q]
 
         x0, bounds = self.tune_space.pack_init_and_bounds()
 
@@ -313,6 +351,15 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 snapshot_payload = json.load(ff)
             validate_boundary_condition_configs(snapshot_payload.get("boundary_conditions", []))
             validate_impedance_timing_config(snapshot_payload)
+            expected_snapshot_cardiac_output = self._expected_snapshot_cardiac_output
+            if expected_snapshot_cardiac_output is None:
+                expected_snapshot_cardiac_output = self._compute_inflow_cardiac_output(
+                    pa_config.bcs["INFLOW"]
+                )
+            validate_flow_cardiac_output_config(
+                snapshot_payload,
+                expected_cardiac_output=expected_snapshot_cardiac_output,
+            )
             # sanity check
             if (np.isnan(pa_config.bcs['LPA_BC'].Z[0]) or
                 np.isnan(pa_config.bcs['RPA_BC'].Z[0])):

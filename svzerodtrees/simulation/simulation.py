@@ -9,7 +9,6 @@ import json
 import copy
 import pandas as pd
 import numpy as np
-from scipy.integrate import trapezoid
 import os
 import glob
 import re
@@ -120,6 +119,7 @@ class Simulation:
 
         self.inflow_path = os.path.abspath(inflow_path) if inflow_path is not None else None
         self._inflow_file_mtime = None
+        self._inflow_file_mean_flow = None
 
         if self.inflow_path is not None:
             if os.path.exists(self.inflow_path):
@@ -219,7 +219,8 @@ class Simulation:
                                                  solver='Nelder-Mead',
                                                  grid_search_init=True,
                                                  log_file=os.path.join(self.path, 'stree_impedance_optimization.log'),
-                                                 n_procs=24)
+                                                 n_procs=24,
+                                                 inflow_path=self.inflow_path)
                 impedance_tuner.tune(nm_iter=5)
             # need to create coupling config and add to preop/postop directories
             # build trees for LPA/RPA
@@ -452,6 +453,7 @@ class Simulation:
         abs_path = os.path.abspath(inflow_path)
         print(f'loading inflow from {abs_path}...')
         self.inflow = Inflow.periodic(path=abs_path)
+        self._inflow_file_mean_flow = float(np.mean(np.asarray(self.inflow.q, dtype=float)))
         self.inflow.rescale(tsteps=self.n_tsteps)
         self.inflow_from_file = True
         self.is_fontan = False
@@ -513,7 +515,7 @@ class Simulation:
 
         n_outlets = getattr(self.preop_dir.mesh_complete, 'n_outlets', None)
         outlet_scale = n_outlets / 2.0 if n_outlets is not None else 1.0
-        target_co = trapezoid(self.inflow.q, self.inflow.t) if self.inflow_from_file else self.clinical_targets.q
+        target_co = self._inflow_file_mean_flow if self.inflow_from_file else self.clinical_targets.q
 
         self.inflow_0d = copy.deepcopy(self.inflow)
         self.inflow_0d.rescale(cardiac_output=target_co / outlet_scale if outlet_scale != 0 else target_co)

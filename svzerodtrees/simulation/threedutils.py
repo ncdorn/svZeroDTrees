@@ -27,6 +27,10 @@ def find_vtp_area(infile, convert_to_cm=False):
         # mesh is in cm, no change needed
         return masser.GetSurfaceArea()
 
+
+def pa_outlet_scale_from_branch_counts(lpa_count, rpa_count):
+    return float(int(lpa_count) + int(rpa_count)) / 2.0
+
 # Sort cap VTP files into inflow / RPA branches / LPA branches. Obtain their names & cap areas.
 def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_branch_tag='LPA', convert_to_cm=False, pulmonary=True):
     '''
@@ -86,6 +90,15 @@ def vtp_info(mesh_surfaces_path, inflow_tag='inflow', rpa_branch_tag='RPA', lpa_
                 cap_info[basename] = find_vtp_area(vtp_file, convert_to_cm)
         
         return cap_info
+
+
+def get_pa_outlet_scale(mesh_surfaces_path, convert_to_cm=False):
+    rpa_info, lpa_info, _ = vtp_info(
+        mesh_surfaces_path,
+        convert_to_cm=convert_to_cm,
+        pulmonary=True,
+    )
+    return pa_outlet_scale_from_branch_counts(len(lpa_info), len(rpa_info))
 
 
 def get_coupled_surfaces(simulation_dir):

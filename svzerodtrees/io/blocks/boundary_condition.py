@@ -4,23 +4,45 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 
+import numpy as np
+
 
 _ALLOWED_IMPEDANCE_KEYS = {"z", "Pd", "convolution_mode", "num_kernel_terms"}
 _FORBIDDEN_IMPEDANCE_KEYS = {"Z", "tree", "t"}
 
 
-def _ensure_finite_numeric(value, *, bc_name: str, field_name: str) -> float:
+def _ensure_finite_numeric(value, *, label: str) -> float:
     try:
         numeric = float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"IMPEDANCE boundary condition '{bc_name}' field '{field_name}' must be numeric"
-        ) from exc
+        raise ValueError(f"{label} must be numeric") from exc
     if not math.isfinite(numeric):
-        raise ValueError(
-            f"IMPEDANCE boundary condition '{bc_name}' field '{field_name}' must be finite"
-        )
+        raise ValueError(f"{label} must be finite")
     return numeric
+
+
+def _ensure_numeric_sequence(values, *, bc_name: str, field_name: str, bc_type: str) -> list[float]:
+    if isinstance(values, (str, bytes)):
+        raise ValueError(
+            f"{bc_type} boundary condition '{bc_name}' field '{field_name}' must be a non-empty numeric sequence"
+        )
+    try:
+        normalized = [
+            _ensure_finite_numeric(
+                entry,
+                label=f"{bc_type} boundary condition '{bc_name}' field '{field_name}'",
+            )
+            for entry in values
+        ]
+    except TypeError as exc:
+        raise ValueError(
+            f"{bc_type} boundary condition '{bc_name}' field '{field_name}' must be a non-empty numeric sequence"
+        ) from exc
+    if not normalized:
+        raise ValueError(
+            f"{bc_type} boundary condition '{bc_name}' field '{field_name}' must be a non-empty numeric sequence"
+        )
+    return normalized
 
 
 def _ensure_positive_int(value, *, field_name: str) -> int:
@@ -63,7 +85,10 @@ def validate_impedance_bc_values(values: Mapping, *, bc_name: str) -> dict:
         )
     try:
         normalized_kernel = [
-            _ensure_finite_numeric(entry, bc_name=bc_name, field_name="z")
+            _ensure_finite_numeric(
+                entry,
+                label=f"IMPEDANCE boundary condition '{bc_name}' field 'z'",
+            )
             for entry in kernel
         ]
     except TypeError as exc:
@@ -77,7 +102,10 @@ def validate_impedance_bc_values(values: Mapping, *, bc_name: str) -> dict:
 
     normalized = {
         "z": normalized_kernel,
-        "Pd": _ensure_finite_numeric(values["Pd"], bc_name=bc_name, field_name="Pd"),
+        "Pd": _ensure_finite_numeric(
+            values["Pd"],
+            label=f"IMPEDANCE boundary condition '{bc_name}' field 'Pd'",
+        ),
     }
 
     mode = values.get("convolution_mode")
@@ -129,6 +157,139 @@ def validate_boundary_condition_config(config: Mapping) -> dict:
 
 def validate_boundary_condition_configs(configs: Sequence[Mapping]) -> list[dict]:
     return [validate_boundary_condition_config(config) for config in configs]
+
+
+def _find_boundary_condition_config(config: Mapping, *, bc_name: str) -> Mapping:
+    if not isinstance(config, Mapping):
+        raise ValueError("config must be a mapping")
+
+    boundary_conditions = config.get("boundary_conditions", [])
+    if isinstance(boundary_conditions, (str, bytes)) or not isinstance(boundary_conditions, Sequence):
+        raise ValueError("config boundary_conditions must be a sequence")
+
+    resolved_name = str(bc_name).strip() or "<unknown>"
+    for entry in boundary_conditions:
+        if not isinstance(entry, Mapping):
+            raise ValueError("boundary condition config must be a mapping")
+        if str(entry.get("bc_name", "")).strip() == resolved_name:
+            return entry
+
+    raise ValueError(f"config must include boundary condition '{resolved_name}'")
+
+
+def _resolve_flow_cardiac_output_config(config: Mapping, *, bc_name: str = "INFLOW") -> float:
+    flow_config = _find_boundary_condition_config(config, bc_name=bc_name)
+    resolved_name = str(bc_name).strip() or "<unknown>"
+    bc_type = str(flow_config.get("bc_type", "")).strip()
+    if bc_type != "FLOW":
+        raise ValueError(
+            f"boundary condition '{resolved_name}' must have bc_type 'FLOW'; got '{bc_type or '<missing>'}'"
+        )
+
+    values = flow_config.get("bc_values")
+    if not isinstance(values, Mapping):
+        raise ValueError(
+            f"FLOW boundary condition '{resolved_name}' bc_values must be a mapping"
+        )
+
+    missing = [key for key in ("Q", "t") if key not in values]
+    if missing:
+        raise ValueError(
+            f"FLOW boundary condition '{resolved_name}' is missing required keys: "
+            + ", ".join(missing)
+        )
+
+    flow_values = _ensure_numeric_sequence(
+        values.get("Q"),
+        bc_name=resolved_name,
+        field_name="Q",
+        bc_type="FLOW",
+    )
+    time_values = _ensure_numeric_sequence(
+        values.get("t"),
+        bc_name=resolved_name,
+        field_name="t",
+        bc_type="FLOW",
+    )
+    if len(flow_values) != len(time_values):
+        raise ValueError(
+            f"FLOW boundary condition '{resolved_name}' fields 'Q' and 't' must have the same length"
+        )
+    if len(flow_values) < 2:
+        raise ValueError(
+            f"FLOW boundary condition '{resolved_name}' requires at least 2 samples to compute cardiac output"
+        )
+
+    return float(np.trapz(np.asarray(flow_values, dtype=float), np.asarray(time_values, dtype=float)))
+
+
+def _resolve_flow_mean_config(config: Mapping, *, bc_name: str = "INFLOW") -> float:
+    flow_config = _find_boundary_condition_config(config, bc_name=bc_name)
+    resolved_name = str(bc_name).strip() or "<unknown>"
+    bc_type = str(flow_config.get("bc_type", "")).strip()
+    if bc_type != "FLOW":
+        raise ValueError(
+            f"boundary condition '{resolved_name}' must have bc_type 'FLOW'; got '{bc_type or '<missing>'}'"
+        )
+
+    values = flow_config.get("bc_values")
+    if not isinstance(values, Mapping):
+        raise ValueError(
+            f"FLOW boundary condition '{resolved_name}' bc_values must be a mapping"
+        )
+
+    missing = [key for key in ("Q", "t") if key not in values]
+    if missing:
+        raise ValueError(
+            f"FLOW boundary condition '{resolved_name}' is missing required keys: "
+            + ", ".join(missing)
+        )
+
+    flow_values = _ensure_numeric_sequence(
+        values.get("Q"),
+        bc_name=resolved_name,
+        field_name="Q",
+        bc_type="FLOW",
+    )
+    time_values = _ensure_numeric_sequence(
+        values.get("t"),
+        bc_name=resolved_name,
+        field_name="t",
+        bc_type="FLOW",
+    )
+    if len(flow_values) != len(time_values):
+        raise ValueError(
+            f"FLOW boundary condition '{resolved_name}' fields 'Q' and 't' must have the same length"
+        )
+    if len(flow_values) < 2:
+        raise ValueError(
+            f"FLOW boundary condition '{resolved_name}' requires at least 2 samples to compute cardiac output"
+        )
+    return float(np.mean(np.asarray(flow_values, dtype=float)))
+
+
+def validate_flow_cardiac_output_config(
+    config: Mapping,
+    *,
+    expected_cardiac_output,
+    bc_name: str = "INFLOW",
+    rel_tol: float = 1e-5,
+    abs_tol: float = 1e-8,
+) -> float:
+    measured_cardiac_output = _resolve_flow_mean_config(config, bc_name=bc_name)
+    try:
+        expected = float(expected_cardiac_output)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("expected_cardiac_output must be numeric") from exc
+    if not math.isfinite(expected):
+        raise ValueError("expected_cardiac_output must be finite")
+
+    if not math.isclose(measured_cardiac_output, expected, rel_tol=rel_tol, abs_tol=abs_tol):
+        raise ValueError(
+            f"FLOW boundary condition '{bc_name}' cardiac output mismatch: "
+            f"expected {expected:.12g}, got {measured_cardiac_output:.12g}"
+        )
+    return measured_cardiac_output
 
 
 def resolve_impedance_timepoint_contract(simparams: Mapping) -> tuple[str, int, int]:

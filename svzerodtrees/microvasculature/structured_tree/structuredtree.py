@@ -373,7 +373,7 @@ class StructuredTree:
         # ---- the 3 switches ----
         dc_mode: Literal["segment_only","poiseuille_network"] = "poiseuille_network",
         fft_layout: Literal["legacy_shift","hermitian"] = "legacy_shift",
-        leaf_termination: Literal["zero","reflectionless"] = "reflectionless",
+        leaf_termination: Literal["zero","reflectionless"] = "zero",
     ):
         """
         Vectorized, NaN-safe Olufsen structured-tree impedance with toggles to

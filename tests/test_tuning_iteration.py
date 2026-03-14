@@ -48,6 +48,8 @@ def _impedance_artifact_payload(
     coupled: bool = False,
     number_of_time_pts: int = 2,
     number_of_time_pts_per_cardiac_cycle: int = 2,
+    inflow_q: list[float] | None = None,
+    inflow_t: list[float] | None = None,
 ) -> dict[str, object]:
     simparams: dict[str, object] = {
         "number_of_time_pts_per_cardiac_cycle": number_of_time_pts_per_cardiac_cycle,
@@ -62,15 +64,39 @@ def _impedance_artifact_payload(
     else:
         simparams["number_of_cardiac_cycles"] = 1
 
+    resolved_inflow_q = inflow_q if inflow_q is not None else [1.0, 1.0]
+    resolved_inflow_t = inflow_t if inflow_t is not None else [0.0, 1.0]
     return {
         "simulation_parameters": simparams,
         "boundary_conditions": [
+            {
+                "bc_name": "INFLOW",
+                "bc_type": "FLOW",
+                "bc_values": {"Q": resolved_inflow_q, "t": resolved_inflow_t},
+            },
             {
                 "bc_name": "OUT",
                 "bc_type": "IMPEDANCE",
                 "bc_values": bc_values,
             }
         ],
+    }
+
+
+def _seed_config_payload(
+    inflow_q: list[float] | None = None,
+    inflow_t: list[float] | None = None,
+) -> dict[str, object]:
+    resolved_inflow_q = inflow_q if inflow_q is not None else [6.0, 6.0]
+    resolved_inflow_t = inflow_t if inflow_t is not None else [0.0, 1.0]
+    return {
+        "boundary_conditions": [
+            {
+                "bc_name": "INFLOW",
+                "bc_type": "FLOW",
+                "bc_values": {"Q": resolved_inflow_q, "t": resolved_inflow_t},
+            }
+        ]
     }
 
 
@@ -192,7 +218,7 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
     mesh_surfaces = tmp_path / "mesh-surfaces"
     targets = tmp_path / "clinical_targets.csv"
     iteration_dir = tmp_path / "iter-01"
-    seed.write_text("{\"seed\": true}", encoding="utf-8")
+    seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
     targets.write_text("target,value\n", encoding="utf-8")
 
@@ -246,6 +272,7 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
                     bc_values={"z": [1.0, 0.5], "Pd": 12.0},
                     coupled=False,
                     number_of_time_pts_per_cardiac_cycle=3,
+                    inflow_q=[3.0, 3.0],
                 )),
                 encoding="utf-8",
             )
@@ -274,6 +301,7 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.construct_impedance_trees", _fake_construct)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.get_pa_outlet_scale", lambda *_args, **_kwargs: 2.0)
     monkeypatch.setattr(
         "svzerodtrees.tuning.iteration._load_tree_params",
         lambda _path: ("lpa-params", "rpa-params"),
@@ -301,6 +329,7 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
     assert calls["construct"]["wedge_p"] == 12.0
     assert calls["construct"]["kwargs"]["n_procs"] == 12
     assert calls["construct"]["kwargs"]["use_mean"] is False
+    assert calls["tuner_kwargs"]["convert_to_cm"] is False
     free_names = [param.name for param in calls["tune_space"].free]
     assert free_names == [entry["name"] for entry in _tune_space_with_xi()["free"]]
     assert "lpa.alpha" not in free_names
@@ -314,7 +343,7 @@ def test_run_impedance_tuning_for_iteration_missing_snapshot_raises(monkeypatch,
     mesh_surfaces = tmp_path / "mesh-surfaces"
     targets = tmp_path / "clinical_targets.csv"
     iteration_dir = tmp_path / "iter-01"
-    seed.write_text("{\"seed\": true}", encoding="utf-8")
+    seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
     targets.write_text("target,value\n", encoding="utf-8")
 
@@ -344,6 +373,7 @@ def test_run_impedance_tuning_for_iteration_missing_snapshot_raises(monkeypatch,
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.get_pa_outlet_scale", lambda *_args, **_kwargs: 2.0)
 
     with pytest.raises(FileNotFoundError, match=PA_CONFIG_SNAPSHOT_FILENAME):
         run_impedance_tuning_for_iteration(
@@ -360,7 +390,7 @@ def test_run_impedance_tuning_for_iteration_missing_required_xi_raises(monkeypat
     mesh_surfaces = tmp_path / "mesh-surfaces"
     targets = tmp_path / "clinical_targets.csv"
     iteration_dir = tmp_path / "iter-01"
-    seed.write_text("{\"seed\": true}", encoding="utf-8")
+    seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
     targets.write_text("target,value\n", encoding="utf-8")
 
@@ -393,21 +423,19 @@ def test_run_impedance_tuning_for_iteration_missing_required_xi_raises(monkeypat
                 encoding="utf-8",
             )
             (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
-                json.dumps(
-                    {
-                        "simulation_parameters": {
-                            "number_of_cardiac_cycles": 1,
-                            "number_of_time_pts_per_cardiac_cycle": 2,
-                        },
-                        "boundary_conditions": [],
-                    }
-                ),
+                json.dumps(_impedance_artifact_payload(
+                    bc_values={"z": [1.0], "Pd": 10.0},
+                    coupled=False,
+                    number_of_time_pts_per_cardiac_cycle=2,
+                    inflow_q=[3.0, 3.0],
+                )),
                 encoding="utf-8",
             )
 
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.get_pa_outlet_scale", lambda *_args, **_kwargs: 2.0)
     monkeypatch.setattr(
         "svzerodtrees.tuning.iteration._load_tree_params",
         lambda _path: (_ for _ in ()).throw(AssertionError("_load_tree_params should not be called")),
@@ -428,7 +456,7 @@ def test_run_impedance_tuning_for_iteration_rejects_legacy_snapshot(monkeypatch,
     mesh_surfaces = tmp_path / "mesh-surfaces"
     targets = tmp_path / "clinical_targets.csv"
     iteration_dir = tmp_path / "iter-01"
-    seed.write_text("{\"seed\": true}", encoding="utf-8")
+    seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
     targets.write_text("target,value\n", encoding="utf-8")
 
@@ -483,6 +511,7 @@ def test_run_impedance_tuning_for_iteration_rejects_legacy_snapshot(monkeypatch,
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.get_pa_outlet_scale", lambda *_args, **_kwargs: 2.0)
 
     with pytest.raises(ValueError, match="unsupported keys: Z"):
         run_impedance_tuning_for_iteration(
@@ -499,7 +528,7 @@ def test_run_impedance_tuning_for_iteration_rejects_legacy_tuned_config(monkeypa
     mesh_surfaces = tmp_path / "mesh-surfaces"
     targets = tmp_path / "clinical_targets.csv"
     iteration_dir = tmp_path / "iter-01"
-    seed.write_text("{\"seed\": true}", encoding="utf-8")
+    seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
     targets.write_text("target,value\n", encoding="utf-8")
 
@@ -544,6 +573,7 @@ def test_run_impedance_tuning_for_iteration_rejects_legacy_tuned_config(monkeypa
                     bc_values={"z": [1.0], "Pd": 10.0},
                     coupled=False,
                     number_of_time_pts_per_cardiac_cycle=2,
+                    inflow_q=[3.0, 3.0],
                 )),
                 encoding="utf-8",
             )
@@ -551,6 +581,7 @@ def test_run_impedance_tuning_for_iteration_rejects_legacy_tuned_config(monkeypa
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.get_pa_outlet_scale", lambda *_args, **_kwargs: 2.0)
     monkeypatch.setattr(
         "svzerodtrees.tuning.iteration._load_tree_params",
         lambda _path: ("lpa-params", "rpa-params"),
@@ -575,7 +606,7 @@ def test_run_impedance_tuning_for_iteration_rejects_snapshot_timestep_mismatch(m
     mesh_surfaces = tmp_path / "mesh-surfaces"
     targets = tmp_path / "clinical_targets.csv"
     iteration_dir = tmp_path / "iter-01"
-    seed.write_text("{\"seed\": true}", encoding="utf-8")
+    seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
     targets.write_text("target,value\n", encoding="utf-8")
 
@@ -627,6 +658,7 @@ def test_run_impedance_tuning_for_iteration_rejects_snapshot_timestep_mismatch(m
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.get_pa_outlet_scale", lambda *_args, **_kwargs: 2.0)
 
     with pytest.raises(ValueError, match="number_of_time_pts_per_cardiac_cycle = len\\(z\\) \\+ 1"):
         run_impedance_tuning_for_iteration(
@@ -643,7 +675,7 @@ def test_run_impedance_tuning_for_iteration_rejects_coupled_tuned_config_wrong_n
     mesh_surfaces = tmp_path / "mesh-surfaces"
     targets = tmp_path / "clinical_targets.csv"
     iteration_dir = tmp_path / "iter-01"
-    seed.write_text("{\"seed\": true}", encoding="utf-8")
+    seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
     targets.write_text("target,value\n", encoding="utf-8")
 
@@ -688,6 +720,7 @@ def test_run_impedance_tuning_for_iteration_rejects_coupled_tuned_config_wrong_n
                     bc_values={"z": [1.0], "Pd": 10.0},
                     coupled=False,
                     number_of_time_pts_per_cardiac_cycle=2,
+                    inflow_q=[3.0, 3.0],
                 )),
                 encoding="utf-8",
             )
@@ -695,6 +728,7 @@ def test_run_impedance_tuning_for_iteration_rejects_coupled_tuned_config_wrong_n
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.get_pa_outlet_scale", lambda *_args, **_kwargs: 2.0)
     monkeypatch.setattr(
         "svzerodtrees.tuning.iteration._load_tree_params",
         lambda _path: ("lpa-params", "rpa-params"),
@@ -712,6 +746,319 @@ def test_run_impedance_tuning_for_iteration_rejects_coupled_tuned_config_wrong_n
             clinical_targets=targets,
             impedance_config={"tune_space": _tune_space_with_xi()},
         )
+
+
+def test_run_impedance_tuning_for_iteration_rejects_snapshot_inflow_mismatch(monkeypatch, tmp_path: Path):
+    seed = tmp_path / "simplified_nonlinear_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    iteration_dir = tmp_path / "iter-01"
+    seed.write_text(json.dumps(_seed_config_payload(inflow_q=[6.0, 6.0])), encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+
+    class DummyConfigHandler:
+        @classmethod
+        def from_json(cls, _path: str, is_pulmonary: bool = False):
+            return cls()
+
+        def to_json(self, path: str):
+            Path(path).write_text(
+                json.dumps(_impedance_artifact_payload(
+                    bc_values={"z": [1.0], "Pd": 10.0},
+                    coupled=True,
+                    number_of_time_pts=2,
+                    number_of_time_pts_per_cardiac_cycle=2,
+                )),
+                encoding="utf-8",
+            )
+
+    class DummyClinicalTargets:
+        wedge_p = 10.0
+
+        @classmethod
+        def from_csv(cls, _path: str):
+            return cls()
+
+    class DummyTuner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def tune(self, nm_iter: int = 1):
+            _ = nm_iter
+            out_dir = Path.cwd()
+            (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
+                "pa,alpha,beta,xi,d_min,lrr,diameter,compliance_model,C\n"
+                "lpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n"
+                "rpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n",
+                encoding="utf-8",
+            )
+            (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
+                json.dumps(_impedance_artifact_payload(
+                    bc_values={"z": [1.0], "Pd": 10.0},
+                    coupled=False,
+                    number_of_time_pts_per_cardiac_cycle=2,
+                    inflow_q=[6.0, 6.0],
+                )),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.get_pa_outlet_scale", lambda *_args, **_kwargs: 2.0)
+
+    with pytest.raises(ValueError, match="cardiac output mismatch"):
+        run_impedance_tuning_for_iteration(
+            iteration_dir=iteration_dir,
+            seed_config=seed,
+            mesh_surfaces=mesh_surfaces,
+            clinical_targets=targets,
+            impedance_config={"tune_space": _tune_space_with_xi()},
+        )
+
+
+def test_run_impedance_tuning_for_iteration_accepts_scaled_snapshot_inflow(monkeypatch, tmp_path: Path):
+    seed = tmp_path / "simplified_nonlinear_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    iteration_dir = tmp_path / "iter-01"
+    seed.write_text(json.dumps(_seed_config_payload(inflow_q=[6.0, 6.0])), encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+
+    class DummyConfigHandler:
+        @classmethod
+        def from_json(cls, _path: str, is_pulmonary: bool = False):
+            return cls()
+
+        def to_json(self, path: str):
+            Path(path).write_text(
+                json.dumps(_impedance_artifact_payload(
+                    bc_values={"z": [1.0], "Pd": 10.0},
+                    coupled=True,
+                    number_of_time_pts=2,
+                    number_of_time_pts_per_cardiac_cycle=2,
+                )),
+                encoding="utf-8",
+            )
+
+    class DummyClinicalTargets:
+        wedge_p = 10.0
+
+        @classmethod
+        def from_csv(cls, _path: str):
+            return cls()
+
+    class DummyTuner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def tune(self, nm_iter: int = 1):
+            _ = nm_iter
+            out_dir = Path.cwd()
+            (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
+                "pa,alpha,beta,xi,d_min,lrr,diameter,compliance_model,C\n"
+                "lpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n"
+                "rpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n",
+                encoding="utf-8",
+            )
+            (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
+                json.dumps(_impedance_artifact_payload(
+                    bc_values={"z": [1.0], "Pd": 10.0},
+                    coupled=False,
+                    number_of_time_pts_per_cardiac_cycle=2,
+                    inflow_q=[3.0, 3.0],
+                )),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.get_pa_outlet_scale", lambda *_args, **_kwargs: 2.0)
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration._load_tree_params",
+        lambda _path: ("lpa-params", "rpa-params"),
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration.construct_impedance_trees",
+        lambda *args, **kwargs: None,
+    )
+
+    result = run_impedance_tuning_for_iteration(
+        iteration_dir=iteration_dir,
+        seed_config=seed,
+        mesh_surfaces=mesh_surfaces,
+        clinical_targets=targets,
+        impedance_config={"tune_space": _tune_space_with_xi()},
+    )
+
+    assert Path(result["pa_config_snapshot"]).name == PA_CONFIG_SNAPSHOT_FILENAME
+
+
+def test_run_impedance_tuning_for_iteration_uses_unscaled_seed_inflow_when_rescale_disabled(monkeypatch, tmp_path: Path):
+    seed = tmp_path / "simplified_nonlinear_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    iteration_dir = tmp_path / "iter-01"
+    seed.write_text(json.dumps(_seed_config_payload(inflow_q=[6.0, 6.0])), encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+
+    class DummyConfigHandler:
+        @classmethod
+        def from_json(cls, _path: str, is_pulmonary: bool = False):
+            return cls()
+
+        def to_json(self, path: str):
+            Path(path).write_text(
+                json.dumps(_impedance_artifact_payload(
+                    bc_values={"z": [1.0], "Pd": 10.0},
+                    coupled=True,
+                    number_of_time_pts=2,
+                    number_of_time_pts_per_cardiac_cycle=2,
+                )),
+                encoding="utf-8",
+            )
+
+    class DummyClinicalTargets:
+        wedge_p = 10.0
+
+        @classmethod
+        def from_csv(cls, _path: str):
+            return cls()
+
+    class DummyTuner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def tune(self, nm_iter: int = 1):
+            _ = nm_iter
+            out_dir = Path.cwd()
+            (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
+                "pa,alpha,beta,xi,d_min,lrr,diameter,compliance_model,C\n"
+                "lpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n"
+                "rpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n",
+                encoding="utf-8",
+            )
+            (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
+                json.dumps(_impedance_artifact_payload(
+                    bc_values={"z": [1.0], "Pd": 10.0},
+                    coupled=False,
+                    number_of_time_pts_per_cardiac_cycle=2,
+                    inflow_q=[6.0, 6.0],
+                )),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.get_pa_outlet_scale", lambda *_args, **_kwargs: 2.0)
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration._load_tree_params",
+        lambda _path: ("lpa-params", "rpa-params"),
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration.construct_impedance_trees",
+        lambda *args, **kwargs: None,
+    )
+
+    result = run_impedance_tuning_for_iteration(
+        iteration_dir=iteration_dir,
+        seed_config=seed,
+        mesh_surfaces=mesh_surfaces,
+        clinical_targets=targets,
+        impedance_config={
+            "rescale_inflow": False,
+            "tune_space": _tune_space_with_xi(),
+        },
+    )
+
+    assert Path(result["pa_config_snapshot"]).name == PA_CONFIG_SNAPSHOT_FILENAME
+
+
+def test_run_impedance_tuning_for_iteration_uses_inflow_file_mean_source(monkeypatch, tmp_path: Path):
+    seed = tmp_path / "simplified_nonlinear_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    inflow_path = tmp_path / "inflow.csv"
+    iteration_dir = tmp_path / "iter-01"
+    seed.write_text(json.dumps(_seed_config_payload(inflow_q=[2.0, 2.0])), encoding="utf-8")
+    inflow_path.write_text("t,q\n0.0,8.0\n1.0,8.0\n", encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+
+    class DummyConfigHandler:
+        @classmethod
+        def from_json(cls, _path: str, is_pulmonary: bool = False):
+            return cls()
+
+        def to_json(self, path: str):
+            Path(path).write_text(
+                json.dumps(_impedance_artifact_payload(
+                    bc_values={"z": [1.0], "Pd": 10.0},
+                    coupled=True,
+                    number_of_time_pts=2,
+                    number_of_time_pts_per_cardiac_cycle=2,
+                )),
+                encoding="utf-8",
+            )
+
+    class DummyClinicalTargets:
+        wedge_p = 10.0
+
+        @classmethod
+        def from_csv(cls, _path: str):
+            return cls()
+
+    class DummyTuner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def tune(self, nm_iter: int = 1):
+            _ = nm_iter
+            out_dir = Path.cwd()
+            (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
+                "pa,alpha,beta,xi,d_min,lrr,diameter,compliance_model,C\n"
+                "lpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n"
+                "rpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n",
+                encoding="utf-8",
+            )
+            (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
+                json.dumps(_impedance_artifact_payload(
+                    bc_values={"z": [1.0], "Pd": 10.0},
+                    coupled=False,
+                    number_of_time_pts_per_cardiac_cycle=2,
+                    inflow_q=[4.0, 4.0],
+                )),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.get_pa_outlet_scale", lambda *_args, **_kwargs: 2.0)
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration._load_tree_params",
+        lambda _path: ("lpa-params", "rpa-params"),
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration.construct_impedance_trees",
+        lambda *args, **kwargs: None,
+    )
+
+    result = run_impedance_tuning_for_iteration(
+        iteration_dir=iteration_dir,
+        seed_config=seed,
+        mesh_surfaces=mesh_surfaces,
+        clinical_targets=targets,
+        inflow_path=inflow_path,
+        impedance_config={"tune_space": _tune_space_with_xi()},
+    )
+
+    assert Path(result["pa_config_snapshot"]).name == PA_CONFIG_SNAPSHOT_FILENAME
 
 
 def test_resolve_impedance_config_requires_explicit_tune_space():

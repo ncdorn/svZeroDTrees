@@ -137,6 +137,14 @@ class DummyImpedancePAConfig:
                     },
                     "boundary_conditions": [
                         {
+                            "bc_name": "INFLOW",
+                            "bc_type": "FLOW",
+                            "bc_values": {
+                                "Q": list(self.bcs["INFLOW"].Q),
+                                "t": list(self.bcs["INFLOW"].t),
+                            },
+                        },
+                        {
                             "bc_name": "LPA_BC",
                             "bc_type": "IMPEDANCE",
                             "bc_values": {"z": [1.0], "Pd": 12.0},
@@ -801,6 +809,223 @@ def test_impedance_tuner_loss_fn_hard_fails_timestep_mismatch_snapshot():
     loss = tuner.loss_fn(x0, pa_config)
 
     assert loss == pytest.approx(1e9)
+
+
+def test_impedance_tuner_tune_rescales_snapshot_inflow(monkeypatch, tmp_path):
+    clinical_targets = ClinicalTargets(mpa_p=[30.0, 15.0, 22.0], rpa_split=0.55, wedge_p=12.0, q=5.0)
+    tune_space = TuneSpace(
+        free=[
+            FreeParam("comp.lpa.C", init=6.6e4, lb=1.0e4, ub=2.0e5),
+            FreeParam("comp.rpa.C", init=7.0e4, lb=1.0e4, ub=2.0e5),
+        ],
+        fixed=[
+            FixedParam("lpa.alpha", 0.9),
+            FixedParam("lpa.beta", 0.6),
+            FixedParam("rpa.alpha", 0.88),
+            FixedParam("rpa.beta", 0.58),
+            FixedParam("lrr", 9.0),
+            FixedParam("d_min", 0.02),
+        ],
+        tied=[],
+    )
+    pa_config = DummyImpedancePAConfig(clinical_targets)
+
+    def _fake_prepare(self):
+        self._geom_defaults = {
+            "lpa.default_diameter": 0.30,
+            "rpa.default_diameter": 0.32,
+            "n_outlets_scale": 2.0,
+        }
+
+    def _fake_minimize(fun, x0, **_kwargs):
+        return SimpleNamespace(x=x0, fun=fun(x0))
+
+    monkeypatch.setattr(ImpedanceTuner, "_prepare_geometry_defaults", _fake_prepare)
+    monkeypatch.setattr(ImpedanceTuner, "_make_pa_config", lambda self: pa_config)
+    monkeypatch.setattr("svzerodtrees.tune_bcs.impedance_tuner.minimize", _fake_minimize)
+
+    tuner = ImpedanceTuner(
+        config_handler=SimpleNamespace(path=str(tmp_path), vessel_map={0: object()}),
+        mesh_surfaces_path="mesh",
+        clinical_targets=clinical_targets,
+        tune_space=tune_space,
+        compliance_model="constant",
+        log_file=str(tmp_path / "tune.log"),
+    )
+
+    tuner.tune(nm_iter=1)
+
+    assert pa_config.bcs["INFLOW"].Q == pytest.approx([2.5, 2.5])
+    assert tuner._expected_snapshot_cardiac_output == pytest.approx(2.5)
+
+
+def test_impedance_tuner_tune_uses_inflow_file_mean_flow_source(monkeypatch, tmp_path):
+    clinical_targets = ClinicalTargets(mpa_p=[30.0, 15.0, 22.0], rpa_split=0.55, wedge_p=12.0, q=5.0)
+    tune_space = TuneSpace(
+        free=[
+            FreeParam("comp.lpa.C", init=6.6e4, lb=1.0e4, ub=2.0e5),
+            FreeParam("comp.rpa.C", init=7.0e4, lb=1.0e4, ub=2.0e5),
+        ],
+        fixed=[
+            FixedParam("lpa.alpha", 0.9),
+            FixedParam("lpa.beta", 0.6),
+            FixedParam("rpa.alpha", 0.88),
+            FixedParam("rpa.beta", 0.58),
+            FixedParam("lrr", 9.0),
+            FixedParam("d_min", 0.02),
+        ],
+        tied=[],
+    )
+    pa_config = DummyImpedancePAConfig(clinical_targets)
+    inflow_path = tmp_path / "inflow.csv"
+    inflow_path.write_text("t,q\n0.0,8.0\n1.0,8.0\n", encoding="utf-8")
+
+    def _fake_prepare(self):
+        self._geom_defaults = {
+            "lpa.default_diameter": 0.30,
+            "rpa.default_diameter": 0.32,
+            "n_outlets_scale": 2.0,
+        }
+
+    def _fake_minimize(fun, x0, **_kwargs):
+        return SimpleNamespace(x=x0, fun=fun(x0))
+
+    monkeypatch.setattr(ImpedanceTuner, "_prepare_geometry_defaults", _fake_prepare)
+    monkeypatch.setattr(ImpedanceTuner, "_make_pa_config", lambda self: pa_config)
+    monkeypatch.setattr("svzerodtrees.tune_bcs.impedance_tuner.minimize", _fake_minimize)
+
+    tuner = ImpedanceTuner(
+        config_handler=SimpleNamespace(path=str(tmp_path), vessel_map={0: object()}),
+        mesh_surfaces_path="mesh",
+        clinical_targets=clinical_targets,
+        tune_space=tune_space,
+        compliance_model="constant",
+        log_file=str(tmp_path / "tune.log"),
+        inflow_path=str(inflow_path),
+    )
+
+    tuner.tune(nm_iter=1)
+
+    assert pa_config.bcs["INFLOW"].Q == pytest.approx([4.0, 4.0])
+    assert tuner._expected_snapshot_cardiac_output == pytest.approx(4.0)
+
+
+def test_impedance_tuner_loss_fn_hard_fails_wrong_snapshot_inflow():
+    clinical_targets = ClinicalTargets(mpa_p=[30.0, 15.0, 22.0], rpa_split=0.55, wedge_p=12.0, q=5.0)
+    tune_space = TuneSpace(
+        free=[
+            FreeParam("comp.lpa.C", init=6.6e4, lb=1.0e4, ub=2.0e5),
+            FreeParam("comp.rpa.C", init=7.0e4, lb=1.0e4, ub=2.0e5),
+            FreeParam("lpa.alpha", init=0.9, lb=0.5, ub=0.99),
+            FreeParam("lpa.beta", init=0.6, lb=0.3, ub=0.9),
+            FreeParam("rpa.alpha", init=0.88, lb=0.5, ub=0.99),
+            FreeParam("rpa.beta", init=0.58, lb=0.3, ub=0.9),
+            FreeParam("lrr", init=9.0, lb=4.0, ub=20.0),
+        ],
+        fixed=[FixedParam("d_min", 0.02)],
+        tied=[],
+    )
+    tuner = ImpedanceTuner(
+        config_handler=SimpleNamespace(),
+        mesh_surfaces_path="mesh",
+        clinical_targets=clinical_targets,
+        tune_space=tune_space,
+        compliance_model="constant",
+    )
+    tuner.n_procs = 2
+    tuner._geom_defaults = {
+        "lpa.default_diameter": 0.30,
+        "rpa.default_diameter": 0.32,
+        "n_outlets_scale": 2.0,
+    }
+    tuner._expected_snapshot_cardiac_output = 2.5
+
+    class WrongInflowSnapshotPAConfig(DummyImpedancePAConfig):
+        def to_json(self, path):
+            self.last_json = path
+            with open(path, "w", encoding="utf-8") as ff:
+                json.dump(
+                    {
+                        "simulation_parameters": {
+                            "number_of_time_pts_per_cardiac_cycle": 2,
+                            "number_of_cardiac_cycles": 1,
+                            "output_all_cycles": False,
+                        },
+                        "boundary_conditions": [
+                            {
+                                "bc_name": "INFLOW",
+                                "bc_type": "FLOW",
+                                "bc_values": {
+                                    "Q": [5.0, 5.0],
+                                    "t": [0.0, 1.0],
+                                },
+                            },
+                            {
+                                "bc_name": "LPA_BC",
+                                "bc_type": "IMPEDANCE",
+                                "bc_values": {"z": [1.0], "Pd": 12.0},
+                            },
+                            {
+                                "bc_name": "RPA_BC",
+                                "bc_type": "IMPEDANCE",
+                                "bc_values": {"z": [1.0], "Pd": 12.0},
+                            },
+                        ],
+                    },
+                    ff,
+                )
+
+    pa_config = WrongInflowSnapshotPAConfig(clinical_targets)
+    x0, _ = tune_space.pack_init_and_bounds()
+
+    loss = tuner.loss_fn(x0, pa_config)
+
+    assert loss == pytest.approx(1e9)
+
+
+def test_impedance_tuner_tune_rejects_invalid_outlet_scale(monkeypatch, tmp_path):
+    clinical_targets = ClinicalTargets(mpa_p=[30.0, 15.0, 22.0], rpa_split=0.55, wedge_p=12.0, q=5.0)
+    tune_space = TuneSpace(
+        free=[
+            FreeParam("comp.lpa.C", init=6.6e4, lb=1.0e4, ub=2.0e5),
+            FreeParam("comp.rpa.C", init=7.0e4, lb=1.0e4, ub=2.0e5),
+        ],
+        fixed=[
+            FixedParam("lpa.alpha", 0.9),
+            FixedParam("lpa.beta", 0.6),
+            FixedParam("rpa.alpha", 0.88),
+            FixedParam("rpa.beta", 0.58),
+            FixedParam("lrr", 9.0),
+            FixedParam("d_min", 0.02),
+        ],
+        tied=[],
+    )
+
+    def _fake_prepare(self):
+        self._geom_defaults = {
+            "lpa.default_diameter": 0.30,
+            "rpa.default_diameter": 0.32,
+            "n_outlets_scale": 0.0,
+        }
+
+    monkeypatch.setattr(ImpedanceTuner, "_prepare_geometry_defaults", _fake_prepare)
+    monkeypatch.setattr(
+        ImpedanceTuner,
+        "_make_pa_config",
+        lambda self: DummyImpedancePAConfig(clinical_targets),
+    )
+
+    tuner = ImpedanceTuner(
+        config_handler=SimpleNamespace(path=str(tmp_path), vessel_map={0: object()}),
+        mesh_surfaces_path="mesh",
+        clinical_targets=clinical_targets,
+        tune_space=tune_space,
+        compliance_model="constant",
+        log_file=str(tmp_path / "tune.log"),
+    )
+
+    with pytest.raises(ValueError, match="invalid pulmonary outlet scale"):
+        tuner.tune(nm_iter=1)
 
 
 def test_impedance_tuner_grid_search_init_selects_best_candidate(monkeypatch):

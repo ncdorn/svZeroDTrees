@@ -735,5 +735,11 @@ if __name__=='__main__':
     plt.show()
 
 
+def mean_flow_from_path(path, *, flip_sign=False):
+    inflow = Inflow.periodic(path=path, flip_sign=flip_sign)
+    period_flow, _ = inflow.period()
+    return float(np.mean(np.asarray(period_flow, dtype=float)))
+
+
 
     

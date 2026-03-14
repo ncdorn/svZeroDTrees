@@ -131,6 +131,7 @@ class TuneBCsWorkflow:
                 grid_search_init=True,
                 log_file=os.path.join(paths.root, "stree_impedance_optimization.log"),
                 n_procs=24,
+                inflow_path=paths.inflow,
             )
             tuner.tune(nm_iter=5)
             output_csv = os.path.join(paths.root, "optimized_params.csv")

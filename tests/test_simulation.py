@@ -196,6 +196,18 @@ def test_simulation_reloads_inflow_when_file_changes(simulation_env):
     assert sim.inflow.q == simulation_env.inflow_factory.default_q
 
 
+def test_simulation_uses_file_mean_flow_for_0d_scaling(simulation_env):
+    sim_mod = simulation_env.module
+    inflow_file = simulation_env.tmp_path / "inflow.csv"
+    inflow_file.write_text("t,q\n0,0\n1,1\n")
+
+    simulation_env.inflow_factory.default_q = [1.0, 5.0, 7.0]
+    sim = sim_mod.Simulation(path=simulation_env.tmp_path, inflow_path=str(inflow_file))
+
+    assert sim._inflow_file_mean_flow == pytest.approx(float(np.mean([1.0, 5.0, 7.0])))
+    assert sim.inflow_0d.rescale_calls[-1]["cardiac_output"] == pytest.approx(float(np.mean([1.0, 5.0, 7.0])))
+
+
 def test_run_pipeline_updates_config_with_new_inflow(simulation_env):
     sim_mod = simulation_env.module
     tmp_path = simulation_env.tmp_path
