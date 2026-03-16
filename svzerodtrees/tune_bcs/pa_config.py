@@ -3,7 +3,6 @@ import copy
 import json
 import pysvzerod
 import numpy as np
-from scipy.integrate import trapz
 from scipy.optimize import minimize, Bounds
 import math
 import matplotlib.pyplot as plt
@@ -454,7 +453,7 @@ class PAConfig():
         # rpa flow, for flow split optimization
         self.Q_rpa = get_branch_result(self.result, 'flow_in', 3, steady=True)
 
-        self.Q_rpa = trapz(get_branch_result(self.result, 'flow_in', 3, steady=False), self.result['time'])
+        self.Q_rpa = np.trapz(get_branch_result(self.result, 'flow_in', 3, steady=False), self.result['time'])
 
         # mpa pressure
         P_mpa = [p / 1333.2 for p in get_branch_result(self.result, 'pressure_in', 0, steady=False)]
@@ -503,7 +502,7 @@ class PAConfig():
         # rpa flow, for flow split optimization
         self.Q_rpa = get_branch_result(self.result, 'flow_in', 3, steady=True)
 
-        self.Q_rpa = trapz(get_branch_result(self.result, 'flow_in', 3, steady=False), self.result['time'])
+        self.Q_rpa = np.trapz(get_branch_result(self.result, 'flow_in', 3, steady=False), self.result['time'])
 
         # mpa pressure
         P_mpa = [p / 1333.2 for p in get_branch_result(self.result, 'pressure_in', 0, steady=False)]

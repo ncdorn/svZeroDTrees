@@ -1,7 +1,7 @@
 from svzerodtrees.utils import *
 import pickle
 import json
-from scipy.integrate import trapz
+import numpy as np
 
 # TODO: likely delete this, it is currently not imported by __init__.py
 
@@ -276,7 +276,7 @@ class ResultHandler:
         
         t = self.results[timestep]['time']
 
-        cardiac_output = trapz(q_in, t)
+        cardiac_output = np.trapz(q_in, t)
 
         return cardiac_output
     

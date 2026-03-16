@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.integrate import trapz
 import scipy
 import sys
 from .blocks import BoundaryCondition
@@ -604,7 +603,7 @@ class Inflow():
         :param cardiac_output: the desired cardiac output in ml/s
         '''
         if cardiac_output is not None:
-            curr_cardiac_output = trapz(self.period()[0], self.period()[1])
+            curr_cardiac_output = np.trapz(self.period()[0], self.period()[1])
             scale_factor = cardiac_output / curr_cardiac_output
             self.q = [q * scale_factor for q in self.q]
 
@@ -711,7 +710,7 @@ class Inflow():
         '''
         return the cardiac output of the flow waveform'''
 
-        return trapz(self.period()[0], self.period()[1])
+        return np.trapz(self.period()[0], self.period()[1])
 
         
 
