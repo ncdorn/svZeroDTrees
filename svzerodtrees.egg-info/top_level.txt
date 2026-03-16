@@ -1,7 +1,0 @@
-build
-data
-docs
-examples
-svzerodtrees
-tests
-workflows
