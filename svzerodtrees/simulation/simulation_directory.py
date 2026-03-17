@@ -310,6 +310,7 @@ class SimulationDirectory:
                 self.svzerod_3Dcoupling.simparams.external_step_size = dt
                 if inflow_period is not None:
                     self.svzerod_3Dcoupling.simparams.cardiac_period = inflow_period
+                self.svzerod_3Dcoupling.regenerate_impedance_bcs_for_coupled_timing()
                 self.svzerod_3Dcoupling.to_json(self.svzerod_3Dcoupling.path)
             self.svFSIxml.write(self.mesh_complete,
                                 n_tsteps=n_tsteps,

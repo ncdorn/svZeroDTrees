@@ -4,6 +4,7 @@ import os
 import math
 from svzerodtrees.utils import *
 from .blocks.boundary_condition import (
+    resolve_coupled_impedance_kernel_steps,
     validate_boundary_condition_configs,
     validate_impedance_timing_config,
 )
@@ -320,6 +321,103 @@ class ConfigHandler():
             "cardiac_period": cardiac_period,
         }
 
+    def _resolve_impedance_tree_metadata(self):
+        impedance_bc_names = {
+            name for name, bc in self.bcs.items() if getattr(bc, "type", None) == "IMPEDANCE"
+        }
+        if not impedance_bc_names:
+            return []
+        if not self.tree_params:
+            raise RuntimeError(
+                "IMPEDANCE boundary conditions require reconstructable tree metadata "
+                "in the top-level 'trees' section. Regenerate the tuned config with "
+                "the updated svZeroDTrees version."
+            )
+
+        tree_entries = []
+        covered_bc_names = set()
+        missing_metadata = []
+        for tree_name, metadata in self.tree_params.items():
+            if not isinstance(metadata, dict):
+                missing_metadata.append(str(tree_name))
+                continue
+            outlet_mapping = metadata.get("outlet_mapping")
+            if not isinstance(outlet_mapping, dict):
+                missing_metadata.append(str(tree_name))
+                continue
+            bc_names = outlet_mapping.get("bc_names")
+            if not isinstance(bc_names, list) or not bc_names:
+                missing_metadata.append(str(tree_name))
+                continue
+            tree_entries.append((tree_name, metadata, outlet_mapping, list(bc_names)))
+            covered_bc_names.update(str(name) for name in bc_names)
+
+        if missing_metadata:
+            missing = ", ".join(sorted(missing_metadata))
+            raise RuntimeError(
+                "IMPEDANCE boundary conditions require rebuild metadata for every "
+                f"tree. Missing outlet mapping for: {missing}. Regenerate the tuned "
+                "config with the updated svZeroDTrees version."
+            )
+
+        missing_bc_names = sorted(impedance_bc_names - covered_bc_names)
+        if missing_bc_names:
+            raise RuntimeError(
+                "IMPEDANCE boundary conditions are missing tree rebuild metadata for: "
+                + ", ".join(missing_bc_names)
+            )
+        return tree_entries
+
+    def regenerate_impedance_bcs_for_coupled_timing(self):
+        impedance_bcs = {
+            name: bc for name, bc in self.bcs.items() if getattr(bc, "type", None) == "IMPEDANCE"
+        }
+        if not impedance_bcs:
+            return
+
+        cardiac_period = self._resolve_coupled_cardiac_period()
+        external_step_size = getattr(self.simparams, "external_step_size", None)
+        kernel_steps = resolve_coupled_impedance_kernel_steps(
+            cardiac_period=cardiac_period,
+            external_step_size=external_step_size,
+        )
+        time_array = np.linspace(0.0, float(cardiac_period), kernel_steps + 1).tolist()
+
+        from ..microvasculature import StructuredTree
+
+        updated_bcs = dict(self.bcs)
+        updated_inductance = dict(self.bc_inductance)
+        rebuilt_bc_names = set()
+
+        for tree_name, metadata, outlet_mapping, bc_names in self._resolve_impedance_tree_metadata():
+            tree = StructuredTree.from_tree_metadata(
+                metadata,
+                time=time_array,
+                simparams=self.simparams,
+            )
+            tree.compute_olufsen_impedance(tsteps=kernel_steps)
+
+            for bc_name in bc_names:
+                if bc_name not in impedance_bcs:
+                    raise RuntimeError(
+                        f"tree metadata for '{tree_name}' references unknown IMPEDANCE BC '{bc_name}'"
+                    )
+                pd = float(impedance_bcs[bc_name].values.get("Pd", 0.0))
+                updated_bcs[bc_name] = tree.create_impedance_bc(bc_name, 0, pd)
+                updated_inductance[bc_name] = float(
+                    metadata.get("inductance", getattr(tree, "inductance", 0.0)) or 0.0
+                )
+                rebuilt_bc_names.add(bc_name)
+
+        missing_bc_names = sorted(set(impedance_bcs) - rebuilt_bc_names)
+        if missing_bc_names:
+            raise RuntimeError(
+                "Failed to regenerate IMPEDANCE BCs for: " + ", ".join(missing_bc_names)
+            )
+
+        self.bcs = updated_bcs
+        self.bc_inductance = updated_inductance
+
 
     def plot_inflow(self):
         '''
@@ -602,6 +700,12 @@ class ConfigHandler():
         if 'trees' in self._config.keys():
             for tree_params in self._config['trees']:
                 self.tree_params[tree_params['name']] = tree_params
+                outlet_mapping = tree_params.get("outlet_mapping", {})
+                bc_names = outlet_mapping.get("bc_names", [])
+                inductance = float(tree_params.get("inductance", 0.0) or 0.0)
+                if isinstance(bc_names, list):
+                    for bc_name in bc_names:
+                        self.bc_inductance[str(bc_name)] = inductance
 
         # find the root vessel
         if self._config['vessels'] != []:

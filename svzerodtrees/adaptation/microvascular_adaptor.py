@@ -528,16 +528,11 @@ class MicrovascularAdaptor:
         time_array = self.preop_simdir.svzerod_3Dcoupling.bcs['INFLOW'].t
 
         for name, params in self.preop_simdir.svzerod_3Dcoupling.tree_params.items():
-            tree = StructuredTree(name=name, time=time_array, simparams=None)
             print(f'building {name} tree with parameters: {params}')
-            tree.build(
-                initial_d=params['initial_d'],
-                d_min=params['d_min'],
-                lrr=params.get('lrr', _DEFAULT_LRR),
-                alpha=params.get('alpha'),
-                beta=params.get('beta'),
-                xi=params.get('xi'),
-                eta_sym=params.get('eta_sym'),
+            tree = StructuredTree.from_tree_metadata(
+                params,
+                time=time_array,
+                simparams=self.preop_simdir.svzerod_3Dcoupling.simparams,
             )
 
     def createImpedanceBCs(self):

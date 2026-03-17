@@ -9,6 +9,18 @@ from .utils import *
 
 # this is where the logic for assigning boundary conditions to the 3D model is implemented
 
+
+def _attach_tree_metadata(tree, params, *, generation_mode, side, bc_names, outlet_names):
+    tree.inductance = float(params.inductance)
+    tree.generation_mode = generation_mode
+    tree.outlet_mapping = {
+        "mode": generation_mode,
+        "side": side,
+        "bc_names": list(bc_names),
+        "outlet_names": list(outlet_names),
+    }
+    return tree.to_dict()
+
 def construct_impedance_trees(config_handler, 
                               mesh_surfaces_path, 
                               wedge_pressure, 
@@ -106,9 +118,6 @@ def construct_impedance_trees(config_handler,
         lpa_tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
         lpa_tree.plot_stiffness(path='lpa_stiffness_plot.png')
 
-        # add tree to config handler
-        config_handler.tree_params[lpa_tree.name] = lpa_tree.to_dict()
-
         rpa_tree = StructuredTree(name='RPA', time=time_array, simparams=config_handler.simparams, compliance_model=rpa_params.compliance_model)
         print(f'building RPA tree with rpa parameters: {rpa_params.summary()}')
 
@@ -124,29 +133,53 @@ def construct_impedance_trees(config_handler,
         rpa_tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
         rpa_tree.plot_stiffness(path='rpa_stiffness_plot.png')
 
-        # add tree to config handler
-        print(rpa_tree.to_dict())
-        config_handler.tree_params[rpa_tree.name] = rpa_tree.to_dict()
+        lpa_bc_names = []
+        lpa_outlet_names = []
+        rpa_bc_names = []
+        rpa_outlet_names = []
 
         # distribute the impedance to lpa and rpa specifically
         for idx, (cap_name, area) in enumerate(cap_info.items()):
             print(f'generating tree {idx + 1} of {len(cap_info)} for cap {cap_name}...')
             if 'lpa' in cap_name.lower():
+                bc_name = cap_to_bc[cap_name]
                 config_handler.bcs[cap_to_bc[cap_name]] = lpa_tree.create_impedance_bc(
-                    cap_to_bc[cap_name],
+                    bc_name,
                     0,
                     wedge_pressure * 1333.2,
                 )
-                config_handler.bc_inductance[cap_to_bc[cap_name]] = lpa_params.inductance
+                config_handler.bc_inductance[bc_name] = lpa_params.inductance
+                lpa_bc_names.append(bc_name)
+                lpa_outlet_names.append(cap_name)
             elif 'rpa' in cap_name.lower():
+                bc_name = cap_to_bc[cap_name]
                 config_handler.bcs[cap_to_bc[cap_name]] = rpa_tree.create_impedance_bc(
-                    cap_to_bc[cap_name],
+                    bc_name,
                     1,
                     wedge_pressure * 1333.2,
                 )
-                config_handler.bc_inductance[cap_to_bc[cap_name]] = rpa_params.inductance
+                config_handler.bc_inductance[bc_name] = rpa_params.inductance
+                rpa_bc_names.append(bc_name)
+                rpa_outlet_names.append(cap_name)
             else:
                 raise ValueError('cap name not recognized')
+
+        config_handler.tree_params[lpa_tree.name] = _attach_tree_metadata(
+            lpa_tree,
+            lpa_params,
+            generation_mode="shared_by_side",
+            side="lpa",
+            bc_names=lpa_bc_names,
+            outlet_names=lpa_outlet_names,
+        )
+        config_handler.tree_params[rpa_tree.name] = _attach_tree_metadata(
+            rpa_tree,
+            rpa_params,
+            generation_mode="shared_by_side",
+            side="rpa",
+            bc_names=rpa_bc_names,
+            outlet_names=rpa_outlet_names,
+        )
             
     else:
         '''build a unique tree for each outlet'''
@@ -186,9 +219,6 @@ def construct_impedance_trees(config_handler,
             # compute the impedance in frequency domain
             tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
 
-            # add tree to config handler
-            config_handler.tree_params[tree.name] = tree.to_dict()
-
             bc_name = cap_to_bc[cap_name]
 
             config_handler.bcs[bc_name] = tree.create_impedance_bc(
@@ -197,6 +227,14 @@ def construct_impedance_trees(config_handler,
                 wedge_pressure * 1333.2,
             )
             config_handler.bc_inductance[bc_name] = params.inductance
+            config_handler.tree_params[tree.name] = _attach_tree_metadata(
+                tree,
+                params,
+                generation_mode="per_outlet",
+                side="lpa" if 'lpa' in cap_name.lower() else "rpa",
+                bc_names=[bc_name],
+                outlet_names=[cap_name],
+            )
 
 
 def assign_rcr_bcs(config_handler, 

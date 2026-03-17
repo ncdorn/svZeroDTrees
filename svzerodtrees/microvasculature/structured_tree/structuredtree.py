@@ -10,7 +10,7 @@ from .io import _json_sanitize, to_block_dict
 from .results import StructuredTreeResults
 from ..compliance import *
 from multiprocessing import Pool
-from typing import Optional, Literal
+from typing import Any, Mapping, Optional, Literal
 import json
 import pickle
 import math
@@ -98,6 +98,134 @@ class StructuredTree:
                 "adaptations": 0
             }
 
+    @staticmethod
+    def _serialize_optional_float(value):
+        if value is None:
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return value
+        return numeric
+
+    @staticmethod
+    def _coerce_serializable_mapping(mapping: Mapping[str, Any] | None) -> dict[str, Any] | None:
+        if mapping is None:
+            return None
+        serialized: dict[str, Any] = {}
+        for key, value in mapping.items():
+            if isinstance(value, Mapping):
+                serialized[str(key)] = StructuredTree._coerce_serializable_mapping(value)
+            elif isinstance(value, (list, tuple)):
+                serialized[str(key)] = [
+                    StructuredTree._coerce_serializable_mapping(entry)
+                    if isinstance(entry, Mapping)
+                    else entry
+                    for entry in value
+                ]
+            else:
+                serialized[str(key)] = value
+        return serialized
+
+    @staticmethod
+    def _compliance_model_from_metadata(metadata: Mapping[str, Any]) -> ComplianceModel:
+        if not isinstance(metadata, Mapping):
+            raise ValueError("tree metadata must include a compliance mapping")
+
+        model_name = str(metadata.get("model", "")).strip()
+        params = metadata.get("params", {})
+        if not isinstance(params, Mapping):
+            raise ValueError("tree metadata compliance.params must be a mapping")
+
+        if model_name == "OlufsenCompliance":
+            for key in ("k1", "k2", "k3"):
+                if key not in params:
+                    raise ValueError(
+                        f"tree metadata for OlufsenCompliance requires compliance.params.{key}"
+                    )
+            return OlufsenCompliance(
+                k1=float(params["k1"]),
+                k2=float(params["k2"]),
+                k3=float(params["k3"]),
+            )
+
+        if model_name == "ConstantCompliance":
+            if "value" in params:
+                value = params["value"]
+            elif "Eh/r" in params:
+                value = params["Eh/r"]
+            else:
+                raise ValueError(
+                    "tree metadata for ConstantCompliance requires compliance.params.value or compliance.params['Eh/r']"
+                )
+            return ConstantCompliance(float(value))
+
+        raise ValueError(
+            "tree metadata compliance.model must be 'OlufsenCompliance' or "
+            f"'ConstantCompliance'; got {model_name or '<missing>'}"
+        )
+
+    @classmethod
+    def from_tree_metadata(
+        cls,
+        metadata: Mapping[str, Any],
+        *,
+        time: list[float],
+        simparams: SimParams,
+    ) -> "StructuredTree":
+        if not isinstance(metadata, Mapping):
+            raise ValueError("tree metadata must be a mapping")
+
+        missing = [
+            key
+            for key in ("name", "initial_d", "d_min", "lrr", "compliance")
+            if key not in metadata
+        ]
+        if missing:
+            raise ValueError(
+                "tree metadata is missing required fields: " + ", ".join(missing)
+            )
+
+        compliance_model = cls._compliance_model_from_metadata(metadata["compliance"])
+        tree = cls(
+            name=str(metadata["name"]),
+            time=time,
+            simparams=simparams,
+            diameter=float(metadata["initial_d"]),
+            compliance_model=compliance_model,
+        )
+        tree.build(
+            initial_d=float(metadata["initial_d"]),
+            d_min=float(metadata["d_min"]),
+            lrr=float(metadata["lrr"]),
+            alpha=(
+                float(metadata["alpha"])
+                if metadata.get("alpha") is not None
+                else None
+            ),
+            beta=(
+                float(metadata["beta"])
+                if metadata.get("beta") is not None
+                else None
+            ),
+            xi=(
+                float(metadata["xi"])
+                if metadata.get("xi") is not None
+                else None
+            ),
+            eta_sym=(
+                float(metadata["eta_sym"])
+                if metadata.get("eta_sym") is not None
+                else None
+            ),
+        )
+        tree.inductance = float(metadata.get("inductance", 0.0) or 0.0)
+        tree.outlet_mapping = cls._coerce_serializable_mapping(
+            metadata.get("outlet_mapping")
+        )
+        tree.generation_mode = metadata.get("generation_mode")
+        return tree
+
 
     @classmethod
     def from_outlet_vessel(cls,
@@ -184,12 +312,29 @@ class StructuredTree:
 
         params = {
             "name": self.name,
-            "initial_d": self.diameter,
+            "initial_d": float(getattr(self, "initial_d", self.diameter)),
+            "d_min": self._serialize_optional_float(getattr(self, "d_min", None)),
+            "lrr": self._serialize_optional_float(getattr(self, "lrr", None)),
+            "alpha": self._serialize_optional_float(getattr(self, "alpha", None)),
+            "beta": self._serialize_optional_float(getattr(self, "beta", None)),
+            "xi": self._serialize_optional_float(getattr(self, "xi", None)),
+            "eta_sym": self._serialize_optional_float(getattr(self, "eta_sym", None)),
+            "inductance": self._serialize_optional_float(
+                getattr(self, "inductance", 0.0)
+            ),
             "compliance": {
                 "model": self.compliance_model.description(),
                 "params": self.compliance_model.params,
-            }
+            },
         }
+        outlet_mapping = self._coerce_serializable_mapping(
+            getattr(self, "outlet_mapping", None)
+        )
+        if outlet_mapping is not None:
+            params["outlet_mapping"] = outlet_mapping
+        generation_mode = getattr(self, "generation_mode", None)
+        if generation_mode is not None:
+            params["generation_mode"] = generation_mode
         return params
 
 

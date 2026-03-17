@@ -1,10 +1,12 @@
 import io
 import builtins
 import json
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
 from types import SimpleNamespace
+import pysvzerod
 
 import svzerodtrees.tune_bcs.rcr_tuner as rcr_module
 
@@ -16,6 +18,7 @@ from svzerodtrees.tune_bcs.clinical_targets import ClinicalTargets
 import svzerodtrees.tune_bcs.pa_config as pa_config_module
 from svzerodtrees.tune_bcs.pa_config import PAConfig
 from svzerodtrees.io.config_handler import ConfigHandler
+from svzerodtrees.microvasculature.structured_tree.structuredtree import StructuredTree
 from svzerodtrees.tune_bcs.tune_space import (
     FreeParam,
     FixedParam,
@@ -364,7 +367,7 @@ def test_config_handler_to_json_canonicalizes_coupled_simulation_parameters(tmp_
     }
 
 
-def test_coupled_config_uses_inflow_samples_for_time_series_and_kernel_contract(tmp_path):
+def test_coupled_config_uses_inflow_samples_for_time_series_and_dt_for_kernel_contract(tmp_path):
     config_handler = ConfigHandler.blank_threed_coupler(str(tmp_path / "blank.json"))
     config_handler.simparams.external_step_size = 0.5
     config_handler.simparams.cardiac_period = 1.0
@@ -381,14 +384,14 @@ def test_coupled_config_uses_inflow_samples_for_time_series_and_kernel_contract(
         {
             "bc_name": "OUT",
             "bc_type": "IMPEDANCE",
-            "bc_values": {"z": [100.0], "Pd": 12.0},
+            "bc_values": {"z": [100.0, 100.0], "Pd": 12.0},
         }
     )
 
     sample_count, kernel_steps = resolve_coupled_impedance_timepoint_contract(config_handler.config)
 
     assert sample_count == 2
-    assert kernel_steps == 1
+    assert kernel_steps == 2
     assert config_handler.get_time_series().tolist() == pytest.approx([0.0, 1.0])
 
 
@@ -617,6 +620,153 @@ def test_impedance_tuning_with_inductance_builds_valid_threed_config(monkeypatch
         "external_step_size": pytest.approx(1.0 / (pa_config.simparams.number_of_time_pts_per_cardiac_cycle - 1)),
         "cardiac_period": pytest.approx(1.0),
     }
+
+
+def _build_serialized_tree_metadata(*, name, bc_name, side):
+    tree = StructuredTree(
+        name=name,
+        time=[0.0, 0.5, 1.0],
+        simparams=SimParams({}),
+        compliance_model=ConstantCompliance(6.6e4),
+    )
+    tree.build(initial_d=0.3, d_min=0.01, alpha=0.9, beta=0.6, lrr=10.0)
+    tree.inductance = 0.05
+    tree.generation_mode = "shared_by_side"
+    tree.outlet_mapping = {
+        "mode": "shared_by_side",
+        "side": side,
+        "bc_names": [bc_name],
+        "outlet_names": [f"{name}.vtp"],
+    }
+    return tree.to_dict()
+
+
+def test_noncoupled_impedance_config_with_tree_metadata_remains_solver_compatible(tmp_path):
+    config_path = Path(__file__).with_name("example_pa_config.json")
+    config_handler = ConfigHandler.from_json(str(config_path), is_pulmonary=True)
+    config_handler.tree_params = {
+        "LPA": _build_serialized_tree_metadata(
+            name="LPA",
+            bc_name="LPA_BC",
+            side="lpa",
+        )
+    }
+
+    output_path = tmp_path / "noncoupled_with_trees.json"
+    config_handler.to_json(str(output_path))
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    result = pysvzerod.simulate(payload)
+
+    assert not result.empty
+    assert "trees" in payload
+    assert payload["trees"][0]["outlet_mapping"]["bc_names"] == ["LPA_BC"]
+
+
+def test_regenerate_impedance_bcs_for_coupled_timing_preserves_solver_bc_schema(monkeypatch, tmp_path):
+    config_handler = ConfigHandler.blank_threed_coupler(str(tmp_path / "threed.json"))
+    config_handler.simparams.external_step_size = 0.0004
+    config_handler.simparams.cardiac_period = 0.8
+    config_handler.bcs = {
+        "INFLOW": BoundaryCondition.from_config(
+            {
+                "bc_name": "INFLOW",
+                "bc_type": "FLOW",
+                "bc_values": {
+                    "Q": [5.0, 5.0],
+                    "t": [0.0, 0.8],
+                },
+            }
+        ),
+        "IMPEDANCE_0": BoundaryCondition.from_config(
+            {
+                "bc_name": "IMPEDANCE_0",
+                "bc_type": "IMPEDANCE",
+                "bc_values": {
+                    "z": [1.0] * 499,
+                    "Pd": 12.0,
+                },
+            }
+        ),
+        "IMPEDANCE_1": BoundaryCondition.from_config(
+            {
+                "bc_name": "IMPEDANCE_1",
+                "bc_type": "IMPEDANCE",
+                "bc_values": {
+                    "z": [2.0] * 499,
+                    "Pd": 12.0,
+                },
+            }
+        ),
+    }
+    config_handler.tree_params = {
+        "LPA": _build_serialized_tree_metadata(
+            name="LPA",
+            bc_name="IMPEDANCE_0",
+            side="lpa",
+        ),
+        "RPA": _build_serialized_tree_metadata(
+            name="RPA",
+            bc_name="IMPEDANCE_1",
+            side="rpa",
+        ),
+    }
+
+    def _fake_compute(self, n_procs=None, tsteps=None, **kwargs):
+        self.Z_t = np.linspace(0.0, 1.0, int(tsteps), dtype=float)
+        return self.Z_t, self.time
+
+    monkeypatch.setattr(StructuredTree, "compute_olufsen_impedance", _fake_compute)
+
+    config_handler.regenerate_impedance_bcs_for_coupled_timing()
+
+    assert len(config_handler.bcs["IMPEDANCE_0"].values["z"]) == 2000
+    assert len(config_handler.bcs["IMPEDANCE_1"].values["z"]) == 2000
+    for bc_name in ("IMPEDANCE_0", "IMPEDANCE_1"):
+        assert set(config_handler.bcs[bc_name].values.keys()) <= {
+            "z",
+            "Pd",
+            "convolution_mode",
+            "num_kernel_terms",
+        }
+
+    config_handler.to_json(str(tmp_path / "regenerated_threed.json"))
+
+
+def test_coupled_impedance_validation_uses_period_over_dt_as_source_of_truth():
+    payload = {
+        "simulation_parameters": {
+            "coupled_simulation": True,
+            "number_of_time_pts": 2,
+            "output_all_cycles": True,
+            "steady_initial": False,
+            "density": 1.06,
+            "viscosity": 0.04,
+            "external_step_size": 0.0004,
+            "cardiac_period": 0.8,
+        },
+        "boundary_conditions": [
+            {
+                "bc_name": "INFLOW",
+                "bc_type": "FLOW",
+                "bc_values": {
+                    "Q": [5.0, 5.0],
+                    "t": [0.0, 0.8],
+                },
+            },
+            {
+                "bc_name": "IMPEDANCE_0",
+                "bc_type": "IMPEDANCE",
+                "bc_values": {
+                    "z": [1.0] * 499,
+                    "Pd": 12.0,
+                },
+            },
+        ],
+    }
+
+    with pytest.raises(ValueError, match=r"expected 2000, got 499"):
+        resolve_coupled_impedance_timepoint_contract(payload)
 
 
 def test_impedance_tuner_build_tree_params_uses_xi_eta_sym():

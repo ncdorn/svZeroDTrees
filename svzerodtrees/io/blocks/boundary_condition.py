@@ -67,6 +67,49 @@ def _ensure_positive_int(value, *, field_name: str) -> int:
     return numeric
 
 
+def resolve_coupled_impedance_kernel_steps(
+    *,
+    cardiac_period,
+    external_step_size,
+    rel_tol: float = 1.0e-8,
+    abs_tol: float = 1.0e-10,
+) -> int:
+    period = _ensure_finite_numeric(
+        cardiac_period,
+        label="simulation_parameters.cardiac_period",
+    )
+    if period <= 0.0:
+        raise ValueError("simulation_parameters.cardiac_period must be > 0")
+
+    step_size = _ensure_finite_numeric(
+        external_step_size,
+        label="simulation_parameters.external_step_size",
+    )
+    if step_size <= 0.0:
+        raise ValueError("simulation_parameters.external_step_size must be > 0")
+
+    period_over_dt = period / step_size
+    rounded_steps = int(round(period_over_dt))
+    if rounded_steps <= 0:
+        raise ValueError(
+            "coupled IMPEDANCE boundary conditions require cardiac_period / "
+            "external_step_size > 0"
+        )
+    if not math.isclose(
+        period_over_dt,
+        float(rounded_steps),
+        rel_tol=rel_tol,
+        abs_tol=abs_tol,
+    ):
+        raise ValueError(
+            "coupled IMPEDANCE boundary conditions require cardiac_period / "
+            "external_step_size to be an integer; got "
+            f"cardiac_period={period:.12g}, external_step_size={step_size:.12g}, "
+            f"ratio={period_over_dt:.12g}"
+        )
+    return rounded_steps
+
+
 def validate_impedance_bc_values(values: Mapping, *, bc_name: str) -> dict:
     if not isinstance(values, Mapping):
         raise ValueError(
@@ -419,24 +462,15 @@ def resolve_coupled_impedance_timepoint_contract(config: Mapping) -> tuple[int, 
             "coupled config with IMPEDANCE boundary conditions requires "
             "simulation_parameters.external_step_size"
         )
-    external_step_size = _ensure_finite_numeric(
-        simparams.get("external_step_size"),
-        label="simulation_parameters.external_step_size",
-    )
-    if external_step_size <= 0.0:
-        raise ValueError("simulation_parameters.external_step_size must be > 0")
-
     if simparams.get("cardiac_period") is None:
         raise ValueError(
             "coupled config with IMPEDANCE boundary conditions requires "
             "simulation_parameters.cardiac_period"
         )
-    cardiac_period = _ensure_finite_numeric(
-        simparams.get("cardiac_period"),
-        label="simulation_parameters.cardiac_period",
+    expected_kernel_steps = resolve_coupled_impedance_kernel_steps(
+        cardiac_period=simparams.get("cardiac_period"),
+        external_step_size=simparams.get("external_step_size"),
     )
-    if cardiac_period <= 0.0:
-        raise ValueError("simulation_parameters.cardiac_period must be > 0")
 
     validated_bcs = validate_boundary_condition_configs(
         config.get("boundary_conditions", [])
@@ -456,8 +490,15 @@ def resolve_coupled_impedance_timepoint_contract(config: Mapping) -> tuple[int, 
             "coupled IMPEDANCE boundary conditions must all use the same len(z); got "
             + ", ".join(str(size) for size in sorted(kernel_sizes))
         )
+    kernel_size = next(iter(kernel_sizes))
+    if kernel_size != expected_kernel_steps:
+        raise ValueError(
+            "coupled IMPEDANCE boundary conditions require len(z) to match "
+            "cardiac_period / external_step_size; "
+            f"expected {expected_kernel_steps}, got {kernel_size}"
+        )
 
-    return sample_count, next(iter(kernel_sizes))
+    return sample_count, kernel_size
 
 
 def validate_impedance_timing_config(config: Mapping) -> None:

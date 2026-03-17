@@ -123,6 +123,33 @@ def test_segment_resistances_matches_poiseuille(simple_tree):
     np.testing.assert_allclose(resistances, expected)
 
 
+def test_tree_metadata_round_trip_preserves_rebuild_inputs(simple_tree):
+    simple_tree.inductance = 0.05
+    simple_tree.generation_mode = "per_outlet"
+    simple_tree.outlet_mapping = {
+        "mode": "per_outlet",
+        "side": "lpa",
+        "bc_names": ["IMPEDANCE_0"],
+        "outlet_names": ["LPA_0.vtp"],
+    }
+
+    metadata = simple_tree.to_dict()
+    rebuilt = StructuredTree.from_tree_metadata(
+        metadata,
+        time=[0.0, 0.5, 1.0],
+        simparams=SimParams({}),
+    )
+
+    assert rebuilt.initial_d == pytest.approx(simple_tree.initial_d)
+    assert rebuilt.d_min == pytest.approx(simple_tree.d_min)
+    assert rebuilt.lrr == pytest.approx(simple_tree.lrr)
+    assert rebuilt.alpha == pytest.approx(simple_tree.alpha)
+    assert rebuilt.beta == pytest.approx(simple_tree.beta)
+    assert rebuilt.inductance == pytest.approx(0.05)
+    assert rebuilt.generation_mode == "per_outlet"
+    assert rebuilt.outlet_mapping["bc_names"] == ["IMPEDANCE_0"]
+
+
 def test_equivalent_resistance_reduces_series_and_parallel(simple_tree):
     seg_R = simple_tree.segment_resistances()
     expected_root = float(seg_R[0] + 1.0 / (1.0 / seg_R[1] + 1.0 / seg_R[2]))
