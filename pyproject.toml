@@ -12,7 +12,18 @@ description = "Structured tree boundary condition modeling for svZeroD cardiovas
 authors = [{ name = "Nick Dorn", email = "ndorn@stanford.edu" }]
 license = "MIT"
 readme = "README.md"
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+]
 requires-python = ">=3.8"
+
+# TODO: add keywords
+keywords = []
+
 dependencies = [
     "scipy >= 1.9.1",
     "numpy >= 1.22.3",
