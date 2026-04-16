@@ -26,6 +26,7 @@ env/
 *.whl
 dist/
 build/
+pip-wheel-metadata/
 
 # === Jupyter / notebooks ===
 .ipynb_checkpoints/
@@ -57,6 +58,8 @@ sandbox/
 # Test coverage / pytest cache
 htmlcov/
 .coverage
+.coverage.*
+coverage.xml
 .tox/
 .pytest_cache/
 .nox/
@@ -64,6 +67,7 @@ htmlcov/
 # MyPy / Ruff / Black caches
 .mypy_cache/
 .ruff_cache/
+.hatch/
 
 # === Files you often want to ignore ===
 *.bak

@@ -52,6 +52,7 @@ def test_svmp_xml_deformable_wall_writes_cmm_tags(tmp_path):
     add_eqn = _find(root, "Add_equation")
     assert add_eqn is not None
     assert add_eqn.get("type") == "CMM"
+    assert add_eqn.findtext("Min_iterations") == "3"
     assert add_eqn.findtext("Poisson_ratio") == "0.49"
     assert add_eqn.findtext("Shell_thickness") == "0.2"
     assert add_eqn.findtext("Elasticity_modulus") == "123.0"

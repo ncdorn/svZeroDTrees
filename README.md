@@ -9,7 +9,7 @@ Structured tree boundary condition modeling for svZeroD cardiovascular simulatio
 
 **Requirements**
 - Python >= 3.8.
-- Python packages (installed via `pip install -e .`): `scipy`, `numpy`, `vtk`, `pandas`, `matplotlib`, `networkx`, `svsuperestimator`, `multiprocess`, `pysvzerod`, `pyyaml`.
+- Runtime dependencies are installed via `pip install -e .`.
 - External tools for 3D coupling only: SimVascular `svpre`, `svsolver`, `svpost` in PATH.
 - Input data files:
 - `zerod_config.json` (svZeroD config)
@@ -23,6 +23,27 @@ git clone https://github.com/ncdorn/svZeroDTrees.git
 cd svZeroDTrees
 pip install -e .
 ```
+
+For `uv` workflows in this workspace, `pysvzerod` is resolved from the sibling
+`../svZeroDSolver` checkout. That allows `uv run python ...` to sync a working
+environment without trying to fetch `pysvzerod` from PyPI.
+
+**Development**
+Preferred package-validation workflows use Hatch-managed environments:
+```bash
+python -m pip install hatch
+hatch run test:run
+hatch run build:check
+hatch run docs:serve
+```
+
+For local runtime work with `uv`:
+```bash
+UV_CACHE_DIR=/tmp/uv-cache uv run python -c "import svzerodtrees, pysvzerod"
+```
+
+Direct `pytest` execution now assumes the package is already installed in the
+active environment. The recommended path is `hatch run test:run`.
 
 **Quickstart**
 CLI (use the example config):
