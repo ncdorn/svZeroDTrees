@@ -33,6 +33,7 @@ dependencies = [
     "filelock",
     "networkx",
     "multiprocess",
+    "numba",
     "pysvzerod",
     "pyyaml",
 ]
@@ -94,7 +95,11 @@ description = "Run the test suite against an installed package."
 dependency-groups = ["tests"]
 
 [tool.hatch.envs.test.scripts]
-run = "pytest {args:--cov=svzerodtrees --cov-report=term-missing --cov-report=xml}"
+unit = "pytest tests/unit {args}"
+integration = "pytest tests/integration {args}"
+e2e = "pytest tests/e2e {args}"
+coverage = "pytest tests/unit tests/integration tests/e2e --cov=svzerodtrees --cov-report=term-missing --cov-report=xml {args}"
+run = "pytest tests/unit tests/integration tests/e2e {args:--cov=svzerodtrees --cov-report=term-missing --cov-report=xml}"
 
 [tool.hatch.envs.docs]
 description = "Serve the repository docs directory for local preview."
@@ -105,6 +110,13 @@ serve = "python -m http.server --directory docs {args:8000}"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "unit: isolated tests for a function, class, or module with no real workflow execution",
+    "integration: package-level contract tests that combine multiple svzerodtrees components",
+    "e2e: hermetic CLI/API smoke tests that exercise entrypoint dispatch without external solvers",
+    "external: tests that require optional external binaries, services, or non-hermetic runtime dependencies",
+    "slow: tests that are intentionally slower than the default hermetic suite",
+]
 
 [tool.black]
 line-length = 88
@@ -127,6 +139,14 @@ source = [
 branch = true
 parallel = true
 source = ["svzerodtrees"]
+omit = [
+    "src/svzerodtrees/_archive/*",
+    "*/site-packages/svzerodtrees/_archive/*",
+    "src/svzerodtrees/post_processing/ParaviewPostProcessor.py",
+    "*/site-packages/svzerodtrees/post_processing/ParaviewPostProcessor.py",
+    "src/svzerodtrees/post_processing/paraview_time_series_visualization.py",
+    "*/site-packages/svzerodtrees/post_processing/paraview_time_series_visualization.py",
+]
 
 [tool.coverage.report]
 exclude_lines = ["pragma: no cover"]

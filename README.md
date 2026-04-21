@@ -33,6 +33,9 @@ Preferred package-validation workflows use Hatch-managed environments:
 ```bash
 python -m pip install hatch
 hatch run test:run
+hatch run test:unit
+hatch run test:integration
+hatch run test:e2e
 hatch run build:check
 hatch run docs:serve
 ```

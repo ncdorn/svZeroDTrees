@@ -56,10 +56,19 @@ Run the test suite:
 hatch run test:run
 ```
 
+Run individual test slices:
+
+```bash
+hatch run test:unit
+hatch run test:integration
+hatch run test:e2e
+```
+
 Run the test suite in your active environment:
 
 ```bash
-pytest --cov=svzerodtrees --cov-report=term-missing --cov-report=xml
+pytest tests/unit tests/integration tests/e2e
+pytest tests/unit tests/integration tests/e2e --cov=svzerodtrees --cov-report=term-missing --cov-report=xml
 ```
 
 Run static checks:

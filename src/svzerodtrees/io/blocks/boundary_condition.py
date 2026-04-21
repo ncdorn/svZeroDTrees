@@ -483,7 +483,14 @@ def resolve_coupled_impedance_timepoint_contract(config: Mapping) -> tuple[int, 
             "coupled config with IMPEDANCE boundary conditions requires at least one IMPEDANCE boundary condition"
         )
 
-    sample_count = _resolve_flow_sample_count_config(config)
+    try:
+        sample_count = _resolve_flow_sample_count_config(config)
+    except ValueError as exc:
+        if "config must include boundary condition" not in str(exc):
+            raise
+        # 3D-coupled configs with a prescribed/Dirichlet inlet intentionally
+        # omit the FLOW boundary condition from the svZeroD coupling file.
+        sample_count = resolved_number_of_time_pts
     kernel_sizes = {len(bc_config["bc_values"]["z"]) for bc_config in impedance_bcs}
     if len(kernel_sizes) != 1:
         raise ValueError(
