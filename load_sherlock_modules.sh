@@ -9,7 +9,9 @@ solver_root="$(cd "${repo_root}/../svZeroDSolver" && pwd)"
 module --force purge
 ml math
 ml devel
+ml system
 ml viz
+ml x11
 ml python/3.12.1
 ml py-numpy/1.26.3_py312
 ml py-scipy/1.12.0_py312
