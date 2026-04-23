@@ -62,6 +62,11 @@ class PipelineWorkflow:
                 sim_kwargs["adaptation_config"] = vars(adaptation)
 
         if threed is not None:
+            tissue_support = getattr(threed, "tissue_support", None)
+            if is_dataclass(tissue_support):
+                tissue_support = asdict(tissue_support)
+            elif tissue_support is not None and not isinstance(tissue_support, dict):
+                tissue_support = vars(tissue_support)
             sim_kwargs["mesh_scale_factor"] = threed.mesh_scale_factor
             sim_kwargs["convert_to_cm"] = threed.convert_to_cm
             sim_kwargs["wall_model"] = threed.wall_model
@@ -70,6 +75,13 @@ class PipelineWorkflow:
             sim_kwargs["shell_thickness"] = threed.shell_thickness
             sim_kwargs["prestress_file"] = threed.prestress_file
             sim_kwargs["prestress_file_path"] = threed.prestress_file_path
+            sim_kwargs["tissue_support"] = tissue_support
+            if getattr(threed, "execution", None) is not None:
+                sim_kwargs["execution_config"] = (
+                    asdict(threed.execution)
+                    if is_dataclass(threed.execution)
+                    else vars(threed.execution)
+                )
 
         if paths.inflow is not None:
             sim_kwargs["inflow_path"] = paths.inflow

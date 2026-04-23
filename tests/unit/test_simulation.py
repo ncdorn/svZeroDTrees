@@ -78,10 +78,10 @@ class DummySimulationDirectory:
         cls.created.append(inst)
         return inst
 
-    def generate_steady_sim(self, flow_rate):
+    def generate_steady_sim(self, flow_rate, execution_config=None):
         self.generated.append(flow_rate)
 
-    def run(self):
+    def run(self, execution_config=None):
         self.runs += 1
 
     def check_simulation(self):

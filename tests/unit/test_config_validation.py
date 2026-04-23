@@ -114,6 +114,12 @@ threed:
   poisson_ratio: 0.49
   shell_thickness: 0.22
   prestress_file: auto
+  tissue_support:
+    enabled: true
+    type: uniform
+    stiffness: 1000.0
+    damping: 10000.0
+    apply_along_normal_direction: true
 """
     )
     cfg = load_config(str(cfg_path))
@@ -123,6 +129,11 @@ threed:
     assert cfg.threed.poisson_ratio == pytest.approx(0.49)
     assert cfg.threed.shell_thickness == pytest.approx(0.22)
     assert cfg.threed.prestress_file == "auto"
+    assert cfg.threed.tissue_support is not None
+    assert cfg.threed.tissue_support.type == "uniform"
+    assert cfg.threed.tissue_support.stiffness == pytest.approx(1000.0)
+    assert cfg.threed.tissue_support.damping == pytest.approx(10000.0)
+    assert cfg.threed.tissue_support.apply_along_normal_direction is True
 
 
 def test_load_deformable_defaults_when_values_omitted(tmp_path):
@@ -149,6 +160,96 @@ threed:
     assert cfg.threed.elasticity_modulus == pytest.approx(5062674.563165)
     assert cfg.threed.poisson_ratio == pytest.approx(0.5)
     assert cfg.threed.shell_thickness == pytest.approx(0.12)
+
+
+def test_threed_execution_local_config_parses(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        """
+version: 1
+workflow: pipeline
+paths:
+  root: .
+threed:
+  execution:
+    mode: local
+    executable: svmultiphysics
+    clean_command: null
+"""
+    )
+    cfg = load_config(str(cfg_path))
+    assert cfg.threed is not None
+    assert cfg.threed.execution.mode == "local"
+    assert cfg.threed.execution.executable == "svmultiphysics"
+    assert cfg.threed.execution.clean_command is None
+    assert cfg.threed.execution.slurm.nodes == 3
+
+
+def test_threed_execution_slurm_config_parses(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        """
+version: 1
+workflow: pipeline
+paths:
+  root: .
+threed:
+  execution:
+    mode: slurm
+    executable: /opt/sv/bin/svmultiphysics
+    submit_command: sbatch
+    slurm:
+      nodes: 2
+      procs_per_node: 8
+      memory: 12
+      hours: 4
+      partition: test
+      qos: debug
+"""
+    )
+    cfg = load_config(str(cfg_path))
+    assert cfg.threed is not None
+    assert cfg.threed.execution.mode == "slurm"
+    assert cfg.threed.execution.executable == "/opt/sv/bin/svmultiphysics"
+    assert cfg.threed.execution.slurm.nodes == 2
+    assert cfg.threed.execution.slurm.procs_per_node == 8
+    assert cfg.threed.execution.slurm.partition == "test"
+    assert cfg.threed.execution.slurm.qos == "debug"
+
+
+def test_invalid_threed_execution_mode_raises(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        """
+version: 1
+workflow: pipeline
+paths:
+  root: .
+threed:
+  execution:
+    mode: ssh
+"""
+    )
+    with pytest.raises(ValueError, match="execution.mode"):
+        load_config(str(cfg_path))
+
+
+def test_unknown_threed_execution_key_raises(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        """
+version: 1
+workflow: pipeline
+paths:
+  root: .
+threed:
+  execution:
+    mode: local
+    extra: true
+"""
+    )
+    with pytest.raises(ValueError, match="threed.execution"):
+        load_config(str(cfg_path))
 
 
 def test_invalid_wall_model_raises(tmp_path):
@@ -195,6 +296,73 @@ threed:
 """
     )
     with pytest.raises(ValueError):
+        load_config(str(cfg_path))
+
+
+def test_tissue_support_requires_deformable_wall(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        """
+version: 1
+workflow: pipeline
+paths:
+  root: .
+threed:
+  wall_model: rigid
+  tissue_support:
+    enabled: true
+    type: uniform
+    stiffness: 1000.0
+    damping: 10000.0
+"""
+    )
+    with pytest.raises(ValueError, match="tissue_support"):
+        load_config(str(cfg_path))
+
+
+def test_spatial_tissue_support_resolves_relative_path(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: pipeline
+paths:
+  root: {tmp_path}
+threed:
+  wall_model: deformable
+  tissue_support:
+    enabled: true
+    type: spatial
+    spatial_values_file_path: robin/values.vtp
+"""
+    )
+    cfg = load_config(str(cfg_path))
+    assert cfg.threed is not None
+    assert cfg.threed.tissue_support is not None
+    assert cfg.threed.tissue_support.type == "spatial"
+    assert cfg.threed.tissue_support.spatial_values_file_path == os.path.join(
+        str(tmp_path), "robin/values.vtp"
+    )
+
+
+def test_invalid_mixed_tissue_support_raises(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        """
+version: 1
+workflow: pipeline
+paths:
+  root: .
+threed:
+  wall_model: deformable
+  tissue_support:
+    enabled: true
+    type: spatial
+    stiffness: 1.0
+    spatial_values_file_path: robin_values.vtp
+"""
+    )
+    with pytest.raises(ValueError, match="forbids stiffness"):
         load_config(str(cfg_path))
 
 

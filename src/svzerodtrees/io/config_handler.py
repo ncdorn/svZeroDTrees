@@ -764,9 +764,9 @@ class ConfigHandler():
                 for child in vessel.children:
                     calc_R_eq(child)
                     # we assume here that the stenosis coefficient is linear, which is not true but a reasonable approximation
-                vessel.R_eq = vessel.R + vessel.stenosis_coefficient + (1 / sum([1 / child.R_eq for child in vessel.children]))
+                vessel._R_eq = vessel.R + vessel.stenosis_coefficient + (1 / sum([1 / child.R_eq for child in vessel.children]))
             else:
-                vessel.R_eq = vessel.R + vessel.stenosis_coefficient
+                vessel._R_eq = vessel.R + vessel.stenosis_coefficient
         
         calc_R_eq(self.root)
 

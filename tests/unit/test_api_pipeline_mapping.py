@@ -38,6 +38,14 @@ def test_pipeline_mapping(monkeypatch, tmp_path):
             shell_thickness=0.25,
             prestress_file="auto",
             prestress_file_path=str(tmp_path / "prestress.vtu"),
+            tissue_support=SimpleNamespace(
+                enabled=True,
+                type="uniform",
+                stiffness=1000.0,
+                damping=10000.0,
+                apply_along_normal_direction=True,
+                spatial_values_file_path=None,
+            ),
         ),
     )
 
@@ -53,6 +61,8 @@ def test_pipeline_mapping(monkeypatch, tmp_path):
     assert called["init"]["shell_thickness"] == 0.25
     assert called["init"]["prestress_file"] == "auto"
     assert called["init"]["prestress_file_path"] == str(tmp_path / "prestress.vtu")
+    assert called["init"]["tissue_support"]["stiffness"] == 1000.0
+    assert called["init"]["tissue_support"]["damping"] == 10000.0
     assert called["init"]["adapted_dir"] is None
     assert called["run"]["optimize_bcs"] is False
     assert called["run"]["run_threed"] is False
@@ -135,3 +145,65 @@ def test_pipeline_mapping_without_threed_uses_simulation_defaults(monkeypatch, t
 
     PipelineWorkflow.from_config(cfg).run()
     assert "wall_model" not in called["init"]
+
+
+def test_pipeline_mapping_passes_threed_execution_config(monkeypatch, tmp_path):
+    called = {}
+
+    class DummySimulation:
+        def __init__(self, **kwargs):
+            called["init"] = kwargs
+
+        def run_pipeline(self, **kwargs):
+            called["run"] = kwargs
+
+    monkeypatch.setattr("svzerodtrees.api.Simulation", DummySimulation)
+
+    execution = SimpleNamespace(
+        mode="local",
+        executable="svmultiphysics",
+        submit_command="sbatch",
+        clean_command=None,
+        slurm=SimpleNamespace(
+            nodes=1,
+            procs_per_node=2,
+            memory=4,
+            hours=1,
+            partition="test",
+            qos="debug",
+        ),
+    )
+    cfg = SimpleNamespace(
+        workflow="pipeline",
+        paths=SimpleNamespace(
+            root=str(tmp_path),
+            zerod_config=str(tmp_path / "zerod_config.json"),
+            clinical_targets=str(tmp_path / "clinical_targets.csv"),
+            mesh_surfaces=str(tmp_path / "mesh-surfaces"),
+            preop_dir=str(tmp_path / "preop"),
+            postop_dir=str(tmp_path / "postop"),
+            adapted_dir=str(tmp_path / "adapted"),
+            inflow=None,
+        ),
+        bcs=None,
+        adaptation=None,
+        pipeline=SimpleNamespace(run_steady=False, optimize_bcs=False, run_threed=True, adapt=False),
+        threed=SimpleNamespace(
+            mesh_scale_factor=1.0,
+            convert_to_cm=False,
+            wall_model="rigid",
+            elasticity_modulus=5062674.563165,
+            poisson_ratio=0.5,
+            shell_thickness=0.12,
+            prestress_file=None,
+            prestress_file_path=None,
+            execution=execution,
+        ),
+    )
+
+    PipelineWorkflow.from_config(cfg).run()
+
+    assert called["init"]["execution_config"]["mode"] == "local"
+    assert called["init"]["execution_config"]["executable"] == "svmultiphysics"
+    assert called["init"]["execution_config"]["clean_command"] is None
+    assert called["init"]["execution_config"]["slurm"].partition == "test"

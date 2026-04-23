@@ -129,6 +129,25 @@ threed:
   shell_thickness: 0.12
   prestress_file: auto  # auto | from_steady_mean | path/to/prestress_result.vtu
   prestress_file_path: path/to/prestress_result.vtu
+  tissue_support:
+    enabled: true
+    type: uniform  # uniform | spatial
+    stiffness: 1000.0
+    damping: 10000.0
+    apply_along_normal_direction: true
+    spatial_values_file_path: null
+  execution:
+    mode: slurm  # slurm | local
+    executable: svmultiphysics
+    submit_command: sbatch
+    clean_command: clean
+    slurm:
+      nodes: 3
+      procs_per_node: 24
+      memory: 16
+      hours: 20
+      partition: amarsden
+      qos: normal
   solver_paths:
     svpre: svpre
     svsolver: svsolver
@@ -136,6 +155,17 @@ threed:
 ```
 
 For deformable wall runs, setting `prestress_file: auto` creates and runs a `prestress/` simulation using mean wall traction from `steady/mean` results, then uses that resulting VTU as `Prestress_file_path`.
+
+For deformable CMM wall runs, optional `tissue_support` writes svMultiPhysics
+Robin support under the wall `Type=CMM` boundary condition. `uniform` mode writes
+scalar `Stiffness` and `Damping`; `spatial` mode writes `Spatial_values_file_path`
+for a VTP file containing `Stiffness` and `Damping` arrays. Rigid wall runs do
+not support `tissue_support`.
+
+`threed.execution.mode: local` runs the configured executable directly as
+`svmultiphysics svFSIplus.xml` in each generated simulation directory.
+`threed.execution.mode: slurm` writes `run_solver.sh` and submits it with
+`submit_command`, defaulting to `sbatch`.
 
 **Postprocess**
 ```yaml

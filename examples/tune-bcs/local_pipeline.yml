@@ -1,0 +1,61 @@
+version: 1
+workflow: pipeline
+
+paths:
+  root: examples/tune-bcs
+  zerod_config: data/zerod_config.json
+  clinical_targets: data/clinical_targets.csv
+  inflow: data/inflow.csv
+  preop_dir: data/preop
+  postop_dir: data/postop
+  adapted_dir: data/adapted
+  optimized_params: optimized_params.csv
+
+bcs:
+  type: impedance
+  compliance_model: constant
+  is_pulmonary: true
+  tune_space:
+    free:
+      - name: lpa.alpha
+        init: 0.9
+        lb: 0.7
+        ub: 0.95
+      - name: lpa.beta
+        init: 0.6
+        lb: 0.3
+        ub: 0.8
+      - name: rpa.alpha
+        init: 0.9
+        lb: 0.7
+        ub: 0.95
+      - name: rpa.beta
+        init: 0.6
+        lb: 0.3
+        ub: 0.8
+    fixed:
+      - name: lrr
+        value: 10.0
+      - name: d_min
+        value: 0.01
+    tied: []
+
+adaptation:
+  method: cwss
+  location: uniform
+  iterations: 1
+
+pipeline:
+  run_steady: true
+  optimize_bcs: true
+  run_threed: true
+  adapt: false
+
+threed:
+  mesh_scale_factor: 1.0
+  convert_to_cm: false
+  wall_model: rigid
+  execution:
+    mode: local
+    executable: svmultiphysics
+    clean_command: clean

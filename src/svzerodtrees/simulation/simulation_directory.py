@@ -8,6 +8,7 @@ import time
 import os
 import math
 import subprocess
+import shlex
 from .input_builders import *
 from ..tune_bcs import ClinicalTargets
 from ..io.blocks import *
@@ -16,6 +17,33 @@ from .input_builders.simulation_file import SimulationFile
 from ..microvasculature import StructuredTree
 
 _DEFAULT_TREE_LRR = 10.0
+DEFAULT_SLURM_EXECUTABLE = "/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics"
+
+
+def _normalise_execution_config(execution_config=None):
+    if execution_config is None:
+        execution_config = {}
+    elif not isinstance(execution_config, dict):
+        execution_config = vars(execution_config)
+
+    slurm = execution_config.get("slurm") or {}
+    if not isinstance(slurm, dict):
+        slurm = vars(slurm)
+
+    return {
+        "mode": str(execution_config.get("mode", "slurm")).lower(),
+        "executable": execution_config.get("executable", DEFAULT_SLURM_EXECUTABLE),
+        "submit_command": execution_config.get("submit_command", "sbatch"),
+        "clean_command": execution_config.get("clean_command", "clean"),
+        "slurm": {
+            "nodes": int(slurm.get("nodes", 3)),
+            "procs_per_node": int(slurm.get("procs_per_node", 24)),
+            "memory": int(slurm.get("memory", 16)),
+            "hours": int(slurm.get("hours", 20)),
+            "partition": slurm.get("partition", "amarsden"),
+            "qos": slurm.get("qos", "normal"),
+        },
+    }
 
 class SimulationDirectory:
     '''
@@ -202,16 +230,39 @@ class SimulationDirectory:
             scale_factor *= 0.1
         return scale_factor
 
-    def run(self):
+    def run(self, execution_config=None):
         '''
         run the simulation'''
+        execution_config = _normalise_execution_config(execution_config)
+        mode = execution_config["mode"]
+        if mode not in {"local", "slurm"}:
+            raise ValueError("execution_config.mode must be one of local|slurm")
+
         self.check_files(verbose=False)
-        try:
-            subprocess.run(["clean"], cwd=self.path, check=False, capture_output=True, text=True)
-        except FileNotFoundError:
-            pass
+        clean_command = execution_config.get("clean_command")
+        if clean_command:
+            try:
+                subprocess.run(
+                    shlex.split(clean_command),
+                    cwd=self.path,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+            except FileNotFoundError:
+                pass
+
+        if mode == "local":
+            subprocess.run(
+                [execution_config["executable"], os.path.basename(self.svFSIxml.path)],
+                cwd=self.path,
+                check=True,
+            )
+            return
+
+        submit_command = shlex.split(execution_config["submit_command"])
         subprocess.run(
-            ["sbatch", os.path.basename(self.solver_runscript.path)],
+            submit_command + [os.path.basename(self.solver_runscript.path)],
             cwd=self.path,
             check=True,
         )
@@ -306,6 +357,7 @@ class SimulationDirectory:
             poisson_ratio = 0.5 if sim_config is None else float(sim_config.get("poisson_ratio", 0.5))
             shell_thickness = 0.12 if sim_config is None else float(sim_config.get("shell_thickness", 0.12))
             prestress_file_path = None if sim_config is None else sim_config.get("prestress_file_path")
+            tissue_support = None if sim_config is None else sim_config.get("tissue_support")
             simulation_mode = "flow" if sim_config is None else str(sim_config.get("simulation_mode", "flow")).lower()
             traction_file_path = None if sim_config is None else sim_config.get("traction_file_path")
             mesh_scale_factor = self._resolve_mesh_scale_factor()
@@ -354,6 +406,7 @@ class SimulationDirectory:
                                 poisson_ratio=poisson_ratio,
                                 shell_thickness=shell_thickness,
                                 prestress_file_path=prestress_file_path,
+                                tissue_support=tissue_support,
                                 simulation_mode=simulation_mode,
                                 traction_file_path=traction_file_path)
         
@@ -363,16 +416,27 @@ class SimulationDirectory:
                 procs_per_node = int(input('number of processors per node ( default 24): ') or 24)
                 memory = int(input('memory per node in GB (default 16): ') or 16)
                 hours = int(input('number of hours (default 6): ') or 12)
+                partition = "amarsden"
+                qos = "normal"
+                svfsiplus_path = DEFAULT_SLURM_EXECUTABLE
             else:
-                nodes = sim_config['nodes']
-                procs_per_node = sim_config['procs_per_node']
-                memory = sim_config['memory']
-                hours = sim_config['hours']
+                execution = _normalise_execution_config((sim_config or {}).get("execution"))
+                slurm = execution["slurm"]
+                nodes = sim_config.get('nodes', slurm["nodes"])
+                procs_per_node = sim_config.get('procs_per_node', slurm["procs_per_node"])
+                memory = sim_config.get('memory', slurm["memory"])
+                hours = sim_config.get('hours', slurm["hours"])
+                partition = slurm["partition"]
+                qos = slurm["qos"]
+                svfsiplus_path = execution["executable"]
             self.solver_runscript.write(
                 nodes=nodes,
                 procs_per_node=procs_per_node,
                 hours=hours,
                 memory=memory,
+                partition=partition,
+                qos=qos,
+                svfsiplus_path=svfsiplus_path,
                 working_dir=self.path,
             )
 
@@ -401,7 +465,7 @@ class SimulationDirectory:
 
         self.check_files()
 
-    def generate_steady_sim(self, flow_rate=None):
+    def generate_steady_sim(self, flow_rate=None, execution_config=None):
         '''
         generate simulation files for a steady simulation'''
 
@@ -451,6 +515,7 @@ class SimulationDirectory:
             'memory': 16,
             'hours': 6,
             'wall_model': 'rigid',
+            'execution': _normalise_execution_config(execution_config),
         }
 
         self.write_files(simname='Steady Simulation', user_input=False, sim_config=sim_config)

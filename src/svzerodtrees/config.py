@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
@@ -11,6 +11,7 @@ from .microvasculature.compliance.constant import ConstantCompliance
 from .microvasculature.compliance.olufsen import OlufsenCompliance
 
 CONFIG_VERSION = 1
+DEFAULT_SLURM_EXECUTABLE = "/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics"
 
 
 @dataclass
@@ -62,6 +63,35 @@ class PipelineConfig:
 
 
 @dataclass
+class SlurmExecutionConfig:
+    nodes: int = 3
+    procs_per_node: int = 24
+    memory: int = 16
+    hours: int = 20
+    partition: str = "amarsden"
+    qos: str = "normal"
+
+
+@dataclass
+class ThreeDExecutionConfig:
+    mode: str = "slurm"
+    executable: str = DEFAULT_SLURM_EXECUTABLE
+    submit_command: str = "sbatch"
+    clean_command: Optional[str] = "clean"
+    slurm: SlurmExecutionConfig = field(default_factory=SlurmExecutionConfig)
+
+
+@dataclass
+class TissueSupportConfig:
+    enabled: bool = True
+    type: str = "uniform"
+    stiffness: Optional[float] = None
+    damping: Optional[float] = None
+    apply_along_normal_direction: bool = True
+    spatial_values_file_path: Optional[str] = None
+
+
+@dataclass
 class ThreeDConfig:
     mesh_scale_factor: float = 1.0
     convert_to_cm: bool = False
@@ -72,6 +102,8 @@ class ThreeDConfig:
     shell_thickness: float = 0.12
     prestress_file: Optional[str] = None
     prestress_file_path: Optional[str] = None
+    execution: ThreeDExecutionConfig = field(default_factory=ThreeDExecutionConfig)
+    tissue_support: Optional[TissueSupportConfig] = None
 
 
 @dataclass
@@ -250,6 +282,113 @@ def _parse_paths(data: Dict[str, Any]) -> PathsConfig:
     )
 
 
+def _parse_slurm_execution(data: Optional[Dict[str, Any]]) -> SlurmExecutionConfig:
+    if data is None:
+        return SlurmExecutionConfig()
+    _ensure_keys(
+        data,
+        ["nodes", "procs_per_node", "memory", "hours", "partition", "qos"],
+        "threed.execution.slurm",
+    )
+    return SlurmExecutionConfig(
+        nodes=int(data.get("nodes", 3)),
+        procs_per_node=int(data.get("procs_per_node", 24)),
+        memory=int(data.get("memory", 16)),
+        hours=int(data.get("hours", 20)),
+        partition=str(data.get("partition", "amarsden")),
+        qos=str(data.get("qos", "normal")),
+    )
+
+
+def _parse_threed_execution(data: Optional[Dict[str, Any]]) -> ThreeDExecutionConfig:
+    if data is None:
+        return ThreeDExecutionConfig()
+    _ensure_keys(
+        data,
+        ["mode", "executable", "submit_command", "clean_command", "slurm"],
+        "threed.execution",
+    )
+    mode = str(data.get("mode", "slurm")).lower()
+    if mode not in {"local", "slurm"}:
+        raise ValueError("threed.execution.mode must be one of local|slurm")
+    clean_command = data.get("clean_command", "clean")
+    if clean_command is not None:
+        clean_command = str(clean_command)
+    return ThreeDExecutionConfig(
+        mode=mode,
+        executable=str(data.get("executable", "svmultiphysics")),
+        submit_command=str(data.get("submit_command", "sbatch")),
+        clean_command=clean_command,
+        slurm=_parse_slurm_execution(data.get("slurm")),
+    )
+
+
+def _parse_tissue_support(
+    root: str,
+    data: Optional[Dict[str, Any]],
+    *,
+    wall_model: str,
+) -> Optional[TissueSupportConfig]:
+    if data is None:
+        return None
+    _ensure_keys(
+        data,
+        [
+            "enabled",
+            "type",
+            "stiffness",
+            "damping",
+            "apply_along_normal_direction",
+            "spatial_values_file_path",
+        ],
+        "threed.tissue_support",
+    )
+    if wall_model != "deformable":
+        raise ValueError("threed.tissue_support is only valid with threed.wall_model=deformable")
+
+    enabled = bool(data.get("enabled", True))
+    support_type = str(data.get("type", "uniform")).lower()
+    if support_type not in {"uniform", "spatial"}:
+        raise ValueError("threed.tissue_support.type must be one of uniform|spatial")
+
+    stiffness = data.get("stiffness")
+    damping = data.get("damping")
+    spatial_values_file_path = data.get("spatial_values_file_path")
+
+    if enabled and support_type == "uniform":
+        if stiffness is None or damping is None:
+            raise ValueError("uniform threed.tissue_support requires stiffness and damping")
+        stiffness = float(stiffness)
+        damping = float(damping)
+        if stiffness < 0.0 or damping < 0.0:
+            raise ValueError("threed.tissue_support stiffness and damping must be non-negative")
+        if spatial_values_file_path is not None:
+            raise ValueError("uniform threed.tissue_support forbids spatial_values_file_path")
+    elif enabled and support_type == "spatial":
+        if not spatial_values_file_path:
+            raise ValueError("spatial threed.tissue_support requires spatial_values_file_path")
+        if stiffness is not None or damping is not None:
+            raise ValueError("spatial threed.tissue_support forbids stiffness and damping")
+        spatial_values_file_path = _resolve_path(root, str(spatial_values_file_path))
+    else:
+        stiffness = float(stiffness) if stiffness is not None else None
+        damping = float(damping) if damping is not None else None
+        spatial_values_file_path = (
+            _resolve_path(root, str(spatial_values_file_path))
+            if spatial_values_file_path
+            else None
+        )
+
+    return TissueSupportConfig(
+        enabled=enabled,
+        type=support_type,
+        stiffness=stiffness,
+        damping=damping,
+        apply_along_normal_direction=bool(data.get("apply_along_normal_direction", True)),
+        spatial_values_file_path=spatial_values_file_path,
+    )
+
+
 def load_config(path: str) -> BaseConfig:
     with open(path, "r") as fh:
         raw = yaml.safe_load(fh) or {}
@@ -343,6 +482,8 @@ def load_config(path: str) -> BaseConfig:
                 "shell_thickness",
                 "prestress_file",
                 "prestress_file_path",
+                "execution",
+                "tissue_support",
             ],
             "threed",
         )
@@ -384,6 +525,12 @@ def load_config(path: str) -> BaseConfig:
             shell_thickness=shell_thickness,
             prestress_file=prestress_file,
             prestress_file_path=prestress_file_path,
+            execution=_parse_threed_execution(data.get("execution")),
+            tissue_support=_parse_tissue_support(
+                paths.root,
+                data.get("tissue_support"),
+                wall_model=wall_model,
+            ),
         )
 
     postprocess = None
@@ -500,6 +647,25 @@ threed:
   shell_thickness: 0.12
   prestress_file: auto  # auto | from_steady_mean | path/to/prestress_result.vtu
   prestress_file_path: path/to/prestress_result.vtu
+  tissue_support:
+    enabled: true
+    type: uniform  # uniform | spatial
+    stiffness: 1000.0
+    damping: 10000.0
+    apply_along_normal_direction: true
+    spatial_values_file_path: null
+  execution:
+    mode: slurm  # slurm | local
+    executable: svmultiphysics
+    submit_command: sbatch
+    clean_command: clean
+    slurm:
+      nodes: 3
+      procs_per_node: 24
+      memory: 16
+      hours: 20
+      partition: amarsden
+      qos: normal
   solver_paths:
     svpre: svpre
     svsolver: svsolver

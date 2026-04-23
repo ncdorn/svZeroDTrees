@@ -38,8 +38,8 @@ class TreeVessel:
         z_vals = params["zero_d_element_values"]
         self._R = z_vals.get("R_poiseuille")
         self._R_eq = self._R
-        # self.C = z_vals.get("C")
-        # self.L = z_vals.get("L")
+        self.C = z_vals.get("C")
+        self.L = z_vals.get("L")
 
         # Compliance model
         self.compliance_model = compliance_model or ConstantCompliance(1e5)  # dyn/cm²
@@ -347,7 +347,7 @@ class TreeVessel:
         self.params["zero_d_element_values"]["C"] = C
         self.params["zero_d_element_values"]["L"] = L
         self.R = R
-        if not self.collapsed:
+        if not self.collapsed and self.left is not None and self.right is not None:
             self._update_R_eq()
 
 

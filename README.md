@@ -10,7 +10,9 @@ Structured tree boundary condition modeling for svZeroD cardiovascular simulatio
 **Requirements**
 - Python >= 3.8.
 - Runtime dependencies are installed via `pip install -e .`.
-- External tools for 3D coupling only: SimVascular `svpre`, `svsolver`, `svpost` in PATH.
+- External tools for 3D coupling only: SimVascular `svpre`, `svsolver`, `svpost`
+  in PATH, plus `svmultiphysics` for local 3D execution or `sbatch` for SLURM
+  execution.
 - Input data files:
 - `zerod_config.json` (svZeroD config)
 - `clinical_targets.csv`
@@ -86,6 +88,7 @@ Typical outputs are written under `paths.root` and include:
 - YAML configs: `examples/pipeline_example.yml`, `examples/tune_bcs_example.yml`,
   `examples/construct_tree/construct_trees_example.yml`, `examples/adapt_example.yml`,
   `examples/postprocess_example.yml`.
+- Local BC tuning + preop 3D smoke case: `examples/bc-tuning/local_pipeline.yml`.
 - Narrative example: `examples/construct_tree/README.md`.
 
 **Reference**

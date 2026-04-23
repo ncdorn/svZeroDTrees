@@ -13,6 +13,35 @@ import os
 import glob
 import re
 
+DEFAULT_SLURM_EXECUTABLE = "/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics"
+
+
+def _normalise_execution_config(execution_config=None):
+    if execution_config is None:
+        execution_config = {}
+    elif not isinstance(execution_config, dict):
+        execution_config = vars(execution_config)
+
+    slurm = execution_config.get("slurm") or {}
+    if not isinstance(slurm, dict):
+        slurm = vars(slurm)
+
+    return {
+        "mode": str(execution_config.get("mode", "slurm")).lower(),
+        "executable": execution_config.get("executable", DEFAULT_SLURM_EXECUTABLE),
+        "submit_command": execution_config.get("submit_command", "sbatch"),
+        "clean_command": execution_config.get("clean_command", "clean"),
+        "slurm": {
+            "nodes": int(slurm.get("nodes", 3)),
+            "procs_per_node": int(slurm.get("procs_per_node", 24)),
+            "memory": int(slurm.get("memory", 16)),
+            "hours": int(slurm.get("hours", 20)),
+            "partition": slurm.get("partition", "amarsden"),
+            "qos": slurm.get("qos", "normal"),
+        },
+    }
+
+
 class Simulation:
     '''
     the overall class for submitting an svZeroDTrees Simulation
@@ -56,8 +85,10 @@ class Simulation:
                  shell_thickness=0.12,
                  prestress_file=None,
                  prestress_file_path=None,
+                 tissue_support=None,
                  optimized=False, 
-                 inflow_path=None):
+                 inflow_path=None,
+                 execution_config=None):
         
         self.path = os.path.abspath(path)
 
@@ -82,6 +113,9 @@ class Simulation:
         self.adaptation_iters = adaptation_config["iterations"]
         self.steady_dir = os.path.join(self.path, steady_dir)
         self.compliance_model = compliance_model.lower()
+        self.execution_config = _normalise_execution_config(execution_config)
+        if self.execution_config["mode"] not in {"local", "slurm"}:
+            raise ValueError("execution_config.mode must be one of local|slurm")
 
         # simulation parameters
         self.n_tsteps = 2000
@@ -101,6 +135,8 @@ class Simulation:
                 'shell_thickness': float(shell_thickness),
                 'prestress_file': prestress_file,
                 'prestress_file_path': prestress_file_path,
+                'tissue_support': tissue_support,
+                'execution': self.execution_config,
             }
         if wall_model == "deformable":
             if float(elasticity_modulus) <= 0.0:
@@ -292,13 +328,13 @@ class Simulation:
             # run preop + postop simulations
             preop_sim = SimulationDirectory.from_directory(self.preop_dir.path, threed_coupler=self.zerod_config_path, convert_to_cm=self.convert_to_cm, mesh_scale_factor=self.mesh_scale_factor)
             preop_sim.write_files(simname='Preop Simulation', user_input=False, sim_config=self.threed_sim_config)
-            preop_sim.run()
+            preop_sim.run(execution_config=self.execution_config)
         
         if adapt:
             # run postop simulation
             postop_sim = SimulationDirectory.from_directory(self.postop_dir.path, self.zerod_config_path, convert_to_cm=self.convert_to_cm, mesh_scale_factor=self.mesh_scale_factor)
             postop_sim.write_files(simname='Postop Simulation', user_input=False, sim_config=self.threed_sim_config)
-            postop_sim.run()
+            postop_sim.run(execution_config=self.execution_config)
 
             # compute adaptation
             self.microvascular_adaptor = MicrovascularAdaptor(self.preop_dir, self.postop_dir, self.adapted_dir, 
@@ -420,9 +456,11 @@ class Simulation:
             "elasticity_modulus": self.threed_sim_config["elasticity_modulus"],
             "poisson_ratio": self.threed_sim_config["poisson_ratio"],
             "shell_thickness": self.threed_sim_config["shell_thickness"],
+            "tissue_support": self.threed_sim_config.get("tissue_support"),
+            "execution": self.execution_config,
         }
         prestress_sim.write_files(simname="Prestress Simulation", user_input=False, sim_config=prestress_config)
-        prestress_sim.run()
+        prestress_sim.run(execution_config=self.execution_config)
         prestress_sim.check_simulation(poll_interval=10)
 
         prestress_result = self._get_latest_result_vtu(prestress_dir)
@@ -570,10 +608,10 @@ class Simulation:
             os.makedirs(dir_path, exist_ok=True)
             # create the steady simulation
             steady_sims[label] = SimulationDirectory.from_directory(path=dir_path, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, mesh_scale_factor=self.mesh_scale_factor)
-            steady_sims[label].generate_steady_sim(flow_rate=q)
+            steady_sims[label].generate_steady_sim(flow_rate=q, execution_config=self.execution_config)
             # cd into directory to sumit simulation
             os.chdir(steady_sims[label].path)
-            steady_sims[label].run()
+            steady_sims[label].run(execution_config=self.execution_config)
             # cd back to the original directory
             os.chdir(self.path)
         

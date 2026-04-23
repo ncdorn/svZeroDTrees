@@ -1,7 +1,53 @@
 from .simulation_file import SimulationFile
 from ...io import ConfigHandler
+from dataclasses import asdict, is_dataclass
 import xml.etree.ElementTree as ET
 import os
+
+
+def _normalize_tissue_support(tissue_support):
+    if tissue_support is None:
+        return None
+    if is_dataclass(tissue_support):
+        tissue_support = asdict(tissue_support)
+    elif not isinstance(tissue_support, dict):
+        tissue_support = vars(tissue_support)
+
+    enabled = bool(tissue_support.get("enabled", True))
+    support_type = str(tissue_support.get("type", "uniform")).lower()
+    if support_type not in {"uniform", "spatial"}:
+        raise ValueError("tissue_support.type must be one of uniform|spatial")
+
+    normalized = {
+        "enabled": enabled,
+        "type": support_type,
+        "apply_along_normal_direction": bool(
+            tissue_support.get("apply_along_normal_direction", True)
+        ),
+        "stiffness": tissue_support.get("stiffness"),
+        "damping": tissue_support.get("damping"),
+        "spatial_values_file_path": tissue_support.get("spatial_values_file_path"),
+    }
+    if not enabled:
+        return normalized
+
+    if support_type == "uniform":
+        if normalized["stiffness"] is None or normalized["damping"] is None:
+            raise ValueError("uniform tissue_support requires stiffness and damping")
+        normalized["stiffness"] = float(normalized["stiffness"])
+        normalized["damping"] = float(normalized["damping"])
+        if normalized["stiffness"] < 0.0 or normalized["damping"] < 0.0:
+            raise ValueError("tissue_support stiffness and damping must be non-negative")
+        if normalized["spatial_values_file_path"] is not None:
+            raise ValueError("uniform tissue_support forbids spatial_values_file_path")
+    else:
+        if not normalized["spatial_values_file_path"]:
+            raise ValueError("spatial tissue_support requires spatial_values_file_path")
+        if normalized["stiffness"] is not None or normalized["damping"] is not None:
+            raise ValueError("spatial tissue_support forbids stiffness and damping")
+
+    return normalized
+
 
 class SvMPxml(SimulationFile):
     '''
@@ -29,6 +75,7 @@ class SvMPxml(SimulationFile):
               poisson_ratio=0.5,
               shell_thickness=0.12,
               prestress_file_path=None,
+              tissue_support=None,
               simulation_mode="flow",
               traction_file_path=None,
               threed_coupler=None,
@@ -118,6 +165,9 @@ class SvMPxml(SimulationFile):
                 raise ValueError("shell_thickness must be > 0 for deformable wall model")
             if not (-1.0 < float(poisson_ratio) <= 0.5):
                 raise ValueError("poisson_ratio must satisfy -1.0 < v <= 0.5 for deformable wall model")
+        tissue_support = _normalize_tissue_support(tissue_support)
+        if tissue_support is not None and tissue_support["enabled"] and wall_model != "deformable":
+            raise ValueError("tissue_support is only valid with wall_model='deformable'")
 
         if simulation_mode == "prestress":
             if not traction_file_path:
@@ -361,6 +411,20 @@ class SvMPxml(SimulationFile):
             if prestress_file_path:
                 prestress_path_node = ET.SubElement(add_wall_bc, "Prestress_file_path")
                 prestress_path_node.text = str(prestress_file_path)
+            if tissue_support is not None and tissue_support["enabled"]:
+                support = ET.SubElement(add_wall_bc, "Tissue_support")
+                if tissue_support["type"] == "uniform":
+                    stiffness = ET.SubElement(support, "Stiffness")
+                    stiffness.text = str(tissue_support["stiffness"])
+                    damping = ET.SubElement(support, "Damping")
+                    damping.text = str(tissue_support["damping"])
+                else:
+                    spatial_values = ET.SubElement(support, "Spatial_values_file_path")
+                    spatial_values.text = str(tissue_support["spatial_values_file_path"])
+                normal_only = ET.SubElement(support, "Apply_along_normal_direction")
+                normal_only.text = (
+                    "true" if tissue_support["apply_along_normal_direction"] else "false"
+                )
         else:
             typ.text = "Dir"
             time_dep = ET.SubElement(add_wall_bc, "Time_dependence")

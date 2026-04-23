@@ -4,6 +4,7 @@ import numpy as np
 from scipy.optimize import minimize, Bounds, LinearConstraint
 from .builder import *
 from .asymmetry import resolve_branch_scaling
+from .utils import _ensure_list_signal
 from ..treevessel import TreeVessel
 from ...utils import *
 from ..utils import *

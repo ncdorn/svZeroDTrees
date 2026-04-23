@@ -28,7 +28,12 @@ class SolverRunscript(SimulationFile):
               hours=6, 
               memory=16,
               svfsiplus_path='/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics',
-              working_dir=None):
+              working_dir=None,
+              partition='amarsden',
+              qos='normal',
+              modules=None,
+              mail_user='ndorn@stanford.edu',
+              mail_types=None):
         '''
         write the solver runscript file'''
 
@@ -38,8 +43,26 @@ class SolverRunscript(SimulationFile):
         self.memory = memory
         self.svfsiplus_path = svfsiplus_path
         self.working_dir = os.path.abspath(working_dir or os.path.dirname(self.path))
+        self.partition = partition
+        self.qos = qos
         output_path = os.path.join(self.working_dir, "svFlowSolver.o%j")
         error_path = os.path.join(self.working_dir, "svFlowSolver.e%j")
+        if modules is None:
+            modules = [
+                "devel",
+                "math",
+                "openmpi",
+                "openblas",
+                "boost",
+                "system",
+                "x11",
+                "mesa",
+                "qt",
+                "gcc/14.2.0",
+                "cmake",
+            ]
+        if mail_types is None:
+            mail_types = ["begin", "end"]
 
         print('writing solver runscript file...')
 
@@ -47,7 +70,7 @@ class SolverRunscript(SimulationFile):
             ff.write("#!/bin/bash\n\n")
             ff.write("#name of your job \n")
             ff.write("#SBATCH --job-name=svFlowSolver\n")
-            ff.write("#SBATCH --partition=amarsden\n\n")
+            ff.write(f"#SBATCH --partition={partition}\n\n")
             ff.write(f"#SBATCH --chdir={self.working_dir}\n\n")
             ff.write("# Specify the name of the output file. The %j specifies the job ID\n")
             ff.write(f"#SBATCH --output={output_path}\n\n")
@@ -56,29 +79,22 @@ class SolverRunscript(SimulationFile):
             ff.write("# The walltime you require for your job \n")
             ff.write(f"#SBATCH --time={hours}:00:00\n\n")
             ff.write("# Job priority. Leave as normal for now \n")
-            ff.write("#SBATCH --qos=normal\n\n")
+            ff.write(f"#SBATCH --qos={qos}\n\n")
             ff.write("# Number of nodes are you requesting for your job. You can have 24 processors per node \n")
             ff.write(f"#SBATCH --nodes={nodes} \n\n")
             ff.write("# Amount of memory you require per node. The default is 4000 MB per node \n")
             ff.write(f"#SBATCH --mem={memory}G\n\n")
             ff.write("# Number of processors per node \n")
             ff.write(f"#SBATCH --ntasks-per-node={procs_per_node} \n\n")
-            ff.write("# Send an email to this address when your job starts and finishes \n")
-            ff.write("#SBATCH --mail-user=ndorn@stanford.edu \n")
-            ff.write("#SBATCH --mail-type=begin \n")
-            ff.write("#SBATCH --mail-type=end \n")
+            if mail_user:
+                ff.write("# Send an email to this address when your job starts and finishes \n")
+                ff.write(f"#SBATCH --mail-user={mail_user} \n")
+                for mail_type in mail_types:
+                    ff.write(f"#SBATCH --mail-type={mail_type} \n")
             ff.write("module --force purge\n\n")
-            ff.write("ml devel\n")
-            ff.write("ml math\n")
-            ff.write("ml openmpi\n")
-            ff.write("ml openblas\n")
-            ff.write("ml boost\n")
-            ff.write("ml system\n")
-            ff.write("ml x11\n")
-            ff.write("ml mesa\n")
-            ff.write("ml qt\n")
-            ff.write("ml gcc/14.2.0\n")
-            ff.write("ml cmake\n\n")
+            for module in modules:
+                ff.write(f"ml {module}\n")
+            ff.write("\n")
             ff.write(f"cd {self.working_dir}\n")
             ff.write(f"srun {svfsiplus_path} svFSIplus.xml\n")
         

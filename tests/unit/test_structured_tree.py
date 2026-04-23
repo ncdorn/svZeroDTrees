@@ -1,7 +1,10 @@
 import numpy as np
 import pytest
 
-from svzerodtrees.microvasculature.structured_tree.structuredtree import StructuredTree
+from svzerodtrees.microvasculature.structured_tree.structuredtree import (
+    StructuredTree,
+    TreeVesselView,
+)
 from svzerodtrees.io.blocks.simulation_parameters import SimParams
 from svzerodtrees.microvasculature.compliance.constant import ConstantCompliance
 from svzerodtrees.io.blocks.boundary_condition import (
@@ -9,6 +12,7 @@ from svzerodtrees.io.blocks.boundary_condition import (
     validate_flow_cardiac_output_config,
     validate_impedance_timing_config,
 )
+from svzerodtrees.io.blocks.vessel import Vessel
 
 
 @pytest.fixture
@@ -148,6 +152,124 @@ def test_tree_metadata_round_trip_preserves_rebuild_inputs(simple_tree):
     assert rebuilt.inductance == pytest.approx(0.05)
     assert rebuilt.generation_mode == "per_outlet"
     assert rebuilt.outlet_mapping["bc_names"] == ["IMPEDANCE_0"]
+
+
+@pytest.mark.parametrize(
+    "metadata, message",
+    [
+        ({}, "missing required fields"),
+        (
+            {
+                "name": "tree",
+                "initial_d": 0.5,
+                "d_min": 0.1,
+                "lrr": 2.0,
+                "compliance": {"model": "ConstantCompliance", "params": {}},
+            },
+            "ConstantCompliance requires",
+        ),
+        (
+            {
+                "name": "tree",
+                "initial_d": 0.5,
+                "d_min": 0.1,
+                "lrr": 2.0,
+                "compliance": {"model": "unknown", "params": {}},
+            },
+            "compliance.model",
+        ),
+    ],
+)
+def test_tree_metadata_validation_errors(metadata, message):
+    with pytest.raises(ValueError, match=message):
+        StructuredTree.from_tree_metadata(
+            metadata,
+            time=[0.0, 1.0],
+            simparams=SimParams({}),
+        )
+
+
+def test_from_bc_config_resolves_resistance_and_rcr_values():
+    resistance_bc = BoundaryCondition.from_config(
+        {
+            "bc_name": "OUT",
+            "bc_type": "RESISTANCE",
+            "bc_values": {"R": 12.0, "Pd": 3.0},
+        }
+    )
+    resistance_tree = StructuredTree.from_bc_config(
+        resistance_bc,
+        simparams=SimParams({}),
+        diameter=0.4,
+        P_outlet=7.0,
+        Q_outlet=2.0,
+    )
+
+    assert resistance_tree.name == "OutletTree_OUT"
+    assert resistance_tree.R == pytest.approx(12.0)
+    assert resistance_tree.C is None
+    assert resistance_tree.Pd == pytest.approx(3.0)
+    assert resistance_tree.P_in == [7.0, 7.0]
+    assert resistance_tree.Q_in == [2.0, 2.0]
+
+    rcr_bc = BoundaryCondition.from_config(
+        {
+            "bc_name": "OUT",
+            "bc_type": "RCR",
+            "bc_values": {"Rp": 2.0, "Rd": 10.0, "C": 1e-4, "Pd": 4.0},
+        }
+    )
+    rcr_tree = StructuredTree.from_bc_config(
+        rcr_bc,
+        simparams=SimParams({}),
+        diameter=0.4,
+        P_outlet=[7.0, 8.0],
+        Q_outlet=[2.0, 3.0],
+        time=[0.0, 1.0],
+    )
+
+    assert rcr_tree.R == pytest.approx(12.0)
+    assert rcr_tree.C == pytest.approx(1e-4)
+    assert rcr_tree.Pd == pytest.approx(4.0)
+    assert rcr_tree.P_in == [7.0, 8.0]
+    assert rcr_tree.Q_in == [2.0, 3.0]
+
+
+def test_from_outlet_vessel_uses_vessel_branch_name_and_diameter():
+    vessel = Vessel.from_config(
+        {
+            "vessel_id": 5,
+            "vessel_name": "branch5_seg0",
+            "vessel_length": 1.0,
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "R_poiseuille": 10.0,
+                "C": 0.0,
+                "L": 0.0,
+                "stenosis_coefficient": 0.0,
+            },
+        }
+    )
+    bc = BoundaryCondition.from_config(
+        {
+            "bc_name": "OUT",
+            "bc_type": "RESISTANCE",
+            "bc_values": {"R": 20.0, "Pd": 5.0},
+        }
+    )
+
+    tree = StructuredTree.from_outlet_vessel(
+        vessel,
+        simparams=SimParams({}),
+        bc=bc,
+        P_outlet=11.0,
+        Q_outlet=2.5,
+    )
+
+    assert tree.name == "OutletTree5"
+    assert tree.diameter == pytest.approx(vessel.diameter)
+    assert tree.R == pytest.approx(20.0)
+    assert tree.Pd == pytest.approx(5.0)
 
 
 def test_equivalent_resistance_reduces_series_and_parallel(simple_tree):
@@ -443,3 +565,59 @@ def test_compute_olufsen_impedance_reflectionless_is_opt_in(simple_tree):
         leaf_termination="reflectionless",
     )
     assert np.max(np.abs(np.asarray(zero_kernel) - np.asarray(reflectionless_kernel))) > 1e-6
+
+
+def test_create_bcs_generates_pressure_and_resistance_outlets(simple_tree):
+    simple_tree.Q_in = [1.0, 1.0, 1.0]
+    simple_tree.Pd = 9.0
+    simple_tree.block_dict["vessels"] = [
+        {
+            "vessel_id": 0,
+            "boundary_conditions": {"outlet": "OUT"},
+        }
+    ]
+
+    simple_tree.create_bcs()
+    pressure_bcs = simple_tree.block_dict["boundary_conditions"]
+    assert pressure_bcs[0]["bc_type"] == "FLOW"
+    assert pressure_bcs[0]["bc_values"]["Q"] == [1.0, 1.0, 1.0]
+    assert pressure_bcs[1] == {
+        "bc_name": "P_d0",
+        "bc_type": "PRESSURE",
+        "bc_values": {"P": [9.0, 9.0], "t": [0.0, 1.0]},
+    }
+
+    simple_tree.create_bcs(distal_bc_type="RESISTANCE", distal_resistance=123.0)
+    resistance_bcs = simple_tree.block_dict["boundary_conditions"]
+    assert resistance_bcs[1] == {
+        "bc_name": "R_d0",
+        "bc_type": "RESISTANCE",
+        "bc_values": {"R": 123.0, "Pd": 9.0},
+    }
+
+    with pytest.raises(ValueError, match="Unsupported distal_bc_type"):
+        simple_tree.create_bcs(distal_bc_type="RCR")
+
+
+def test_count_vessels_and_tree_vessel_views(simple_tree):
+    assert simple_tree.count_vessels() == 3
+
+    root = TreeVesselView(simple_tree.store, 0)
+    assert root.id == 0
+    assert root.gen == 0
+    assert root.left.id == 1
+    assert root.right.id == 2
+    assert root.parent is None
+
+    root.d = 1.2
+    assert simple_tree.store.d[0] == pytest.approx(1.2)
+
+
+def test_compute_olufsen_impedance_rejects_invalid_time_inputs(simple_tree):
+    simple_tree.time = [0.0]
+    with pytest.raises(ValueError, match="at least two time samples"):
+        simple_tree.compute_olufsen_impedance()
+
+    simple_tree.time = [1.0, 0.0]
+    with pytest.raises(ValueError, match="dt must be positive"):
+        simple_tree.compute_olufsen_impedance()
