@@ -20,6 +20,7 @@ layout.
 - `uv` for fast local environment sync in this workspace.
 
 The package requires Python `>=3.8`.
+The validated Sherlock baseline is Python `3.12.1`.
 
 ## Local Setup
 
@@ -38,12 +39,27 @@ hatch run docs:serve
 ### Option 2: uv-managed local environment
 
 Use `uv` when you want a working editable environment in this workspace. This
-repo config resolves `pysvzerod` from the sibling `../svZeroDSolver` checkout.
+repo config resolves `pysvzerod` from the sibling `../svZeroDSolver` checkout
+through the `solver` dependency group.
 
 ```bash
-UV_CACHE_DIR=/tmp/uv-cache uv sync --group dev --group tests --group build
+UV_CACHE_DIR=/tmp/uv-cache uv sync --group dev --group tests --group build --group solver
 UV_CACHE_DIR=/tmp/uv-cache uv run python -c "import svzerodtrees, pysvzerod"
 ```
+
+### Option 3: pip-managed editable installs
+
+Use plain `pip` when you want an explicit local environment without `uv`.
+Install the sibling solver checkout first when you need solver-backed workflows.
+
+```bash
+python -m pip install -e ../svZeroDSolver
+python -m pip install -e .
+```
+
+`svZeroDTrees` itself can be imported without `pysvzerod`, but any workflow
+that actually calls the 0D solver will raise a clear runtime error until the
+solver package is installed.
 
 Direct `pytest` runs assume the package is already installed in the active
 environment.
@@ -89,6 +105,16 @@ Preview the docs directory locally:
 
 ```bash
 hatch run docs:serve
+```
+
+## Sherlock Setup
+
+Sherlock has a coherent Python 3.12 module stack for `svZeroDTrees`. The
+checked-in helper script loads the validated modules and installs the sibling
+solver first:
+
+```bash
+bash load_sherlock_modules.sh
 ```
 
 ## CLI Smoke Checks

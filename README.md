@@ -9,7 +9,10 @@ Structured tree boundary condition modeling for svZeroD cardiovascular simulatio
 
 **Requirements**
 - Python >= 3.8.
-- Runtime dependencies are installed via `pip install -e .`.
+- Validated on Sherlock with `python/3.12.1`.
+- Runtime dependencies are installed via `python -m pip install -e .`.
+- Solver-backed workflows additionally require `pysvzerod` from a sibling
+  `svZeroDSolver` checkout.
 - External tools for 3D coupling only: SimVascular `svpre`, `svsolver`, `svpost`
   in PATH, plus `svmultiphysics` for local 3D execution or `sbatch` for SLURM
   execution.
@@ -22,13 +25,25 @@ Structured tree boundary condition modeling for svZeroD cardiovascular simulatio
 **Install**
 ```bash
 git clone https://github.com/ncdorn/svZeroDTrees.git
+git clone https://github.com/ncdorn/svZeroDSolver.git
+python -m pip install -e svZeroDSolver
 cd svZeroDTrees
-pip install -e .
+python -m pip install -e .
 ```
 
-For `uv` workflows in this workspace, `pysvzerod` is resolved from the sibling
-`../svZeroDSolver` checkout. That allows `uv run python ...` to sync a working
-environment without trying to fetch `pysvzerod` from PyPI.
+If you only need non-solver code paths, `svZeroDTrees` can now be installed
+before `pysvzerod`; solver-backed workflows raise an explicit runtime error
+until the sibling solver checkout is installed.
+
+For `uv` workflows in this workspace, the sibling `../svZeroDSolver` checkout is
+still supported via the `solver` dependency group:
+```bash
+UV_CACHE_DIR=/tmp/uv-cache uv sync --group dev --group tests --group build --group solver
+UV_CACHE_DIR=/tmp/uv-cache uv run python -c "import svzerodtrees, pysvzerod"
+```
+
+**Sherlock**
+Use [load_sherlock_modules.sh](/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/SimVascular/svz/repos/svZeroDTrees/load_sherlock_modules.sh) to load the validated Python 3.12 module stack and install both sibling packages in the correct order.
 
 **Development**
 Preferred package-validation workflows use Hatch-managed environments:
@@ -40,11 +55,6 @@ hatch run test:integration
 hatch run test:e2e
 hatch run build:check
 hatch run docs:serve
-```
-
-For local runtime work with `uv`:
-```bash
-UV_CACHE_DIR=/tmp/uv-cache uv run python -c "import svzerodtrees, pysvzerod"
 ```
 
 Direct `pytest` execution now assumes the package is already installed in the

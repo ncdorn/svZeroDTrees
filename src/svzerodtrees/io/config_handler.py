@@ -2,6 +2,7 @@ import json
 import pickle
 import os
 import math
+from svzerodtrees._pysvzerod import simulate_pysvzerod
 from svzerodtrees.utils import *
 from .blocks.boundary_condition import (
     resolve_coupled_impedance_kernel_steps,
@@ -12,7 +13,6 @@ from .result_handler import ResultHandler
 from .inflow_handler import Inflow
 from .blocks import *
 from .utils import *
-import pysvzerod
 
 
 
@@ -194,7 +194,7 @@ class ConfigHandler():
         # assemble the config
         self.assemble_config()
 
-        result_df = pysvzerod.simulate(self.config)
+        result_df = simulate_pysvzerod(self.config)
         
         return result_df
         

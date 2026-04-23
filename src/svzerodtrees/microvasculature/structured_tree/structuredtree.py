@@ -6,6 +6,7 @@ from .builder import *
 from .asymmetry import resolve_branch_scaling
 from .utils import _ensure_list_signal
 from ..treevessel import TreeVessel
+from ..._pysvzerod import simulate_pysvzerod
 from ...utils import *
 from ..utils import *
 from ...io.blocks import *
@@ -1415,7 +1416,7 @@ class StructuredTree:
         if json_path is not None:
             self.to_json(json_path)
 
-        result = pysvzerod.simulate(self.block_dict)
+        result = simulate_pysvzerod(self.block_dict)
 
         # assigning flow values to the TreeVessel instances
         print("attaching result to tree")

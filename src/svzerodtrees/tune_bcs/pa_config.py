@@ -1,13 +1,13 @@
 
 import copy
 import json
-import pysvzerod
 import numpy as np
 from scipy.optimize import minimize, Bounds
 import math
 import matplotlib.pyplot as plt
 
 # svzerodtrees imports
+from .._pysvzerod import simulate_pysvzerod
 from ..io.blocks import Vessel, BoundaryCondition, SimParams
 from ..io.blocks.boundary_condition import (
     resolve_impedance_timepoint_contract,
@@ -167,7 +167,7 @@ class PAConfig():
         run the simulation with the current config
         '''
 
-        self.result = pysvzerod.simulate(self.config)
+        self.result = simulate_pysvzerod(self.config)
 
         self.rpa_split = np.mean(self.result[self.result.name=='branch3_seg0']['flow_in']) / (np.mean(self.result[self.result.name=='branch0_seg0']['flow_out']))
 

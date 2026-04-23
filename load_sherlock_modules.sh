@@ -1,24 +1,27 @@
 #!/bin/bash
 
-# these are the modules required to run svzerodtrees on sherlock.
-# everything must be run with python 3.9
+set -euo pipefail
 
-ml python/3.9.0
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+solver_root="$(cd "${repo_root}/../svZeroDSolver" && pwd)"
+
+# Validated Sherlock module stack for svZeroDTrees and pysvzerod on Python 3.12.
+module --force purge
+ml devel
+ml python/3.12.1
+ml py-numpy/1.26.3_py312
+ml py-scipy/1.12.0_py312
+ml py-pandas/2.2.1_py312
+ml py-matplotlib/3.8.3_py312
+ml py-numba/0.60.0_py312
 ml viz
-ml py-numpy/1.24.2_py39
-ml py-scipy/1.10.1_py39
-ml py-pandas/2.0.1_py39
-ml py-matplotlib/3.7.1_py39
+ml py-vtk/9.4.1_py312
 ml cmake
-ml gcc/12.1.0
 ml binutils/2.38
 
-# installing svzerodtrees package
-pip install -e .
-# install svzerodplus (must be build on sherlock)
-pip install git+https://github.com/StanfordCBCL/svZeroDPlus.git
-# install vtk
-pip install vtk
+# Install the sibling solver first, then svZeroDTrees itself.
+python -m pip install -e "${solver_root}"
+python -m pip install -e "${repo_root}"
 
-# uncomment the line below to run an experiment from a run_experiment.py file
-# python3 run_experiment.py
+# Uncomment the line below to run an experiment from a run_experiment.py file.
+# python run_experiment.py

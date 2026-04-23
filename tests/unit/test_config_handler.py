@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import svzerodtrees._pysvzerod as pysvzerod_loader
 from svzerodtrees.io.config_handler import ConfigHandler
 
 
@@ -192,3 +193,20 @@ def test_branch_resistance_mutation_and_equivalent_resistance():
     expected_parallel = 1.0 / (1.0 / handler.vessel_map[1].R + 1.0 / handler.vessel_map[2].R)
     assert handler.root.id == 3
     assert handler.root.R_eq == pytest.approx(7.0 + expected_parallel)
+
+
+def test_simulate_defers_missing_pysvzerod_until_solver_call(monkeypatch):
+    pysvzerod_loader.require_pysvzerod.cache_clear()
+
+    def _missing_solver(_name):
+        exc = ModuleNotFoundError("No module named 'pysvzerod'")
+        exc.name = "pysvzerod"
+        raise exc
+
+    monkeypatch.setattr(pysvzerod_loader.importlib, "import_module", _missing_solver)
+
+    handler = ConfigHandler(_bifurcation_config())
+    assert handler.root.id == 0
+
+    with pytest.raises(ModuleNotFoundError, match="Install the sibling svZeroDSolver checkout first"):
+        handler.simulate()

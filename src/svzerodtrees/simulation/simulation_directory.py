@@ -1,4 +1,5 @@
 from ..utils import *
+from .._pysvzerod import simulate_pysvzerod
 from .threedutils import *
 from ..io import *
 from scipy.optimize import minimize, Bounds
@@ -1139,7 +1140,7 @@ class SimulationDirectory:
             nonlinear_config.vessel_map[3].stenosis_coefficient = nonlinear_resistance[1] / 2
             nonlinear_config.vessel_map[4].stenosis_coefficient = nonlinear_resistance[1] / 2
 
-            result = pysvzerod.simulate(nonlinear_config.config) # Run the simulation with the updated nonlinear resistance
+            result = simulate_pysvzerod(nonlinear_config.config) # Run the simulation with the updated nonlinear resistance
 
             mpa_result = result[result.name == 'branch0_seg0']
             mpa_result = mpa_result[mpa_result.time > mpa_result.time.max() - cycle_duration]
@@ -1317,7 +1318,7 @@ class SimulationDirectory:
         def _evaluate_loss(params, targets, config, cycle_duration, weights):
             params = _apply_parameters(config, params)
             try:
-                result = pysvzerod.simulate(config.config)
+                result = simulate_pysvzerod(config.config)
             except Exception as exc:
                 print(f"pysvzerod simulation failed during RRI optimization: {exc}")
                 components = {key: np.inf for key in ['mean', 'sys', 'dia', 'rpa_split']}

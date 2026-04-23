@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from .io.utils import *
 import pandas as pd
 import copy
-import pysvzerod
+from ._pysvzerod import simulate_pysvzerod
 
 '''
 global utils
@@ -19,7 +19,7 @@ def run_svzerodplus(config: dict, dtype='ndarray'):
     :return output: the result of the simulation as a dict of dicts with each array denoted by its branch id
     """
 
-    result = pysvzerod.simulate(config)
+    result = simulate_pysvzerod(config)
 
     output = {
         "time": result["time"],
