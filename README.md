@@ -43,7 +43,16 @@ UV_CACHE_DIR=/tmp/uv-cache uv run python -c "import svzerodtrees, pysvzerod"
 ```
 
 **Sherlock**
-Use [load_sherlock_modules.sh](/Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/SimVascular/svz/repos/svZeroDTrees/load_sherlock_modules.sh) to load the validated Python 3.12 module stack and install both sibling packages in the correct order.
+Building `svZeroDSolver` on Sherlock requires at least 16 GB of memory. Start
+an `sdev` session or use another node with at least 16 GB before running the
+helper script:
+```bash
+sdev -m 16GB
+bash load_sherlock_modules.sh
+```
+
+Do not run the solver install from the default login node; the C++ build can be
+killed for lack of memory there.
 
 **Development**
 Preferred package-validation workflows use Hatch-managed environments:

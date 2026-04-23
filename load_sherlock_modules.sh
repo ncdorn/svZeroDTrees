@@ -5,6 +5,10 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 solver_root="$(cd "${repo_root}/../svZeroDSolver" && pwd)"
 
+# svZeroDSolver needs at least 16 GB of memory to build on Sherlock.
+# Run this script from an sdev session or another node with >=16 GB, not the
+# default login node.
+
 # Validated Sherlock module stack for svZeroDTrees and pysvzerod on Python 3.12.
 module --force purge
 ml math

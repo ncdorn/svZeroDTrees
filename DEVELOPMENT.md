@@ -111,9 +111,12 @@ hatch run docs:serve
 
 Sherlock has a coherent Python 3.12 module stack for `svZeroDTrees`. The
 checked-in helper script loads the validated modules and installs the sibling
-solver first:
+solver first, but `svZeroDSolver` needs at least 16 GB of memory to build on
+the cluster. Run it from an `sdev` session or another node with at least 16 GB,
+not from the default login node:
 
 ```bash
+sdev -m 16GB
 bash load_sherlock_modules.sh
 ```
 
