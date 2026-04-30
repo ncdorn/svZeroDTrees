@@ -562,7 +562,7 @@ class Inflow():
             if path.endswith('.csv'):
                 inflow = pd.read_csv(path)
             else:
-                inflow = pd.read_table(path, sep='\s+', header=None)
+                inflow = pd.read_table(path, sep=r'\s+', header=None)
             if len(inflow.columns) == 2:
                 # we have both flowrate and time in this file
                 inflow.rename(columns={0: 't', 1: 'q'}, inplace=True)

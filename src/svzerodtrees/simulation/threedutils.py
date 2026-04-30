@@ -449,7 +449,7 @@ def get_inflow_period(inflow_file):
     '''
     get the period of the inflow waveform
     '''
-    df = pd.read_csv(inflow_file, sep='\s+', header=None, names=['time', 'flow'])
+    df = pd.read_csv(inflow_file, sep=r'\s+', header=None, names=['time', 'flow'])
     period = df['time'].max()
 
     return period
@@ -703,7 +703,7 @@ def compute_flow_split(Q_svZeroD, svpre_file, n_steps=1000):
     # get the indices of the LPA and RPA outlets
     lpa_idxs, rpa_idxs = get_lpa_rpa_idxs(svpre_file)
 
-    q = pd.read_csv(Q_svZeroD, sep='\s+')
+    q = pd.read_csv(Q_svZeroD, sep=r'\s+')
 
     q_lpa = 0
     q_rpa = 0

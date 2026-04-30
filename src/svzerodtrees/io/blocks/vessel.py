@@ -40,6 +40,7 @@ class Vessel():
         self._R_eq = self._R
         self._C_eq = self._C
         self._L_eq = self._L
+        self._terminal_resistance = 0.0
         # get diameter with viscosity 0.04
         self._diameter = self._calculate_diameter(self._R)
     
@@ -141,11 +142,16 @@ class Vessel():
         if len(self.children) != 0:
             self._update_R_eq()
         else:
-            self._R_eq = self._R
+            self._R_eq = self._R + self._terminal_resistance
         return self._R_eq
 
     def _update_R_eq(self):
-        self._R_eq = self._R + (1 / sum([1 / child.R_eq for child in self.children]))
+        child_resistances = [child.R_eq for child in self.children]
+        if any(resistance == 0 for resistance in child_resistances):
+            parallel_resistance = 0.0
+        else:
+            parallel_resistance = 1 / sum(1 / resistance for resistance in child_resistances)
+        self._R_eq = self._R + parallel_resistance
     
     @property
     def C(self):
@@ -172,14 +178,21 @@ class Vessel():
     def L(self, new_L):
         self._L = new_L
 
-    # @property
-    # def L_eq(self):
-    #     if len(self.children) != 0:
-    #         self._update_L_eq()
-    #     return self._L_eq
+    @property
+    def L_eq(self):
+        if len(self.children) != 0:
+            self._update_L_eq()
+        else:
+            self._L_eq = self._L
+        return self._L_eq
 
-    # def _update_L_eq(self):
-    #     self._L_eq = self._L + (1 / sum([1 / child.L_eq for child in self.children]))
+    def _update_L_eq(self):
+        child_inductances = [child.L_eq for child in self.children]
+        if any(inductance == 0 for inductance in child_inductances):
+            parallel_inductance = 0.0
+        else:
+            parallel_inductance = 1 / sum(1 / inductance for inductance in child_inductances)
+        self._L_eq = self._L + parallel_inductance
 
     @property
     def stenosis_coefficient(self):
@@ -188,6 +201,14 @@ class Vessel():
     @stenosis_coefficient.setter
     def stenosis_coefficient(self, new_stenosis_coefficient):
         self._stenosis_coefficient = new_stenosis_coefficient
+
+    @property
+    def terminal_resistance(self):
+        return self._terminal_resistance
+
+    @terminal_resistance.setter
+    def terminal_resistance(self, new_terminal_resistance):
+        self._terminal_resistance = float(new_terminal_resistance or 0.0)
         
     @property
     def children(self):

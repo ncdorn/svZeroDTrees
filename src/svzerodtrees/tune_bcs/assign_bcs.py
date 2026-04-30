@@ -1,4 +1,7 @@
 
+from pathlib import Path
+import re
+
 import numpy as np
 from ..io import *
 from ..io.blocks.boundary_condition import resolve_impedance_timepoint_contract
@@ -21,6 +24,125 @@ def _attach_tree_metadata(tree, params, *, generation_mode, side, bc_names, outl
     }
     return tree.to_dict()
 
+
+def _mapping_key(value):
+    stem = Path(str(value)).stem
+    return re.sub(r"[^a-z0-9]+", "", stem.lower())
+
+
+def _outlet_bc_names(config_handler):
+    return [
+        name
+        for name, bc in config_handler.bcs.items()
+        if "inflow" not in str(getattr(bc, "name", name)).lower()
+    ]
+
+
+def _metadata_cap_to_bc(config_handler):
+    mapping = {}
+    for tree_payload in getattr(config_handler, "tree_params", {}).values():
+        if not isinstance(tree_payload, dict):
+            continue
+        outlet_mapping = tree_payload.get("outlet_mapping")
+        if not isinstance(outlet_mapping, dict):
+            continue
+        outlet_names = outlet_mapping.get("outlet_names") or []
+        bc_names = outlet_mapping.get("bc_names") or []
+        if len(outlet_names) == len(bc_names):
+            pairs = zip(outlet_names, bc_names)
+        elif len(bc_names) == 1:
+            pairs = ((outlet_name, bc_names[0]) for outlet_name in outlet_names)
+        else:
+            continue
+        for outlet_name, bc_name in pairs:
+            mapping[_mapping_key(outlet_name)] = str(bc_name)
+    return mapping
+
+
+def resolve_cap_to_bc_mapping(
+    config_handler,
+    cap_info,
+    *,
+    bc_prefix,
+    allow_ordered_outlet_mapping=False,
+):
+    """Resolve mesh cap names to 0D outlet BC names without silent order guesses."""
+
+    cap_names = list(cap_info.keys())
+    outlet_names = _outlet_bc_names(config_handler)
+    if len(outlet_names) != len(cap_names):
+        raise ValueError(
+            "number of outlet boundary conditions does not match number of cap "
+            f"surfaces: bcs={len(outlet_names)}, caps={len(cap_names)}"
+        )
+
+    metadata_mapping = _metadata_cap_to_bc(config_handler)
+    bc_by_key = {}
+    for name in outlet_names:
+        bc = config_handler.bcs[name]
+        keys = {_mapping_key(name), _mapping_key(getattr(bc, "name", name))}
+        for key in keys:
+            if key:
+                bc_by_key.setdefault(key, []).append(name)
+
+    resolved = {}
+    used = set()
+    unresolved = []
+    for cap_name in cap_names:
+        cap_key = _mapping_key(cap_name)
+        bc_name = metadata_mapping.get(cap_key)
+        if bc_name is not None and bc_name in outlet_names and bc_name not in used:
+            resolved[cap_name] = bc_name
+            used.add(bc_name)
+            continue
+
+        matches = [name for name in bc_by_key.get(cap_key, []) if name not in used]
+        if len(matches) == 1:
+            resolved[cap_name] = matches[0]
+            used.add(matches[0])
+        else:
+            unresolved.append(str(cap_name))
+
+    if not unresolved and len(resolved) == len(cap_names):
+        return resolved
+
+    if allow_ordered_outlet_mapping:
+        return {
+            cap_name: outlet_names[idx]
+            for idx, cap_name in enumerate(cap_names)
+        }
+
+    raise ValueError(
+        "could not deterministically map mesh caps to outlet BCs; unresolved caps: "
+        + ", ".join(unresolved)
+        + ". Add matching BC names/outlet metadata or set "
+        "allow_ordered_outlet_mapping=True for legacy order-based mapping."
+    )
+
+
+def validate_cap_to_bc_mapping(
+    config_handler,
+    mesh_surfaces_path,
+    *,
+    convert_to_cm=False,
+    is_pulmonary=True,
+    bc_prefix="IMPEDANCE",
+    allow_ordered_outlet_mapping=False,
+):
+    if is_pulmonary:
+        rpa_info, lpa_info, _ = vtp_info(
+            mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=True
+        )
+        cap_info = lpa_info | rpa_info
+    else:
+        cap_info = vtp_info(mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=False)
+    return resolve_cap_to_bc_mapping(
+        config_handler,
+        cap_info,
+        bc_prefix=bc_prefix,
+        allow_ordered_outlet_mapping=allow_ordered_outlet_mapping,
+    )
+
 def construct_impedance_trees(config_handler, 
                               mesh_surfaces_path, 
                               wedge_pressure, 
@@ -33,7 +155,8 @@ def construct_impedance_trees(config_handler,
                               use_mean=False,
                               specify_diameter=False,
                               diameter_scale=0.0,
-                              diameter_std_cap=None):
+                              diameter_std_cap=None,
+                              allow_ordered_outlet_mapping=False):
     '''
     construct impedance trees for outlet BCs
     
@@ -64,16 +187,12 @@ def construct_impedance_trees(config_handler,
     # lpa_areas = np.array(list(lpa_info.values()))
     # rpa_areas = np.array(list(rpa_info.values()))
 
-    outlet_bc_names = [name for name, bc in config_handler.bcs.items() if 'inflow' not in bc.name.lower()]
-
-    # assumed that cap and boundary condition orders match
-    if len(outlet_bc_names) != len(cap_info):
-        print('number of outlet boundary conditions does not match number of cap surfaces, automatically assigning bc names...')
-        for i, name in enumerate(outlet_bc_names):
-            # delete the unused bcs
-            del config_handler.bcs[name]
-        outlet_bc_names = [f'IMPEDANCE_{i}' for i in range(len(cap_info))]
-    cap_to_bc = {list(cap_info.keys())[i]: outlet_bc_names[i] for i in range(len(outlet_bc_names))}
+    cap_to_bc = resolve_cap_to_bc_mapping(
+        config_handler,
+        cap_info,
+        bc_prefix="IMPEDANCE",
+        allow_ordered_outlet_mapping=allow_ordered_outlet_mapping,
+    )
     if not hasattr(config_handler, "bc_inductance"):
         config_handler.bc_inductance = {}
 

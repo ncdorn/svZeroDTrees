@@ -13,9 +13,16 @@ def get_branch_id(vessel_config):
     :return: integer branch id
     '''
 
-    br, seg = vessel_config["vessel_name"].split("_")
-    br = int(br[6:])
-    seg = int(seg[3:])
+    parts = vessel_config["vessel_name"].split("_")
+    br_part = next((part for part in parts if part.startswith("branch")), None)
+    seg_part = next((part for part in parts if part.startswith("seg")), None)
+    if br_part is None or seg_part is None:
+        raise ValueError(
+            f"vessel_name must contain branch* and seg* tokens: {vessel_config['vessel_name']}"
+        )
+
+    br = int(br_part[6:])
+    seg = int(seg_part[3:])
 
     return br, seg
 
@@ -37,4 +44,3 @@ def get_branch_result(result_array, data_name: str, branch: int, steady: bool=Fa
     else:
         # return result_array[data_name][branch] # old code
         return result_array[result_array.name == branch][data_name].to_numpy()
-

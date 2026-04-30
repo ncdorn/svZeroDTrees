@@ -190,9 +190,23 @@ def test_branch_resistance_mutation_and_equivalent_resistance():
     assert [vessel.R for vessel in handler.get_segments(0)] == pytest.approx([5.0, 7.0])
 
     handler.compute_R_eq()
-    expected_parallel = 1.0 / (1.0 / handler.vessel_map[1].R + 1.0 / handler.vessel_map[2].R)
+    expected_lpa = handler.vessel_map[1].R + handler.bcs["LPA_BC"].R
+    expected_rpa = handler.vessel_map[2].R + handler.bcs["RPA_BC"].R
+    expected_parallel = 1.0 / (1.0 / expected_lpa + 1.0 / expected_rpa)
     assert handler.root.id == 3
     assert handler.root.R_eq == pytest.approx(7.0 + expected_parallel)
+
+
+def test_equivalent_resistance_includes_terminal_boundary_conditions_for_connectors():
+    payload = _bifurcation_config()
+    payload["vessels"][1]["zero_d_element_values"]["R_poiseuille"] = 0.0
+    payload["vessels"][2]["zero_d_element_values"]["R_poiseuille"] = 0.0
+    handler = ConfigHandler(payload)
+
+    assert handler.vessel_map[1].R_eq == pytest.approx(100.0)
+    assert handler.vessel_map[2].R_eq == pytest.approx(200.0)
+    expected_parallel = 1.0 / (1.0 / 100.0 + 1.0 / 200.0)
+    assert handler.root.R_eq == pytest.approx(10.0 + expected_parallel)
 
 
 def test_simulate_defers_missing_pysvzerod_until_solver_call(monkeypatch):

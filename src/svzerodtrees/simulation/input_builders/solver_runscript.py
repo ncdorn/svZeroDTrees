@@ -96,6 +96,18 @@ class SolverRunscript(SimulationFile):
                 ff.write(f"ml {module}\n")
             ff.write("\n")
             ff.write(f"cd {self.working_dir}\n")
+            ff.write('if [ -n "${SLURM_CPUS_PER_TASK:-}" ] && [ -n "${SLURM_TRES_PER_TASK:-}" ]; then\n')
+            ff.write('  case "${SLURM_TRES_PER_TASK}" in\n')
+            ff.write('    cpu=*)\n')
+            ff.write('      _svzt_tres_cpus="${SLURM_TRES_PER_TASK#cpu=}"\n')
+            ff.write('      _svzt_tres_cpus="${_svzt_tres_cpus%%,*}"\n')
+            ff.write('      if [ "${SLURM_CPUS_PER_TASK}" != "${_svzt_tres_cpus}" ]; then\n')
+            ff.write('        unset SLURM_TRES_PER_TASK\n')
+            ff.write('      fi\n')
+            ff.write('      unset _svzt_tres_cpus\n')
+            ff.write('      ;;\n')
+            ff.write('  esac\n')
+            ff.write('fi\n')
             ff.write(f"srun {svfsiplus_path} svFSIplus.xml\n")
         
         self.is_written = True

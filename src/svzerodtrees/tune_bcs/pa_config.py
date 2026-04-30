@@ -242,6 +242,7 @@ class PAConfig():
         tree_params: dict with keys 'lpa', 'rpa', values list currently [k2, k3, lrr, alpha]
         '''
 
+        self.simparams.steady_initial = False
         self.bcs["INFLOW"] = self.inflow
 
         self.mpa.bc = {

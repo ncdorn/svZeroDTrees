@@ -16,7 +16,7 @@ class SvZeroDdata(SimulationFile):
     def initialize(self):
         '''
         initialize the svZeroD_data object'''
-        self.df = pd.read_csv(self.path, sep='\s+')
+        self.df = pd.read_csv(self.path, sep=r'\s+')
 
         self.df.rename({self.df.columns[0]: 'time'}, axis=1, inplace=True)
 

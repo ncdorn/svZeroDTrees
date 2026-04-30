@@ -47,6 +47,8 @@ def test_solver_runscript_writes_configurable_slurm_options(tmp_path: Path):
     assert "#SBATCH --qos=debug" in rendered
     assert "#SBATCH --nodes=1" in rendered
     assert "#SBATCH --ntasks-per-node=2" in rendered
+    assert 'if [ -n "${SLURM_CPUS_PER_TASK:-}" ] && [ -n "${SLURM_TRES_PER_TASK:-}" ]; then' in rendered
+    assert 'unset SLURM_TRES_PER_TASK' in rendered
     assert "srun /custom/svmultiphysics svFSIplus.xml" in rendered
 
 

@@ -3,7 +3,7 @@ tune_bcs.py contains the code to tune the boundary conditions for the SVZeroDtre
 
 from .pa_config import PAConfig
 
-from .assign_bcs import construct_impedance_trees
+from .assign_bcs import construct_impedance_trees, validate_cap_to_bc_mapping
 
 from .tune_space import *
 
@@ -12,4 +12,4 @@ from.clinical_targets import ClinicalTargets
 from .impedance_tuner import ImpedanceTuner
 from .rcr_tuner import RCRTuner
 
-from .assign_bcs import construct_impedance_trees, assign_rcr_bcs
+from .assign_bcs import construct_impedance_trees, assign_rcr_bcs, validate_cap_to_bc_mapping

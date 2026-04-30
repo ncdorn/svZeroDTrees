@@ -651,6 +651,13 @@ class ConfigHandler():
                 self.inflows[bc_config['bc_name']] = Inflow(bc_config['bc_values']['Q'], bc_config['bc_values']['t'], t_per=np.max(bc_config['bc_values']['t']), name=bc_config['bc_name'])
             self.bcs[bc_config['bc_name']] = BoundaryCondition.from_config(bc_config)
 
+        for vessel in list(self.vessel_map.values()) + list(self.branch_map.values()):
+            if vessel.bc is None:
+                continue
+            outlet_name = vessel.bc.get("outlet")
+            if outlet_name in self.bcs:
+                vessel.terminal_resistance = self.bcs[outlet_name].R or 0.0
+
         # initialize the simulation parameters
         self.simparams = SimParams(self._config['simulation_parameters'])
 
@@ -764,9 +771,14 @@ class ConfigHandler():
                 for child in vessel.children:
                     calc_R_eq(child)
                     # we assume here that the stenosis coefficient is linear, which is not true but a reasonable approximation
-                vessel._R_eq = vessel.R + vessel.stenosis_coefficient + (1 / sum([1 / child.R_eq for child in vessel.children]))
+                child_resistances = [child.R_eq for child in vessel.children]
+                if any(resistance == 0 for resistance in child_resistances):
+                    parallel_resistance = 0.0
+                else:
+                    parallel_resistance = 1 / sum(1 / resistance for resistance in child_resistances)
+                vessel._R_eq = vessel.R + vessel.stenosis_coefficient + parallel_resistance
             else:
-                vessel._R_eq = vessel.R + vessel.stenosis_coefficient
+                vessel._R_eq = vessel.R + vessel.stenosis_coefficient + vessel.terminal_resistance
         
         calc_R_eq(self.root)
 
@@ -860,8 +872,9 @@ class ConfigHandler():
             path=os.path.join(simdir, 'svzerod_3Dcoupling.json')
         )
 
-        # copy over the bcs
-        threed_coupler.bcs = self.bcs
+        # Copy the boundary-condition map so dirichlet inflow coupling can drop
+        # inflow blocks from the 3D coupler without mutating the source 0D model.
+        threed_coupler.bcs = dict(self.bcs)
         if inflow_from_0d:
             # need to add a vessel between the inflwo bc and coupling block to allow effective coupling
             self.n_inflows = 0

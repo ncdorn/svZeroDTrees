@@ -30,6 +30,7 @@ from svzerodtrees.tune_bcs import (
     TiedParam,
     TuneSpace,
     construct_impedance_trees,
+    validate_cap_to_bc_mapping,
     positive,
     unit_interval,
 )
@@ -53,6 +54,10 @@ DEFAULT_IMPEDANCE_TUNING_CONFIG: dict[str, Any] = {
     "rescale_inflow": True,
     "convert_to_cm": False,
     "compliance_model": "olufsen",
+    "diameter_scale": 0.0,
+    "diameter_std_cap": None,
+    "allow_ordered_outlet_mapping": False,
+    "tuning_model": "rri",
 }
 
 OPTIMIZED_PARAMS_FILENAME = "optimized_params.csv"
@@ -103,6 +108,11 @@ def _resolve_impedance_config(
     merged["rescale_inflow"] = bool(merged["rescale_inflow"])
     merged["convert_to_cm"] = bool(merged["convert_to_cm"])
     merged["compliance_model"] = str(merged["compliance_model"]).strip().lower()
+    merged["diameter_scale"] = float(merged["diameter_scale"])
+    if merged["diameter_std_cap"] is not None:
+        merged["diameter_std_cap"] = float(merged["diameter_std_cap"])
+    merged["allow_ordered_outlet_mapping"] = bool(merged["allow_ordered_outlet_mapping"])
+    merged["tuning_model"] = str(merged["tuning_model"]).strip().lower()
     merged["tune_space"] = _normalize_tune_space_config(merged.get("tune_space"))
 
     if merged["nm_iter"] <= 0:
@@ -113,6 +123,12 @@ def _resolve_impedance_config(
         raise ValueError("impedance tuning d_min must be > 0")
     if merged["compliance_model"] not in {"constant", "olufsen"}:
         raise ValueError("impedance tuning compliance_model must be constant or olufsen")
+    if merged["diameter_scale"] < 0.0:
+        raise ValueError("impedance tuning diameter_scale must be >= 0")
+    if merged["diameter_std_cap"] is not None and merged["diameter_std_cap"] < 0.0:
+        raise ValueError("impedance tuning diameter_std_cap must be >= 0")
+    if merged["tuning_model"] not in {"rri", "full_pa"}:
+        raise ValueError("impedance tuning tuning_model must be one of rri|full_pa")
 
     return merged
 
@@ -363,6 +379,7 @@ def _expected_snapshot_inflow_cardiac_output(
     mesh_surfaces: Path,
     rescale_inflow: bool,
     convert_to_cm: bool,
+    tuning_model: str = "rri",
     inflow_path: str | Path | None = None,
 ) -> float:
     if inflow_path is not None:
@@ -377,6 +394,8 @@ def _expected_snapshot_inflow_cardiac_output(
             payload = json.load(ff)
         cardiac_output = _resolve_flow_mean_config(payload, bc_name="INFLOW")
     if not rescale_inflow:
+        return cardiac_output
+    if str(tuning_model).strip().lower() == "full_pa":
         return cardiac_output
 
     scale = float(get_pa_outlet_scale(str(mesh_surfaces), convert_to_cm=convert_to_cm))
@@ -437,12 +456,21 @@ def run_impedance_tuning_for_iteration(
         mesh_surfaces=mesh_surfaces_path,
         rescale_inflow=bool(tuning["rescale_inflow"]),
         convert_to_cm=bool(tuning["convert_to_cm"]),
+        tuning_model=str(tuning["tuning_model"]),
         inflow_path=inflow_path,
     )
 
     opt_log = output_dir / OPTIMIZATION_LOG_FILENAME
     with _pushd(output_dir):
         reduced_config = ConfigHandler.from_json(str(seed_config_path), is_pulmonary=True)
+        if tuning["tuning_model"] == "full_pa" and getattr(reduced_config, "bcs", None) is not None:
+            validate_cap_to_bc_mapping(
+                reduced_config,
+                str(mesh_surfaces_path),
+                convert_to_cm=bool(tuning["convert_to_cm"]),
+                is_pulmonary=True,
+                allow_ordered_outlet_mapping=bool(tuning["allow_ordered_outlet_mapping"]),
+            )
         tuner = ImpedanceTuner(
             reduced_config,
             str(mesh_surfaces_path),
@@ -456,6 +484,13 @@ def run_impedance_tuning_for_iteration(
             log_file=str(opt_log),
             solver=str(tuning["solver"]),
             inflow_path=str(inflow_path) if inflow_path is not None else None,
+            tuning_model=str(tuning["tuning_model"]),
+            d_min=float(tuning["d_min"]),
+            use_mean=bool(tuning["use_mean"]),
+            specify_diameter=bool(tuning["specify_diameter"]),
+            diameter_scale=float(tuning["diameter_scale"]),
+            diameter_std_cap=tuning["diameter_std_cap"],
+            allow_ordered_outlet_mapping=bool(tuning["allow_ordered_outlet_mapping"]),
         )
         tuner.tune(nm_iter=int(tuning["nm_iter"]))
 
@@ -491,6 +526,9 @@ def run_impedance_tuning_for_iteration(
         n_procs=int(tuning["n_procs"]),
         use_mean=bool(tuning["use_mean"]),
         specify_diameter=bool(tuning["specify_diameter"]),
+        diameter_scale=float(tuning["diameter_scale"]),
+        diameter_std_cap=tuning["diameter_std_cap"],
+        allow_ordered_outlet_mapping=bool(tuning["allow_ordered_outlet_mapping"]),
     )
 
     tuned_zerod_config = output_dir / tuned_config_name
@@ -502,6 +540,7 @@ def run_impedance_tuning_for_iteration(
         "stree_optimization_log": str(opt_log),
         "pa_config_snapshot": str(pa_snapshot),
         "tuned_zerod_config": str(tuned_zerod_config),
+        "tuning_model": tuning["tuning_model"],
         "impedance_config": tuning,
     }
 

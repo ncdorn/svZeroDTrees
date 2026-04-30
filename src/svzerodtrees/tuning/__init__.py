@@ -10,6 +10,7 @@ from .iteration import (
     write_iteration_decision,
     write_iteration_metrics,
 )
+from .learned_seed import prepare_reduced_rri_seed_from_learned
 
 __all__ = [
     "DEFAULT_ITERATION_THRESHOLDS",
@@ -17,6 +18,7 @@ __all__ = [
     "compute_flow_split_metrics",
     "evaluate_iteration_gate",
     "generate_reduced_pa_from_iteration",
+    "prepare_reduced_rri_seed_from_learned",
     "run_impedance_tuning_for_iteration",
     "write_iteration_decision",
     "write_iteration_metrics",

@@ -1,8 +1,10 @@
 from .base import BoundaryConditionTuner
+import copy
 import numpy as np
 from scipy.optimize import minimize
 from ..simulation.threedutils import pa_outlet_scale_from_branch_counts, vtp_info
 from ..tune_bcs.pa_config import PAConfig
+from ..tune_bcs.assign_bcs import construct_impedance_trees
 from ..microvasculature import TreeParameters, compliance as comp_mod
 from ..microvasculature.structured_tree.asymmetry import resolve_branch_scaling
 from ..tune_bcs.tune_space import TuneSpace
@@ -32,12 +34,22 @@ class ImpedanceTuner(BoundaryConditionTuner):
                  log_file=None,
                  maxiter=200,
                  solver="Powell",
-                 inflow_path=None):
+                 inflow_path=None,
+                 tuning_model="rri",
+                 d_min=0.01,
+                 use_mean=True,
+                 specify_diameter=True,
+                 diameter_scale=0.0,
+                 diameter_std_cap=None,
+                 allow_ordered_outlet_mapping=False):
         super().__init__(config_handler, mesh_surfaces_path, clinical_targets)
         self.tune_space = tune_space
         self.compliance_model = (compliance_model or "").lower()
         if self.compliance_model not in ("olufsen", "constant"):
             raise ValueError(f"Unknown compliance model: {self.compliance_model}")
+        self.tuning_model = str(tuning_model or "rri").strip().lower()
+        if self.tuning_model not in {"rri", "full_pa"}:
+            raise ValueError("tuning_model must be one of rri|full_pa")
 
         self.rescale_inflow = rescale_inflow
         self.n_procs = n_procs
@@ -48,6 +60,12 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self.maxiter = maxiter
         self.solver = solver
         self.inflow_path = os.path.abspath(inflow_path) if inflow_path is not None else None
+        self.d_min = float(d_min)
+        self.use_mean = bool(use_mean)
+        self.specify_diameter = bool(specify_diameter)
+        self.diameter_scale = float(diameter_scale)
+        self.diameter_std_cap = None if diameter_std_cap is None else float(diameter_std_cap)
+        self.allow_ordered_outlet_mapping = bool(allow_ordered_outlet_mapping)
 
         # grid search params
         self.grid_search_init = grid_search_init
@@ -61,6 +79,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self._last_loss_breakdown = {}
         self._opt_csv_path = None
         self._expected_snapshot_cardiac_output = None
+        self._full_pa_base_config = None
 
 
     # ---- Internal helpers ---- #
@@ -87,6 +106,11 @@ class ImpedanceTuner(BoundaryConditionTuner):
             if self.convert_to_cm:
                 pa_config.convert_to_cm()
         return pa_config
+
+    def _make_tuning_model(self):
+        if self.tuning_model == "full_pa":
+            return copy.deepcopy(self.config_handler)
+        return self._make_pa_config()
 
     def _prepare_geometry_defaults(self):
         rpa_info, lpa_info, _ = vtp_info(self.mesh_surfaces_path, convert_to_cm=self.convert_to_cm, pulmonary=True)
@@ -126,6 +150,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 "the patient inflow.csv mean flow as the source of truth"
             )
         if not self.rescale_inflow:
+            return cardiac_output
+        if self.tuning_model == "full_pa":
             return cardiac_output
 
         scale = float(self._geom_defaults["n_outlets_scale"])
@@ -211,6 +237,144 @@ class ImpedanceTuner(BoundaryConditionTuner):
 
         print(f"[grid] best init loss={best_f:.3f} for candidate={best_x[-1]}")
         return best_x
+
+    @staticmethod
+    def _vessel_result(result, vessel):
+        by_name = result[result.name == vessel.name]
+        if not by_name.empty:
+            return by_name
+        branch_name = f"branch{vessel.branch}_seg0"
+        by_branch = result[result.name == branch_name]
+        if not by_branch.empty:
+            return by_branch
+        raise ValueError(f"simulation result missing vessel '{vessel.name}'")
+
+    def _compute_full_pa_metrics(self, config_handler, result):
+        if not hasattr(config_handler, "mpa") or not hasattr(config_handler, "rpa"):
+            raise ValueError("full_pa tuning requires pulmonary mpa and rpa vessels")
+
+        mpa_result = self._vessel_result(result, config_handler.mpa)
+        rpa_result = self._vessel_result(result, config_handler.rpa)
+
+        cycle_duration = getattr(config_handler.simparams, "cardiac_period", None)
+        if cycle_duration is None:
+            inflow_times = getattr(config_handler.bcs["INFLOW"], "t", None)
+            if inflow_times:
+                inflow_arr = np.asarray(inflow_times, dtype=float)
+                if inflow_arr.size >= 2:
+                    cycle_duration = float(inflow_arr.max() - inflow_arr.min())
+
+        if cycle_duration is not None and np.isfinite(cycle_duration) and cycle_duration > 0.0:
+            mpa_time = np.asarray(mpa_result.time, dtype=float)
+            rpa_time = np.asarray(rpa_result.time, dtype=float)
+            mpa_result = mpa_result[mpa_time > mpa_time.max() - float(cycle_duration)]
+            rpa_result = rpa_result[rpa_time > rpa_time.max() - float(cycle_duration)]
+
+        if mpa_result.empty or rpa_result.empty:
+            raise ValueError("full_pa simulation result has no usable last-cycle data")
+
+        pressure = np.asarray(mpa_result.pressure_in, dtype=float) / 1333.2
+        mpa_flow = np.asarray(mpa_result.flow_in, dtype=float)
+        rpa_flow = np.asarray(rpa_result.flow_in, dtype=float)
+        mpa_time = np.asarray(mpa_result.time, dtype=float)
+        rpa_time = np.asarray(rpa_result.time, dtype=float)
+
+        if mpa_time.size >= 2 and rpa_time.size >= 2:
+            total_flow = float(np.trapz(mpa_flow, mpa_time))
+            rpa_total = float(np.trapz(rpa_flow, rpa_time))
+        else:
+            total_flow = float(np.mean(mpa_flow))
+            rpa_total = float(np.mean(rpa_flow))
+        if total_flow == 0.0:
+            raise ValueError("full_pa MPA flow is zero; cannot compute RPA split")
+
+        return {
+            "P_mpa": [float(np.max(pressure)), float(np.min(pressure)), float(np.mean(pressure))],
+            "rpa_split": rpa_total / total_flow,
+        }
+
+    @staticmethod
+    def _impedance_bcs_are_finite(model):
+        for bc in model.bcs.values():
+            if getattr(bc, "type", None) != "IMPEDANCE":
+                continue
+            z_values = getattr(bc, "Z", None)
+            if z_values is not None and np.asarray(z_values, dtype=float).size:
+                if not np.all(np.isfinite(np.asarray(z_values, dtype=float))):
+                    return False
+        return True
+
+    def _write_and_validate_snapshot(self, model):
+        model.to_json('pa_config_tuning_snapshot.json')
+        with open('pa_config_tuning_snapshot.json', encoding='utf-8') as ff:
+            snapshot_payload = json.load(ff)
+        validate_boundary_condition_configs(snapshot_payload.get("boundary_conditions", []))
+        validate_impedance_timing_config(snapshot_payload)
+        expected_snapshot_cardiac_output = self._expected_snapshot_cardiac_output
+        if expected_snapshot_cardiac_output is None:
+            expected_snapshot_cardiac_output = self._compute_inflow_cardiac_output(
+                model.bcs["INFLOW"]
+            )
+        validate_flow_cardiac_output_config(
+            snapshot_payload,
+            expected_cardiac_output=expected_snapshot_cardiac_output,
+        )
+
+    def _evaluate_model(self, x: np.ndarray, provided_model=None):
+        params = self.tune_space.vector_to_param_dict(x)
+        lpa_params, rpa_params = self._build_tree_params(params)
+
+        if self.tuning_model == "full_pa":
+            base_model = self._full_pa_base_config if self._full_pa_base_config is not None else provided_model
+            if base_model is None:
+                raise ValueError("full_pa tuning model has not been initialized")
+            model = copy.deepcopy(base_model)
+            construct_impedance_trees(
+                model,
+                self.mesh_surfaces_path,
+                self.clinical_targets.wedge_p,
+                lpa_params,
+                rpa_params,
+                d_min=self.d_min,
+                convert_to_cm=self.convert_to_cm,
+                is_pulmonary=self.is_pulmonary,
+                n_procs=self.n_procs,
+                use_mean=self.use_mean,
+                specify_diameter=self.specify_diameter,
+                diameter_scale=self.diameter_scale,
+                diameter_std_cap=self.diameter_std_cap,
+                allow_ordered_outlet_mapping=self.allow_ordered_outlet_mapping,
+            )
+            self._write_and_validate_snapshot(model)
+            if not self._impedance_bcs_are_finite(model):
+                raise ValueError("full_pa impedance BC contains non-finite values")
+            result = model.simulate()
+            metrics = self._compute_full_pa_metrics(model, result)
+            print(
+                f'full PA config SIMULATED, rpa split: {metrics["rpa_split"]}, '
+                f'p_mpa = {metrics["P_mpa"]}\n params: {params}'
+            )
+            return model, metrics, lpa_params, rpa_params, params
+
+        model = self._full_pa_base_config if self._full_pa_base_config is not None else provided_model
+        if model is None:
+            raise ValueError("RRI tuning model has not been initialized")
+        lpa_params, rpa_params = self._build_tree_params(params)
+        model.create_impedance_trees(lpa_params, rpa_params, self.n_procs)
+        self._write_and_validate_snapshot(model)
+        if (np.isnan(model.bcs['LPA_BC'].Z[0]) or
+            np.isnan(model.bcs['RPA_BC'].Z[0])):
+            raise ValueError("RRI impedance BC contains non-finite values")
+        model.simulate()
+        metrics = {
+            "P_mpa": model.P_mpa,
+            "rpa_split": model.rpa_split,
+        }
+        print(
+            f'pa config SIMULATED, rpa split: {model.rpa_split}, '
+            f'p_mpa = {model.P_mpa}\n params: {params}'
+        )
+        return model, metrics, lpa_params, rpa_params, params
     
 
     # ---- Main tuning routine ---- #
@@ -233,7 +397,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 lf.write(msg + "\n")
 
         self._prepare_geometry_defaults()
-        pa_config = self._make_pa_config()
+        pa_config = self._make_tuning_model()
         self._expected_snapshot_cardiac_output = self._resolve_expected_snapshot_cardiac_output(
             pa_config.bcs["INFLOW"]
         )
@@ -246,6 +410,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 )
             scale_factor = self._expected_snapshot_cardiac_output / current_mean_flow
             pa_config.bcs['INFLOW'].Q = [q * scale_factor for q in pa_config.bcs['INFLOW'].Q]
+        self._full_pa_base_config = pa_config
 
         x0, bounds = self.tune_space.pack_init_and_bounds()
 
@@ -342,39 +507,21 @@ class ImpedanceTuner(BoundaryConditionTuner):
         print(f"[ImpedanceTuner] Optimized: {best_x}  f={best_unweighted_loss:.3f}")
         # final simulate & plot
         _ = self.loss_fn(best_x, pa_config, finalize=True)
-        pa_config.plot_mpa()
+        if self.tuning_model == "rri":
+            pa_config.plot_mpa()
         return result
     
 
     # ---- Loss function ---- #
 
     def loss_fn(self, x: np.ndarray, pa_config, finalize: bool=False) -> float:
-        params = self.tune_space.vector_to_param_dict(x)
-
         try:
-            lpa_params, rpa_params = self._build_tree_params(params)
-            pa_config.create_impedance_trees(lpa_params, rpa_params, self.n_procs)
-            pa_config.to_json('pa_config_tuning_snapshot.json')
-            with open('pa_config_tuning_snapshot.json', encoding='utf-8') as ff:
-                snapshot_payload = json.load(ff)
-            validate_boundary_condition_configs(snapshot_payload.get("boundary_conditions", []))
-            validate_impedance_timing_config(snapshot_payload)
-            expected_snapshot_cardiac_output = self._expected_snapshot_cardiac_output
-            if expected_snapshot_cardiac_output is None:
-                expected_snapshot_cardiac_output = self._compute_inflow_cardiac_output(
-                    pa_config.bcs["INFLOW"]
-                )
-            validate_flow_cardiac_output_config(
-                snapshot_payload,
-                expected_cardiac_output=expected_snapshot_cardiac_output,
+            model, metrics, lpa_params, rpa_params, params = self._evaluate_model(
+                x,
+                provided_model=pa_config,
             )
-            # sanity check
-            if (np.isnan(pa_config.bcs['LPA_BC'].Z[0]) or
-                np.isnan(pa_config.bcs['RPA_BC'].Z[0])):
-                return 1e9
-            pa_config.simulate()
-            print(f'pa config SIMULATED, rpa split: {pa_config.rpa_split}, p_mpa = {pa_config.P_mpa}\n params: {params}')
         except Exception as e:
+            params = self.tune_space.vector_to_param_dict(x)
             print(f"[loss_fn] simulation error: {e} params={params}")
             return 1e9
 
@@ -384,7 +531,9 @@ class ImpedanceTuner(BoundaryConditionTuner):
             if (self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p)
             else {"sys": 1.0, "dia": 0.0, "mean": 1.0}
         )
-        pressure_diff = np.abs(np.array(pa_config.P_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p
+        p_mpa = metrics["P_mpa"]
+        rpa_split = metrics["rpa_split"]
+        pressure_diff = np.abs(np.array(p_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p
         pressure_components = {
             "sys": pressure_diff[0] ** 2,
             "dia": pressure_diff[1] ** 2,
@@ -400,7 +549,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
             pressure_contrib["dia"] +
             pressure_contrib["mean"]
         )
-        flowsplit_loss = ((pa_config.rpa_split - self.clinical_targets.rpa_split) / self.clinical_targets.rpa_split)**2 * 100.0
+        flowsplit_loss = ((rpa_split - self.clinical_targets.rpa_split) / self.clinical_targets.rpa_split)**2 * 100.0
 
         if self.compliance_model == "olufsen":
             l2 = 1e-3 * (params["comp.lpa.k2"]**2 + params["comp.rpa.k2"]**2)
@@ -430,10 +579,10 @@ class ImpedanceTuner(BoundaryConditionTuner):
                     "reg": l2,
                 },
                 "metrics": {
-                    "sys_pressure": pa_config.P_mpa[0],
-                    "dia_pressure": pa_config.P_mpa[1],
-                    "mean_pressure": pa_config.P_mpa[2],
-                    "rpa_split": pa_config.rpa_split,
+                    "sys_pressure": p_mpa[0],
+                    "dia_pressure": p_mpa[1],
+                    "mean_pressure": p_mpa[2],
+                    "rpa_split": rpa_split,
                 },
                 "params": params,
             }
@@ -442,8 +591,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
             final_loss = weighted_total if self._augmented_mode else base_total
             # Write once on final call
             rows = [
-                lpa_params.to_csv_row(loss=final_loss, flow_split=1 - pa_config.rpa_split, p_mpa=pa_config.P_mpa),
-                rpa_params.to_csv_row(loss=final_loss, flow_split=pa_config.rpa_split, p_mpa=pa_config.P_mpa)
+                lpa_params.to_csv_row(loss=final_loss, flow_split=1 - rpa_split, p_mpa=p_mpa),
+                rpa_params.to_csv_row(loss=final_loss, flow_split=rpa_split, p_mpa=p_mpa)
             ]
             keys = sorted({k for r in rows for k in r})
             csv_path = self._opt_csv_path or "optimized_params.csv"

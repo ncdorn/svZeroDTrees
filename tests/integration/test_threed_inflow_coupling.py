@@ -87,6 +87,10 @@ def test_generate_threed_coupler_dirichlet_drops_inflow_bc(tmp_path: Path):
     assert "OUTLET" in bc_names
     assert all("inflow" not in name.lower() for name in coupling_blocks)
     assert all("inflow" not in block.name.lower() for block in coupler.coupling_blocks.values())
+    assert "INFLOW" in handler.bcs
+
+    handler.generate_inflow_file(str(tmp_path), period=0.8, n_tsteps=3)
+    assert (tmp_path / "inflow.flow").exists()
 
 
 def test_generate_inflow_file_writes_reference_style_header(tmp_path: Path):
