@@ -829,15 +829,16 @@ class StructuredTree:
         return self.Z_t, self.time
 
 
-    def create_impedance_bc(self, name, tree_id, Pd: float = 0.0):
+    def create_impedance_bc(self, name, tree_id, Pd: float = 0.0, verbose: bool = True):
         '''
         create an impedance BC object
-        
+
         :param name: name of the boundary condition
         :param tree_id: id of the tree in the list of trees
         :param Pd: distal pressure in dyn/cm2'''
 
-        print(f'creating impedance bc for tree {self.name}')
+        if verbose:
+            print(f'creating impedance bc for tree {self.name}')
 
         impedance_bc = BoundaryCondition({
             "bc_name": f"{name}",

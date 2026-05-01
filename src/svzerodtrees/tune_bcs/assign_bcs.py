@@ -143,20 +143,21 @@ def validate_cap_to_bc_mapping(
         allow_ordered_outlet_mapping=allow_ordered_outlet_mapping,
     )
 
-def construct_impedance_trees(config_handler, 
-                              mesh_surfaces_path, 
-                              wedge_pressure, 
+def construct_impedance_trees(config_handler,
+                              mesh_surfaces_path,
+                              wedge_pressure,
                               lpa_params: TreeParameters,
                               rpa_params: TreeParameters,
-                              d_min, 
-                              convert_to_cm=False, 
-                              is_pulmonary=True, 
+                              d_min,
+                              convert_to_cm=False,
+                              is_pulmonary=True,
                               n_procs=24,
                               use_mean=False,
                               specify_diameter=False,
                               diameter_scale=0.0,
                               diameter_std_cap=None,
-                              allow_ordered_outlet_mapping=False):
+                              allow_ordered_outlet_mapping=False,
+                              verbose=True):
     '''
     construct impedance trees for outlet BCs
     
@@ -264,13 +265,15 @@ def construct_impedance_trees(config_handler,
 
         # distribute the impedance to lpa and rpa specifically
         for idx, (cap_name, area) in enumerate(cap_info.items()):
-            print(f'generating tree {idx + 1} of {len(cap_info)} for cap {cap_name}...')
+            if verbose:
+                print(f'generating tree {idx + 1} of {len(cap_info)} for cap {cap_name}...')
             if 'lpa' in cap_name.lower():
                 bc_name = cap_to_bc[cap_name]
                 config_handler.bcs[cap_to_bc[cap_name]] = lpa_tree.create_impedance_bc(
                     bc_name,
                     0,
                     wedge_pressure * 1333.2,
+                    verbose=verbose,
                 )
                 config_handler.bc_inductance[bc_name] = lpa_params.inductance
                 lpa_bc_names.append(bc_name)
@@ -281,6 +284,7 @@ def construct_impedance_trees(config_handler,
                     bc_name,
                     1,
                     wedge_pressure * 1333.2,
+                    verbose=verbose,
                 )
                 config_handler.bc_inductance[bc_name] = rpa_params.inductance
                 rpa_bc_names.append(bc_name)
@@ -312,15 +316,18 @@ def construct_impedance_trees(config_handler,
         )
         for idx, (cap_name, area) in enumerate(cap_info.items()):
 
-            print(f'generating tree {idx} of {len(cap_info)} for cap {cap_name}...')
+            if verbose:
+                print(f'generating tree {idx} of {len(cap_info)} for cap {cap_name}...')
             cap_d = _cap_diameter(area)
             if 'lpa' in cap_name.lower():
-                print(f'building tree with lpa parameters: {lpa_params.summary()}')
+                if verbose:
+                    print(f'building tree with lpa parameters: {lpa_params.summary()}')
                 params = lpa_params
                 mean_d = lpa_mean_dia
                 std_d = lpa_std_dia
             elif 'rpa' in cap_name.lower():
-                print(f'building tree with rpa parameters: {rpa_params.summary()}')
+                if verbose:
+                    print(f'building tree with rpa parameters: {rpa_params.summary()}')
                 params = rpa_params
                 mean_d = rpa_mean_dia
                 std_d = rpa_std_dia
@@ -349,6 +356,7 @@ def construct_impedance_trees(config_handler,
                 bc_name,
                 idx,
                 wedge_pressure * 1333.2,
+                verbose=verbose,
             )
             config_handler.bc_inductance[bc_name] = params.inductance
             config_handler.tree_params[tree.name] = _attach_tree_metadata(

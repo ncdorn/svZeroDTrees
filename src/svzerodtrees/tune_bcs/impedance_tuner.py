@@ -344,6 +344,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 diameter_scale=self.diameter_scale,
                 diameter_std_cap=self.diameter_std_cap,
                 allow_ordered_outlet_mapping=self.allow_ordered_outlet_mapping,
+                verbose=False,
             )
             self._write_and_validate_snapshot(model)
             if not self._impedance_bcs_are_finite(model):
