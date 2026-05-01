@@ -3,10 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import svzerodtrees.tune_bcs.assign_bcs as assign_bcs_module
 import svzerodtrees.tune_bcs.pa_config as pa_config_module
 from svzerodtrees.io.blocks import BoundaryCondition, SimParams, Vessel
 from svzerodtrees.microvasculature.compliance import ConstantCompliance
 from svzerodtrees.microvasculature.treeparams import TreeParameters
+from svzerodtrees.tune_bcs.assign_bcs import construct_impedance_trees
 from svzerodtrees.tune_bcs.clinical_targets import ClinicalTargets
 from svzerodtrees.tune_bcs.pa_config import PAConfig
 
@@ -224,3 +226,99 @@ def test_create_impedance_trees_disables_steady_initial(monkeypatch, pa_config):
     assert pa_config.config["simulation_parameters"]["steady_initial"] is False
     assert pa_config.bcs["LPA_BC"].type == "IMPEDANCE"
     assert pa_config.bcs["RPA_BC"].type == "IMPEDANCE"
+
+
+def test_construct_impedance_trees_disables_steady_initial_for_full_pa(monkeypatch):
+    class FakeConfig:
+        def __init__(self):
+            self.simparams = SimParams(
+                {
+                    "number_of_time_pts_per_cardiac_cycle": 3,
+                    "number_of_cardiac_cycles": 1,
+                    "steady_initial": True,
+                }
+            )
+            self.bcs = {
+                "INFLOW": BoundaryCondition.from_config(
+                    {
+                        "bc_name": "INFLOW",
+                        "bc_type": "FLOW",
+                        "bc_values": {"Q": [5.0, 5.0, 5.0], "t": [0.0, 0.5, 1.0]},
+                    }
+                ),
+                "LPA_OUT": BoundaryCondition.from_config(
+                    {
+                        "bc_name": "LPA_OUT",
+                        "bc_type": "RESISTANCE",
+                        "bc_values": {"R": 100.0, "Pd": 0.0},
+                    }
+                ),
+                "RPA_OUT": BoundaryCondition.from_config(
+                    {
+                        "bc_name": "RPA_OUT",
+                        "bc_type": "RESISTANCE",
+                        "bc_values": {"R": 100.0, "Pd": 0.0},
+                    }
+                ),
+            }
+            self.tree_params = {}
+
+    class FakeStructuredTree:
+        def __init__(self, name, time, simparams=None, compliance_model=None):
+            self.name = name
+            self.time = time
+            self.simparams = simparams
+            self.compliance_model = compliance_model
+            self.Z_t = []
+
+        def build(self, **_kwargs):
+            pass
+
+        def compute_olufsen_impedance(self, n_procs=1, tsteps=None):
+            self.Z_t = [42.0] * int(tsteps)
+
+        def create_impedance_bc(self, name, _outlet_id, Pd=0.0):
+            return BoundaryCondition.from_config(
+                {
+                    "bc_name": name,
+                    "bc_type": "IMPEDANCE",
+                    "bc_values": {"z": list(self.Z_t), "Pd": Pd},
+                }
+            )
+
+        def to_dict(self):
+            return {"name": self.name}
+
+    monkeypatch.setattr(assign_bcs_module, "StructuredTree", FakeStructuredTree)
+    monkeypatch.setattr(
+        assign_bcs_module,
+        "vtp_info",
+        lambda *_args, **_kwargs: ({"rpa.vtp": 1.0}, {"lpa.vtp": 1.0}, {}),
+    )
+    params = TreeParameters(
+        name="pa",
+        lrr=10.0,
+        diameter=0.5,
+        d_min=0.01,
+        alpha=0.9,
+        beta=0.6,
+        compliance_model=ConstantCompliance(1.0),
+    )
+    config = FakeConfig()
+
+    construct_impedance_trees(
+        config,
+        "mesh-surfaces",
+        wedge_pressure=12.0,
+        lpa_params=params,
+        rpa_params=params,
+        d_min=0.01,
+        n_procs=1,
+        use_mean=False,
+        allow_ordered_outlet_mapping=True,
+    )
+
+    assert config.simparams.steady_initial is False
+    assert config.bcs["LPA_OUT"].type == "IMPEDANCE"
+    assert config.bcs["RPA_OUT"].type == "IMPEDANCE"
+    assert len(config.bcs["LPA_OUT"].Z) == 2

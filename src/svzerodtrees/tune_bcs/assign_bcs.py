@@ -166,6 +166,11 @@ def construct_impedance_trees(config_handler,
     :param diameter_scale: for unique trees, shrink diameter spread toward the mean (0=all mean, 1=full spread)
     :param diameter_std_cap: optional cap in std deviations on diameter deviation before scaling'''
 
+    # svZeroDSolver's steady-initial pass uses a fixed 10-step cycle. That is
+    # incompatible with reconstructed IMPEDANCE kernels unless the production
+    # model also happens to use 11 points per cycle.
+    config_handler.simparams.steady_initial = False
+
     def _cap_diameter(area):
         return (area / np.pi) ** 0.5 * 2
 

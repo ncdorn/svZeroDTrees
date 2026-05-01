@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pysvzerod
 
 import svzerodtrees.tune_bcs.rcr_tuner as rcr_module
+import svzerodtrees.tune_bcs.assign_bcs as assign_bcs_module
 
 from svzerodtrees.io.blocks import BoundaryCondition, SimParams, Vessel
 from svzerodtrees.io.blocks.boundary_condition import resolve_coupled_impedance_timepoint_contract
@@ -27,6 +28,7 @@ from svzerodtrees.tune_bcs.tune_space import (
     positive,
 )
 from svzerodtrees.tune_bcs.impedance_tuner import ImpedanceTuner
+from svzerodtrees.tune_bcs.assign_bcs import construct_impedance_trees
 from svzerodtrees.tune_bcs.rcr_tuner import RCRTuner
 from svzerodtrees.microvasculature.structured_tree.asymmetry import alpha_beta_from_xi_eta, xi_from_alpha_beta
 
@@ -464,7 +466,7 @@ def test_pa_config_simulate_runs_with_impedance_trees(monkeypatch):
         )
 
     monkeypatch.setattr(pa_config_module, "StructuredTree", DummyStructuredTree)
-    monkeypatch.setattr(pa_config_module.pysvzerod, "simulate", fake_simulate)
+    monkeypatch.setattr(pa_config_module, "simulate_pysvzerod", fake_simulate)
 
     lpa_params = TreeParameters(
         name="lpa",
@@ -494,6 +496,146 @@ def test_pa_config_simulate_runs_with_impedance_trees(monkeypatch):
     assert pa_config.P_mpa[0] == pytest.approx(20.0)
     assert pa_config.lpa_tree._tsteps == pa_config.simparams.number_of_time_pts_per_cardiac_cycle - 1
     assert pa_config.rpa_tree._tsteps == pa_config.simparams.number_of_time_pts_per_cardiac_cycle - 1
+
+
+def test_full_pa_construct_impedance_trees_disables_steady_initial(monkeypatch, tmp_path):
+    payload = {
+        "simulation_parameters": {
+            "density": 1.06,
+            "viscosity": 0.04,
+            "number_of_cardiac_cycles": 2,
+            "number_of_time_pts_per_cardiac_cycle": 400,
+            "output_all_cycles": True,
+            "steady_initial": True,
+        },
+        "boundary_conditions": [
+            {
+                "bc_name": "INFLOW",
+                "bc_type": "FLOW",
+                "bc_values": {"Q": [5.0, 5.0, 5.0], "t": [0.0, 0.4, 0.8]},
+            },
+            {
+                "bc_name": "RESISTANCE_0",
+                "bc_type": "RESISTANCE",
+                "bc_values": {"R": 100.0, "Pd": 0.0},
+            },
+            {
+                "bc_name": "RESISTANCE_1",
+                "bc_type": "RESISTANCE",
+                "bc_values": {"R": 100.0, "Pd": 0.0},
+            },
+        ],
+        "vessels": [
+            {
+                "vessel_id": 0,
+                "vessel_name": "branch0_seg0",
+                "vessel_length": 1.0,
+                "zero_d_element_type": "BloodVessel",
+                "zero_d_element_values": {
+                    "R_poiseuille": 1.0,
+                    "C": 1.0,
+                    "L": 0.0,
+                    "stenosis_coefficient": 0.0,
+                },
+                "boundary_conditions": {"inlet": "INFLOW"},
+            },
+            {
+                "vessel_id": 1,
+                "vessel_name": "branch1_seg0",
+                "vessel_length": 1.0,
+                "zero_d_element_type": "BloodVessel",
+                "zero_d_element_values": {
+                    "R_poiseuille": 1.0,
+                    "C": 1.0,
+                    "L": 0.0,
+                    "stenosis_coefficient": 0.0,
+                },
+                "boundary_conditions": {"outlet": "RESISTANCE_0"},
+            },
+            {
+                "vessel_id": 2,
+                "vessel_name": "branch2_seg0",
+                "vessel_length": 1.0,
+                "zero_d_element_type": "BloodVessel",
+                "zero_d_element_values": {
+                    "R_poiseuille": 1.0,
+                    "C": 1.0,
+                    "L": 0.0,
+                    "stenosis_coefficient": 0.0,
+                },
+                "boundary_conditions": {"outlet": "RESISTANCE_1"},
+            },
+        ],
+        "junctions": [],
+    }
+
+    class DummyStructuredTree:
+        def __init__(self, name, time, simparams, compliance_model):
+            self.name = name
+            self.time = time
+            self.simparams = simparams
+            self.compliance_model = compliance_model
+            self.Z_t = []
+
+        def build(self, **kwargs):
+            self._build_kwargs = kwargs
+
+        def compute_olufsen_impedance(self, n_procs=1, tsteps=None):
+            self._n_procs = n_procs
+            self._tsteps = tsteps
+            self.Z_t = [1.0] * int(tsteps)
+
+        def create_impedance_bc(self, bc_name, outlet_id, pd):
+            return BoundaryCondition.from_config(
+                {
+                    "bc_name": bc_name,
+                    "bc_type": "IMPEDANCE",
+                    "bc_values": {"z": list(self.Z_t), "Pd": pd},
+                }
+            )
+
+        def to_dict(self):
+            return {"name": self.name, "outlet_mapping": getattr(self, "outlet_mapping", {})}
+
+    monkeypatch.setattr(assign_bcs_module, "StructuredTree", DummyStructuredTree)
+    monkeypatch.setattr(
+        assign_bcs_module,
+        "vtp_info",
+        lambda *_args, **_kwargs: ({"rpa.vtp": 1.0}, {"lpa.vtp": 1.0}, {}),
+    )
+
+    config_handler = ConfigHandler(payload, is_pulmonary=True)
+    params = TreeParameters(
+        name="pa",
+        lrr=10.0,
+        diameter=0.3,
+        d_min=0.01,
+        alpha=0.9,
+        beta=0.6,
+        compliance_model=ConstantCompliance(6.6e4),
+    )
+    construct_impedance_trees(
+        config_handler,
+        str(tmp_path / "mesh-surfaces"),
+        wedge_pressure=12.0,
+        lpa_params=params,
+        rpa_params=params,
+        d_min=0.01,
+        n_procs=1,
+        allow_ordered_outlet_mapping=True,
+    )
+    output_path = tmp_path / "full_pa_impedance.json"
+    config_handler.to_json(str(output_path))
+    rendered = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert rendered["simulation_parameters"]["steady_initial"] is False
+    assert sorted(
+        {
+            len(bc["bc_values"]["z"])
+            for bc in rendered["boundary_conditions"]
+            if bc["bc_type"] == "IMPEDANCE"
+        }
+    ) == [399]
 
 
 def test_impedance_tuner_build_tree_params_uses_defaults():
