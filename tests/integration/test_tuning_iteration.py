@@ -183,6 +183,88 @@ def _learned_bifurcation_payload() -> dict[str, object]:
     }
 
 
+def _full_pa_multi_outlet_payload() -> dict[str, object]:
+    def _vessel(vessel_id: int, name: str, bc: dict[str, str] | None = None):
+        vessel = {
+            "vessel_id": vessel_id,
+            "vessel_name": name,
+            "vessel_length": 1.0,
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "R_poiseuille": 10.0,
+                "C": 1.0,
+                "L": 0.0,
+                "stenosis_coefficient": 0.0,
+            },
+        }
+        if bc is not None:
+            vessel["boundary_conditions"] = bc
+        return vessel
+
+    outlet_bcs = ["LPA_1", "LPA_2", "RPA_1", "RPA_2"]
+    return {
+        "simulation_parameters": {
+            "number_of_time_pts_per_cardiac_cycle": 2,
+            "number_of_cardiac_cycles": 1,
+            "cardiac_period": 1.0,
+        },
+        "boundary_conditions": [
+            {
+                "bc_name": "INFLOW",
+                "bc_type": "FLOW",
+                "bc_values": {"Q": [6.0, 6.0], "t": [0.0, 1.0]},
+            },
+            *[
+                {
+                    "bc_name": name,
+                    "bc_type": "RESISTANCE",
+                    "bc_values": {"R": 500.0, "Pd": 0.0},
+                }
+                for name in outlet_bcs
+            ],
+        ],
+        "vessels": [
+            _vessel(0, "branch0_seg0", {"inlet": "INFLOW"}),
+            _vessel(1, "branch1_seg0"),
+            _vessel(2, "branch2_seg0"),
+            _vessel(3, "branch3_seg0", {"outlet": "LPA_1"}),
+            _vessel(4, "branch4_seg0", {"outlet": "LPA_2"}),
+            _vessel(5, "branch5_seg0", {"outlet": "RPA_1"}),
+            _vessel(6, "branch6_seg0", {"outlet": "RPA_2"}),
+        ],
+        "junctions": [],
+    }
+
+
+def _full_pa_impedance_snapshot_payload() -> dict[str, object]:
+    payload = _full_pa_multi_outlet_payload()
+    for bc in payload["boundary_conditions"]:
+        if bc["bc_name"] == "INFLOW":
+            continue
+        bc["bc_type"] = "IMPEDANCE"
+        bc["bc_values"] = {"z": [1.0, 0.5], "Pd": 12.0}
+    return payload
+
+
+def _reduced_rri_impedance_snapshot_payload() -> dict[str, object]:
+    payload = _impedance_artifact_payload(
+        bc_values={"z": [1.0, 0.5], "Pd": 12.0},
+        coupled=False,
+        number_of_time_pts_per_cardiac_cycle=3,
+        inflow_q=[6.0, 6.0],
+    )
+    payload["boundary_conditions"][1]["bc_name"] = "LPA_BC"
+    payload["boundary_conditions"].append(
+        {
+            "bc_name": "RPA_BC",
+            "bc_type": "IMPEDANCE",
+            "bc_values": {"z": [1.0, 0.5], "Pd": 12.0},
+        }
+    )
+    payload["vessels"] = [{"vessel_id": idx} for idx in range(5)]
+    return payload
+
+
 def _fake_learned_seed_result(_config):
     rows = []
     for time, pressure, flow in [(0.0, 20.0, 10.0), (1.0, 30.0, 10.0)]:
@@ -738,8 +820,160 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
     assert calls["construct"]["kwargs"]["diameter_std_cap"] == pytest.approx(1.5)
 
 
+def test_run_impedance_tuning_for_iteration_full_pa_rejects_reduced_snapshot(
+    monkeypatch, tmp_path: Path
+):
+    seed = tmp_path / "full_pa_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
+    iteration_dir = tmp_path / "iter-01"
+    seed.write_text(json.dumps(_full_pa_multi_outlet_payload()), encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+
+    class DummyConfigHandler:
+        bcs = {
+            "INFLOW": SimpleNamespace(name="INFLOW"),
+            "LPA_1": SimpleNamespace(name="LPA_1"),
+            "LPA_2": SimpleNamespace(name="LPA_2"),
+            "RPA_1": SimpleNamespace(name="RPA_1"),
+            "RPA_2": SimpleNamespace(name="RPA_2"),
+        }
+
+        @classmethod
+        def from_json(cls, _path: str, is_pulmonary: bool = False):
+            return cls()
+
+        def to_json(self, path: str):
+            Path(path).write_text(
+                json.dumps(_full_pa_impedance_snapshot_payload()),
+                encoding="utf-8",
+            )
+
+    class DummyClinicalTargets:
+        wedge_p = 12.0
+
+        @classmethod
+        def from_csv(cls, _path: str):
+            return cls()
+
+    class ReducedSnapshotTuner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def tune(self, nm_iter: int = 1):
+            out_dir = Path.cwd()
+            (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
+                "pa,alpha,beta,xi,d_min,lrr,diameter,compliance_model,C\n"
+                "lpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n"
+                "rpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n",
+                encoding="utf-8",
+            )
+            (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
+                json.dumps(_reduced_rri_impedance_snapshot_payload()),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", ReducedSnapshotTuner)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.validate_cap_to_bc_mapping", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.construct_impedance_trees", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration._load_tree_params",
+        lambda _path: ("lpa-params", "rpa-params"),
+    )
+
+    with pytest.raises(ValueError, match="reduced PA/RRI|lost vessel topology|collapsed"):
+        run_impedance_tuning_for_iteration(
+            iteration_dir=iteration_dir,
+            seed_config=seed,
+            mesh_surfaces=mesh_surfaces,
+            clinical_targets=targets,
+            inflow_path=inflow_path,
+            impedance_config={
+                "tuning_model": "full_pa",
+                "rescale_inflow": True,
+                "tune_space": _tune_space_with_xi(),
+            },
+        )
+
+
+def test_run_impedance_tuning_for_iteration_clears_stale_snapshot(
+    monkeypatch, tmp_path: Path
+):
+    seed = tmp_path / "full_pa_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
+    iteration_dir = tmp_path / "iter-01"
+    results_dir = iteration_dir / "results"
+    results_dir.mkdir(parents=True)
+    seed.write_text(json.dumps(_full_pa_multi_outlet_payload()), encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+    (results_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
+        json.dumps(_reduced_rri_impedance_snapshot_payload()),
+        encoding="utf-8",
+    )
+
+    class DummyConfigHandler:
+        bcs = {
+            "INFLOW": SimpleNamespace(name="INFLOW"),
+            "LPA_1": SimpleNamespace(name="LPA_1"),
+            "LPA_2": SimpleNamespace(name="LPA_2"),
+            "RPA_1": SimpleNamespace(name="RPA_1"),
+            "RPA_2": SimpleNamespace(name="RPA_2"),
+        }
+
+        @classmethod
+        def from_json(cls, _path: str, is_pulmonary: bool = False):
+            return cls()
+
+    class DummyClinicalTargets:
+        wedge_p = 12.0
+
+        @classmethod
+        def from_csv(cls, _path: str):
+            return cls()
+
+    class NoSnapshotTuner:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def tune(self, nm_iter: int = 1):
+            (Path.cwd() / OPTIMIZED_PARAMS_FILENAME).write_text(
+                "pa,alpha,beta,xi,d_min,lrr,diameter,compliance_model,C\n"
+                "lpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n"
+                "rpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n",
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", NoSnapshotTuner)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.validate_cap_to_bc_mapping", lambda *_args, **_kwargs: {})
+
+    with pytest.raises(FileNotFoundError, match=PA_CONFIG_SNAPSHOT_FILENAME):
+        run_impedance_tuning_for_iteration(
+            iteration_dir=iteration_dir,
+            seed_config=seed,
+            mesh_surfaces=mesh_surfaces,
+            clinical_targets=targets,
+            inflow_path=inflow_path,
+            impedance_config={
+                "tuning_model": "full_pa",
+                "rescale_inflow": True,
+                "tune_space": _tune_space_with_xi(),
+            },
+        )
+    assert not (results_dir / PA_CONFIG_SNAPSHOT_FILENAME).exists()
+
+
 def test_full_pa_tuner_loss_applies_trial_bcs_and_writes_csv(monkeypatch, tmp_path: Path):
     calls: dict[str, object] = {}
+    monkeypatch.chdir(tmp_path)
 
     class BC:
         def __init__(self, name: str, bc_type: str = "RESISTANCE"):
@@ -826,6 +1060,7 @@ def test_full_pa_tuner_loss_applies_trial_bcs_and_writes_csv(monkeypatch, tmp_pa
     assert calls["construct"]["kwargs"]["diameter_scale"] == pytest.approx(0.5)
     assert calls["construct"]["kwargs"]["diameter_std_cap"] == pytest.approx(2.0)
     assert (tmp_path / OPTIMIZED_PARAMS_FILENAME).exists()
+    assert (tmp_path / PA_CONFIG_SNAPSHOT_FILENAME).exists()
 
 
 def test_run_impedance_tuning_for_iteration_missing_snapshot_raises(monkeypatch, tmp_path: Path):

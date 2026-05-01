@@ -83,4 +83,4 @@ trees:
 **Where to Go Next**
 - Full schema reference: `docs/interface.md`.
 - Complete examples: `examples/*.yml` and `examples/construct_tree/README.md`.
-- Iteration helper API: `svzerodtrees.tuning.iteration` (`compute_centerline_mpa_metrics`, `compute_flow_split_metrics`, `evaluate_iteration_gate`, `generate_reduced_pa_from_iteration`).
+- Iteration helper API: `svzerodtrees.tuning.iteration` (`compute_centerline_mpa_metrics`, `compute_flow_split_metrics`, `evaluate_iteration_gate`, `generate_reduced_pa_from_iteration`, `run_impedance_tuning_for_iteration`). The impedance helper supports `tuning_model: full_pa` and validates that `pa_config_tuning_snapshot.json` preserves the full 0D vessel/outlet topology instead of falling back to a reduced RRI snapshot.

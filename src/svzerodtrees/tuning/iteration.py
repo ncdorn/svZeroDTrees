@@ -66,6 +66,78 @@ PA_CONFIG_SNAPSHOT_FILENAME = "pa_config_tuning_snapshot.json"
 TUNED_ZEROD_CONFIG_FILENAME = "svzerod_3d_coupling_tuned.json"
 
 
+def _clear_tuning_outputs(output_dir: Path, *, tuned_config_name: str) -> None:
+    for filename in (
+        OPTIMIZED_PARAMS_FILENAME,
+        OPTIMIZATION_LOG_FILENAME,
+        PA_CONFIG_SNAPSHOT_FILENAME,
+        tuned_config_name,
+    ):
+        path = output_dir / filename
+        if path.exists() and path.is_file():
+            path.unlink()
+
+
+def _load_json_payload(path: Path) -> dict[str, Any]:
+    with path.open(encoding="utf-8") as ff:
+        payload = json.load(ff)
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    return payload
+
+
+def _outlet_bc_names(payload: Mapping[str, Any]) -> set[str]:
+    names: set[str] = set()
+    boundary_conditions = payload.get("boundary_conditions")
+    if not isinstance(boundary_conditions, list):
+        return names
+    for bc in boundary_conditions:
+        if not isinstance(bc, Mapping):
+            continue
+        name = str(bc.get("bc_name") or "")
+        bc_type = str(bc.get("bc_type") or "").upper()
+        if not name or bc_type == "FLOW" or "inflow" in name.lower():
+            continue
+        names.add(name)
+    return names
+
+
+def _assert_full_pa_snapshot_preserves_topology(
+    *,
+    seed_config: Path,
+    snapshot: Path,
+) -> None:
+    seed_payload = _load_json_payload(seed_config)
+    snapshot_payload = _load_json_payload(snapshot)
+
+    seed_vessels = seed_payload.get("vessels")
+    snapshot_vessels = snapshot_payload.get("vessels")
+    if isinstance(seed_vessels, list) and len(seed_vessels) > 5:
+        if not isinstance(snapshot_vessels, list):
+            raise ValueError(
+                "full_pa tuning snapshot does not contain vessels; refusing reduced PA/RRI snapshot"
+            )
+        if len(snapshot_vessels) < len(seed_vessels):
+            raise ValueError(
+                "full_pa tuning snapshot lost vessel topology: "
+                f"seed_vessels={len(seed_vessels)}, snapshot_vessels={len(snapshot_vessels)}"
+            )
+
+    seed_outlets = _outlet_bc_names(seed_payload)
+    snapshot_outlets = _outlet_bc_names(snapshot_payload)
+    if len(seed_outlets) > 2:
+        if len(snapshot_outlets) <= 2:
+            raise ValueError(
+                "full_pa tuning snapshot collapsed to reduced PA/RRI outlet BCs"
+            )
+        missing = sorted(seed_outlets - snapshot_outlets)
+        if missing:
+            raise ValueError(
+                "full_pa tuning snapshot missing seed outlet BCs: "
+                + ", ".join(missing)
+            )
+
+
 @contextmanager
 def _pushd(path: Path):
     previous = Path.cwd()
@@ -448,6 +520,7 @@ def run_impedance_tuning_for_iteration(
         raise FileNotFoundError(f"clinical targets not found: {targets_path}")
 
     tuning = _resolve_impedance_config(impedance_config)
+    _clear_tuning_outputs(output_dir, tuned_config_name=tuned_config_name)
     required_xi_pa = _required_xi_pa_labels(tuning["tune_space"])
     targets = ClinicalTargets.from_csv(str(targets_path))
     tune_space = _build_tune_space_from_config(tuning["tune_space"])
@@ -508,6 +581,11 @@ def run_impedance_tuning_for_iteration(
         pa_snapshot,
         expected_inflow_cardiac_output=expected_snapshot_co,
     )
+    if tuning["tuning_model"] == "full_pa":
+        _assert_full_pa_snapshot_preserves_topology(
+            seed_config=seed_config_path,
+            snapshot=pa_snapshot,
+        )
 
     _validate_required_xi_in_optimized_csv(
         optimized_csv=optimized_csv,
