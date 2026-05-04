@@ -10,6 +10,7 @@ import os
 import math
 import subprocess
 import shlex
+import shutil
 from .input_builders import *
 from ..tune_bcs import ClinicalTargets
 from ..io.blocks import *
@@ -60,7 +61,8 @@ class SimulationDirectory:
                  clinical_target=None,
                  fig_dir=None,
                  convert_to_cm=False,
-                 mesh_scale_factor=1.0):
+                 mesh_scale_factor=1.0,
+                 explicit_threed_coupler=False):
         '''
         initialize the simulation handler which handles threed simulation data'''
 
@@ -100,6 +102,7 @@ class SimulationDirectory:
 
         self.convert_to_cm = convert_to_cm
         self.mesh_scale_factor = mesh_scale_factor
+        self.explicit_threed_coupler = explicit_threed_coupler
 
     @classmethod
     def from_directory(cls, path='.', zerod_config: str =None, mesh_complete: str ='mesh-complete', threed_coupler=None, results_dir: str =None, convert_to_cm: bool =False, is_pulmonary=True, mesh_scale_factor=1.0):
@@ -140,8 +143,15 @@ class SimulationDirectory:
             mesh_complete = None
         
         # check for svzerod_3Dcoupling.json
+        explicit_threed_coupler = False
         svzerod_3Dcoupling = os.path.join(path, 'svzerod_3Dcoupling.json')
-        if threed_coupler is not None and zerod_config is not None and mesh_complete is not None:
+        if isinstance(threed_coupler, (str, os.PathLike)) and os.path.exists(threed_coupler):
+            explicit_threed_coupler = True
+            if os.path.abspath(threed_coupler) != os.path.abspath(svzerod_3Dcoupling):
+                shutil.copy2(threed_coupler, svzerod_3Dcoupling)
+            print('explicit svzerod_3Dcoupling.json found')
+            svzerod_3Dcoupling = ConfigHandler.from_json(svzerod_3Dcoupling, is_pulmonary=False)
+        elif threed_coupler is not None and zerod_config is not None and mesh_complete is not None:
             print('generating svzerod_3Dcoupling.json from zerod model...')
             svzerod_3Dcoupling, coupling_blocks = zerod_config.generate_threed_coupler(path, 
                                                                                         inflow_from_0d=True, 
@@ -215,7 +225,8 @@ class SimulationDirectory:
                    clinical_targets,
                    fig_dir,
                    convert_to_cm,
-                   mesh_scale_factor)
+                   mesh_scale_factor,
+                   explicit_threed_coupler)
     
     def duplicate(self, new_path):
         '''
@@ -367,7 +378,11 @@ class SimulationDirectory:
             config_file = None
             inflow_file_path = None
             if self.svzerod_3Dcoupling is not None:
-                if self.zerod_config is not None and self.mesh_complete is not None:
+                if (
+                    not self.explicit_threed_coupler
+                    and self.zerod_config is not None
+                    and self.mesh_complete is not None
+                ):
                     self.svzerod_3Dcoupling, _ = self.zerod_config.generate_threed_coupler(
                         self.path,
                         inflow_from_0d=(inflow_boundary_condition == "neumann"),

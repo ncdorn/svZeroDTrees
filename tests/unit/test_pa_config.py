@@ -192,7 +192,7 @@ def test_create_impedance_trees_disables_steady_initial(monkeypatch, pa_config):
             self.n_procs = n_procs
             self.tsteps = tsteps
 
-        def create_impedance_bc(self, name, _outlet_id, Pd=0.0):
+        def create_impedance_bc(self, name, _outlet_id, Pd=0.0, verbose=True):
             return BoundaryCondition.from_config(
                 {
                     "bc_name": name,
@@ -277,7 +277,7 @@ def test_construct_impedance_trees_disables_steady_initial_for_full_pa(monkeypat
         def compute_olufsen_impedance(self, n_procs=1, tsteps=None):
             self.Z_t = [42.0] * int(tsteps)
 
-        def create_impedance_bc(self, name, _outlet_id, Pd=0.0):
+        def create_impedance_bc(self, name, _outlet_id, Pd=0.0, verbose=True):
             return BoundaryCondition.from_config(
                 {
                     "bc_name": name,
@@ -322,3 +322,128 @@ def test_construct_impedance_trees_disables_steady_initial_for_full_pa(monkeypat
     assert config.bcs["LPA_OUT"].type == "IMPEDANCE"
     assert config.bcs["RPA_OUT"].type == "IMPEDANCE"
     assert len(config.bcs["LPA_OUT"].Z) == 2
+
+
+def test_construct_impedance_trees_uses_per_outlet_diameters_when_not_mean(monkeypatch):
+    class FakeConfig:
+        def __init__(self):
+            self.simparams = SimParams(
+                {
+                    "number_of_time_pts_per_cardiac_cycle": 3,
+                    "number_of_cardiac_cycles": 1,
+                    "steady_initial": True,
+                }
+            )
+            self.bcs = {
+                "INFLOW": BoundaryCondition.from_config(
+                    {
+                        "bc_name": "INFLOW",
+                        "bc_type": "FLOW",
+                        "bc_values": {"Q": [5.0, 5.0], "t": [0.0, 0.5, 1.0]},
+                    }
+                ),
+                "lpa_small": BoundaryCondition.from_config(
+                    {
+                        "bc_name": "lpa_small",
+                        "bc_type": "RESISTANCE",
+                        "bc_values": {"R": 100.0, "Pd": 0.0},
+                    }
+                ),
+                "lpa_large": BoundaryCondition.from_config(
+                    {
+                        "bc_name": "lpa_large",
+                        "bc_type": "RESISTANCE",
+                        "bc_values": {"R": 100.0, "Pd": 0.0},
+                    }
+                ),
+                "rpa_small": BoundaryCondition.from_config(
+                    {
+                        "bc_name": "rpa_small",
+                        "bc_type": "RESISTANCE",
+                        "bc_values": {"R": 100.0, "Pd": 0.0},
+                    }
+                ),
+                "rpa_large": BoundaryCondition.from_config(
+                    {
+                        "bc_name": "rpa_large",
+                        "bc_type": "RESISTANCE",
+                        "bc_values": {"R": 100.0, "Pd": 0.0},
+                    }
+                ),
+            }
+            self.tree_params = {}
+
+    class FakeStructuredTree:
+        def __init__(self, name, time, simparams=None, compliance_model=None):
+            self.name = name
+            self.time = time
+            self.simparams = simparams
+            self.compliance_model = compliance_model
+            self.Z_t = []
+            self.initial_d = None
+
+        def build(self, **kwargs):
+            self.initial_d = kwargs["initial_d"]
+
+        def compute_olufsen_impedance(self, n_procs=1, tsteps=None):
+            self.Z_t = [42.0] * int(tsteps)
+
+        def create_impedance_bc(self, name, _outlet_id, Pd=0.0, verbose=True):
+            return BoundaryCondition.from_config(
+                {
+                    "bc_name": name,
+                    "bc_type": "IMPEDANCE",
+                    "bc_values": {"z": list(self.Z_t), "Pd": Pd},
+                }
+            )
+
+        def to_dict(self):
+            return {
+                "name": self.name,
+                "initial_d": self.initial_d,
+                "generation_mode": getattr(self, "generation_mode", None),
+            }
+
+    monkeypatch.setattr(assign_bcs_module, "StructuredTree", FakeStructuredTree)
+    monkeypatch.setattr(
+        assign_bcs_module,
+        "vtp_info",
+        lambda *_args, **_kwargs: (
+            {"rpa_small.vtp": np.pi * 0.2**2 / 4, "rpa_large.vtp": np.pi * 0.6**2 / 4},
+            {"lpa_small.vtp": np.pi * 0.1**2 / 4, "lpa_large.vtp": np.pi * 0.5**2 / 4},
+            {},
+        ),
+    )
+    params = TreeParameters(
+        name="pa",
+        lrr=10.0,
+        diameter=0.5,
+        d_min=0.01,
+        alpha=0.9,
+        beta=0.6,
+        compliance_model=ConstantCompliance(1.0),
+    )
+    config = FakeConfig()
+
+    construct_impedance_trees(
+        config,
+        "mesh-surfaces",
+        wedge_pressure=12.0,
+        lpa_params=params,
+        rpa_params=params,
+        d_min=0.01,
+        n_procs=1,
+        use_mean=False,
+        specify_diameter=False,
+        diameter_scale=0.5,
+    )
+
+    tree_params = config.tree_params
+    assert set(tree_params) == {"lpa_small.vtp", "lpa_large.vtp", "rpa_small.vtp", "rpa_large.vtp"}
+    assert {payload["generation_mode"] for payload in tree_params.values()} == {"per_outlet"}
+    assert tree_params["lpa_small.vtp"]["initial_d"] != pytest.approx(
+        tree_params["lpa_large.vtp"]["initial_d"]
+    )
+    assert tree_params["rpa_small.vtp"]["initial_d"] != pytest.approx(
+        tree_params["rpa_large.vtp"]["initial_d"]
+    )

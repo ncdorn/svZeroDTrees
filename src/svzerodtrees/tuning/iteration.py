@@ -21,7 +21,7 @@ from svzerodtrees.io.blocks.boundary_condition import (
 )
 from svzerodtrees.microvasculature import TreeParameters
 from svzerodtrees.simulation import SimulationDirectory
-from svzerodtrees.simulation.threedutils import get_pa_outlet_scale
+from svzerodtrees.simulation.threedutils import get_pa_outlet_scale, vtp_info
 from svzerodtrees.tune_bcs import (
     ClinicalTargets,
     FixedParam,
@@ -100,6 +100,97 @@ def _outlet_bc_names(payload: Mapping[str, Any]) -> set[str]:
             continue
         names.add(name)
     return names
+
+
+def _pulmonary_cap_info(mesh_surfaces: Path, *, convert_to_cm: bool) -> dict[str, float]:
+    rpa_info, lpa_info, _ = vtp_info(
+        str(mesh_surfaces),
+        convert_to_cm=convert_to_cm,
+        pulmonary=True,
+    )
+    return dict(lpa_info | rpa_info)
+
+
+def _expanded_rri_payload_for_caps(
+    *,
+    seed_payload: Mapping[str, Any],
+    mesh_surfaces: Path,
+    convert_to_cm: bool,
+) -> dict[str, Any]:
+    payload = json.loads(json.dumps(seed_payload))
+    boundary_conditions = payload.get("boundary_conditions")
+    if not isinstance(boundary_conditions, list):
+        raise ValueError("seed config boundary_conditions must be a list")
+
+    cap_info = _pulmonary_cap_info(mesh_surfaces, convert_to_cm=convert_to_cm)
+    if not cap_info:
+        raise ValueError(f"no pulmonary outlet caps found under {mesh_surfaces}")
+
+    inflow_bcs: list[dict[str, Any]] = []
+    outlet_bcs: list[dict[str, Any]] = []
+    for bc in boundary_conditions:
+        if not isinstance(bc, Mapping):
+            continue
+        name = str(bc.get("bc_name") or "")
+        bc_type = str(bc.get("bc_type") or "").upper()
+        if bc_type == "FLOW" or "inflow" in name.lower():
+            inflow_bcs.append(dict(bc))
+        else:
+            outlet_bcs.append(dict(bc))
+
+    if len(outlet_bcs) > 2:
+        return payload
+    if not inflow_bcs:
+        raise ValueError("cannot expand reduced RRI config without an inflow BC")
+
+    lpa_template = next(
+        (bc for bc in outlet_bcs if "lpa" in str(bc.get("bc_name", "")).lower()),
+        outlet_bcs[0] if outlet_bcs else None,
+    )
+    rpa_template = next(
+        (bc for bc in outlet_bcs if "rpa" in str(bc.get("bc_name", "")).lower()),
+        outlet_bcs[-1] if outlet_bcs else None,
+    )
+    if lpa_template is None or rpa_template is None:
+        raise ValueError("cannot expand reduced RRI config without outlet BC templates")
+
+    expanded_bcs: list[dict[str, Any]] = list(inflow_bcs)
+    used_names = {str(bc.get("bc_name")) for bc in expanded_bcs}
+    for index, cap_name in enumerate(cap_info):
+        template = lpa_template if "lpa" in str(cap_name).lower() else rpa_template
+        bc_payload = json.loads(json.dumps(template))
+        bc_name = Path(str(cap_name)).stem
+        if not bc_name or bc_name in used_names:
+            bc_name = f"IMPEDANCE_{index}"
+        bc_payload["bc_name"] = bc_name
+        if "bc_values" not in bc_payload or not isinstance(bc_payload["bc_values"], Mapping):
+            bc_payload["bc_values"] = {"R": 1.0, "Pd": 0.0}
+        used_names.add(bc_name)
+        expanded_bcs.append(bc_payload)
+
+    payload["boundary_conditions"] = expanded_bcs
+    payload["trees"] = []
+    return payload
+
+
+def _config_handler_for_tree_assignment(
+    *,
+    seed_config: Path,
+    mesh_surfaces: Path,
+    tuning_model: str,
+    convert_to_cm: bool,
+) -> ConfigHandler:
+    seed_payload = _load_json_payload(seed_config)
+    if str(tuning_model).strip().lower() == "rri":
+        cap_count = len(_pulmonary_cap_info(mesh_surfaces, convert_to_cm=convert_to_cm))
+        if len(_outlet_bc_names(seed_payload)) != cap_count:
+            seed_payload = _expanded_rri_payload_for_caps(
+                seed_payload=seed_payload,
+                mesh_surfaces=mesh_surfaces,
+                convert_to_cm=convert_to_cm,
+            )
+            return ConfigHandler(seed_payload, is_pulmonary=True)
+    return ConfigHandler.from_json(str(seed_config), is_pulmonary=True)
 
 
 def _assert_full_pa_snapshot_preserves_topology(
@@ -593,21 +684,42 @@ def run_impedance_tuning_for_iteration(
     )
     lpa_params, rpa_params = _load_tree_params(optimized_csv)
     tuned_config = ConfigHandler.from_json(str(seed_config_path), is_pulmonary=True)
-    construct_impedance_trees(
-        tuned_config,
-        str(mesh_surfaces_path),
-        targets.wedge_p,
-        lpa_params,
-        rpa_params,
-        d_min=float(tuning["d_min"]),
-        convert_to_cm=bool(tuning["convert_to_cm"]),
-        n_procs=int(tuning["n_procs"]),
-        use_mean=bool(tuning["use_mean"]),
-        specify_diameter=bool(tuning["specify_diameter"]),
-        diameter_scale=float(tuning["diameter_scale"]),
-        diameter_std_cap=tuning["diameter_std_cap"],
-        allow_ordered_outlet_mapping=bool(tuning["allow_ordered_outlet_mapping"]),
-    )
+    construct_kwargs = {
+        "d_min": float(tuning["d_min"]),
+        "convert_to_cm": bool(tuning["convert_to_cm"]),
+        "n_procs": int(tuning["n_procs"]),
+        "use_mean": bool(tuning["use_mean"]),
+        "specify_diameter": bool(tuning["specify_diameter"]),
+        "diameter_scale": float(tuning["diameter_scale"]),
+        "diameter_std_cap": tuning["diameter_std_cap"],
+        "allow_ordered_outlet_mapping": bool(tuning["allow_ordered_outlet_mapping"]),
+    }
+    try:
+        construct_impedance_trees(
+            tuned_config,
+            str(mesh_surfaces_path),
+            targets.wedge_p,
+            lpa_params,
+            rpa_params,
+            **construct_kwargs,
+        )
+    except ValueError as exc:
+        if tuning["tuning_model"] != "rri" or "number of outlet boundary conditions" not in str(exc):
+            raise
+        tuned_config = _config_handler_for_tree_assignment(
+            seed_config=seed_config_path,
+            mesh_surfaces=mesh_surfaces_path,
+            tuning_model=str(tuning["tuning_model"]),
+            convert_to_cm=bool(tuning["convert_to_cm"]),
+        )
+        construct_impedance_trees(
+            tuned_config,
+            str(mesh_surfaces_path),
+            targets.wedge_p,
+            lpa_params,
+            rpa_params,
+            **construct_kwargs,
+        )
 
     tuned_zerod_config = output_dir / tuned_config_name
     tuned_config.to_json(str(tuned_zerod_config))

@@ -100,3 +100,61 @@ def test_simulation_directory_run_slurm_submits_batch(monkeypatch, tmp_path: Pat
     )
 
     assert calls == [(["sbatch", "run_solver.sh"], {"cwd": str(tmp_path), "check": True})]
+
+
+def test_write_files_preserves_explicit_threed_coupler(tmp_path: Path):
+    coupling_path = tmp_path / "svzerod_3Dcoupling.json"
+    coupling_path.write_text("explicit", encoding="utf-8")
+    calls = []
+
+    class Coupler:
+        path = str(coupling_path)
+        simparams = SimpleNamespace(external_step_size=None, cardiac_period=None)
+        coupling_blocks = {"OUTLET": SimpleNamespace(name="OUTLET")}
+
+        def regenerate_impedance_bcs_for_coupled_timing(self):
+            calls.append("regenerate_impedance")
+
+        def to_json(self, path):
+            Path(path).write_text("explicit-updated", encoding="utf-8")
+
+    class ZeroDConfig:
+        def generate_threed_coupler(self, *_args, **_kwargs):
+            calls.append("generate_threed_coupler")
+            coupling_path.write_text("regenerated", encoding="utf-8")
+            return Coupler(), []
+
+        def generate_inflow_file(self, simdir, period=None, n_tsteps=None):
+            calls.append(("generate_inflow_file", period, n_tsteps))
+            Path(simdir, "inflow.flow").write_text("flow", encoding="utf-8")
+
+    sim_dir = SimulationDirectory.__new__(SimulationDirectory)
+    sim_dir.path = str(tmp_path)
+    sim_dir.zerod_config = ZeroDConfig()
+    sim_dir.mesh_complete = SimpleNamespace()
+    sim_dir.svzerod_3Dcoupling = Coupler()
+    sim_dir.svFSIxml = SimpleNamespace(
+        is_written=False,
+        write=lambda *_args, **kwargs: calls.append(("write_xml", kwargs)),
+    )
+    sim_dir.solver_runscript = SimpleNamespace(
+        is_written=False,
+        write=lambda **kwargs: calls.append(("write_runscript", kwargs)),
+    )
+    sim_dir.convert_to_cm = False
+    sim_dir.mesh_scale_factor = 1.0
+    sim_dir.explicit_threed_coupler = True
+    sim_dir.check_files = lambda verbose=False: calls.append("check_files")
+
+    sim_dir.write_files(
+        user_input=False,
+        sim_config={
+            "n_tsteps": 10,
+            "dt": 0.01,
+            "inflow_boundary_condition": "dirichlet",
+        },
+    )
+
+    assert "generate_threed_coupler" not in calls
+    assert coupling_path.read_text(encoding="utf-8") == "explicit-updated"
+    assert any(call[0] == "generate_inflow_file" for call in calls if isinstance(call, tuple))

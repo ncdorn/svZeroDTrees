@@ -971,6 +971,115 @@ def test_run_impedance_tuning_for_iteration_clears_stale_snapshot(
     assert not (results_dir / PA_CONFIG_SNAPSHOT_FILENAME).exists()
 
 
+def test_run_impedance_tuning_for_iteration_rri_expands_reduced_bcs_for_caps(
+    monkeypatch, tmp_path: Path
+):
+    seed = tmp_path / "simplified_nonlinear_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
+    iteration_dir = tmp_path / "iter-01"
+    seed.write_text(json.dumps(_learned_bifurcation_payload()), encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+
+    calls: dict[str, object] = {"construct_bc_names": []}
+
+    class DummyClinicalTargets:
+        wedge_p = 12.0
+
+        @classmethod
+        def from_csv(cls, _path: str):
+            return cls()
+
+    class DummyTuner:
+        def __init__(self, *_args, **kwargs):
+            calls["tuner_kwargs"] = kwargs
+            self.log_file = kwargs["log_file"]
+
+        def tune(self, nm_iter: int = 1):
+            calls["nm_iter"] = nm_iter
+            out_dir = Path.cwd()
+            (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
+                "pa,alpha,beta,xi,d_min,lrr,diameter,compliance_model,C\n"
+                "lpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n"
+                "rpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n",
+                encoding="utf-8",
+            )
+            snapshot = _reduced_rri_impedance_snapshot_payload()
+            snapshot["boundary_conditions"][0]["bc_values"]["Q"] = [3.0, 3.0]
+            (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
+                json.dumps(snapshot),
+                encoding="utf-8",
+            )
+            Path(str(self.log_file)).write_text("log", encoding="utf-8")
+
+    def _fake_construct(config_handler, *_args, **_kwargs):
+        outlet_names = [
+            name
+            for name, bc in config_handler.bcs.items()
+            if "inflow" not in str(getattr(bc, "name", name)).lower()
+        ]
+        calls["construct_bc_names"].append(outlet_names)
+        if len(outlet_names) != 4:
+            raise ValueError(
+                "number of outlet boundary conditions does not match number of cap "
+                f"surfaces: bcs={len(outlet_names)}, caps=4"
+            )
+        for name in outlet_names:
+            config_handler.bcs[name] = SimpleNamespace(
+                name=name,
+                type="IMPEDANCE",
+                values={"z": [1.0], "Pd": 12.0},
+                Z=[1.0],
+                Pd=12.0,
+                to_dict=lambda name=name: {
+                    "bc_name": name,
+                    "bc_type": "IMPEDANCE",
+                    "bc_values": {"z": [1.0], "Pd": 12.0},
+                },
+            )
+
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.construct_impedance_trees", _fake_construct)
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration.vtp_info",
+        lambda *_args, **_kwargs: (
+            {"rpa_cap_1.vtp": 2.0, "rpa_cap_2.vtp": 8.0},
+            {"lpa_cap_1.vtp": 1.0, "lpa_cap_2.vtp": 4.0},
+            {},
+        ),
+    )
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.get_pa_outlet_scale", lambda *_args, **_kwargs: 2.0)
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration._load_tree_params",
+        lambda _path: ("lpa-params", "rpa-params"),
+    )
+
+    result = run_impedance_tuning_for_iteration(
+        iteration_dir=iteration_dir,
+        seed_config=seed,
+        mesh_surfaces=mesh_surfaces,
+        clinical_targets=targets,
+        inflow_path=inflow_path,
+        impedance_config={
+            "tuning_model": "rri",
+            "rescale_inflow": True,
+            "tune_space": _tune_space_with_xi(),
+        },
+    )
+
+    assert Path(result["tuned_zerod_config"]).exists()
+    assert calls["construct_bc_names"][0] == ["LPA_BC", "RPA_BC"]
+    assert calls["construct_bc_names"][1] == [
+        "lpa_cap_1",
+        "lpa_cap_2",
+        "rpa_cap_1",
+        "rpa_cap_2",
+    ]
+
+
 def test_full_pa_tuner_loss_applies_trial_bcs_and_writes_csv(monkeypatch, tmp_path: Path):
     calls: dict[str, object] = {}
     monkeypatch.chdir(tmp_path)
