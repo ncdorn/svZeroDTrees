@@ -1,6 +1,8 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from svzerodtrees.simulation import simulation_directory as simulation_directory_module
 from svzerodtrees.simulation.simulation_directory import SimulationDirectory
 from svzerodtrees.simulation.input_builders.solver_runscript import SolverRunscript
 
@@ -158,3 +160,171 @@ def test_write_files_preserves_explicit_threed_coupler(tmp_path: Path):
     assert "generate_threed_coupler" not in calls
     assert coupling_path.read_text(encoding="utf-8") == "explicit-updated"
     assert any(call[0] == "generate_inflow_file" for call in calls if isinstance(call, tuple))
+
+
+def test_write_files_generates_canonical_coupler_from_tuned_source(tmp_path: Path):
+    coupling_path = tmp_path / "svzerod_3Dcoupling.json"
+    calls = []
+
+    class Coupler:
+        path = str(coupling_path)
+        simparams = SimpleNamespace(external_step_size=None, cardiac_period=None)
+        coupling_blocks = {"OUTLET": SimpleNamespace(name="OUTLET")}
+
+        def regenerate_impedance_bcs_for_coupled_timing(self):
+            calls.append("regenerate_impedance")
+
+        def to_json(self, path):
+            payload = {
+                "simulation_parameters": {},
+                "external_solver_coupling_blocks": [
+                    {"name": "OUTLET", "connected_block": "RESISTANCE_0"}
+                ],
+                "boundary_conditions": [],
+                "vessels": [],
+                "junctions": [],
+            }
+            Path(path).write_text(json.dumps(payload), encoding="utf-8")
+
+    class ZeroDConfig:
+        def generate_threed_coupler(self, simdir, **kwargs):
+            calls.append(("generate_threed_coupler", kwargs))
+            return Coupler(), ["OUTLET"]
+
+        def generate_inflow_file(self, simdir, period=None, n_tsteps=None):
+            calls.append(("generate_inflow_file", period, n_tsteps))
+            Path(simdir, "inflow.flow").write_text("flow", encoding="utf-8")
+
+    sim_dir = SimulationDirectory.__new__(SimulationDirectory)
+    sim_dir.path = str(tmp_path)
+    sim_dir.zerod_config = ZeroDConfig()
+    sim_dir.mesh_complete = SimpleNamespace()
+    sim_dir.svzerod_3Dcoupling = Coupler()
+    sim_dir.svFSIxml = SimpleNamespace(
+        is_written=False,
+        write=lambda *_args, **kwargs: calls.append(("write_xml", kwargs)),
+    )
+    sim_dir.solver_runscript = SimpleNamespace(
+        is_written=False,
+        write=lambda **kwargs: calls.append(("write_runscript", kwargs)),
+    )
+    sim_dir.convert_to_cm = False
+    sim_dir.mesh_scale_factor = 1.0
+    sim_dir.explicit_threed_coupler = False
+    sim_dir.check_files = lambda verbose=False: calls.append("check_files")
+
+    sim_dir.write_files(
+        user_input=False,
+        sim_config={
+            "n_tsteps": 10,
+            "dt": 0.01,
+            "inflow_boundary_condition": "dirichlet",
+        },
+    )
+
+    generate_calls = [call for call in calls if isinstance(call, tuple) and call[0] == "generate_threed_coupler"]
+    assert generate_calls
+    assert generate_calls[0][1]["inflow_from_0d"] is False
+    payload = json.loads(coupling_path.read_text(encoding="utf-8"))
+    assert payload["external_solver_coupling_blocks"]
+
+
+def test_from_directory_preserves_explicit_valid_coupler(monkeypatch, tmp_path: Path):
+    mesh_dir = tmp_path / "mesh-complete"
+    mesh_dir.mkdir()
+    explicit_path = tmp_path / "valid_coupler.json"
+    explicit_path.write_text(
+        json.dumps({"external_solver_coupling_blocks": [{"name": "OUTLET"}]}),
+        encoding="utf-8",
+    )
+    calls = []
+
+    class FakeMeshComplete:
+        def __init__(self, path):
+            self.path = str(path)
+
+        def rename_vtps(self):
+            calls.append("rename_vtps")
+
+    class FakeConfigHandler:
+        @classmethod
+        def from_json(cls, path, is_pulmonary=False):
+            calls.append(("from_json", Path(path).name, is_pulmonary))
+            return SimpleNamespace(path=str(path), add_result=lambda svzerod_data: None)
+
+        @classmethod
+        def blank_threed_coupler(cls, path):
+            raise AssertionError("blank coupler should not be used")
+
+    monkeypatch.setattr(simulation_directory_module, "MeshComplete", FakeMeshComplete)
+    monkeypatch.setattr(simulation_directory_module, "ConfigHandler", FakeConfigHandler)
+    monkeypatch.setattr(simulation_directory_module, "SvMPxml", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(simulation_directory_module, "SolverRunscript", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(simulation_directory_module, "SvZeroDdata", lambda path: SimpleNamespace(path=path))
+
+    sim_dir = SimulationDirectory.from_directory(
+        path=str(tmp_path),
+        mesh_complete="mesh-complete",
+        threed_coupler=str(explicit_path),
+    )
+
+    assert sim_dir.explicit_threed_coupler is True
+    assert (tmp_path / "svzerod_3Dcoupling.json").exists()
+    assert ("from_json", "svzerod_3Dcoupling.json", False) in calls
+
+
+def test_from_directory_generates_when_tuned_source_lacks_coupling_blocks(monkeypatch, tmp_path: Path):
+    mesh_dir = tmp_path / "mesh-complete"
+    mesh_dir.mkdir()
+    tuned_source = tmp_path / "svzerod_3d_coupling_tuned.json"
+    tuned_source.write_text(json.dumps({"boundary_conditions": []}), encoding="utf-8")
+    calls = []
+
+    class FakeMeshComplete:
+        def __init__(self, path):
+            self.path = str(path)
+
+        def rename_vtps(self):
+            calls.append("rename_vtps")
+
+    class FakeZeroDConfig:
+        path = str(tuned_source)
+
+        def generate_threed_coupler(self, simdir, **kwargs):
+            calls.append(("generate_threed_coupler", kwargs))
+            canonical = Path(simdir) / "svzerod_3Dcoupling.json"
+            canonical.write_text(
+                json.dumps({"external_solver_coupling_blocks": [{"name": "OUTLET"}]}),
+                encoding="utf-8",
+            )
+            return SimpleNamespace(path=str(canonical), add_result=lambda svzerod_data: None), ["OUTLET"]
+
+    class FakeConfigHandler:
+        @classmethod
+        def from_json(cls, path, is_pulmonary=False):
+            calls.append(("from_json", Path(path).name, is_pulmonary))
+            return FakeZeroDConfig()
+
+        @classmethod
+        def blank_threed_coupler(cls, path):
+            raise AssertionError("blank coupler should not be used")
+
+    monkeypatch.setattr(simulation_directory_module, "MeshComplete", FakeMeshComplete)
+    monkeypatch.setattr(simulation_directory_module, "ConfigHandler", FakeConfigHandler)
+    monkeypatch.setattr(simulation_directory_module, "SvMPxml", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(simulation_directory_module, "SolverRunscript", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(simulation_directory_module, "SvZeroDdata", lambda path: SimpleNamespace(path=path))
+
+    sim_dir = SimulationDirectory.from_directory(
+        path=str(tmp_path),
+        mesh_complete="mesh-complete",
+        threed_coupler=str(tuned_source),
+    )
+
+    assert sim_dir.explicit_threed_coupler is False
+    assert ("from_json", "svzerod_3d_coupling_tuned.json", True) in calls
+    generate_calls = [call for call in calls if isinstance(call, tuple) and call[0] == "generate_threed_coupler"]
+    assert generate_calls
+    assert generate_calls[0][1]["mesh_complete"].path == str(mesh_dir)
+    payload = json.loads((tmp_path / "svzerod_3Dcoupling.json").read_text(encoding="utf-8"))
+    assert payload["external_solver_coupling_blocks"]

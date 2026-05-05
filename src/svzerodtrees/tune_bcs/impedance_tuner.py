@@ -81,6 +81,19 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self._expected_snapshot_cardiac_output = None
         self._full_pa_base_config = None
 
+    def _tree_assignment_options_for_objective(self):
+        if self.tuning_model != "full_pa":
+            return {
+                "use_mean": self.use_mean,
+                "diameter_scale": self.diameter_scale,
+                "diameter_std_cap": self.diameter_std_cap,
+            }
+        return {
+            "use_mean": True,
+            "diameter_scale": 0.0,
+            "diameter_std_cap": None,
+        }
+
 
     # ---- Internal helpers ---- #
 
@@ -329,6 +342,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
             if base_model is None:
                 raise ValueError("full_pa tuning model has not been initialized")
             model = copy.deepcopy(base_model)
+            objective_tree_options = self._tree_assignment_options_for_objective()
             construct_impedance_trees(
                 model,
                 self.mesh_surfaces_path,
@@ -339,10 +353,10 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 convert_to_cm=self.convert_to_cm,
                 is_pulmonary=self.is_pulmonary,
                 n_procs=self.n_procs,
-                use_mean=self.use_mean,
+                use_mean=objective_tree_options["use_mean"],
                 specify_diameter=self.specify_diameter,
-                diameter_scale=self.diameter_scale,
-                diameter_std_cap=self.diameter_std_cap,
+                diameter_scale=objective_tree_options["diameter_scale"],
+                diameter_std_cap=objective_tree_options["diameter_std_cap"],
                 allow_ordered_outlet_mapping=self.allow_ordered_outlet_mapping,
                 verbose=False,
             )

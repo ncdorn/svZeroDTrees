@@ -6,6 +6,7 @@ from scipy.optimize import minimize, Bounds
 import matplotlib.pyplot as plt
 import copy
 import time
+import json
 import os
 import math
 import subprocess
@@ -20,6 +21,13 @@ from ..microvasculature import StructuredTree
 
 _DEFAULT_TREE_LRR = 10.0
 DEFAULT_SLURM_EXECUTABLE = "/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics"
+
+
+def _has_valid_external_solver_coupling_blocks(path):
+    with open(path, encoding="utf-8") as ff:
+        payload = json.load(ff)
+    blocks = payload.get("external_solver_coupling_blocks")
+    return isinstance(blocks, list) and len(blocks) > 0
 
 
 def _normalise_execution_config(execution_config=None):
@@ -146,11 +154,30 @@ class SimulationDirectory:
         explicit_threed_coupler = False
         svzerod_3Dcoupling = os.path.join(path, 'svzerod_3Dcoupling.json')
         if isinstance(threed_coupler, (str, os.PathLike)) and os.path.exists(threed_coupler):
-            explicit_threed_coupler = True
-            if os.path.abspath(threed_coupler) != os.path.abspath(svzerod_3Dcoupling):
-                shutil.copy2(threed_coupler, svzerod_3Dcoupling)
-            print('explicit svzerod_3Dcoupling.json found')
-            svzerod_3Dcoupling = ConfigHandler.from_json(svzerod_3Dcoupling, is_pulmonary=False)
+            if _has_valid_external_solver_coupling_blocks(threed_coupler):
+                explicit_threed_coupler = True
+                if os.path.abspath(threed_coupler) != os.path.abspath(svzerod_3Dcoupling):
+                    shutil.copy2(threed_coupler, svzerod_3Dcoupling)
+                print('explicit svzerod_3Dcoupling.json found')
+                svzerod_3Dcoupling = ConfigHandler.from_json(svzerod_3Dcoupling, is_pulmonary=False)
+            elif mesh_complete is not None:
+                print('supplied threed_coupler has no coupling blocks; generating svzerod_3Dcoupling.json from zerod model...')
+                source_config = zerod_config
+                if source_config is None:
+                    source_config = ConfigHandler.from_json(threed_coupler, is_pulmonary=is_pulmonary)
+                svzerod_3Dcoupling, coupling_blocks = source_config.generate_threed_coupler(
+                    path,
+                    inflow_from_0d=True,
+                    mesh_complete=mesh_complete,
+                )
+                if zerod_config is None:
+                    zerod_config = source_config
+            else:
+                raise ValueError(
+                    "explicit threed_coupler must contain non-empty "
+                    "external_solver_coupling_blocks or be paired with mesh_complete "
+                    "so a canonical coupler can be generated"
+                )
         elif threed_coupler is not None and zerod_config is not None and mesh_complete is not None:
             print('generating svzerod_3Dcoupling.json from zerod model...')
             svzerod_3Dcoupling, coupling_blocks = zerod_config.generate_threed_coupler(path, 

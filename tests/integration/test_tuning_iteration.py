@@ -817,6 +817,8 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
     assert calls["tuner_kwargs"]["tuning_model"] == "full_pa"
     assert calls["tuner_kwargs"]["diameter_scale"] == pytest.approx(0.25)
     assert calls["tuner_kwargs"]["diameter_std_cap"] == pytest.approx(1.5)
+    assert calls["construct"]["kwargs"]["use_mean"] is False
+    assert calls["construct"]["kwargs"]["diameter_scale"] == pytest.approx(0.25)
     assert calls["construct"]["kwargs"]["diameter_std_cap"] == pytest.approx(1.5)
 
 
@@ -1165,9 +1167,9 @@ def test_full_pa_tuner_loss_applies_trial_bcs_and_writes_csv(monkeypatch, tmp_pa
     loss = tuner.loss_fn(x0, tuner._full_pa_base_config, finalize=True)
 
     assert loss > 0.0
-    assert calls["construct"]["kwargs"]["use_mean"] is False
-    assert calls["construct"]["kwargs"]["diameter_scale"] == pytest.approx(0.5)
-    assert calls["construct"]["kwargs"]["diameter_std_cap"] == pytest.approx(2.0)
+    assert calls["construct"]["kwargs"]["use_mean"] is True
+    assert calls["construct"]["kwargs"]["diameter_scale"] == pytest.approx(0.0)
+    assert calls["construct"]["kwargs"]["diameter_std_cap"] is None
     assert (tmp_path / OPTIMIZED_PARAMS_FILENAME).exists()
     assert (tmp_path / PA_CONFIG_SNAPSHOT_FILENAME).exists()
 
