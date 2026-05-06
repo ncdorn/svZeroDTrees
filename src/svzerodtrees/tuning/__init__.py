@@ -1,7 +1,7 @@
 """Iteration tuning helpers for 3D-0D workflows."""
 
 from .iteration import (
-    DEFAULT_ITERATION_THRESHOLDS,
+    DEFAULT_CONVERGENCE_TOLERANCE,
     compute_centerline_mpa_metrics,
     compute_flow_split_metrics,
     evaluate_iteration_gate,
@@ -13,7 +13,7 @@ from .iteration import (
 from .learned_seed import prepare_reduced_rri_seed_from_learned
 
 __all__ = [
-    "DEFAULT_ITERATION_THRESHOLDS",
+    "DEFAULT_CONVERGENCE_TOLERANCE",
     "compute_centerline_mpa_metrics",
     "compute_flow_split_metrics",
     "evaluate_iteration_gate",

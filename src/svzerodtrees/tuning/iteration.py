@@ -36,12 +36,7 @@ from svzerodtrees.tune_bcs import (
 )
 
 
-DEFAULT_ITERATION_THRESHOLDS: dict[str, float] = {
-    "mpa_sys": 5.0,
-    "mpa_dia": 3.0,
-    "mpa_mean": 3.0,
-    "rpa_split": 0.05,
-}
+DEFAULT_CONVERGENCE_TOLERANCE: float = 0.10
 
 DEFAULT_IMPEDANCE_TUNING_CONFIG: dict[str, Any] = {
     "solver": "Nelder-Mead",
@@ -859,13 +854,17 @@ def evaluate_iteration_gate(
     *,
     metrics: Mapping[str, float],
     clinical_targets: str | Path | Mapping[str, Any],
-    thresholds: Mapping[str, float] | None = None,
+    tolerance: float | None = None,
 ) -> dict[str, Any]:
-    """Evaluate convergence gate and return machine-readable decision payload."""
+    """Evaluate convergence gate and return machine-readable decision payload.
 
-    limits = dict(DEFAULT_ITERATION_THRESHOLDS)
-    if thresholds is not None:
-        limits.update({k: float(v) for k, v in thresholds.items()})
+    Each metric must be within ``tolerance`` (fraction) of its clinical target.
+    Default tolerance is ``DEFAULT_CONVERGENCE_TOLERANCE`` (10%).
+    """
+
+    tol = float(tolerance) if tolerance is not None else DEFAULT_CONVERGENCE_TOLERANCE
+    if tol <= 0.0:
+        raise ValueError("tolerance must be > 0")
 
     targets = _clinical_targets_from_input(clinical_targets)
     required = ["mpa_sys", "mpa_dia", "mpa_mean", "rpa_split"]
@@ -873,13 +872,22 @@ def evaluate_iteration_gate(
     if missing:
         raise ValueError(f"metrics missing required keys: {missing}")
 
+    zero_targets = [key for key in required if targets[key] == 0.0]
+    if zero_targets:
+        raise ValueError(
+            f"clinical target values must be non-zero for percentage threshold; "
+            f"got zero for: {zero_targets}"
+        )
+
+    thresholds = {key: tol * abs(targets[key]) for key in required}
     deltas = {key: abs(float(metrics[key]) - float(targets[key])) for key in required}
-    close_to_targets = all(deltas[key] <= limits[key] for key in required)
+    close_to_targets = all(deltas[key] <= thresholds[key] for key in required)
 
     return {
         "decision": "converged" if close_to_targets else "not_close",
         "close_to_targets": close_to_targets,
-        "thresholds": limits,
+        "tolerance": tol,
+        "thresholds": thresholds,
         "clinical_targets": targets,
         "metrics": {key: float(metrics[key]) for key in required},
         "deltas": deltas,

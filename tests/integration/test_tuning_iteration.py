@@ -327,31 +327,65 @@ def test_compute_centerline_metrics_from_csv(tmp_path: Path):
 
 
 def test_evaluate_iteration_gate_passes_on_boundary():
+    # targets: sys=50, dia=20, mean=30, split=0.50
+    # 10% thresholds: 5.0, 2.0, 3.0, 0.05
+    # metrics at exactly the boundary on every axis
     metrics = {
-        "mpa_sys": 45.0,
-        "mpa_dia": 20.0,
-        "mpa_mean": 30.0,
-        "rpa_split": 0.45,
+        "mpa_sys": 45.0,    # delta=5.0, threshold=5.0
+        "mpa_dia": 18.0,    # delta=2.0, threshold=2.0
+        "mpa_mean": 27.0,   # delta=3.0, threshold=3.0
+        "rpa_split": 0.45,  # delta=0.05, threshold=0.05
     }
-    targets = {"mpa_p": [50.0, 23.0, 33.0], "rpa_split": 0.50}
+    targets = {"mpa_p": [50.0, 20.0, 30.0], "rpa_split": 0.50}
 
     result = evaluate_iteration_gate(metrics=metrics, clinical_targets=targets)
     assert result["close_to_targets"] is True
     assert result["decision"] == "converged"
+    assert result["tolerance"] == pytest.approx(0.10)
+    assert result["thresholds"]["mpa_sys"] == pytest.approx(5.0)
+    assert result["thresholds"]["mpa_dia"] == pytest.approx(2.0)
+    assert result["thresholds"]["mpa_mean"] == pytest.approx(3.0)
+    assert result["thresholds"]["rpa_split"] == pytest.approx(0.05)
 
 
 def test_evaluate_iteration_gate_fails_when_over_threshold():
+    # mpa_sys delta=5.1 > 10% of 50 (5.0) → not_close
     metrics = {
         "mpa_sys": 44.9,
-        "mpa_dia": 19.9,
-        "mpa_mean": 29.9,
-        "rpa_split": 0.449,
+        "mpa_dia": 18.0,
+        "mpa_mean": 27.0,
+        "rpa_split": 0.45,
     }
-    targets = {"mpa_p": [50.0, 23.0, 33.0], "rpa_split": 0.50}
+    targets = {"mpa_p": [50.0, 20.0, 30.0], "rpa_split": 0.50}
 
     result = evaluate_iteration_gate(metrics=metrics, clinical_targets=targets)
     assert result["close_to_targets"] is False
     assert result["decision"] == "not_close"
+
+
+def test_evaluate_iteration_gate_tolerance_override():
+    # custom tolerance of 5%: threshold for mpa_sys = 0.05 * 50 = 2.5
+    # delta = |47.6 - 50| = 2.4 ≤ 2.5 → converged
+    metrics = {
+        "mpa_sys": 47.6,
+        "mpa_dia": 19.1,
+        "mpa_mean": 28.6,
+        "rpa_split": 0.476,
+    }
+    targets = {"mpa_p": [50.0, 20.0, 30.0], "rpa_split": 0.50}
+
+    result = evaluate_iteration_gate(metrics=metrics, clinical_targets=targets, tolerance=0.05)
+    assert result["tolerance"] == pytest.approx(0.05)
+    assert result["thresholds"]["mpa_sys"] == pytest.approx(2.5)
+    assert result["close_to_targets"] is True
+
+
+def test_evaluate_iteration_gate_rejects_zero_target():
+    metrics = {"mpa_sys": 1.0, "mpa_dia": 0.0, "mpa_mean": 1.0, "rpa_split": 0.5}
+    targets = {"mpa_p": [10.0, 0.0, 10.0], "rpa_split": 0.5}
+
+    with pytest.raises(ValueError, match="zero"):
+        evaluate_iteration_gate(metrics=metrics, clinical_targets=targets)
 
 
 def test_compute_flow_split_metrics_from_totals():
@@ -547,7 +581,8 @@ def test_write_iteration_json_contract(tmp_path: Path):
     decision_payload = {
         "decision": "not_close",
         "close_to_targets": False,
-        "thresholds": {"mpa_sys": 5.0, "mpa_dia": 3.0, "mpa_mean": 3.0, "rpa_split": 0.05},
+        "tolerance": 0.10,
+        "thresholds": {"mpa_sys": 5.0, "mpa_dia": 2.0, "mpa_mean": 3.0, "rpa_split": 0.05},
         "regenerated_config_path": "simplified_zerod_tuned_RRI.json",
         "postop_submission_requested": False,
     }

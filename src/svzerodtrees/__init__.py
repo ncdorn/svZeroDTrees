@@ -14,7 +14,7 @@ from .api import (
 )
 from .config import load_config
 from .tuning import (
-    DEFAULT_ITERATION_THRESHOLDS,
+    DEFAULT_CONVERGENCE_TOLERANCE,
     compute_centerline_mpa_metrics,
     compute_flow_split_metrics,
     evaluate_iteration_gate,
