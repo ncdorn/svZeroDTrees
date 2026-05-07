@@ -32,6 +32,19 @@ def test_svmp_xml_rigid_wall_defaults(tmp_path):
     assert add_eqn is not None
     assert add_eqn.get("type") == "fluid"
 
+    ls = add_eqn.find("LS")
+    assert ls is not None
+    assert ls.get("type") == "NS"
+    assert ls.find("Linear_algebra").get("type") == "fsils"
+    assert ls.find("Linear_algebra").findtext("Preconditioner") == "fsils"
+    assert ls.findtext("Max_iterations") == "10"
+    assert ls.findtext("NS_GM_max_iterations") == "200"
+    assert ls.findtext("NS_CG_max_iterations") == "500"
+    assert ls.findtext("Tolerance") == "0.4"
+    assert ls.findtext("NS_GM_tolerance") == "0.01"
+    assert ls.findtext("NS_CG_tolerance") == "0.2"
+    assert ls.findtext("Krylov_space_dimension") == "50"
+
     wall_bc = root.find(".//Add_BC[@name='wall']")
     assert wall_bc is not None
     assert wall_bc.findtext("Type") == "Dir"
@@ -58,6 +71,17 @@ def test_svmp_xml_deformable_wall_writes_cmm_tags(tmp_path):
     assert add_eqn.findtext("Poisson_ratio") == "0.49"
     assert add_eqn.findtext("Shell_thickness") == "0.2"
     assert add_eqn.findtext("Elasticity_modulus") == "123.0"
+
+    ls = add_eqn.find("LS")
+    assert ls is not None
+    assert ls.get("type") == "GMRES"
+    assert ls.findtext("Max_iterations") == "100"
+    assert ls.findtext("Tolerance") == "0.01"
+    assert ls.find("NS_GM_max_iterations") is None
+    assert ls.find("NS_CG_max_iterations") is None
+    assert ls.find("NS_GM_tolerance") is None
+    assert ls.find("NS_CG_tolerance") is None
+    assert ls.find("Krylov_space_dimension") is None
 
     wall_bc = root.find(".//Add_BC[@name='wall']")
     assert wall_bc is not None

@@ -328,20 +328,20 @@ class SvMPxml(SimulationFile):
         ls_max_iterations.text = "10" if wall_model == "rigid" else "100"
 
         ls_tolerance = ET.SubElement(ls, "Tolerance")
-        ls_tolerance.text = "1e-3" if wall_model == "rigid" else "0.01"
+        ls_tolerance.text = "0.4" if wall_model == "rigid" else "0.01"
 
         if wall_model == "rigid":
             ns_gm_max_iterations = ET.SubElement(ls, "NS_GM_max_iterations")
-            ns_gm_max_iterations.text = "3"
+            ns_gm_max_iterations.text = "200"
 
             ns_cg_max_iterations = ET.SubElement(ls, "NS_CG_max_iterations")
             ns_cg_max_iterations.text = "500"
 
             ns_gm_tolerance = ET.SubElement(ls, "NS_GM_tolerance")
-            ns_gm_tolerance.text = "1e-3"
+            ns_gm_tolerance.text = "0.01"
 
             ns_cg_tolerance = ET.SubElement(ls, "NS_CG_tolerance")
-            ns_cg_tolerance.text = "1e-3"
+            ns_cg_tolerance.text = "0.2"
 
             krylov_space_dim = ET.SubElement(ls, "Krylov_space_dimension")
             krylov_space_dim.text = "50"
