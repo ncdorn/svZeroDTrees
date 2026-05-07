@@ -287,6 +287,8 @@ def _resolve_impedance_config(
         raise ValueError("impedance tuning diameter_std_cap must be >= 0")
     if merged["tuning_model"] not in {"rri", "full_pa"}:
         raise ValueError("impedance tuning tuning_model must be one of rri|full_pa")
+    if merged["diameter_scale"] > 0.0:
+        merged["use_mean"] = False
 
     return merged
 

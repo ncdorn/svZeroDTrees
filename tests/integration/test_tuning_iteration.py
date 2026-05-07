@@ -735,7 +735,6 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
         impedance_config={
             "nm_iter": 7,
             "n_procs": 12,
-            "use_mean": False,
             "diameter_scale": 0.1,
             "tune_space": _tune_space_with_xi(),
         },
@@ -753,6 +752,7 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
     assert calls["construct"]["kwargs"]["diameter_scale"] == pytest.approx(0.1)
     assert calls["construct"]["kwargs"]["diameter_std_cap"] is None
     assert calls["tuner_kwargs"]["tuning_model"] == "rri"
+    assert calls["tuner_kwargs"]["use_mean"] is False
     assert calls["tuner_kwargs"]["convert_to_cm"] is False
     free_names = [param.name for param in calls["tune_space"].free]
     assert free_names == [entry["name"] for entry in _tune_space_with_xi()["free"]]
@@ -2031,6 +2031,19 @@ def test_resolve_impedance_config_supports_tuning_model_and_diameter_std_cap():
     )
     assert cfg["tuning_model"] == "full_pa"
     assert cfg["diameter_std_cap"] == pytest.approx(1.25)
+
+
+def test_resolve_impedance_config_nonzero_diameter_scale_disables_mean_tree_assignment():
+    cfg = _resolve_impedance_config(
+        {
+            "diameter_scale": 0.1,
+            "use_mean": True,
+            "tune_space": _tune_space_with_xi(),
+        }
+    )
+
+    assert cfg["diameter_scale"] == pytest.approx(0.1)
+    assert cfg["use_mean"] is False
 
 
 def test_resolve_impedance_config_rejects_invalid_tuning_model_and_diameter_std_cap():
