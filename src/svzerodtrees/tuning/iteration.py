@@ -908,12 +908,17 @@ def generate_reduced_pa_from_iteration(
     """Run reduced PA regeneration for a completed iteration."""
 
     sim = SimulationDirectory.from_directory(str(iteration_dir))
+    target_pressure_csv = Path(iteration_dir) / "mpa_pressure_vs_time.csv"
+    if not target_pressure_csv.exists():
+        target_pressure_csv = Path(iteration_dir).parent / "results" / "mpa_pressure_vs_time.csv"
+    target_pressure_csv_arg = str(target_pressure_csv) if target_pressure_csv.exists() else None
     result = sim.optimize_RRI(
         str(tuned_pa_config),
         optimizer=optimizer,
         nm_iter=nm_iter,
         output_name=output_name,
         tuning_iter=tuning_iter,
+        target_pressure_csv=target_pressure_csv_arg,
     )
 
     output_config = (

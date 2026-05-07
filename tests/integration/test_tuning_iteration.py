@@ -480,7 +480,41 @@ def test_generate_reduced_pa_wrapper(monkeypatch, tmp_path: Path):
     assert calls["tuned_pa_config"].endswith("pa_config_tuning_snapshot.json")
     assert calls["kwargs"]["nm_iter"] == 7
     assert calls["kwargs"]["tuning_iter"] == 2
+    assert calls["kwargs"]["target_pressure_csv"] is None
     assert result["regenerated_config_path"].endswith("out.json")
+
+
+def test_generate_reduced_pa_wrapper_passes_sibling_pressure_csv(monkeypatch, tmp_path: Path):
+    calls = {}
+    iteration_dir = tmp_path / "iter-01" / "preop"
+    results_dir = tmp_path / "iter-01" / "results"
+    iteration_dir.mkdir(parents=True)
+    results_dir.mkdir(parents=True)
+    pressure_csv = results_dir / "mpa_pressure_vs_time.csv"
+    pressure_csv.write_text("time_s,mpa_pressure_mmhg\n0.0,10.0\n", encoding="utf-8")
+
+    class DummySim:
+        @classmethod
+        def from_directory(cls, path):
+            calls["path"] = path
+            return cls()
+
+        def optimize_RRI(self, tuned_pa_config, **kwargs):
+            calls["tuned_pa_config"] = tuned_pa_config
+            calls["kwargs"] = kwargs
+            return {"output_config": str(tmp_path / "out.json")}
+
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration.SimulationDirectory",
+        DummySim,
+    )
+
+    generate_reduced_pa_from_iteration(
+        iteration_dir=iteration_dir,
+        tuned_pa_config=results_dir / "pa_config_tuning_snapshot.json",
+    )
+
+    assert calls["kwargs"]["target_pressure_csv"] == str(pressure_csv)
 
 
 def test_prepare_reduced_rri_seed_from_learned_fits_and_writes_outputs(monkeypatch, tmp_path: Path):

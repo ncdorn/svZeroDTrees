@@ -9,6 +9,7 @@ import time
 import json
 import os
 import math
+import pandas as pd
 import subprocess
 import shlex
 import shutil
@@ -1243,7 +1244,7 @@ class SimulationDirectory:
         return optimized_resistances.tolist()  # return as a list for easier handling
 
 
-    def optimize_RRI(self, tuned_pa_config, initial_guess=None, tuning_iter=1, output_name='simplified_zerod_tuned_RRI.json', optimizer='Nelder-Mead', nm_iter: int = 10):
+    def optimize_RRI(self, tuned_pa_config, initial_guess=None, tuning_iter=1, output_name='simplified_zerod_tuned_RRI.json', optimizer='Nelder-Mead', nm_iter: int = 10, target_pressure_csv=None):
         '''
         Optimize the stenosis coefficient, Poiseuille resistance, and inductance for the proximal LPA (vessel 1)
         and RPA (vessel 3) in the simplified PA config so that the 0D result matches the 3D target pressures/flow split.
@@ -1251,12 +1252,47 @@ class SimulationDirectory:
         '''
         if self.svzerod_data is None:
             raise ValueError("svZeroD_data not found. Please run the simulation first.")
-        
-        cycle_duration = self.svzerod_3Dcoupling.bcs['INFLOW'].t[-1]
 
-        time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'], cycle_duration=cycle_duration, window="last", full_cycle=False)
-        if time.size == 0:
-            raise RuntimeError("No svZeroD results available for RRI optimization.")
+        rri_config = ConfigHandler.from_json(tuned_pa_config)
+
+        if 'INFLOW' in self.svzerod_3Dcoupling.bcs:
+            cycle_duration = self.svzerod_3Dcoupling.bcs['INFLOW'].t[-1]
+        elif 'INFLOW' in rri_config.inflows:
+            cycle_duration = rri_config.inflows['INFLOW'].t[-1]
+        else:
+            raise KeyError("INFLOW")
+
+        if 'branch0_seg0' in self.svzerod_3Dcoupling.coupling_blocks:
+            time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'], cycle_duration=cycle_duration, window="last", full_cycle=False)
+            if time.size == 0:
+                raise RuntimeError("No svZeroD results available for RRI optimization.")
+        elif target_pressure_csv is not None:
+            pressure_df = pd.read_csv(target_pressure_csv)
+            pressure_col = next(
+                (
+                    col
+                    for col in ("mpa_pressure_mmhg", "pressure_mmhg", "pressure", "mpa_pressure")
+                    if col in pressure_df.columns
+                ),
+                None,
+            )
+            if pressure_col is None:
+                raise ValueError(
+                    "target_pressure_csv must contain one of: "
+                    "mpa_pressure_mmhg, pressure_mmhg, pressure, mpa_pressure"
+                )
+            time_col = "time_s" if "time_s" in pressure_df.columns else None
+            pressure_mmhg = pd.to_numeric(pressure_df[pressure_col], errors="coerce").to_numpy(dtype=float)
+            finite = np.isfinite(pressure_mmhg)
+            pressure_mmhg = pressure_mmhg[finite]
+            if time_col is not None:
+                time = pd.to_numeric(pressure_df[time_col], errors="coerce").to_numpy(dtype=float)[finite]
+            else:
+                time = np.linspace(0.0, cycle_duration, pressure_mmhg.size, endpoint=False)
+            pressure = pressure_mmhg * 1333.2
+            flow = np.zeros_like(pressure)
+        else:
+            raise KeyError("branch0_seg0")
 
         mask_last_period = time > time.max() - cycle_duration
         time_last_period = time[mask_last_period]
@@ -1279,7 +1315,6 @@ class SimulationDirectory:
             'rpa_split': rpa_split
         }
 
-        rri_config = ConfigHandler.from_json(tuned_pa_config)
         log_path = os.path.join(self.path, "optimize_simplified_nonlinear_RRI.log")
 
         def _append_log(message: str):
