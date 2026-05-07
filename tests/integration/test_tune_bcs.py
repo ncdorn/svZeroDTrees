@@ -764,6 +764,75 @@ def test_impedance_tuning_with_inductance_builds_valid_threed_config(monkeypatch
     }
 
 
+def test_impedance_threed_coupler_without_distal_vessels_uses_distinct_coupling_block_names(monkeypatch, tmp_path):
+    """IMPEDANCE BCs must not share names with external FLOW coupling blocks."""
+    pa_config = _build_pa_config([10.0, 10.0])
+
+    class DummyStructuredTree:
+        def __init__(self, name, time, simparams, compliance_model):
+            self.name = name
+            self.time = time
+            self.simparams = simparams
+            self.compliance_model = compliance_model
+
+        def build(self, **kwargs):
+            self._build_kwargs = kwargs
+
+        def compute_olufsen_impedance(self, n_procs=1, tsteps=None):
+            self._n_procs = n_procs
+            self._tsteps = tsteps
+
+        def create_impedance_bc(self, bc_name, outlet_id, pd):
+            return BoundaryCondition.from_config(
+                {
+                    "bc_name": bc_name,
+                    "bc_type": "IMPEDANCE",
+                    "bc_values": {"z": [100.0, 50.0], "Pd": pd},
+                }
+            )
+
+    monkeypatch.setattr(pa_config_module, "StructuredTree", DummyStructuredTree)
+
+    tree_params = TreeParameters(
+        name="lpa",
+        lrr=10.0,
+        diameter=0.3,
+        d_min=0.01,
+        alpha=0.9,
+        beta=0.6,
+        compliance_model=ConstantCompliance(6.6e4),
+        inductance=0.0,
+    )
+    pa_config.create_impedance_trees(tree_params, tree_params, n_procs=1)
+    config_handler = ConfigHandler(pa_config.config)
+
+    class DummySurface:
+        def __init__(self, filename):
+            self.filename = filename
+
+    class DummyMeshComplete:
+        mesh_surfaces = {
+            "surface_0": DummySurface("INFLOW.vtp"),
+            "surface_1": DummySurface("LPA.vtp"),
+            "surface_2": DummySurface("RPA.vtp"),
+        }
+
+    threed_coupler, _ = config_handler.generate_threed_coupler(
+        simdir=str(tmp_path),
+        inflow_from_0d=True,
+        mesh_complete=DummyMeshComplete(),
+        include_distal_vessel=False,
+    )
+
+    payload = threed_coupler.config
+    bc_names = {bc["bc_name"] for bc in payload["boundary_conditions"]}
+    coupling_blocks = payload["external_solver_coupling_blocks"]
+
+    assert coupling_blocks
+    assert all(block["name"] not in bc_names for block in coupling_blocks)
+    assert all(block["connected_block"] in bc_names or block["connected_block"] in {"branch0_seg0"} for block in coupling_blocks)
+
+
 def _build_serialized_tree_metadata(*, name, bc_name, side):
     tree = StructuredTree(
         name=name,

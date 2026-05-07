@@ -72,7 +72,7 @@ def test_coupling_block_from_boundary_condition_omits_result_by_default():
     block = CouplingBlock.from_bc(bc, surface="outlet.vtp")
     serialized = block.to_dict()
 
-    assert serialized["name"] == "OUTBC"
+    assert serialized["name"] == "OUTBCcoupling"
     assert serialized["connected_block"] == "OUT_BC"
     assert serialized["surface"] == "outlet.vtp"
     assert "result" not in serialized

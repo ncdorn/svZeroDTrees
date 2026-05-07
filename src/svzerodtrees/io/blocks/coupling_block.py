@@ -35,8 +35,9 @@ class CouplingBlock():
 
         :param bc: boundary condition to create the coupling block from
         '''
+        coupling_name = f"{bc.name.replace('_', '')}coupling"
         config = {
-            'name': bc.name.replace('_', ''),
+            'name': coupling_name,
             'type': coupling_type,
             'location': location,
             'connected_block': bc.name,
