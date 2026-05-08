@@ -85,7 +85,8 @@ class SvMPxml(SimulationFile):
               configuration_file="svzerod_3Dcoupling.json",
               shared_library="/home/users/ndorn/svZeroDSolver/Release/src/interface/libsvzero_interface.so",
               initial_flows=0.0,
-              initial_pressures=0.0):
+              initial_pressures=0.0,
+              vtk_save_increment=20):
         '''
         write the svFSI.xml file
         
@@ -131,7 +132,7 @@ class SvMPxml(SimulationFile):
         name_prefix.text = "result"
 
         increment_vtk = ET.SubElement(gensimparams, "Increment_in_saving_VTK_files")
-        increment_vtk.text = "20"
+        increment_vtk.text = str(vtk_save_increment)
 
         start_saving_tstep = ET.SubElement(gensimparams, "Start_saving_after_time_step")
         start_saving_tstep.text = "1"

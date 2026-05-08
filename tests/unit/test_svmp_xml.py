@@ -114,6 +114,15 @@ def test_svmp_xml_deformable_without_prestress_omits_path(tmp_path):
     assert wall_bc.find("Prestress_file_path") is None
 
 
+def test_svmp_xml_can_save_vtk_every_timestep(tmp_path):
+    xml_path = Path(tmp_path) / "svFSIplus.xml"
+    writer = SvMPxml(str(xml_path))
+    writer.write(_make_mesh_complete(), wall_model="deformable", vtk_save_increment=1)
+
+    root = ET.parse(xml_path).getroot()
+    assert root.findtext(".//Increment_in_saving_VTK_files") == "1"
+
+
 def test_svmp_xml_deformable_writes_uniform_tissue_support(tmp_path):
     xml_path = Path(tmp_path) / "svFSIplus.xml"
     writer = SvMPxml(str(xml_path))

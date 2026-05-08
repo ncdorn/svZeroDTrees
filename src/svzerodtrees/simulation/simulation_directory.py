@@ -400,6 +400,7 @@ class SimulationDirectory:
             tissue_support = None if sim_config is None else sim_config.get("tissue_support")
             simulation_mode = "flow" if sim_config is None else str(sim_config.get("simulation_mode", "flow")).lower()
             traction_file_path = None if sim_config is None else sim_config.get("traction_file_path")
+            vtk_save_increment = 20 if sim_config is None else int(sim_config.get("vtk_save_increment", 20))
             mesh_scale_factor = self._resolve_mesh_scale_factor()
             if self.convert_to_cm:
                 print("scaling mesh to cm...")
@@ -452,7 +453,8 @@ class SimulationDirectory:
                                 prestress_file_path=prestress_file_path,
                                 tissue_support=tissue_support,
                                 simulation_mode=simulation_mode,
-                                traction_file_path=traction_file_path)
+                                traction_file_path=traction_file_path,
+                                vtk_save_increment=vtk_save_increment)
         
         def write_runscript_input_params(user_input=user_input, sim_config=sim_config):
             if user_input:
@@ -1255,44 +1257,53 @@ class SimulationDirectory:
 
         rri_config = ConfigHandler.from_json(tuned_pa_config)
 
-        if 'INFLOW' in self.svzerod_3Dcoupling.bcs:
-            cycle_duration = self.svzerod_3Dcoupling.bcs['INFLOW'].t[-1]
-        elif 'INFLOW' in rri_config.inflows:
-            cycle_duration = rri_config.inflows['INFLOW'].t[-1]
-        else:
-            raise KeyError("INFLOW")
-
-        if 'branch0_seg0' in self.svzerod_3Dcoupling.coupling_blocks:
-            time, flow, pressure = self.svzerod_data.get_result(self.svzerod_3Dcoupling.coupling_blocks['branch0_seg0'], cycle_duration=cycle_duration, window="last", full_cycle=False)
-            if time.size == 0:
-                raise RuntimeError("No svZeroD results available for RRI optimization.")
-        elif target_pressure_csv is not None:
-            pressure_df = pd.read_csv(target_pressure_csv)
-            pressure_col = next(
-                (
-                    col
-                    for col in ("mpa_pressure_mmhg", "pressure_mmhg", "pressure", "mpa_pressure")
-                    if col in pressure_df.columns
-                ),
-                None,
+        # Derive cycle duration from inflow.flow in the simulation directory.
+        # Reading from svzerod_3Dcoupling INFLOW BCs or rri_config inflows is deprecated.
+        inflow_flow_path = os.path.join(self.path, "inflow.flow")
+        if not os.path.exists(inflow_flow_path):
+            raise FileNotFoundError(
+                f"inflow.flow not found in simulation directory '{self.path}'; "
+                "it must be present to determine the cardiac cycle duration"
             )
-            if pressure_col is None:
-                raise ValueError(
-                    "target_pressure_csv must contain one of: "
-                    "mpa_pressure_mmhg, pressure_mmhg, pressure, mpa_pressure"
-                )
-            time_col = "time_s" if "time_s" in pressure_df.columns else None
-            pressure_mmhg = pd.to_numeric(pressure_df[pressure_col], errors="coerce").to_numpy(dtype=float)
-            finite = np.isfinite(pressure_mmhg)
-            pressure_mmhg = pressure_mmhg[finite]
-            if time_col is not None:
-                time = pd.to_numeric(pressure_df[time_col], errors="coerce").to_numpy(dtype=float)[finite]
-            else:
-                time = np.linspace(0.0, cycle_duration, pressure_mmhg.size, endpoint=False)
-            pressure = pressure_mmhg * 1333.2
-            flow = np.zeros_like(pressure)
+        with open(inflow_flow_path, "r", encoding="utf-8") as _ff:
+            _flow_lines = [ln.strip() for ln in _ff if ln.strip()]
+        # first line is "{n_tsteps} {header_terms}" — data starts on line 2
+        _time_values = [float(ln.split()[0]) for ln in _flow_lines[1:]]
+        if not _time_values:
+            raise ValueError(f"inflow.flow contains no data rows: {inflow_flow_path}")
+        cycle_duration = float(_time_values[-1])
+
+        # Always derive pressure targets from target_pressure_csv.
+        # Reading from svzerod_3Dcoupling coupling blocks (branch0_seg0) is deprecated.
+        if target_pressure_csv is None:
+            raise ValueError(
+                "target_pressure_csv is required for optimize_RRI — "
+                "reading pressure results via svzerod_3Dcoupling coupling blocks is no longer supported"
+            )
+        pressure_df = pd.read_csv(target_pressure_csv)
+        pressure_col = next(
+            (
+                col
+                for col in ("mpa_pressure_mmhg", "pressure_mmhg", "pressure", "mpa_pressure")
+                if col in pressure_df.columns
+            ),
+            None,
+        )
+        if pressure_col is None:
+            raise ValueError(
+                "target_pressure_csv must contain one of: "
+                "mpa_pressure_mmhg, pressure_mmhg, pressure, mpa_pressure"
+            )
+        time_col = "time_s" if "time_s" in pressure_df.columns else None
+        pressure_mmhg = pd.to_numeric(pressure_df[pressure_col], errors="coerce").to_numpy(dtype=float)
+        finite = np.isfinite(pressure_mmhg)
+        pressure_mmhg = pressure_mmhg[finite]
+        if time_col is not None:
+            time = pd.to_numeric(pressure_df[time_col], errors="coerce").to_numpy(dtype=float)[finite]
         else:
-            raise KeyError("branch0_seg0")
+            time = np.linspace(0.0, cycle_duration, pressure_mmhg.size, endpoint=False)
+        pressure = pressure_mmhg * 1333.2
+        flow = np.zeros_like(pressure)
 
         mask_last_period = time > time.max() - cycle_duration
         time_last_period = time[mask_last_period]
