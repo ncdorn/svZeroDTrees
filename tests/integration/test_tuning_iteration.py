@@ -326,6 +326,40 @@ def test_compute_centerline_metrics_from_csv(tmp_path: Path):
     assert metrics["mpa_mean"] == pytest.approx(14.666666666666666)
 
 
+def test_compute_centerline_metrics_from_last_cardiac_period(tmp_path: Path):
+    csv_path = tmp_path / "mpa_pressure_vs_time.csv"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "timestep_id,time_s,mpa_pressure_mmhg",
+                "0,0.0,9.0",
+                "1,0.4,-10.0",
+                "2,0.9,4.0",
+                "3,1.0,34.0",
+                "4,1.2,18.0",
+                "5,1.6,16.0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    metrics = compute_centerline_mpa_metrics(
+        pressure_csv=csv_path,
+        cycle_duration=0.8,
+    )
+    assert metrics["mpa_sys"] == pytest.approx(34.0)
+    assert metrics["mpa_dia"] == pytest.approx(4.0)
+    assert metrics["mpa_mean"] == pytest.approx(18.0)
+
+
+def test_compute_centerline_metrics_cycle_duration_requires_time_csv():
+    with pytest.raises(ValueError, match="cycle_duration requires pressure_csv"):
+        compute_centerline_mpa_metrics(
+            pressure_values=[10.0, 20.0],
+            cycle_duration=1.0,
+        )
+
+
 def test_evaluate_iteration_gate_passes_on_boundary():
     # targets: sys=50, dia=20, mean=30, split=0.50
     # 10% thresholds: 5.0, 2.0, 3.0, 0.05

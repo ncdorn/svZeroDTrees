@@ -740,7 +740,9 @@ def _to_float_array(values: Sequence[float]) -> np.ndarray:
     return arr
 
 
-def _load_centerline_pressure_series(csv_path: str | Path) -> np.ndarray:
+def _load_centerline_pressure_series(
+    csv_path: str | Path,
+) -> tuple[np.ndarray, np.ndarray | None]:
     path = Path(csv_path)
     if not path.exists():
         raise FileNotFoundError(f"centerline pressure CSV not found: {path}")
@@ -754,7 +756,24 @@ def _load_centerline_pressure_series(csv_path: str | Path) -> np.ndarray:
     ]
     for col in candidate_cols:
         if col in df.columns:
-            return _to_float_array(df[col].to_numpy())
+            pressure_values = pd.to_numeric(df[col], errors="coerce").to_numpy(
+                dtype=float
+            )
+            time = None
+            if "time_s" in df.columns:
+                time_values = pd.to_numeric(df["time_s"], errors="coerce").to_numpy(
+                    dtype=float
+                )
+                if len(time_values) != len(pressure_values):
+                    raise ValueError(
+                        "centerline pressure CSV time_s length does not match pressure"
+                    )
+                finite = np.isfinite(pressure_values) & np.isfinite(time_values)
+                time = time_values[finite]
+                pressure = pressure_values[finite]
+            else:
+                pressure = _to_float_array(pressure_values)
+            return pressure, time
 
     raise ValueError(
         "centerline pressure CSV must contain one of: "
@@ -767,21 +786,39 @@ def compute_centerline_mpa_metrics(
     pressure_csv: str | Path | None = None,
     pressure_values: Sequence[float] | None = None,
     last_n: int | None = None,
+    cycle_duration: float | None = None,
 ) -> dict[str, float]:
     """Compute systolic/diastolic/mean MPA pressure (mmHg) for gate decisions."""
 
     if pressure_values is None and pressure_csv is None:
         raise ValueError("one of pressure_values or pressure_csv is required")
+    if pressure_values is not None and cycle_duration is not None:
+        raise ValueError("cycle_duration requires pressure_csv with time_s values")
 
+    time = None
     if pressure_values is not None:
         arr = _to_float_array(pressure_values)
     else:
-        arr = _load_centerline_pressure_series(pressure_csv)  # type: ignore[arg-type]
+        arr, time = _load_centerline_pressure_series(pressure_csv)  # type: ignore[arg-type]
 
     if last_n is not None:
         if last_n <= 0:
             raise ValueError("last_n must be positive")
         arr = arr[-last_n:]
+        if time is not None:
+            time = time[-last_n:]
+
+    if cycle_duration is not None:
+        cycle = float(cycle_duration)
+        if not np.isfinite(cycle) or cycle <= 0.0:
+            raise ValueError("cycle_duration must be positive and finite")
+        if time is None:
+            raise ValueError("cycle_duration requires pressure_csv with time_s values")
+        cutoff = float(np.max(time)) - cycle
+        mask = time > cutoff
+        if not np.any(mask):
+            raise ValueError("last cardiac period pressure window is empty")
+        arr = arr[mask]
 
     return {
         "mpa_sys": float(np.max(arr)),

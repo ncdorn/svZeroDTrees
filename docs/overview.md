@@ -83,4 +83,4 @@ trees:
 **Where to Go Next**
 - Full schema reference: `docs/interface.md`.
 - Complete examples: `examples/*.yml` and `examples/construct_tree/README.md`.
-- Iteration helper API: `svzerodtrees.tuning.iteration` (`compute_centerline_mpa_metrics`, `compute_flow_split_metrics`, `evaluate_iteration_gate`, `generate_reduced_pa_from_iteration`, `run_impedance_tuning_for_iteration`). The impedance helper supports `tuning_model: full_pa` and validates that `pa_config_tuning_snapshot.json` preserves the full 0D vessel/outlet topology instead of falling back to a reduced RRI snapshot.
+- Iteration helper API: `svzerodtrees.tuning.iteration` (`compute_centerline_mpa_metrics`, `compute_flow_split_metrics`, `evaluate_iteration_gate`, `generate_reduced_pa_from_iteration`, `run_impedance_tuning_for_iteration`). `compute_centerline_mpa_metrics` can evaluate only the last cardiac period when supplied a pressure CSV with `time_s` and a `cycle_duration`. The impedance helper supports `tuning_model: full_pa` and validates that `pa_config_tuning_snapshot.json` preserves the full 0D vessel/outlet topology instead of falling back to a reduced RRI snapshot.
