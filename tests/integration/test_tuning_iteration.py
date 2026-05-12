@@ -711,7 +711,7 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
             calls["tune_space"] = args[3]
             calls["tuner_kwargs"] = kwargs
 
-        def tune(self, nm_iter: int = 1):
+        def tune(self, nm_iter: int = 1, initial_params_csv=None):
             calls["nm_iter"] = nm_iter
             out_dir = Path.cwd()
             (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
@@ -847,7 +847,7 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
         def __init__(self, *args, **kwargs):
             calls["tuner_kwargs"] = kwargs
 
-        def tune(self, nm_iter: int = 1):
+        def tune(self, nm_iter: int = 1, initial_params_csv=None):
             calls["nm_iter"] = nm_iter
             out_dir = Path.cwd()
             (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
@@ -967,7 +967,7 @@ def test_run_impedance_tuning_for_iteration_full_pa_rejects_reduced_snapshot(
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def tune(self, nm_iter: int = 1):
+        def tune(self, nm_iter: int = 1, initial_params_csv=None):
             out_dir = Path.cwd()
             (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
                 "pa,alpha,beta,xi,d_min,lrr,diameter,compliance_model,C\n"
@@ -1047,7 +1047,7 @@ def test_run_impedance_tuning_for_iteration_clears_stale_snapshot(
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def tune(self, nm_iter: int = 1):
+        def tune(self, nm_iter: int = 1, initial_params_csv=None):
             (Path.cwd() / OPTIMIZED_PARAMS_FILENAME).write_text(
                 "pa,alpha,beta,xi,d_min,lrr,diameter,compliance_model,C\n"
                 "lpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n"
@@ -1102,7 +1102,7 @@ def test_run_impedance_tuning_for_iteration_rri_expands_reduced_bcs_for_caps(
             calls["tuner_kwargs"] = kwargs
             self.log_file = kwargs["log_file"]
 
-        def tune(self, nm_iter: int = 1):
+        def tune(self, nm_iter: int = 1, initial_params_csv=None):
             calls["nm_iter"] = nm_iter
             out_dir = Path.cwd()
             (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
@@ -1306,7 +1306,7 @@ def test_run_impedance_tuning_for_iteration_missing_snapshot_raises(monkeypatch,
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def tune(self, nm_iter: int = 1):
+        def tune(self, nm_iter: int = 1, initial_params_csv=None):
             _ = nm_iter
             (Path.cwd() / OPTIMIZED_PARAMS_FILENAME).write_text("pa\nlpa\nrpa\n", encoding="utf-8")
 
@@ -1355,7 +1355,7 @@ def test_run_impedance_tuning_for_iteration_missing_required_xi_raises(monkeypat
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def tune(self, nm_iter: int = 1):
+        def tune(self, nm_iter: int = 1, initial_params_csv=None):
             _ = nm_iter
             out_dir = Path.cwd()
             (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
@@ -1434,7 +1434,7 @@ def test_run_impedance_tuning_for_iteration_rejects_legacy_snapshot(monkeypatch,
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def tune(self, nm_iter: int = 1):
+        def tune(self, nm_iter: int = 1, initial_params_csv=None):
             _ = nm_iter
             out_dir = Path.cwd()
             (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
@@ -1505,7 +1505,7 @@ def test_run_impedance_tuning_for_iteration_rejects_legacy_tuned_config(monkeypa
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def tune(self, nm_iter: int = 1):
+        def tune(self, nm_iter: int = 1, initial_params_csv=None):
             _ = nm_iter
             out_dir = Path.cwd()
             (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
@@ -1585,7 +1585,7 @@ def test_run_impedance_tuning_for_iteration_rejects_snapshot_timestep_mismatch(m
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def tune(self, nm_iter: int = 1):
+        def tune(self, nm_iter: int = 1, initial_params_csv=None):
             _ = nm_iter
             out_dir = Path.cwd()
             (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
@@ -1656,7 +1656,7 @@ def test_run_impedance_tuning_for_iteration_rejects_coupled_tuned_config_wrong_n
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def tune(self, nm_iter: int = 1):
+        def tune(self, nm_iter: int = 1, initial_params_csv=None):
             _ = nm_iter
             out_dir = Path.cwd()
             (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
@@ -1736,7 +1736,7 @@ def test_run_impedance_tuning_for_iteration_rejects_snapshot_inflow_mismatch(mon
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def tune(self, nm_iter: int = 1):
+        def tune(self, nm_iter: int = 1, initial_params_csv=None):
             _ = nm_iter
             out_dir = Path.cwd()
             (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
@@ -1808,7 +1808,7 @@ def test_run_impedance_tuning_for_iteration_accepts_scaled_snapshot_inflow(monke
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def tune(self, nm_iter: int = 1):
+        def tune(self, nm_iter: int = 1, initial_params_csv=None):
             _ = nm_iter
             out_dir = Path.cwd()
             (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
@@ -1888,7 +1888,7 @@ def test_run_impedance_tuning_for_iteration_uses_unscaled_seed_inflow_when_resca
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def tune(self, nm_iter: int = 1):
+        def tune(self, nm_iter: int = 1, initial_params_csv=None):
             _ = nm_iter
             out_dir = Path.cwd()
             (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
@@ -1972,7 +1972,7 @@ def test_run_impedance_tuning_for_iteration_uses_inflow_file_mean_source(monkeyp
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def tune(self, nm_iter: int = 1):
+        def tune(self, nm_iter: int = 1, initial_params_csv=None):
             _ = nm_iter
             out_dir = Path.cwd()
             (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
@@ -2164,3 +2164,461 @@ def test_resolve_impedance_config_invalid_inf_string_raises():
 def test_resolve_impedance_config_missing_tune_space_keys_raises():
     with pytest.raises(ValueError, match="must define keys: free, fixed, tied"):
         _resolve_impedance_config({"tune_space": {"free": []}})
+
+
+# ---------------------------------------------------------------------------
+# _seed_x0_from_csv unit tests
+# ---------------------------------------------------------------------------
+
+from svzerodtrees.tune_bcs.impedance_tuner import _seed_x0_from_csv
+from svzerodtrees.tune_bcs.tune_space import FreeParam, FixedParam, TiedParam, TuneSpace
+import math
+import warnings as _warnings_mod
+import numpy as np
+
+
+def _make_tune_space_for_csv_tests() -> TuneSpace:
+    """TuneSpace covering all column groups tested in CSV seeding."""
+    return TuneSpace(
+        free=[
+            FreeParam("lpa.xi",        init=2.3,   lb=0.0,   ub=6.0),
+            FreeParam("rpa.xi",        init=2.3,   lb=0.0,   ub=6.0),
+            FreeParam("lpa.eta_sym",   init=0.6,   lb=0.3,   ub=0.9),
+            FreeParam("rpa.eta_sym",   init=0.7,   lb=0.3,   ub=0.9),
+            FreeParam("lpa.inductance",init=1.0,   lb=0.0,   ub=10.0),
+            FreeParam("rpa.inductance",init=1.0,   lb=0.0,   ub=10.0),
+            FreeParam("comp.lpa.k2",   init=-25.0, lb=-100.0, ub=-1.0),
+            FreeParam("comp.rpa.k2",   init=-25.0, lb=-100.0, ub=-1.0),
+            FreeParam("lrr",           init=10.0,  lb=4.0,   ub=25.0),
+        ],
+        fixed=[FixedParam("d_min", 0.01)],
+        tied=[],
+    )
+
+
+def _write_csv(path, rows: list[dict]) -> None:
+    import csv as _csv
+    all_keys = list(rows[0].keys())
+    with open(path, "w", newline="") as fh:
+        writer = _csv.DictWriter(fh, fieldnames=all_keys)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _noop_log(msg: str) -> None:
+    pass
+
+
+def test_seed_x0_from_csv_full_override(tmp_path):
+    """All covered columns override the default x0."""
+    tune_space = _make_tune_space_for_csv_tests()
+    x0, _ = tune_space.pack_init_and_bounds()
+    csv_path = tmp_path / "optimized_params.csv"
+    _write_csv(csv_path, [
+        {"pa": "lpa", "xi": 3.0, "eta_sym": 0.75, "inductance": 2.5, "k2": -50.0, "lrr": 12.0},
+        {"pa": "rpa", "xi": 2.8, "eta_sym": 0.65, "inductance": 3.0, "k2": -60.0, "lrr": 12.0},
+    ])
+    seeded = _seed_x0_from_csv(str(csv_path), tune_space, x0, _noop_log)
+
+    name_to_idx = {p.name: i for i, p in enumerate(tune_space.free)}
+    p = tune_space.free[name_to_idx["lpa.xi"]]
+    assert seeded[name_to_idx["lpa.xi"]] == pytest.approx(p.from_native(3.0))
+    p = tune_space.free[name_to_idx["rpa.xi"]]
+    assert seeded[name_to_idx["rpa.xi"]] == pytest.approx(p.from_native(2.8))
+    p = tune_space.free[name_to_idx["lpa.eta_sym"]]
+    assert seeded[name_to_idx["lpa.eta_sym"]] == pytest.approx(p.from_native(0.75))
+    p = tune_space.free[name_to_idx["rpa.eta_sym"]]
+    assert seeded[name_to_idx["rpa.eta_sym"]] == pytest.approx(p.from_native(0.65))
+    p = tune_space.free[name_to_idx["lpa.inductance"]]
+    assert seeded[name_to_idx["lpa.inductance"]] == pytest.approx(p.from_native(2.5))
+    p = tune_space.free[name_to_idx["rpa.inductance"]]
+    assert seeded[name_to_idx["rpa.inductance"]] == pytest.approx(p.from_native(3.0))
+    p = tune_space.free[name_to_idx["comp.lpa.k2"]]
+    assert seeded[name_to_idx["comp.lpa.k2"]] == pytest.approx(p.from_native(-50.0))
+    p = tune_space.free[name_to_idx["comp.rpa.k2"]]
+    assert seeded[name_to_idx["comp.rpa.k2"]] == pytest.approx(p.from_native(-60.0))
+    p = tune_space.free[name_to_idx["lrr"]]
+    assert seeded[name_to_idx["lrr"]] == pytest.approx(p.from_native(12.0))
+
+
+def test_seed_x0_from_csv_missing_column_falls_back_to_default(tmp_path):
+    """Missing optional columns keep the configured init and emit a warning."""
+    tune_space = _make_tune_space_for_csv_tests()
+    x0, _ = tune_space.pack_init_and_bounds()
+    csv_path = tmp_path / "optimized_params.csv"
+    # Omit 'inductance' and 'lrr' columns entirely.
+    _write_csv(csv_path, [
+        {"pa": "lpa", "xi": 3.0, "eta_sym": 0.75, "k2": -50.0},
+        {"pa": "rpa", "xi": 2.8, "eta_sym": 0.65, "k2": -60.0},
+    ])
+
+    with _warnings_mod.catch_warnings(record=True) as caught:
+        _warnings_mod.simplefilter("always")
+        seeded = _seed_x0_from_csv(str(csv_path), tune_space, x0, _noop_log)
+
+    warned_msgs = " ".join(str(w.message) for w in caught)
+    assert "inductance" in warned_msgs
+    assert "lrr" in warned_msgs
+
+    name_to_idx = {p.name: i for i, p in enumerate(tune_space.free)}
+    # Overridden params change.
+    assert seeded[name_to_idx["lpa.xi"]] != x0[name_to_idx["lpa.xi"]]
+    # Inductance and lrr unchanged from defaults.
+    assert seeded[name_to_idx["lpa.inductance"]] == pytest.approx(x0[name_to_idx["lpa.inductance"]])
+    assert seeded[name_to_idx["rpa.inductance"]] == pytest.approx(x0[name_to_idx["rpa.inductance"]])
+    assert seeded[name_to_idx["lrr"]] == pytest.approx(x0[name_to_idx["lrr"]])
+
+
+def test_seed_x0_from_csv_nonfinite_value_raises(tmp_path):
+    """Non-finite values in the CSV raise ValueError immediately."""
+    tune_space = _make_tune_space_for_csv_tests()
+    x0, _ = tune_space.pack_init_and_bounds()
+    csv_path = tmp_path / "optimized_params.csv"
+    _write_csv(csv_path, [
+        {"pa": "lpa", "xi": float("nan"), "eta_sym": 0.75, "k2": -50.0},
+        {"pa": "rpa", "xi": 2.8, "eta_sym": 0.65, "k2": -60.0},
+    ])
+    with pytest.raises(ValueError, match="non-finite"):
+        _seed_x0_from_csv(str(csv_path), tune_space, x0, _noop_log)
+
+
+def test_seed_x0_from_csv_out_of_bounds_raises(tmp_path):
+    """Native values outside configured bounds raise ValueError."""
+    tune_space = _make_tune_space_for_csv_tests()
+    x0, _ = tune_space.pack_init_and_bounds()
+    csv_path = tmp_path / "optimized_params.csv"
+    # lpa.xi has ub=6.0; 999.0 is out of bounds.
+    _write_csv(csv_path, [
+        {"pa": "lpa", "xi": 999.0, "eta_sym": 0.75, "k2": -50.0},
+        {"pa": "rpa", "xi": 2.8,   "eta_sym": 0.65, "k2": -60.0},
+    ])
+    with pytest.raises(ValueError, match="outside configured bounds"):
+        _seed_x0_from_csv(str(csv_path), tune_space, x0, _noop_log)
+
+
+def test_seed_x0_from_csv_tied_k2_not_overwritten(tmp_path):
+    """When comp.rpa.k2 is tied (not free), only comp.lpa.k2 is seeded."""
+    tune_space = TuneSpace(
+        free=[
+            FreeParam("lpa.xi",      init=2.3,   lb=0.0,   ub=6.0),
+            FreeParam("rpa.xi",      init=2.3,   lb=0.0,   ub=6.0),
+            FreeParam("comp.lpa.k2", init=-25.0, lb=-100.0, ub=-1.0),
+        ],
+        fixed=[FixedParam("d_min", 0.01)],
+        tied=[TiedParam("comp.rpa.k2", other="comp.lpa.k2")],
+    )
+    x0, _ = tune_space.pack_init_and_bounds()
+    csv_path = tmp_path / "optimized_params.csv"
+    _write_csv(csv_path, [
+        {"pa": "lpa", "xi": 3.0, "k2": -50.0},
+        {"pa": "rpa", "xi": 2.8, "k2": -70.0},  # rpa k2 in CSV should be ignored
+    ])
+    seeded = _seed_x0_from_csv(str(csv_path), tune_space, x0, _noop_log)
+
+    name_to_idx = {p.name: i for i, p in enumerate(tune_space.free)}
+    # comp.lpa.k2 updated from lpa row.
+    p_lpa_k2 = tune_space.free[name_to_idx["comp.lpa.k2"]]
+    assert seeded[name_to_idx["comp.lpa.k2"]] == pytest.approx(p_lpa_k2.from_native(-50.0))
+    # comp.rpa.k2 is tied, not in free, so rpa CSV value is silently ignored.
+    assert "comp.rpa.k2" not in name_to_idx
+
+
+def test_seed_x0_from_csv_does_not_mutate_original_x0(tmp_path):
+    """_seed_x0_from_csv returns a new array and does not mutate x0 in-place."""
+    tune_space = _make_tune_space_for_csv_tests()
+    x0, _ = tune_space.pack_init_and_bounds()
+    original_x0 = x0.copy()
+    csv_path = tmp_path / "optimized_params.csv"
+    _write_csv(csv_path, [
+        {"pa": "lpa", "xi": 4.0, "eta_sym": 0.8, "k2": -30.0},
+        {"pa": "rpa", "xi": 3.5, "eta_sym": 0.6, "k2": -40.0},
+    ])
+    seeded = _seed_x0_from_csv(str(csv_path), tune_space, x0, _noop_log)
+    np.testing.assert_array_equal(x0, original_x0)
+    assert not np.array_equal(seeded, original_x0)
+
+
+# ---------------------------------------------------------------------------
+# run_impedance_tuning_for_iteration with previous_optimized_params
+# ---------------------------------------------------------------------------
+
+def test_run_impedance_tuning_for_iteration_passes_prev_csv_to_tune(monkeypatch, tmp_path: Path):
+    """previous_optimized_params is forwarded to tuner.tune() as initial_params_csv."""
+    seed = tmp_path / "simplified_nonlinear_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
+    iteration_dir = tmp_path / "iter-02"
+    prev_csv = tmp_path / "iter-01" / "results" / "optimized_params.csv"
+    prev_csv.parent.mkdir(parents=True)
+    prev_csv.write_text(
+        "pa,xi,eta_sym,inductance,k2,lrr\n"
+        "lpa,3.0,0.75,2.5,-50.0,12.0\n"
+        "rpa,2.8,0.65,3.0,-60.0,12.0\n",
+        encoding="utf-8",
+    )
+    seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+
+    tune_calls: list[dict] = []
+
+    class DummyConfigHandler:
+        def __init__(self, path: str):
+            self.path = path
+
+        @classmethod
+        def from_json(cls, path: str, is_pulmonary: bool = False):
+            return cls(path)
+
+        def to_json(self, path: str):
+            Path(path).write_text(
+                json.dumps(_impedance_artifact_payload(
+                    bc_values={"z": [1.0], "Pd": 12.0},
+                    coupled=True,
+                    number_of_time_pts=2,
+                    number_of_time_pts_per_cardiac_cycle=3,
+                )),
+                encoding="utf-8",
+            )
+
+    class DummyClinicalTargets:
+        wedge_p = 12.0
+
+        @classmethod
+        def from_csv(cls, path: str):
+            return cls()
+
+    class DummyTuner:
+        def __init__(self, *args, **kwargs):
+            self._kwargs = kwargs
+
+        def tune(self, nm_iter: int = 1, initial_params_csv: str | None = None):
+            tune_calls.append({"nm_iter": nm_iter, "initial_params_csv": initial_params_csv})
+            out_dir = Path.cwd()
+            (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
+                "pa,alpha,beta,xi,d_min,lrr,diameter,compliance_model,C\n"
+                "lpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n"
+                "rpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n",
+                encoding="utf-8",
+            )
+            (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
+                json.dumps(_impedance_artifact_payload(
+                    bc_values={"z": [1.0, 0.5], "Pd": 12.0},
+                    coupled=False,
+                    number_of_time_pts_per_cardiac_cycle=3,
+                )),
+                encoding="utf-8",
+            )
+            log_file = self._kwargs.get("log_file")
+            if log_file:
+                Path(log_file).write_text("log", encoding="utf-8")
+
+    import svzerodtrees.tuning.iteration as _iter_mod
+    monkeypatch.setattr(_iter_mod, "ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr(_iter_mod, "ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr(_iter_mod, "ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr(_iter_mod, "construct_impedance_trees", lambda *a, **kw: None)
+    monkeypatch.setattr(_iter_mod, "validate_cap_to_bc_mapping", lambda *a, **kw: None)
+    monkeypatch.setattr(_iter_mod, "get_pa_outlet_scale", lambda *a, **kw: 2.0)
+    monkeypatch.setattr(_iter_mod, "_load_tree_params", lambda _p: ("lpa-params", "rpa-params"))
+    monkeypatch.setattr(_iter_mod, "_validate_impedance_artifact", lambda *a, **kw: None)
+    monkeypatch.setattr(_iter_mod, "_assert_full_pa_snapshot_preserves_topology", lambda *a, **kw: None)
+    monkeypatch.setattr(_iter_mod, "_validate_required_xi_in_optimized_csv", lambda *a, **kw: None)
+
+    run_impedance_tuning_for_iteration(
+        iteration_dir=iteration_dir,
+        seed_config=seed,
+        mesh_surfaces=mesh_surfaces,
+        clinical_targets=targets,
+        inflow_path=inflow_path,
+        impedance_config=_resolve_impedance_config({"tune_space": _tune_space_with_xi()}),
+        previous_optimized_params=prev_csv,
+    )
+
+    assert len(tune_calls) == 1
+    assert tune_calls[0]["initial_params_csv"] == str(prev_csv)
+
+
+def test_run_impedance_tuning_for_iteration_no_prev_csv_passes_none(monkeypatch, tmp_path: Path):
+    """When previous_optimized_params is None (iteration 1), initial_params_csv=None."""
+    seed = tmp_path / "simplified_nonlinear_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
+    iteration_dir = tmp_path / "iter-01"
+    seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+
+    tune_calls: list[dict] = []
+
+    class DummyConfigHandler:
+        def __init__(self, path: str):
+            self.path = path
+
+        @classmethod
+        def from_json(cls, path: str, is_pulmonary: bool = False):
+            return cls(path)
+
+        def to_json(self, path: str):
+            Path(path).write_text(
+                json.dumps(_impedance_artifact_payload(
+                    bc_values={"z": [1.0], "Pd": 12.0},
+                    coupled=True,
+                    number_of_time_pts=2,
+                    number_of_time_pts_per_cardiac_cycle=3,
+                )),
+                encoding="utf-8",
+            )
+
+    class DummyClinicalTargets:
+        wedge_p = 12.0
+
+        @classmethod
+        def from_csv(cls, path: str):
+            return cls()
+
+    class DummyTuner:
+        def __init__(self, *args, **kwargs):
+            self._kwargs = kwargs
+
+        def tune(self, nm_iter: int = 1, initial_params_csv: str | None = None):
+            tune_calls.append({"nm_iter": nm_iter, "initial_params_csv": initial_params_csv})
+            out_dir = Path.cwd()
+            (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
+                "pa,alpha,beta,xi,d_min,lrr,diameter,compliance_model,C\n"
+                "lpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n"
+                "rpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n",
+                encoding="utf-8",
+            )
+            (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
+                json.dumps(_impedance_artifact_payload(
+                    bc_values={"z": [1.0, 0.5], "Pd": 12.0},
+                    coupled=False,
+                    number_of_time_pts_per_cardiac_cycle=3,
+                )),
+                encoding="utf-8",
+            )
+            log_file = self._kwargs.get("log_file")
+            if log_file:
+                Path(log_file).write_text("log", encoding="utf-8")
+
+    import svzerodtrees.tuning.iteration as _iter_mod
+    monkeypatch.setattr(_iter_mod, "ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr(_iter_mod, "ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr(_iter_mod, "ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr(_iter_mod, "construct_impedance_trees", lambda *a, **kw: None)
+    monkeypatch.setattr(_iter_mod, "validate_cap_to_bc_mapping", lambda *a, **kw: None)
+    monkeypatch.setattr(_iter_mod, "get_pa_outlet_scale", lambda *a, **kw: 2.0)
+    monkeypatch.setattr(_iter_mod, "_load_tree_params", lambda _p: ("lpa-params", "rpa-params"))
+    monkeypatch.setattr(_iter_mod, "_validate_impedance_artifact", lambda *a, **kw: None)
+    monkeypatch.setattr(_iter_mod, "_assert_full_pa_snapshot_preserves_topology", lambda *a, **kw: None)
+    monkeypatch.setattr(_iter_mod, "_validate_required_xi_in_optimized_csv", lambda *a, **kw: None)
+
+    run_impedance_tuning_for_iteration(
+        iteration_dir=iteration_dir,
+        seed_config=seed,
+        mesh_surfaces=mesh_surfaces,
+        clinical_targets=targets,
+        inflow_path=inflow_path,
+        impedance_config=_resolve_impedance_config({"tune_space": _tune_space_with_xi()}),
+        previous_optimized_params=None,
+    )
+
+    assert len(tune_calls) == 1
+    assert tune_calls[0]["initial_params_csv"] is None
+
+
+def test_run_impedance_tuning_for_iteration_missing_prev_csv_passes_none(monkeypatch, tmp_path: Path):
+    """When previous_optimized_params path does not exist, initial_params_csv=None (fallback)."""
+    seed = tmp_path / "simplified_nonlinear_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
+    iteration_dir = tmp_path / "iter-02"
+    missing_csv = tmp_path / "iter-01" / "results" / "optimized_params.csv"
+    # Intentionally NOT created.
+    seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+
+    tune_calls: list[dict] = []
+
+    class DummyConfigHandler:
+        def __init__(self, path: str):
+            self.path = path
+
+        @classmethod
+        def from_json(cls, path: str, is_pulmonary: bool = False):
+            return cls(path)
+
+        def to_json(self, path: str):
+            Path(path).write_text(
+                json.dumps(_impedance_artifact_payload(
+                    bc_values={"z": [1.0], "Pd": 12.0},
+                    coupled=True,
+                    number_of_time_pts=2,
+                    number_of_time_pts_per_cardiac_cycle=3,
+                )),
+                encoding="utf-8",
+            )
+
+    class DummyClinicalTargets:
+        wedge_p = 12.0
+
+        @classmethod
+        def from_csv(cls, path: str):
+            return cls()
+
+    class DummyTuner:
+        def __init__(self, *args, **kwargs):
+            self._kwargs = kwargs
+
+        def tune(self, nm_iter: int = 1, initial_params_csv: str | None = None):
+            tune_calls.append({"nm_iter": nm_iter, "initial_params_csv": initial_params_csv})
+            out_dir = Path.cwd()
+            (out_dir / OPTIMIZED_PARAMS_FILENAME).write_text(
+                "pa,alpha,beta,xi,d_min,lrr,diameter,compliance_model,C\n"
+                "lpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n"
+                "rpa,0.9,0.6,2.3,0.01,10.0,0.3,constant,66000\n",
+                encoding="utf-8",
+            )
+            (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
+                json.dumps(_impedance_artifact_payload(
+                    bc_values={"z": [1.0, 0.5], "Pd": 12.0},
+                    coupled=False,
+                    number_of_time_pts_per_cardiac_cycle=3,
+                )),
+                encoding="utf-8",
+            )
+            log_file = self._kwargs.get("log_file")
+            if log_file:
+                Path(log_file).write_text("log", encoding="utf-8")
+
+    import svzerodtrees.tuning.iteration as _iter_mod
+    monkeypatch.setattr(_iter_mod, "ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr(_iter_mod, "ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr(_iter_mod, "ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr(_iter_mod, "construct_impedance_trees", lambda *a, **kw: None)
+    monkeypatch.setattr(_iter_mod, "validate_cap_to_bc_mapping", lambda *a, **kw: None)
+    monkeypatch.setattr(_iter_mod, "get_pa_outlet_scale", lambda *a, **kw: 2.0)
+    monkeypatch.setattr(_iter_mod, "_load_tree_params", lambda _p: ("lpa-params", "rpa-params"))
+    monkeypatch.setattr(_iter_mod, "_validate_impedance_artifact", lambda *a, **kw: None)
+    monkeypatch.setattr(_iter_mod, "_assert_full_pa_snapshot_preserves_topology", lambda *a, **kw: None)
+    monkeypatch.setattr(_iter_mod, "_validate_required_xi_in_optimized_csv", lambda *a, **kw: None)
+
+    run_impedance_tuning_for_iteration(
+        iteration_dir=iteration_dir,
+        seed_config=seed,
+        mesh_surfaces=mesh_surfaces,
+        clinical_targets=targets,
+        inflow_path=inflow_path,
+        impedance_config=_resolve_impedance_config({"tune_space": _tune_space_with_xi()}),
+        previous_optimized_params=missing_csv,
+    )
+
+    # Missing CSV is forwarded as a string; ImpedanceTuner.tune() internally
+    # detects it's missing and warns. Here we check the string was passed.
+    assert len(tune_calls) == 1
+    assert tune_calls[0]["initial_params_csv"] == str(missing_csv)

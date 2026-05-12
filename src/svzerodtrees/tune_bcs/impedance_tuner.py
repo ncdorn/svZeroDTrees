@@ -15,6 +15,129 @@ from ..io.blocks.boundary_condition import (
     validate_impedance_timing_config,
 )
 import csv, json, math, os
+import warnings
+
+
+# Column names in optimized_params.csv → free-param name templates.
+# {pa} is replaced with "lpa" or "rpa" based on the row's "pa" column.
+_CSV_PER_PA_COLUMNS: dict[str, str] = {
+    "xi": "{pa}.xi",
+    "eta_sym": "{pa}.eta_sym",
+    "inductance": "{pa}.inductance",
+    "k2": "comp.{pa}.k2",
+    "diameter": "{pa}.diameter",
+}
+# These columns are shared across both PA sides; read from the lpa row.
+_CSV_SHARED_COLUMNS: tuple[str, ...] = ("lrr", "d_min")
+
+
+def _seed_x0_from_csv(
+    csv_path: str,
+    tune_space: "TuneSpace",
+    x0: "np.ndarray",
+    log_fn,
+) -> "np.ndarray":
+    """Override free-parameter initial guess from a previous-iteration optimized_params.csv.
+
+    Only parameters that are present as free params in tune_space are updated.
+    Missing optional columns fall back to the configured init with a warning.
+    Non-finite or out-of-bounds native values raise ValueError immediately.
+    """
+    free_idx: dict[str, tuple[int, object]] = {
+        p.name: (i, p) for i, p in enumerate(tune_space.free)
+    }
+
+    with open(csv_path, newline="") as fh:
+        reader = csv.DictReader(fh)
+        rows = list(reader)
+
+    lpa_row = next((r for r in rows if r.get("pa") == "lpa"), None)
+    rpa_row = next((r for r in rows if r.get("pa") == "rpa"), None)
+
+    x0 = x0.copy()
+
+    for pa, row in (("lpa", lpa_row), ("rpa", rpa_row)):
+        if row is None:
+            continue
+        for col, param_template in _CSV_PER_PA_COLUMNS.items():
+            param_name = param_template.format(pa=pa)
+            if param_name not in free_idx:
+                continue
+            if col not in row or row[col] == "":
+                warnings.warn(
+                    f"[csv_seed] column '{col}' missing for pa='{pa}' in {csv_path}; "
+                    f"using configured init for '{param_name}'",
+                    stacklevel=2,
+                )
+                log_fn(
+                    f"[csv_seed] column '{col}' missing for pa='{pa}'; "
+                    f"using configured init for '{param_name}'"
+                )
+                continue
+            try:
+                native_val = float(row[col])
+            except (ValueError, TypeError) as exc:
+                raise ValueError(
+                    f"[csv_seed] cannot parse column '{col}' for pa='{pa}' "
+                    f"in {csv_path}: {exc}"
+                ) from exc
+            if not math.isfinite(native_val):
+                raise ValueError(
+                    f"[csv_seed] non-finite value {native_val!r} in column '{col}' "
+                    f"for pa='{pa}' in {csv_path}"
+                )
+            idx, p = free_idx[param_name]
+            if not (p.lb <= native_val <= p.ub):
+                raise ValueError(
+                    f"[csv_seed] value {native_val} for '{param_name}' "
+                    f"is outside configured bounds [{p.lb}, {p.ub}] (from {csv_path})"
+                )
+            x0[idx] = p.from_native(native_val)
+            log_fn(
+                f"[csv_seed] '{param_name}' seeded from previous CSV: "
+                f"native={native_val} -> free={x0[idx]:.6f}"
+            )
+
+    # Shared columns: read once from the lpa row (values should be identical across sides).
+    source_row = lpa_row if lpa_row is not None else rpa_row
+    if source_row is not None:
+        for col in _CSV_SHARED_COLUMNS:
+            param_name = col
+            if param_name not in free_idx:
+                continue
+            if col not in source_row or source_row[col] == "":
+                warnings.warn(
+                    f"[csv_seed] column '{col}' missing in {csv_path}; "
+                    f"using configured init for '{param_name}'",
+                    stacklevel=2,
+                )
+                log_fn(
+                    f"[csv_seed] column '{col}' missing; using configured init for '{param_name}'"
+                )
+                continue
+            try:
+                native_val = float(source_row[col])
+            except (ValueError, TypeError) as exc:
+                raise ValueError(
+                    f"[csv_seed] cannot parse column '{col}' in {csv_path}: {exc}"
+                ) from exc
+            if not math.isfinite(native_val):
+                raise ValueError(
+                    f"[csv_seed] non-finite value {native_val!r} in column '{col}' in {csv_path}"
+                )
+            idx, p = free_idx[param_name]
+            if not (p.lb <= native_val <= p.ub):
+                raise ValueError(
+                    f"[csv_seed] value {native_val} for '{param_name}' "
+                    f"is outside configured bounds [{p.lb}, {p.ub}] (from {csv_path})"
+                )
+            x0[idx] = p.from_native(native_val)
+            log_fn(
+                f"[csv_seed] '{param_name}' seeded from previous CSV: "
+                f"native={native_val} -> free={x0[idx]:.6f}"
+            )
+
+    return x0
 
 class ImpedanceTuner(BoundaryConditionTuner):
     def __init__(self,
@@ -394,7 +517,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
 
     # ---- Main tuning routine ---- #
 
-    def tune(self, nm_iter: int = 1):
+    def tune(self, nm_iter: int = 1, initial_params_csv: str | None = None):
         # set log path if not provided
         if self.log_file is None:
             base_dir = getattr(self.config_handler, "path", None)
@@ -428,6 +551,26 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self._full_pa_base_config = pa_config
 
         x0, bounds = self.tune_space.pack_init_and_bounds()
+
+        # ——— Seed x0 from previous-iteration optimized_params.csv ———
+        if initial_params_csv is not None:
+            if os.path.isfile(initial_params_csv):
+                _append_log(f"[csv_seed] seeding initial params from {initial_params_csv}")
+                print(f"[ImpedanceTuner] seeding x0 from previous CSV: {initial_params_csv}")
+                x0 = _seed_x0_from_csv(
+                    initial_params_csv,
+                    self.tune_space,
+                    x0,
+                    _append_log,
+                )
+            else:
+                msg = (
+                    f"[csv_seed] previous optimized params CSV not found: {initial_params_csv}; "
+                    "falling back to configured tune_space.init defaults"
+                )
+                warnings.warn(msg, stacklevel=2)
+                _append_log(msg)
+                print(f"[ImpedanceTuner] WARNING: {msg}")
 
         # ——— Grid search init on compliance ———
         if self.grid_search_init:

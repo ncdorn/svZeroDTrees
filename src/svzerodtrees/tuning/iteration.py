@@ -589,6 +589,7 @@ def run_impedance_tuning_for_iteration(
     impedance_config: Mapping[str, Any] | None = None,
     results_dir: str | Path | None = None,
     tuned_config_name: str = TUNED_ZEROD_CONFIG_FILENAME,
+    previous_optimized_params: str | Path | None = None,
 ) -> dict[str, Any]:
     """Run impedance tuning + BC tree assignment for one tuning iteration."""
 
@@ -653,7 +654,19 @@ def run_impedance_tuning_for_iteration(
             diameter_std_cap=tuning["diameter_std_cap"],
             allow_ordered_outlet_mapping=bool(tuning["allow_ordered_outlet_mapping"]),
         )
-        tuner.tune(nm_iter=int(tuning["nm_iter"]))
+        prev_csv = str(previous_optimized_params) if previous_optimized_params is not None else None
+        if prev_csv is not None and os.path.isfile(prev_csv):
+            import logging as _logging
+            _logging.getLogger(__name__).info(
+                "Seeding structured-tree tuning from previous optimized params: %s", prev_csv
+            )
+        elif prev_csv is not None:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "previous_optimized_params specified but not found, using tune_space.init defaults: %s",
+                prev_csv,
+            )
+        tuner.tune(nm_iter=int(tuning["nm_iter"]), initial_params_csv=prev_csv)
 
     optimized_csv = output_dir / OPTIMIZED_PARAMS_FILENAME
     pa_snapshot = output_dir / PA_CONFIG_SNAPSHOT_FILENAME
