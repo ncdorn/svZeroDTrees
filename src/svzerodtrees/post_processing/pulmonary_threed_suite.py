@@ -170,14 +170,20 @@ def _clinical_targets_from_input(
             pressures = clinical_targets["mpa_p"]
         else:
             pressures = clinical_targets.get("mpa_pressure")
-        if not isinstance(pressures, (list, tuple)) or len(pressures) < 3:
+        try:
+            pressure_values = np.asarray(pressures, dtype=float).reshape(-1)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "clinical_targets mapping requires mpa_p or mpa_pressure length-3 sequence"
+            ) from exc
+        if pressure_values.size < 3:
             raise ValueError("clinical_targets mapping requires mpa_p or mpa_pressure length-3 sequence")
         if "rpa_split" not in clinical_targets:
             raise ValueError("clinical_targets mapping requires rpa_split")
         return {
-            "mpa_sys": float(pressures[0]),
-            "mpa_dia": float(pressures[1]),
-            "mpa_mean": float(pressures[2]),
+            "mpa_sys": float(pressure_values[0]),
+            "mpa_dia": float(pressure_values[1]),
+            "mpa_mean": float(pressure_values[2]),
             "rpa_split": float(clinical_targets["rpa_split"]),
         }
     targets = ClinicalTargets.from_csv(str(clinical_targets))
@@ -206,6 +212,27 @@ def _cycle_duration_from_inflow_csv(inflow_csv: str | Path) -> float:
     if duration <= 0.0:
         raise ValueError(f"inflow CSV duration must be > 0: {inflow_csv}")
     return duration
+
+
+def _resolve_suite_targets(
+    *,
+    stage: str,
+    clinical_targets: str | Path | Mapping[str, Any] | None,
+    warnings: list[str],
+) -> dict[str, float] | None:
+    if clinical_targets is None:
+        warnings.append(
+            f"{stage} clinical targets unavailable; generating non-comparison artifacts only"
+        )
+        return None
+    try:
+        return _clinical_targets_from_input(clinical_targets)
+    except (TypeError, ValueError) as exc:
+        warnings.append(
+            f"{stage} clinical targets invalid for overlay/comparison; "
+            f"generating non-comparison artifacts only ({exc})"
+        )
+        return None
 
 
 def write_mpa_pressure_timeseries_csv(
@@ -466,66 +493,46 @@ def run_pulmonary_threed_postprocess_suite(
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
+    metadata_path = output_path / "postprocess_suite_metadata.json"
     warnings: list[str] = []
-
-    targets = None
-    if clinical_targets is not None:
-        targets = _clinical_targets_from_input(clinical_targets)
-    else:
-        warnings.append(f"{stage} clinical targets unavailable; generating non-comparison artifacts only")
+    targets = _resolve_suite_targets(
+        stage=stage,
+        clinical_targets=clinical_targets,
+        warnings=warnings,
+    )
 
     pressure_csv = output_path / "mpa_pressure_vs_time.csv"
     pressure_png = output_path / "mpa_pressure_vs_time.png"
-    pressure_result = write_mpa_pressure_timeseries_csv(
-        simulation_dir=simulation_dir,
-        centerline=centerline,
-        output_csv=pressure_csv,
-        output_plot=pressure_png,
-        clinical_targets=targets,
-        pressure_field=pressure_field,
-        already_mmhg=already_mmhg,
-    )
-
     flow_split_csv = output_path / "flow_split_comparison.csv"
     flow_split_png = output_path / "flow_split_comparison.png"
-    flow_split_result = write_flow_split_comparison_artifacts(
-        simulation_dir=simulation_dir,
-        output_csv=flow_split_csv,
-        output_plot=flow_split_png,
-        clinical_targets=targets,
-        stage=stage,
-    )
-
     frames_csv = output_path / "frames.csv"
-    frames_result = write_frames_csv_for_simulation(
-        simulation_dir=simulation_dir,
-        output_csv=frames_csv,
-    )
-
     resistance_dir = output_path / "resistance_map"
-    resistance_result = compute_pulmonary_resistance_map(
-        svslicer_path=svslicer_path,
-        centerline=str(centerline),
-        frames_csv=str(frames_csv),
-        output_dir=str(resistance_dir),
-        cycle_duration_s=float(cycle_duration_s),
-    )
     resistance_map_vtp = output_path / "resistance_map_mean.vtp"
     branch_summary_csv = output_path / "branch_resistance_summary.csv"
     ranked_candidates_csv = output_path / "ranked_stent_candidates.csv"
     resistance_metadata_json = output_path / "resistance_map_metadata.json"
-    shutil.copyfile(resistance_result["resistance_map"], resistance_map_vtp)
-    shutil.copyfile(resistance_result["summary_csv"], branch_summary_csv)
-    shutil.copyfile(resistance_result["ranked_csv"], ranked_candidates_csv)
-    shutil.copyfile(resistance_result["metadata_json"], resistance_metadata_json)
     resistance_png = output_path / "resistance_map_mean.png"
-    render_resistance_map_png(
-        resistance_map_vtp=resistance_map_vtp,
-        output_png=resistance_png,
-    )
-
-    metadata = {
+    outputs = {
+        "mpa_pressure_csv": str(pressure_csv),
+        "mpa_pressure_png": str(pressure_png),
+        "flow_split_csv": str(flow_split_csv),
+        "flow_split_png": str(flow_split_png),
+        "frames_csv": str(frames_csv),
+        "resistance_map_vtp": str(resistance_map_vtp),
+        "resistance_map_png": str(resistance_png),
+        "branch_resistance_summary_csv": str(branch_summary_csv),
+        "ranked_stent_candidates_csv": str(ranked_candidates_csv),
+        "resistance_map_metadata_json": str(resistance_metadata_json),
+    }
+    steps: dict[str, dict[str, Any]] = {
+        "pressure": {"status": "pending"},
+        "flow_split": {"status": "pending"},
+        "frames": {"status": "pending"},
+        "resistance_map": {"status": "pending"},
+    }
+    metadata: dict[str, Any] = {
         "kind": "pulmonary_threed_suite",
+        "status": "running",
         "stage": stage,
         "simulation_dir": str(Path(simulation_dir).resolve()),
         "output_dir": str(output_path.resolve()),
@@ -534,24 +541,82 @@ def run_pulmonary_threed_postprocess_suite(
         "cycle_duration_s": float(cycle_duration_s),
         "clinical_targets_available": targets is not None,
         "warnings": warnings,
-        "outputs": {
-            "mpa_pressure_csv": str(pressure_csv),
-            "mpa_pressure_png": str(pressure_png),
-            "flow_split_csv": str(flow_split_csv),
-            "flow_split_png": str(flow_split_png),
-            "frames_csv": str(frames_csv),
-            "resistance_map_vtp": str(resistance_map_vtp),
-            "resistance_map_png": str(resistance_png),
-            "branch_resistance_summary_csv": str(branch_summary_csv),
-            "ranked_stent_candidates_csv": str(ranked_candidates_csv),
-            "resistance_map_metadata_json": str(resistance_metadata_json),
-        },
-        "pressure": pressure_result,
-        "flow_split": flow_split_result,
-        "frames": frames_result,
-        "resistance_map": resistance_result,
+        "outputs": outputs,
+        "steps": steps,
+        "metadata_json": str(metadata_path),
     }
-    metadata_path = output_path / "postprocess_suite_metadata.json"
-    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
-    metadata["metadata_json"] = str(metadata_path)
-    return metadata
+    active_step: str | None = None
+
+    try:
+        active_step = "pressure"
+        pressure_result = write_mpa_pressure_timeseries_csv(
+            simulation_dir=simulation_dir,
+            centerline=centerline,
+            output_csv=pressure_csv,
+            output_plot=pressure_png,
+            clinical_targets=targets,
+            pressure_field=pressure_field,
+            already_mmhg=already_mmhg,
+        )
+        steps["pressure"] = {"status": "completed", "result": pressure_result}
+        metadata["pressure"] = pressure_result
+
+        active_step = "flow_split"
+        flow_split_result = write_flow_split_comparison_artifacts(
+            simulation_dir=simulation_dir,
+            output_csv=flow_split_csv,
+            output_plot=flow_split_png,
+            clinical_targets=targets,
+            stage=stage,
+        )
+        steps["flow_split"] = {"status": "completed", "result": flow_split_result}
+        metadata["flow_split"] = flow_split_result
+
+        active_step = "frames"
+        frames_result = write_frames_csv_for_simulation(
+            simulation_dir=simulation_dir,
+            output_csv=frames_csv,
+        )
+        steps["frames"] = {"status": "completed", "result": frames_result}
+        metadata["frames"] = frames_result
+
+        active_step = "resistance_map"
+        resistance_result = compute_pulmonary_resistance_map(
+            svslicer_path=svslicer_path,
+            centerline=str(centerline),
+            frames_csv=str(frames_csv),
+            output_dir=str(resistance_dir),
+            cycle_duration_s=float(cycle_duration_s),
+        )
+        shutil.copyfile(resistance_result["resistance_map"], resistance_map_vtp)
+        shutil.copyfile(resistance_result["summary_csv"], branch_summary_csv)
+        shutil.copyfile(resistance_result["ranked_csv"], ranked_candidates_csv)
+        shutil.copyfile(resistance_result["metadata_json"], resistance_metadata_json)
+        render_resistance_map_png(
+            resistance_map_vtp=resistance_map_vtp,
+            output_png=resistance_png,
+        )
+        steps["resistance_map"] = {"status": "completed", "result": resistance_result}
+        metadata["resistance_map"] = resistance_result
+
+        metadata["status"] = "completed"
+        metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+        return metadata
+    except Exception as exc:
+        metadata["status"] = "failed"
+        metadata["error"] = {
+            "step": active_step,
+            "type": type(exc).__name__,
+            "message": str(exc),
+        }
+        if active_step is not None:
+            steps[active_step] = {
+                "status": "failed",
+                "error": {
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                },
+            }
+        raise
+    finally:
+        metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")

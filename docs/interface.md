@@ -216,9 +216,16 @@ Supported analysis `kind` values:
 - `svslicer_path`: required path to the `svslicer` executable
 - `stage`: required `preop|postop`
 - `clinical_targets`: optional CSV path or in-memory mapping for target overlays
+  and flow-split comparison. Mapping inputs may use `mpa_pressure` or legacy
+  `mpa_p` plus `rpa_split`.
 - `cycle_duration_s`: optional cardiac-cycle duration in seconds
 - `inflow_csv`: optional inflow waveform used to infer cycle duration when
   `cycle_duration_s` is omitted
+
+If `clinical_targets` is missing or malformed, the suite still generates the
+pressure plot, flow-split plot, frame manifest, and resistance-map artifacts,
+but omits target overlays/comparison values and records a warning in
+`postprocess_suite_metadata.json`.
 
 Example:
 ```yaml
