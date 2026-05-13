@@ -166,6 +166,14 @@ def _clinical_targets_from_input(
     if clinical_targets is None:
         return None
     if isinstance(clinical_targets, Mapping):
+        normalized_keys = {"mpa_sys", "mpa_dia", "mpa_mean", "rpa_split"}
+        if normalized_keys.issubset(clinical_targets):
+            return {
+                "mpa_sys": float(clinical_targets["mpa_sys"]),
+                "mpa_dia": float(clinical_targets["mpa_dia"]),
+                "mpa_mean": float(clinical_targets["mpa_mean"]),
+                "rpa_split": float(clinical_targets["rpa_split"]),
+            }
         if "mpa_p" in clinical_targets:
             pressures = clinical_targets["mpa_p"]
         else:

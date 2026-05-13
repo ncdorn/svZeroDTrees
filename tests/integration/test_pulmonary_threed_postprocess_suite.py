@@ -203,6 +203,24 @@ def test_clinical_targets_mapping_accepts_mpa_pressure_alias():
     }
 
 
+def test_clinical_targets_mapping_accepts_normalized_metric_mapping():
+    targets = _clinical_targets_from_input(
+        {
+            "mpa_sys": 20.0,
+            "mpa_dia": 10.0,
+            "mpa_mean": 15.0,
+            "rpa_split": 0.6,
+        }
+    )
+
+    assert targets == {
+        "mpa_sys": 20.0,
+        "mpa_dia": 10.0,
+        "mpa_mean": 15.0,
+        "rpa_split": 0.6,
+    }
+
+
 def test_run_pulmonary_threed_postprocess_suite_tolerates_invalid_overlay_targets(monkeypatch, tmp_path: Path):
     centerline_path = tmp_path / "centerlines.vtp"
     _write_centerline(centerline_path)
