@@ -508,6 +508,7 @@ def run_pulmonary_threed_postprocess_suite(
         clinical_targets=clinical_targets,
         warnings=warnings,
     )
+    target_input = clinical_targets if targets is not None else None
 
     pressure_csv = output_path / "mpa_pressure_vs_time.csv"
     pressure_png = output_path / "mpa_pressure_vs_time.png"
@@ -562,7 +563,7 @@ def run_pulmonary_threed_postprocess_suite(
             centerline=centerline,
             output_csv=pressure_csv,
             output_plot=pressure_png,
-            clinical_targets=targets,
+            clinical_targets=target_input,
             pressure_field=pressure_field,
             already_mmhg=already_mmhg,
         )
@@ -574,7 +575,7 @@ def run_pulmonary_threed_postprocess_suite(
             simulation_dir=simulation_dir,
             output_csv=flow_split_csv,
             output_plot=flow_split_png,
-            clinical_targets=targets,
+            clinical_targets=target_input,
             stage=stage,
         )
         steps["flow_split"] = {"status": "completed", "result": flow_split_result}
