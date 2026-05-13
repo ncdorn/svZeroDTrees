@@ -115,8 +115,16 @@ class PostprocessFigure:
 
 
 @dataclass
+class PostprocessAnalysis:
+    kind: str
+    output: str
+    options: Optional[Dict[str, Any]] = None
+
+
+@dataclass
 class PostprocessConfig:
-    figures: List[PostprocessFigure]
+    figures: List[PostprocessFigure] = field(default_factory=list)
+    analyses: List[PostprocessAnalysis] = field(default_factory=list)
 
 
 @dataclass
@@ -141,9 +149,38 @@ def _ensure_keys(data: Dict[str, Any], allowed: List[str], context: str) -> None
 def _resolve_path(root: str, value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
+    value = os.path.expanduser(value)
     if os.path.isabs(value):
         return value
     return os.path.abspath(os.path.join(root, value))
+
+
+def _resolve_postprocess_analysis_options(
+    root: str,
+    kind: str,
+    options: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    if options is None:
+        return None
+    if not isinstance(options, dict):
+        raise ValueError(f"postprocess analysis '{kind}' options must be a mapping")
+
+    resolved = dict(options)
+    if kind == "pulmonary_resistance_map":
+        for key in ("svslicer_path", "centerline", "frames_csv", "intermediate_dir"):
+            if resolved.get(key):
+                resolved[key] = _resolve_path(root, str(resolved[key]))
+    elif kind == "pulmonary_threed_suite":
+        for key in (
+            "simulation_dir",
+            "centerline",
+            "svslicer_path",
+            "clinical_targets",
+            "inflow_csv",
+        ):
+            if resolved.get(key):
+                resolved[key] = _resolve_path(root, str(resolved[key]))
+    return resolved
 
 
 _TRANSFORMS = {
@@ -536,7 +573,7 @@ def load_config(path: str) -> BaseConfig:
     postprocess = None
     if raw.get("postprocess") is not None:
         data = raw["postprocess"]
-        _ensure_keys(data, ["figures"], "postprocess")
+        _ensure_keys(data, ["figures", "analyses"], "postprocess")
         figures = []
         for entry in data.get("figures", []) or []:
             _ensure_keys(entry, ["kind", "input", "output", "options"], "postprocess.figures")
@@ -548,7 +585,79 @@ def load_config(path: str) -> BaseConfig:
                     options=entry.get("options"),
                 )
             )
-        postprocess = PostprocessConfig(figures=figures)
+        analyses = []
+        for entry in data.get("analyses", []) or []:
+            _ensure_keys(entry, ["kind", "output", "options"], "postprocess.analyses")
+            kind = str(entry["kind"])
+            options = entry.get("options")
+            if kind == "pulmonary_resistance_map":
+                if options is None:
+                    raise ValueError(
+                        "postprocess analysis 'pulmonary_resistance_map' requires options"
+                    )
+                _ensure_keys(
+                    options,
+                    [
+                        "svslicer_path",
+                        "centerline",
+                        "frames_csv",
+                        "cycle_duration_s",
+                        "keep_intermediate_centerlines",
+                        "intermediate_dir",
+                        "pressure_array",
+                        "flow_array",
+                        "branch_id_array",
+                        "path_array",
+                    ],
+                    "postprocess.analyses.options",
+                )
+                for required_key in ("svslicer_path", "centerline", "frames_csv", "cycle_duration_s"):
+                    if options.get(required_key) in (None, ""):
+                        raise ValueError(
+                            "postprocess analysis 'pulmonary_resistance_map' requires "
+                            f"options.{required_key}"
+                        )
+            elif kind == "pulmonary_threed_suite":
+                if options is None:
+                    raise ValueError(
+                        "postprocess analysis 'pulmonary_threed_suite' requires options"
+                    )
+                _ensure_keys(
+                    options,
+                    [
+                        "simulation_dir",
+                        "centerline",
+                        "svslicer_path",
+                        "clinical_targets",
+                        "stage",
+                        "cycle_duration_s",
+                        "inflow_csv",
+                        "pressure_field",
+                        "already_mmhg",
+                    ],
+                    "postprocess.analyses.options",
+                )
+                for required_key in ("simulation_dir", "centerline", "svslicer_path", "stage"):
+                    if options.get(required_key) in (None, ""):
+                        raise ValueError(
+                            "postprocess analysis 'pulmonary_threed_suite' requires "
+                            f"options.{required_key}"
+                        )
+                if options.get("cycle_duration_s") in (None, "") and options.get("inflow_csv") in (None, ""):
+                    raise ValueError(
+                        "postprocess analysis 'pulmonary_threed_suite' requires one of "
+                        "options.cycle_duration_s or options.inflow_csv"
+                    )
+            analyses.append(
+                PostprocessAnalysis(
+                    kind=kind,
+                    output=_resolve_path(paths.root, entry["output"]),
+                    options=_resolve_postprocess_analysis_options(paths.root, kind, options),
+                )
+            )
+        if not figures and not analyses:
+            raise ValueError("postprocess requires at least one figure or analysis")
+        postprocess = PostprocessConfig(figures=figures, analyses=analyses)
 
     return BaseConfig(
         version=version,
@@ -679,4 +788,22 @@ postprocess:
       options:
         time_window: [0.0, 1.0]
         exclude_collapsed: true
+  analyses:
+    - kind: pulmonary_resistance_map
+      output: results/resistance_map
+      options:
+        svslicer_path: ~/Documents/Stanford/PhD/Marsden_Lab/SimVascular/svSlicer/Release/svslicer
+        centerline: path/to/centerlines.vtp
+        frames_csv: path/to/frames.csv
+        cycle_duration_s: 1.0
+        keep_intermediate_centerlines: false
+    - kind: pulmonary_threed_suite
+      output: results/postprocess
+      options:
+        simulation_dir: path/to/preop
+        centerline: path/to/centerlines.vtp
+        svslicer_path: ~/Documents/Stanford/PhD/Marsden_Lab/SimVascular/svSlicer/Release/svslicer
+        clinical_targets: path/to/clinical_targets.csv
+        stage: preop
+        inflow_csv: path/to/inflow.csv
 """.strip() + "\n"

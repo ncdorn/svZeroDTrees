@@ -94,7 +94,7 @@ PipelineWorkflow.from_config(cfg).run()
 - `tune_bcs`: optimize impedance or RCR parameters only.
 - `construct_trees`: assign impedance or RCR BCs to a svZeroD config.
 - `adapt`: run microvascular adaptation using preop/postop results.
-- `postprocess`: generate figures from saved tree pickles.
+- `postprocess`: generate figures from saved tree pickles or compute analysis artifacts such as svSlicer-based pulmonary resistance maps or the standardized pulmonary 3D postprocess suite.
 
 **Outputs**
 Typical outputs are written under `paths.root` and include:
@@ -102,11 +102,12 @@ Typical outputs are written under `paths.root` and include:
 - `svzerod_config_with_bcs.json` (or `paths.output_config`) from tree construction.
 - `preop`, `postop`, `adapted` directories for pipeline/adaptation runs.
 - Figures from postprocess workflow (PNG outputs you specify).
+- Postprocess analysis artifacts such as `resistance_map_mean.vtp`, ranked CSV summaries, standardized `mpa_pressure_vs_time.csv`, flow-split comparison outputs, and metadata JSON files.
 
 **Examples**
 - YAML configs: `examples/pipeline_example.yml`, `examples/tune_bcs_example.yml`,
   `examples/construct_tree/construct_trees_example.yml`, `examples/adapt_example.yml`,
-  `examples/postprocess_example.yml`.
+  `examples/postprocess_example.yml`, `examples/postprocess_resistance_map_example.yml`.
 - Local BC tuning + preop 3D smoke case: `examples/bc-tuning/local_pipeline.yml`.
 - Narrative example: `examples/construct_tree/README.md`.
 

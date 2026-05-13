@@ -7,7 +7,7 @@ This document defines the YAML schema used by the CLI and Python API. The schema
 - `tune_bcs`: tune boundary conditions only.
 - `construct_trees`: assign impedance or RCR BCs.
 - `adapt`: run microvascular adaptation (impedance BCs).
-- `postprocess`: generate figures from saved tree pickles.
+- `postprocess`: generate figures from saved tree pickles or compute standalone analysis artifacts.
 
 **Workflow Requirements**
 
@@ -177,12 +177,63 @@ postprocess:
       options:
         time_window: [0.0, 1.0]
         exclude_collapsed: true
+  analyses:
+    - kind: pulmonary_resistance_map
+      output: results/resistance_map
+      options:
+        svslicer_path: ~/Documents/Stanford/PhD/Marsden_Lab/SimVascular/svSlicer/Release/svslicer
+        centerline: centerlines.vtp
+        frames_csv: frames.csv
+        cycle_duration_s: 1.0
+        keep_intermediate_centerlines: false
 ```
 
-Supported `kind` values:
+Supported figure `kind` values:
 - `generation_metrics`
 - `generation_waveforms`
 - `visualize_hemodynamics`
+
+Supported analysis `kind` values:
+- `pulmonary_resistance_map`
+- `pulmonary_threed_suite`
+
+`pulmonary_resistance_map` options:
+- `svslicer_path`: required path to the `svslicer` executable
+- `centerline`: required `centerlines.vtp`
+- `frames_csv`: required CSV with columns `path,time_s`
+- `cycle_duration_s`: required last-cycle selection window
+- `keep_intermediate_centerlines`: optional, default `false`
+- `intermediate_dir`: optional directory for per-frame mapped VTPs
+- `pressure_array`: optional, default `pressure`
+- `flow_array`: optional, default `velocity`
+- `branch_id_array`: optional, default `BranchId`
+- `path_array`: optional, default `Path`
+
+`pulmonary_threed_suite` options:
+- `simulation_dir`: required 3D simulation directory containing `svFSIplus.xml`
+  and `result_*.vtu`
+- `centerline`: required `centerlines.vtp`
+- `svslicer_path`: required path to the `svslicer` executable
+- `stage`: required `preop|postop`
+- `clinical_targets`: optional CSV path or in-memory mapping for target overlays
+- `cycle_duration_s`: optional cardiac-cycle duration in seconds
+- `inflow_csv`: optional inflow waveform used to infer cycle duration when
+  `cycle_duration_s` is omitted
+
+Example:
+```yaml
+postprocess:
+  analyses:
+    - kind: pulmonary_threed_suite
+      output: results/postprocess
+      options:
+        simulation_dir: preop
+        centerline: centerlines.vtp
+        svslicer_path: ~/bin/svslicer
+        stage: preop
+        inflow_csv: inflow.csv
+        clinical_targets: clinical_targets.csv
+```
 
 **CLI Usage**
 ```bash

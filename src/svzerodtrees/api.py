@@ -13,6 +13,10 @@ from .adaptation import MicrovascularAdaptor
 from .simulation.simulation_directory import SimulationDirectory
 from .post_processing.tree_figures import generation_metrics, generation_waveforms
 from .post_processing.tree_figures import visualize_hemodynamics
+from .post_processing import (
+    compute_pulmonary_resistance_map,
+    run_pulmonary_threed_postprocess_suite,
+)
 import pickle
 
 
@@ -346,9 +350,30 @@ class PostprocessWorkflow:
             else:
                 outputs.append(None)
 
+        analysis_outputs = []
+        for analysis in postprocess.analyses:
+            options = analysis.options or {}
+            if analysis.kind == "pulmonary_resistance_map":
+                analysis_outputs.append(
+                    compute_pulmonary_resistance_map(
+                        output_dir=analysis.output,
+                        **options,
+                    )
+                )
+            elif analysis.kind == "pulmonary_threed_suite":
+                analysis_outputs.append(
+                    run_pulmonary_threed_postprocess_suite(
+                        output_dir=analysis.output,
+                        **options,
+                    )
+                )
+            else:
+                raise ValueError(f"Unknown postprocess analysis kind '{analysis.kind}'")
+
         return {
             "status": "ok",
             "outputs": outputs,
+            "analysis_outputs": analysis_outputs,
         }
 
 

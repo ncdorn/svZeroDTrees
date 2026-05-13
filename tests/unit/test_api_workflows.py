@@ -8,6 +8,7 @@ from svzerodtrees.api import (
     AdaptationWorkflow,
     ConstructTreesWorkflow,
     PipelineWorkflow,
+    PostprocessWorkflow,
     TuneBCsWorkflow,
     run_from_config_file,
 )
@@ -125,3 +126,78 @@ def test_pipeline_workflow_maps_defaults_when_sections_omitted(monkeypatch, tmp_
         "run_threed": True,
         "adapt": True,
     }
+
+
+def test_postprocess_workflow_dispatches_analysis(monkeypatch, tmp_path):
+    calls = {}
+
+    def fake_compute_pulmonary_resistance_map(**kwargs):
+        calls["kwargs"] = kwargs
+        return {"kind": "pulmonary_resistance_map", "summary_csv": "summary.csv"}
+
+    monkeypatch.setattr(
+        "svzerodtrees.api.compute_pulmonary_resistance_map",
+        fake_compute_pulmonary_resistance_map,
+    )
+
+    cfg = SimpleNamespace(
+        postprocess=SimpleNamespace(
+            figures=[],
+            analyses=[
+                SimpleNamespace(
+                    kind="pulmonary_resistance_map",
+                    output=str(tmp_path / "results"),
+                    options={
+                        "svslicer_path": "/tmp/svslicer",
+                        "centerline": "/tmp/centerlines.vtp",
+                        "frames_csv": "/tmp/frames.csv",
+                        "cycle_duration_s": 1.0,
+                    },
+                )
+            ],
+        )
+    )
+
+    result = PostprocessWorkflow.from_config(cfg).run()
+
+    assert calls["kwargs"]["output_dir"] == str(tmp_path / "results")
+    assert result["analysis_outputs"][0]["summary_csv"] == "summary.csv"
+
+
+def test_postprocess_workflow_dispatches_pulmonary_threed_suite(monkeypatch, tmp_path):
+    calls = {}
+
+    def fake_run_suite(**kwargs):
+        calls["kwargs"] = kwargs
+        return {"kind": "pulmonary_threed_suite", "metadata_json": "suite.json"}
+
+    monkeypatch.setattr(
+        "svzerodtrees.api.run_pulmonary_threed_postprocess_suite",
+        fake_run_suite,
+    )
+
+    cfg = SimpleNamespace(
+        postprocess=SimpleNamespace(
+            figures=[],
+            analyses=[
+                SimpleNamespace(
+                    kind="pulmonary_threed_suite",
+                    output=str(tmp_path / "postprocess"),
+                    options={
+                        "simulation_dir": "/tmp/preop",
+                        "centerline": "/tmp/centerlines.vtp",
+                        "svslicer_path": "/tmp/svslicer",
+                        "clinical_targets": "/tmp/clinical_targets.csv",
+                        "stage": "preop",
+                        "inflow_csv": "/tmp/inflow.csv",
+                    },
+                )
+            ],
+        )
+    )
+
+    result = PostprocessWorkflow.from_config(cfg).run()
+
+    assert calls["kwargs"]["output_dir"] == str(tmp_path / "postprocess")
+    assert calls["kwargs"]["stage"] == "preop"
+    assert result["analysis_outputs"][0]["metadata_json"] == "suite.json"

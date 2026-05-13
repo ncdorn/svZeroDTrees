@@ -13,6 +13,7 @@ from .api import (
     PostprocessWorkflow,
 )
 from .config import load_config
+from .post_processing import compute_pulmonary_resistance_map
 from .tuning import (
     DEFAULT_CONVERGENCE_TOLERANCE,
     compute_centerline_mpa_metrics,

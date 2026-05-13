@@ -1,0 +1,16 @@
+version: 1
+workflow: postprocess
+
+paths:
+  root: .
+
+postprocess:
+  analyses:
+    - kind: pulmonary_resistance_map
+      output: results/resistance_map
+      options:
+        svslicer_path: ~/Documents/Stanford/PhD/Marsden_Lab/SimVascular/svSlicer/Release/svslicer
+        centerline: centerlines.vtp
+        frames_csv: frames.csv
+        cycle_duration_s: 1.0
+        keep_intermediate_centerlines: false

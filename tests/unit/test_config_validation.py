@@ -464,6 +464,121 @@ postprocess:
     assert fig.options == {"dpi": 150}
 
 
+def test_postprocess_analysis_config_resolves_paths_and_options(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: postprocess
+paths:
+  root: {tmp_path}
+postprocess:
+  analyses:
+    - kind: pulmonary_resistance_map
+      output: results/resistance_map
+      options:
+        svslicer_path: tools/svslicer
+        centerline: centerlines.vtp
+        frames_csv: frames.csv
+        cycle_duration_s: 1.0
+        intermediate_dir: scratch/mapped
+""",
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+    analysis = cfg.postprocess.analyses[0]
+
+    assert analysis.output == os.path.join(str(tmp_path), "results/resistance_map")
+    assert analysis.options["svslicer_path"] == os.path.join(str(tmp_path), "tools/svslicer")
+    assert analysis.options["centerline"] == os.path.join(str(tmp_path), "centerlines.vtp")
+    assert analysis.options["frames_csv"] == os.path.join(str(tmp_path), "frames.csv")
+    assert analysis.options["intermediate_dir"] == os.path.join(str(tmp_path), "scratch/mapped")
+
+
+def test_postprocess_analysis_requires_core_options(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: postprocess
+paths:
+  root: {tmp_path}
+postprocess:
+  analyses:
+    - kind: pulmonary_resistance_map
+      output: results/resistance_map
+      options:
+        centerline: centerlines.vtp
+        frames_csv: frames.csv
+        cycle_duration_s: 1.0
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="options.svslicer_path"):
+        load_config(str(cfg_path))
+
+
+def test_postprocess_suite_analysis_config_resolves_paths(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: postprocess
+paths:
+  root: {tmp_path}
+postprocess:
+  analyses:
+    - kind: pulmonary_threed_suite
+      output: results/postprocess
+      options:
+        simulation_dir: preop
+        centerline: centerlines.vtp
+        svslicer_path: tools/svslicer
+        clinical_targets: clinical_targets.csv
+        stage: preop
+        inflow_csv: inflow.csv
+""",
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+    analysis = cfg.postprocess.analyses[0]
+
+    assert analysis.output == os.path.join(str(tmp_path), "results/postprocess")
+    assert analysis.options["simulation_dir"] == os.path.join(str(tmp_path), "preop")
+    assert analysis.options["centerline"] == os.path.join(str(tmp_path), "centerlines.vtp")
+    assert analysis.options["svslicer_path"] == os.path.join(str(tmp_path), "tools/svslicer")
+    assert analysis.options["clinical_targets"] == os.path.join(str(tmp_path), "clinical_targets.csv")
+    assert analysis.options["inflow_csv"] == os.path.join(str(tmp_path), "inflow.csv")
+
+
+def test_postprocess_suite_requires_cycle_duration_or_inflow(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: postprocess
+paths:
+  root: {tmp_path}
+postprocess:
+  analyses:
+    - kind: pulmonary_threed_suite
+      output: results/postprocess
+      options:
+        simulation_dir: preop
+        centerline: centerlines.vtp
+        svslicer_path: tools/svslicer
+        stage: preop
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="cycle_duration_s or options.inflow_csv"):
+        load_config(str(cfg_path))
+
+
 def test_render_schema_includes_supported_workflows():
     schema = render_schema()
     assert "workflow: pipeline" in schema
