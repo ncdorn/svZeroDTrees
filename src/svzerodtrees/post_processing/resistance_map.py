@@ -102,6 +102,19 @@ def _select_last_cycle_frames(frames: pd.DataFrame, cycle_duration_s: float) -> 
     return selected.reset_index(drop=True)
 
 
+def _subsample_frames(frames: pd.DataFrame, max_frames: int | None) -> pd.DataFrame:
+    if max_frames is None:
+        return frames.reset_index(drop=True)
+    limit = int(max_frames)
+    if limit <= 0:
+        raise ValueError("max_frames must be positive when provided")
+    if len(frames) <= limit:
+        return frames.reset_index(drop=True)
+    indices = np.linspace(0, len(frames) - 1, num=limit, dtype=int)
+    indices = np.unique(indices)
+    return frames.iloc[indices].reset_index(drop=True)
+
+
 def _branch_geometry(
     poly: vtk.vtkPolyData,
     *,
@@ -321,6 +334,7 @@ def compute_pulmonary_resistance_map(
     frames_csv: str,
     output_dir: str,
     cycle_duration_s: float,
+    max_frames: int | None = 8,
     keep_intermediate_centerlines: bool = False,
     intermediate_dir: str | None = None,
     pressure_array: str = "pressure",
@@ -338,7 +352,8 @@ def compute_pulmonary_resistance_map(
         raise FileNotFoundError(f"svSlicer executable not found: {svslicer_executable}")
 
     frames = _load_frames_csv(frames_csv)
-    selected = _select_last_cycle_frames(frames, cycle_duration_s)
+    selected_all = _select_last_cycle_frames(frames, cycle_duration_s)
+    selected = _subsample_frames(selected_all, max_frames)
 
     output_path.mkdir(parents=True, exist_ok=True)
     if intermediate_dir is None:
@@ -351,11 +366,21 @@ def compute_pulmonary_resistance_map(
     try:
         for frame_index, row in enumerate(selected.itertuples(index=False)):
             mapped_path = _mapped_output_path(intermediate_path, frame_index, row.path)
+            print(
+                f"[svzerodtrees] resistance-map frame {frame_index + 1}/{len(selected)} "
+                f"source={row.path}",
+                flush=True,
+            )
             _run_svslicer(
                 svslicer_path=str(svslicer_executable),
                 result_path=str(row.path),
                 centerline_path=str(centerline_path),
                 output_path=str(mapped_path),
+            )
+            print(
+                f"[svzerodtrees] resistance-map frame {frame_index + 1}/{len(selected)} "
+                f"mapped={mapped_path}",
+                flush=True,
             )
             mapped_files.append((mapped_path, float(row.time_s)))
 
@@ -381,6 +406,9 @@ def compute_pulmonary_resistance_map(
             "centerline": str(centerline_path),
             "frames_csv": str(Path(frames_csv).expanduser().resolve()),
             "cycle_duration_s": float(cycle_duration_s),
+            "available_frame_count": int(len(selected_all)),
+            "selected_frame_count": int(len(selected)),
+            "max_frames": None if max_frames is None else int(max_frames),
             "keep_intermediate_centerlines": bool(keep_intermediate_centerlines),
             "intermediate_dir": str(intermediate_path),
             "pressure_array": pressure_array,
@@ -402,6 +430,7 @@ def compute_pulmonary_resistance_map(
             "ranked_csv": str(ranked_path),
             "metadata_json": str(metadata_path),
             "selected_frame_count": len(mapped_files),
+            "available_frame_count": len(selected_all),
             "intermediate_dir": str(intermediate_path) if keep_intermediate_centerlines else None,
         }
     finally:

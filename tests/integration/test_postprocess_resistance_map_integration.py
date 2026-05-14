@@ -140,3 +140,52 @@ def test_compute_pulmonary_resistance_map_with_mocked_svslicer(monkeypatch, tmp_
     assert len(metadata["selected_frames"]) == 2
     assert not (tmp_path / "out" / "intermediate_centerlines").exists()
     assert Path(result["resistance_map"]).exists()
+
+
+def test_compute_pulmonary_resistance_map_subsamples_last_cycle_frames(monkeypatch, tmp_path: Path):
+    svslicer = tmp_path / "svslicer"
+    svslicer.write_text("#!/bin/sh\n", encoding="utf-8")
+    centerline = tmp_path / "centerlines.vtp"
+    _write_centerline(centerline)
+
+    frame_paths = []
+    for idx in range(6):
+        frame = tmp_path / f"result_{idx + 1:04d}.vtu"
+        frame.write_text("dummy", encoding="utf-8")
+        frame_paths.append(frame)
+
+    manifest_lines = ["path,time_s"]
+    for idx, frame in enumerate(frame_paths):
+        manifest_lines.append(f"{frame.name},{0.2 * idx:.1f}")
+    manifest = tmp_path / "frames.csv"
+    manifest.write_text("\n".join(manifest_lines) + "\n", encoding="utf-8")
+
+    seen_inputs: list[str] = []
+
+    def fake_run(cmd, capture_output, text, check):
+        seen_inputs.append(Path(cmd[1]).name)
+        _write_mapped_centerline(
+            Path(cmd[3]),
+            pressure=[100.0, 90.0, 100.0, 80.0],
+            velocity=[4.0, 4.0, 3.0, 3.0],
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("svzerodtrees.post_processing.resistance_map.subprocess.run", fake_run)
+
+    result = compute_pulmonary_resistance_map(
+        svslicer_path=str(svslicer),
+        centerline=str(centerline),
+        frames_csv=str(manifest),
+        output_dir=str(tmp_path / "out"),
+        cycle_duration_s=1.0,
+        max_frames=3,
+    )
+
+    metadata = json.loads(Path(result["metadata_json"]).read_text(encoding="utf-8"))
+
+    assert metadata["available_frame_count"] == 5
+    assert metadata["selected_frame_count"] == 3
+    assert metadata["max_frames"] == 3
+    assert len(metadata["selected_frames"]) == 3
+    assert len(seen_inputs) == 3

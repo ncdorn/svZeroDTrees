@@ -202,6 +202,8 @@ Supported analysis `kind` values:
 - `centerline`: required `centerlines.vtp`
 - `frames_csv`: required CSV with columns `path,time_s`
 - `cycle_duration_s`: required last-cycle selection window
+- `max_frames`: optional cap on last-cycle frames passed through `svslicer`,
+  default `8`, sampled uniformly across the selected cycle window
 - `keep_intermediate_centerlines`: optional, default `false`
 - `intermediate_dir`: optional directory for per-frame mapped VTPs
 - `pressure_array`: optional, default `pressure`
