@@ -45,9 +45,24 @@ def _polydata_points(poly: vtk.vtkPolyData) -> np.ndarray:
 
 
 def _point_array(poly: vtk.vtkPolyData, name: str) -> np.ndarray:
-    array = poly.GetPointData().GetArray(name)
+    point_data = poly.GetPointData()
+    array = point_data.GetArray(name)
     if array is None:
-        raise ValueError(f"required point-data array '{name}' is missing")
+        normalized_name = name.casefold()
+        for index in range(point_data.GetNumberOfArrays()):
+            candidate_name = point_data.GetArrayName(index)
+            if candidate_name and candidate_name.casefold() == normalized_name:
+                array = point_data.GetArray(index)
+                break
+    if array is None:
+        available = [
+            point_data.GetArrayName(index)
+            for index in range(point_data.GetNumberOfArrays())
+        ]
+        raise ValueError(
+            f"required point-data array '{name}' is missing; "
+            f"available={available}"
+        )
     data = np.asarray(vtk_to_numpy(array), dtype=float)
     if data.ndim == 2 and data.shape[1] == 1:
         return data[:, 0]

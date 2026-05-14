@@ -62,6 +62,35 @@ def _write_mapped_centerline(path: Path, *, pressure, velocity) -> None:
     writer.Write()
 
 
+def _write_mapped_centerline_with_named_arrays(
+    path: Path,
+    *,
+    pressure_name: str,
+    velocity_name: str,
+    pressure,
+    velocity,
+) -> None:
+    _write_centerline(path)
+    reader = vtk.vtkXMLPolyDataReader()
+    reader.SetFileName(str(path))
+    reader.Update()
+    poly = vtk.vtkPolyData()
+    poly.DeepCopy(reader.GetOutput())
+
+    for name, values in {
+        pressure_name: pressure,
+        velocity_name: velocity,
+    }.items():
+        array = numpy_to_vtk(values, deep=True)
+        array.SetName(name)
+        poly.GetPointData().AddArray(array)
+
+    writer = vtk.vtkXMLPolyDataWriter()
+    writer.SetFileName(str(path))
+    writer.SetInputData(poly)
+    writer.Write()
+
+
 def test_compute_pulmonary_resistance_map_with_mocked_svslicer(monkeypatch, tmp_path: Path):
     svslicer = tmp_path / "svslicer"
     svslicer.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -189,3 +218,42 @@ def test_compute_pulmonary_resistance_map_subsamples_last_cycle_frames(monkeypat
     assert metadata["max_frames"] == 3
     assert len(metadata["selected_frames"]) == 3
     assert len(seen_inputs) == 3
+
+
+def test_compute_pulmonary_resistance_map_accepts_capitalized_hemodynamic_arrays(
+    monkeypatch, tmp_path: Path
+):
+    svslicer = tmp_path / "svslicer"
+    svslicer.write_text("#!/bin/sh\n", encoding="utf-8")
+    centerline = tmp_path / "centerlines.vtp"
+    _write_centerline(centerline)
+
+    frame = tmp_path / "result_0001.vtu"
+    frame.write_text("dummy", encoding="utf-8")
+    manifest = tmp_path / "frames.csv"
+    manifest.write_text("path,time_s\nresult_0001.vtu,1.0\n", encoding="utf-8")
+
+    def fake_run(cmd, capture_output, text, check):
+        _write_mapped_centerline_with_named_arrays(
+            Path(cmd[3]),
+            pressure_name="Pressure",
+            velocity_name="Velocity",
+            pressure=[100.0, 80.0, 100.0, 70.0],
+            velocity=[4.0, 4.0, 2.0, 2.0],
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("svzerodtrees.post_processing.resistance_map.subprocess.run", fake_run)
+
+    result = compute_pulmonary_resistance_map(
+        svslicer_path=str(svslicer),
+        centerline=str(centerline),
+        frames_csv=str(manifest),
+        output_dir=str(tmp_path / "out"),
+        cycle_duration_s=1.0,
+        max_frames=1,
+    )
+
+    summary = pd.read_csv(result["summary_csv"])
+    assert not summary.empty
+    assert Path(result["resistance_map"]).exists()
