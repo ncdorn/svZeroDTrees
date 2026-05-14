@@ -98,7 +98,7 @@ def test_compute_pulmonary_resistance_map_with_mocked_svslicer(monkeypatch, tmp_
     _write_centerline(centerline)
 
     frame_paths = []
-    for name in ("result_0001.vtu", "result_0002.vtu", "result_0003.vtu"):
+    for name in ("result_0001.vtu", "result_0002.vtu", "result_0003.vtu", "result_0004.vtu"):
         frame = tmp_path / name
         frame.write_text("dummy", encoding="utf-8")
         frame_paths.append(frame)
@@ -109,8 +109,9 @@ def test_compute_pulmonary_resistance_map_with_mocked_svslicer(monkeypatch, tmp_
             [
                 "path,time_s",
                 f"{frame_paths[0].name},0.0",
-                f"{frame_paths[1].name},0.8",
-                f"{frame_paths[2].name},1.4",
+                f"{frame_paths[1].name},0.4",
+                f"{frame_paths[2].name},0.8",
+                f"{frame_paths[3].name},1.2",
             ]
         )
         + "\n",
@@ -148,7 +149,7 @@ def test_compute_pulmonary_resistance_map_with_mocked_svslicer(monkeypatch, tmp_
         centerline=str(centerline),
         frames_csv=str(manifest),
         output_dir=str(tmp_path / "out"),
-        cycle_duration_s=1.0,
+        cycle_duration_s=0.8,
     )
 
     summary = pd.read_csv(result["summary_csv"])
@@ -166,9 +167,75 @@ def test_compute_pulmonary_resistance_map_with_mocked_svslicer(monkeypatch, tmp_
     assert branch2["rank"] == pytest.approx(1.0)
     assert ranked.iloc[0]["branch_id"] == pytest.approx(2.0)
     assert metadata["selected_frames"][0]["path"].endswith("result_0002_centerline.vtp")
+    assert metadata["selected_frames"][1]["path"].endswith("result_0003_centerline.vtp")
     assert len(metadata["selected_frames"]) == 2
+    assert metadata["selection_window_start_s"] == pytest.approx(0.4)
+    assert metadata["selection_window_end_s"] == pytest.approx(1.2)
+    assert metadata["selection_policy"] == "all_frames_last_full_cycle"
+    assert metadata["available_frame_count"] == 2
+    assert metadata["selected_frame_count"] == 2
+    assert metadata["max_frames"] is None
     assert not (tmp_path / "out" / "intermediate_centerlines").exists()
     assert Path(result["resistance_map"]).exists()
+
+
+def test_compute_pulmonary_resistance_map_selects_all_last_cycle_frames_in_exact_mode(
+    monkeypatch, tmp_path: Path
+):
+    svslicer = tmp_path / "svslicer"
+    svslicer.write_text("#!/bin/sh\n", encoding="utf-8")
+    centerline = tmp_path / "centerlines.vtp"
+    _write_centerline(centerline)
+
+    frame_paths = []
+    for idx in range(6):
+        frame = tmp_path / f"result_{idx + 1:04d}.vtu"
+        frame.write_text("dummy", encoding="utf-8")
+        frame_paths.append(frame)
+
+    manifest_lines = ["path,time_s"]
+    for idx, frame in enumerate(frame_paths):
+        manifest_lines.append(f"{frame.name},{0.2 * idx:.1f}")
+    manifest = tmp_path / "frames.csv"
+    manifest.write_text("\n".join(manifest_lines) + "\n", encoding="utf-8")
+
+    seen_inputs: list[str] = []
+
+    def fake_run(cmd, capture_output, text, check):
+        seen_inputs.append(Path(cmd[1]).name)
+        _write_mapped_centerline(
+            Path(cmd[3]),
+            pressure=[100.0, 90.0, 100.0, 80.0],
+            velocity=[4.0, 4.0, 3.0, 3.0],
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("svzerodtrees.post_processing.resistance_map.subprocess.run", fake_run)
+
+    result = compute_pulmonary_resistance_map(
+        svslicer_path=str(svslicer),
+        centerline=str(centerline),
+        frames_csv=str(manifest),
+        output_dir=str(tmp_path / "out"),
+        cycle_duration_s=1.0,
+    )
+
+    metadata = json.loads(Path(result["metadata_json"]).read_text(encoding="utf-8"))
+
+    assert seen_inputs == [
+        "result_0001.vtu",
+        "result_0002.vtu",
+        "result_0003.vtu",
+        "result_0004.vtu",
+        "result_0005.vtu",
+    ]
+    assert metadata["selection_window_start_s"] == pytest.approx(0.0)
+    assert metadata["selection_window_end_s"] == pytest.approx(1.0)
+    assert metadata["selection_policy"] == "all_frames_last_full_cycle"
+    assert metadata["available_frame_count"] == 5
+    assert metadata["selected_frame_count"] == 5
+    assert metadata["max_frames"] is None
+    assert len(metadata["selected_frames"]) == 5
 
 
 def test_compute_pulmonary_resistance_map_subsamples_last_cycle_frames(monkeypatch, tmp_path: Path):
@@ -215,6 +282,9 @@ def test_compute_pulmonary_resistance_map_subsamples_last_cycle_frames(monkeypat
 
     assert metadata["available_frame_count"] == 5
     assert metadata["selected_frame_count"] == 3
+    assert metadata["selection_window_start_s"] == pytest.approx(0.0)
+    assert metadata["selection_window_end_s"] == pytest.approx(1.0)
+    assert metadata["selection_policy"] == "all_frames_last_full_cycle"
     assert metadata["max_frames"] == 3
     assert len(metadata["selected_frames"]) == 3
     assert len(seen_inputs) == 3
@@ -230,8 +300,13 @@ def test_compute_pulmonary_resistance_map_accepts_capitalized_hemodynamic_arrays
 
     frame = tmp_path / "result_0001.vtu"
     frame.write_text("dummy", encoding="utf-8")
+    excluded_frame = tmp_path / "result_0002.vtu"
+    excluded_frame.write_text("dummy", encoding="utf-8")
     manifest = tmp_path / "frames.csv"
-    manifest.write_text("path,time_s\nresult_0001.vtu,1.0\n", encoding="utf-8")
+    manifest.write_text(
+        "path,time_s\nresult_0001.vtu,0.0\nresult_0002.vtu,0.5\n",
+        encoding="utf-8",
+    )
 
     def fake_run(cmd, capture_output, text, check):
         _write_mapped_centerline_with_named_arrays(

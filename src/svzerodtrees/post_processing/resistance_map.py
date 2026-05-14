@@ -106,15 +106,38 @@ def _load_frames_csv(frames_csv: str | Path) -> pd.DataFrame:
     return pd.DataFrame.from_records(records).sort_values("time_s").reset_index(drop=True)
 
 
-def _select_last_cycle_frames(frames: pd.DataFrame, cycle_duration_s: float) -> pd.DataFrame:
+def _selection_tolerance_s(frames: pd.DataFrame, cycle_duration_s: float) -> float:
+    time_values = frames["time_s"].to_numpy(dtype=float)
+    unique_times = np.unique(time_values)
+    positive_diffs = np.diff(unique_times)
+    positive_diffs = positive_diffs[positive_diffs > 0.0]
+    if positive_diffs.size:
+        dt = float(np.min(positive_diffs))
+    else:
+        dt = float(cycle_duration_s)
+    scale = max(1.0, float(np.max(np.abs(time_values))), float(cycle_duration_s))
+    return max(dt * 1e-6, np.finfo(float).eps * scale * 8.0)
+
+
+def _select_last_cycle_frames(
+    frames: pd.DataFrame,
+    cycle_duration_s: float,
+) -> tuple[pd.DataFrame, float, float, float]:
     cycle_duration = float(cycle_duration_s)
     if not math.isfinite(cycle_duration) or cycle_duration <= 0.0:
         raise ValueError("cycle_duration_s must be positive and finite")
-    cutoff = float(frames["time_s"].max()) - cycle_duration
-    selected = frames.loc[frames["time_s"] > cutoff].copy()
+    t_end = float(frames["time_s"].max())
+    window_start = t_end - cycle_duration
+    tol = _selection_tolerance_s(frames, cycle_duration)
+    # Select the final full cycle as the half-open interval [t_end - T, t_end).
+    # The tolerance absorbs floating-point noise while remaining negligible
+    # relative to the native frame spacing.
+    selected = frames.loc[
+        (frames["time_s"] >= window_start - tol) & (frames["time_s"] < t_end - tol)
+    ].copy()
     if selected.empty:
-        raise ValueError("last-cycle frame selection is empty")
-    return selected.reset_index(drop=True)
+        raise ValueError("last full-cycle frame selection is empty")
+    return selected.reset_index(drop=True), window_start, t_end, tol
 
 
 def _subsample_frames(frames: pd.DataFrame, max_frames: int | None) -> pd.DataFrame:
@@ -349,7 +372,7 @@ def compute_pulmonary_resistance_map(
     frames_csv: str,
     output_dir: str,
     cycle_duration_s: float,
-    max_frames: int | None = 8,
+    max_frames: int | None = None,
     keep_intermediate_centerlines: bool = False,
     intermediate_dir: str | None = None,
     pressure_array: str = "pressure",
@@ -367,7 +390,9 @@ def compute_pulmonary_resistance_map(
         raise FileNotFoundError(f"svSlicer executable not found: {svslicer_executable}")
 
     frames = _load_frames_csv(frames_csv)
-    selected_all = _select_last_cycle_frames(frames, cycle_duration_s)
+    selected_all, window_start_s, window_end_s, selection_tolerance_s = _select_last_cycle_frames(
+        frames, cycle_duration_s
+    )
     selected = _subsample_frames(selected_all, max_frames)
 
     output_path.mkdir(parents=True, exist_ok=True)
@@ -421,6 +446,10 @@ def compute_pulmonary_resistance_map(
             "centerline": str(centerline_path),
             "frames_csv": str(Path(frames_csv).expanduser().resolve()),
             "cycle_duration_s": float(cycle_duration_s),
+            "selection_window_start_s": float(window_start_s),
+            "selection_window_end_s": float(window_end_s),
+            "selection_tolerance_s": float(selection_tolerance_s),
+            "selection_policy": "all_frames_last_full_cycle",
             "available_frame_count": int(len(selected_all)),
             "selected_frame_count": int(len(selected)),
             "max_frames": None if max_frames is None else int(max_frames),

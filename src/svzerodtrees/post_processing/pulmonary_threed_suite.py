@@ -596,7 +596,6 @@ def run_pulmonary_threed_postprocess_suite(
             frames_csv=str(frames_csv),
             output_dir=str(resistance_dir),
             cycle_duration_s=float(cycle_duration_s),
-            max_frames=1,
         )
         shutil.copyfile(resistance_result["resistance_map"], resistance_map_vtp)
         shutil.copyfile(resistance_result["summary_csv"], branch_summary_csv)

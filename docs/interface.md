@@ -201,9 +201,13 @@ Supported analysis `kind` values:
 - `svslicer_path`: required path to the `svslicer` executable
 - `centerline`: required `centerlines.vtp`
 - `frames_csv`: required CSV with columns `path,time_s`
-- `cycle_duration_s`: required last-cycle selection window
-- `max_frames`: optional cap on last-cycle frames passed through `svslicer`,
-  default `8`, sampled uniformly across the selected cycle window
+- `cycle_duration_s`: required last-cycle selection window. The resistance map
+  now uses the exact temporal mean over the final full cardiac period defined
+  as the half-open interval `[t_end - cycle_duration_s, t_end)` so the terminal
+  phase endpoint is not double-counted.
+- `max_frames`: optional explicit approximation cap on last-cycle frames passed
+  through `svslicer`. By default this is unset, so all frames in the final full
+  cycle window are included in the mean.
 - `keep_intermediate_centerlines`: optional, default `false`
 - `intermediate_dir`: optional directory for per-frame mapped VTPs
 - `pressure_array`: optional, default `pressure`
