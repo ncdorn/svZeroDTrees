@@ -123,6 +123,7 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
             )
 
     def fake_compute_pulmonary_resistance_map(**kwargs):
+        assert kwargs["max_frames"] == 1
         resistance_dir = Path(kwargs["output_dir"])
         resistance_dir.mkdir(parents=True, exist_ok=True)
         summary = resistance_dir / "branch_resistance_summary.csv"
@@ -255,6 +256,7 @@ def test_run_pulmonary_threed_postprocess_suite_tolerates_invalid_overlay_target
             return ({"left": 40.0}, {"right": 60.0})
 
     def fake_compute_pulmonary_resistance_map(**kwargs):
+        assert kwargs["max_frames"] == 1
         resistance_dir = Path(kwargs["output_dir"])
         resistance_dir.mkdir(parents=True, exist_ok=True)
         summary = resistance_dir / "branch_resistance_summary.csv"
