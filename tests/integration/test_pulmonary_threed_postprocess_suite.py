@@ -124,6 +124,7 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
 
     def fake_compute_pulmonary_resistance_map(**kwargs):
         assert "max_frames" not in kwargs
+        assert kwargs["workers"] == "auto"
         resistance_dir = Path(kwargs["output_dir"])
         resistance_dir.mkdir(parents=True, exist_ok=True)
         summary = resistance_dir / "branch_resistance_summary.csv"
@@ -173,6 +174,7 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
         svslicer_path="/tmp/svslicer",
         clinical_targets={"mpa_p": [20.0, 10.0, 15.0], "rpa_split": 0.6},
         cycle_duration_s=0.4,
+        resistance_map_workers="auto",
     )
 
     assert (output_dir / "mpa_pressure_vs_time.csv").exists()
@@ -257,6 +259,7 @@ def test_run_pulmonary_threed_postprocess_suite_tolerates_invalid_overlay_target
 
     def fake_compute_pulmonary_resistance_map(**kwargs):
         assert "max_frames" not in kwargs
+        assert kwargs["workers"] is None
         resistance_dir = Path(kwargs["output_dir"])
         resistance_dir.mkdir(parents=True, exist_ok=True)
         summary = resistance_dir / "branch_resistance_summary.csv"

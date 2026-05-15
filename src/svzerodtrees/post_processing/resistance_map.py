@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import math
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Literal
 
 import numpy as np
 import pandas as pd
@@ -14,6 +16,7 @@ import vtk
 from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
 
 _FLOW_EPSILON = 1e-12
+_AUTO_WORKER_CAP = 4
 
 
 @dataclass
@@ -229,6 +232,61 @@ def _warning_message(branch_id: int, message: str) -> Dict[str, Any]:
     return {"branch_id": branch_id, "message": message}
 
 
+def _resolve_workers(
+    workers: int | Literal["auto"] | None,
+) -> tuple[int | str | None, int]:
+    if workers is None:
+        return None, 1
+    if workers == "auto":
+        slurm_cpus = os.environ.get("SLURM_CPUS_PER_TASK")
+        available_cpus: int | None = None
+        if slurm_cpus is not None:
+            try:
+                parsed = int(slurm_cpus)
+            except ValueError:
+                parsed = 0
+            if parsed > 0:
+                available_cpus = parsed
+        if available_cpus is None:
+            detected = os.cpu_count() or 1
+            available_cpus = max(1, int(detected))
+        return "auto", max(1, min(_AUTO_WORKER_CAP, available_cpus))
+    resolved = int(workers)
+    if resolved <= 0:
+        raise ValueError("workers must be >= 1 when provided")
+    return resolved, resolved
+
+
+def _map_frame(
+    *,
+    frame_index: int,
+    frame_path: str,
+    time_s: float,
+    intermediate_path: Path,
+    svslicer_executable: Path,
+    centerline_path: Path,
+    total_frames: int,
+) -> tuple[int, Path, float]:
+    mapped_path = _mapped_output_path(intermediate_path, frame_index, frame_path)
+    print(
+        f"[svzerodtrees] resistance-map frame {frame_index + 1}/{total_frames} "
+        f"source={frame_path}",
+        flush=True,
+    )
+    _run_svslicer(
+        svslicer_path=str(svslicer_executable),
+        result_path=str(frame_path),
+        centerline_path=str(centerline_path),
+        output_path=str(mapped_path),
+    )
+    print(
+        f"[svzerodtrees] resistance-map frame {frame_index + 1}/{total_frames} "
+        f"mapped={mapped_path}",
+        flush=True,
+    )
+    return frame_index, mapped_path, time_s
+
+
 def _aggregate_branch_metrics(
     mapped_files: Iterable[tuple[Path, float]],
     *,
@@ -375,6 +433,7 @@ def compute_pulmonary_resistance_map(
     max_frames: int | None = None,
     keep_intermediate_centerlines: bool = False,
     intermediate_dir: str | None = None,
+    workers: int | Literal["auto"] | None = None,
     pressure_array: str = "pressure",
     flow_array: str = "velocity",
     branch_id_array: str = "BranchId",
@@ -394,6 +453,7 @@ def compute_pulmonary_resistance_map(
         frames, cycle_duration_s
     )
     selected = _subsample_frames(selected_all, max_frames)
+    workers_requested, workers_used = _resolve_workers(workers)
 
     output_path.mkdir(parents=True, exist_ok=True)
     if intermediate_dir is None:
@@ -402,27 +462,67 @@ def compute_pulmonary_resistance_map(
         intermediate_path = Path(intermediate_dir).expanduser().resolve()
     intermediate_path.mkdir(parents=True, exist_ok=True)
 
-    mapped_files: List[tuple[Path, float]] = []
+    metadata_path = output_path / "resistance_map_metadata.json"
+    metadata: Dict[str, Any] = {
+        "svslicer_path": str(svslicer_executable),
+        "centerline": str(centerline_path),
+        "frames_csv": str(Path(frames_csv).expanduser().resolve()),
+        "cycle_duration_s": float(cycle_duration_s),
+        "selection_window_start_s": float(window_start_s),
+        "selection_window_end_s": float(window_end_s),
+        "selection_tolerance_s": float(selection_tolerance_s),
+        "selection_policy": "all_frames_last_full_cycle",
+        "available_frame_count": int(len(selected_all)),
+        "selected_frame_count": int(len(selected)),
+        "max_frames": None if max_frames is None else int(max_frames),
+        "keep_intermediate_centerlines": bool(keep_intermediate_centerlines),
+        "intermediate_dir": str(intermediate_path),
+        "pressure_array": pressure_array,
+        "flow_array": flow_array,
+        "branch_id_array": branch_id_array,
+        "path_array": path_array,
+        "workers_requested": workers_requested,
+        "workers_used": int(workers_used),
+        "selected_frames": [],
+        "warnings": [],
+    }
+    mapped_files_by_index: dict[int, tuple[Path, float]] = {}
     try:
-        for frame_index, row in enumerate(selected.itertuples(index=False)):
-            mapped_path = _mapped_output_path(intermediate_path, frame_index, row.path)
-            print(
-                f"[svzerodtrees] resistance-map frame {frame_index + 1}/{len(selected)} "
-                f"source={row.path}",
-                flush=True,
-            )
-            _run_svslicer(
-                svslicer_path=str(svslicer_executable),
-                result_path=str(row.path),
-                centerline_path=str(centerline_path),
-                output_path=str(mapped_path),
-            )
-            print(
-                f"[svzerodtrees] resistance-map frame {frame_index + 1}/{len(selected)} "
-                f"mapped={mapped_path}",
-                flush=True,
-            )
-            mapped_files.append((mapped_path, float(row.time_s)))
+        if workers_used == 1:
+            for frame_index, row in enumerate(selected.itertuples(index=False)):
+                _, mapped_path, time_s = _map_frame(
+                    frame_index=frame_index,
+                    frame_path=str(row.path),
+                    time_s=float(row.time_s),
+                    intermediate_path=intermediate_path,
+                    svslicer_executable=svslicer_executable,
+                    centerline_path=centerline_path,
+                    total_frames=len(selected),
+                )
+                mapped_files_by_index[frame_index] = (mapped_path, time_s)
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers_used) as executor:
+                future_map = {
+                    executor.submit(
+                        _map_frame,
+                        frame_index=frame_index,
+                        frame_path=str(row.path),
+                        time_s=float(row.time_s),
+                        intermediate_path=intermediate_path,
+                        svslicer_executable=svslicer_executable,
+                        centerline_path=centerline_path,
+                        total_frames=len(selected),
+                    ): frame_index
+                    for frame_index, row in enumerate(selected.itertuples(index=False))
+                }
+                for future in concurrent.futures.as_completed(future_map):
+                    frame_index, mapped_path, time_s = future.result()
+                    mapped_files_by_index[frame_index] = (mapped_path, time_s)
+
+        mapped_files = [mapped_files_by_index[index] for index in sorted(mapped_files_by_index)]
+        metadata["selected_frames"] = [
+            {"path": str(path), "time_s": time_s} for path, time_s in mapped_files
+        ]
 
         resistance_map_poly, summary, warnings = _aggregate_branch_metrics(
             mapped_files,
@@ -441,29 +541,7 @@ def compute_pulmonary_resistance_map(
         summary.sort_values(["rank", "branch_id"], na_position="last").to_csv(ranked_path, index=False)
         _write_polydata(resistance_map_poly, vtp_path)
 
-        metadata = {
-            "svslicer_path": str(svslicer_executable),
-            "centerline": str(centerline_path),
-            "frames_csv": str(Path(frames_csv).expanduser().resolve()),
-            "cycle_duration_s": float(cycle_duration_s),
-            "selection_window_start_s": float(window_start_s),
-            "selection_window_end_s": float(window_end_s),
-            "selection_tolerance_s": float(selection_tolerance_s),
-            "selection_policy": "all_frames_last_full_cycle",
-            "available_frame_count": int(len(selected_all)),
-            "selected_frame_count": int(len(selected)),
-            "max_frames": None if max_frames is None else int(max_frames),
-            "keep_intermediate_centerlines": bool(keep_intermediate_centerlines),
-            "intermediate_dir": str(intermediate_path),
-            "pressure_array": pressure_array,
-            "flow_array": flow_array,
-            "branch_id_array": branch_id_array,
-            "path_array": path_array,
-            "selected_frames": [
-                {"path": str(path), "time_s": time_s} for path, time_s in mapped_files
-            ],
-            "warnings": warnings,
-        }
+        metadata["warnings"] = warnings
         metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
         return {

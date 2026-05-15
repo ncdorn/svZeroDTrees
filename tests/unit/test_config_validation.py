@@ -481,6 +481,7 @@ postprocess:
         centerline: centerlines.vtp
         frames_csv: frames.csv
         cycle_duration_s: 1.0
+        workers: auto
         intermediate_dir: scratch/mapped
 """,
         encoding="utf-8",
@@ -494,6 +495,7 @@ postprocess:
     assert analysis.options["centerline"] == os.path.join(str(tmp_path), "centerlines.vtp")
     assert analysis.options["frames_csv"] == os.path.join(str(tmp_path), "frames.csv")
     assert analysis.options["intermediate_dir"] == os.path.join(str(tmp_path), "scratch/mapped")
+    assert analysis.options["workers"] == "auto"
 
 
 def test_postprocess_analysis_requires_core_options(tmp_path):
@@ -539,6 +541,7 @@ postprocess:
         clinical_targets: clinical_targets.csv
         stage: preop
         inflow_csv: inflow.csv
+        resistance_map_workers: 2
 """,
         encoding="utf-8",
     )
@@ -552,6 +555,7 @@ postprocess:
     assert analysis.options["svslicer_path"] == os.path.join(str(tmp_path), "tools/svslicer")
     assert analysis.options["clinical_targets"] == os.path.join(str(tmp_path), "clinical_targets.csv")
     assert analysis.options["inflow_csv"] == os.path.join(str(tmp_path), "inflow.csv")
+    assert analysis.options["resistance_map_workers"] == 2
 
 
 def test_postprocess_suite_requires_cycle_duration_or_inflow(tmp_path):

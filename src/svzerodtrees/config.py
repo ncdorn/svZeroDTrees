@@ -602,6 +602,7 @@ def load_config(path: str) -> BaseConfig:
                         "centerline",
                         "frames_csv",
                         "cycle_duration_s",
+                        "workers",
                         "keep_intermediate_centerlines",
                         "intermediate_dir",
                         "pressure_array",
@@ -634,6 +635,7 @@ def load_config(path: str) -> BaseConfig:
                         "inflow_csv",
                         "pressure_field",
                         "already_mmhg",
+                        "resistance_map_workers",
                     ],
                     "postprocess.analyses.options",
                 )
@@ -796,6 +798,7 @@ postprocess:
         centerline: path/to/centerlines.vtp
         frames_csv: path/to/frames.csv
         cycle_duration_s: 1.0
+        workers: auto
         keep_intermediate_centerlines: false
     - kind: pulmonary_threed_suite
       output: results/postprocess
@@ -806,4 +809,5 @@ postprocess:
         clinical_targets: path/to/clinical_targets.csv
         stage: preop
         inflow_csv: path/to/inflow.csv
+        resistance_map_workers: auto
 """.strip() + "\n"

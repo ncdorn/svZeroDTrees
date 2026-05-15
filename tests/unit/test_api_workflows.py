@@ -152,6 +152,7 @@ def test_postprocess_workflow_dispatches_analysis(monkeypatch, tmp_path):
                         "centerline": "/tmp/centerlines.vtp",
                         "frames_csv": "/tmp/frames.csv",
                         "cycle_duration_s": 1.0,
+                        "workers": "auto",
                     },
                 )
             ],
@@ -161,6 +162,7 @@ def test_postprocess_workflow_dispatches_analysis(monkeypatch, tmp_path):
     result = PostprocessWorkflow.from_config(cfg).run()
 
     assert calls["kwargs"]["output_dir"] == str(tmp_path / "results")
+    assert calls["kwargs"]["workers"] == "auto"
     assert result["analysis_outputs"][0]["summary_csv"] == "summary.csv"
 
 
@@ -190,6 +192,7 @@ def test_postprocess_workflow_dispatches_pulmonary_threed_suite(monkeypatch, tmp
                         "clinical_targets": "/tmp/clinical_targets.csv",
                         "stage": "preop",
                         "inflow_csv": "/tmp/inflow.csv",
+                        "resistance_map_workers": 2,
                     },
                 )
             ],
@@ -200,4 +203,5 @@ def test_postprocess_workflow_dispatches_pulmonary_threed_suite(monkeypatch, tmp
 
     assert calls["kwargs"]["output_dir"] == str(tmp_path / "postprocess")
     assert calls["kwargs"]["stage"] == "preop"
+    assert calls["kwargs"]["resistance_map_workers"] == 2
     assert result["analysis_outputs"][0]["metadata_json"] == "suite.json"

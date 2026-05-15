@@ -95,6 +95,9 @@ PipelineWorkflow.from_config(cfg).run()
 - `construct_trees`: assign impedance or RCR BCs to a svZeroD config.
 - `adapt`: run microvascular adaptation using preop/postop results.
 - `postprocess`: generate figures from saved tree pickles or compute analysis artifacts such as svSlicer-based pulmonary resistance maps or the standardized pulmonary 3D postprocess suite.
+  Pulmonary resistance-map configs may optionally set `workers: auto|<int>`, and
+  pulmonary 3D suite configs may optionally set `resistance_map_workers`, to
+  enable bounded frame-level parallelism during svSlicer centerline mapping.
 
 **Outputs**
 Typical outputs are written under `paths.root` and include:

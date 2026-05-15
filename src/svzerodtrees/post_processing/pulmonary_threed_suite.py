@@ -7,7 +7,7 @@ import re
 import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 import matplotlib
 matplotlib.use("Agg")
@@ -493,6 +493,7 @@ def run_pulmonary_threed_postprocess_suite(
     inflow_csv: str | Path | None = None,
     pressure_field: str = "Pressure",
     already_mmhg: bool = False,
+    resistance_map_workers: int | Literal["auto"] | None = None,
 ) -> dict[str, Any]:
     if cycle_duration_s is None:
         if inflow_csv is None:
@@ -596,6 +597,7 @@ def run_pulmonary_threed_postprocess_suite(
             frames_csv=str(frames_csv),
             output_dir=str(resistance_dir),
             cycle_duration_s=float(cycle_duration_s),
+            workers=resistance_map_workers,
         )
         shutil.copyfile(resistance_result["resistance_map"], resistance_map_vtp)
         shutil.copyfile(resistance_result["summary_csv"], branch_summary_csv)

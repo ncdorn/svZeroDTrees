@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import threading
 import subprocess
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -175,6 +177,8 @@ def test_compute_pulmonary_resistance_map_with_mocked_svslicer(monkeypatch, tmp_
     assert metadata["available_frame_count"] == 2
     assert metadata["selected_frame_count"] == 2
     assert metadata["max_frames"] is None
+    assert metadata["workers_requested"] is None
+    assert metadata["workers_used"] == 1
     assert not (tmp_path / "out" / "intermediate_centerlines").exists()
     assert Path(result["resistance_map"]).exists()
 
@@ -235,6 +239,8 @@ def test_compute_pulmonary_resistance_map_selects_all_last_cycle_frames_in_exact
     assert metadata["available_frame_count"] == 5
     assert metadata["selected_frame_count"] == 5
     assert metadata["max_frames"] is None
+    assert metadata["workers_requested"] is None
+    assert metadata["workers_used"] == 1
     assert len(metadata["selected_frames"]) == 5
 
 
@@ -286,6 +292,8 @@ def test_compute_pulmonary_resistance_map_subsamples_last_cycle_frames(monkeypat
     assert metadata["selection_window_end_s"] == pytest.approx(1.0)
     assert metadata["selection_policy"] == "all_frames_last_full_cycle"
     assert metadata["max_frames"] == 3
+    assert metadata["workers_requested"] is None
+    assert metadata["workers_used"] == 1
     assert len(metadata["selected_frames"]) == 3
     assert len(seen_inputs) == 3
 
@@ -332,3 +340,204 @@ def test_compute_pulmonary_resistance_map_accepts_capitalized_hemodynamic_arrays
     summary = pd.read_csv(result["summary_csv"])
     assert not summary.empty
     assert Path(result["resistance_map"]).exists()
+
+
+def test_compute_pulmonary_resistance_map_parallel_workers_preserve_deterministic_outputs(
+    monkeypatch, tmp_path: Path
+):
+    svslicer = tmp_path / "svslicer"
+    svslicer.write_text("#!/bin/sh\n", encoding="utf-8")
+    centerline = tmp_path / "centerlines.vtp"
+    _write_centerline(centerline)
+
+    frame_paths = []
+    for idx in range(4):
+        frame = tmp_path / f"result_{idx + 1:04d}.vtu"
+        frame.write_text("dummy", encoding="utf-8")
+        frame_paths.append(frame)
+
+    manifest = tmp_path / "frames.csv"
+    manifest.write_text(
+        "\n".join(
+            [
+                "path,time_s",
+                "result_0001.vtu,0.0",
+                "result_0002.vtu,0.2",
+                "result_0003.vtu,0.4",
+                "result_0004.vtu,0.6",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    start_gate = threading.Event()
+    active_lock = threading.Lock()
+    active_runs = 0
+    max_active_runs = 0
+
+    def fake_run(cmd, capture_output, text, check):
+        nonlocal active_runs, max_active_runs
+        with active_lock:
+            active_runs += 1
+            max_active_runs = max(max_active_runs, active_runs)
+            if active_runs >= 2:
+                start_gate.set()
+        start_gate.wait(timeout=1.0)
+        time.sleep(0.01)
+        _write_mapped_centerline(
+            Path(cmd[3]),
+            pressure=[100.0, 80.0, 100.0, 70.0],
+            velocity=[4.0, 4.0, 2.0, 2.0],
+        )
+        with active_lock:
+            active_runs -= 1
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("svzerodtrees.post_processing.resistance_map.subprocess.run", fake_run)
+
+    result = compute_pulmonary_resistance_map(
+        svslicer_path=str(svslicer),
+        centerline=str(centerline),
+        frames_csv=str(manifest),
+        output_dir=str(tmp_path / "out"),
+        cycle_duration_s=0.6,
+        workers=2,
+    )
+
+    metadata = json.loads(Path(result["metadata_json"]).read_text(encoding="utf-8"))
+
+    assert max_active_runs >= 2
+    assert metadata["workers_requested"] == 2
+    assert metadata["workers_used"] == 2
+    assert [Path(entry["path"]).name for entry in metadata["selected_frames"]] == [
+        "0000_result_0001_centerline.vtp",
+        "0001_result_0002_centerline.vtp",
+        "0002_result_0003_centerline.vtp",
+    ]
+
+
+def test_compute_pulmonary_resistance_map_auto_workers_use_slurm_cpus(
+    monkeypatch, tmp_path: Path
+):
+    svslicer = tmp_path / "svslicer"
+    svslicer.write_text("#!/bin/sh\n", encoding="utf-8")
+    centerline = tmp_path / "centerlines.vtp"
+    _write_centerline(centerline)
+    frame = tmp_path / "result_0001.vtu"
+    frame.write_text("dummy", encoding="utf-8")
+    manifest = tmp_path / "frames.csv"
+    manifest.write_text("path,time_s\nresult_0001.vtu,0.0\nresult_0002.vtu,1.0\n", encoding="utf-8")
+    excluded_frame = tmp_path / "result_0002.vtu"
+    excluded_frame.write_text("dummy", encoding="utf-8")
+
+    def fake_run(cmd, capture_output, text, check):
+        _write_mapped_centerline(
+            Path(cmd[3]),
+            pressure=[100.0, 80.0, 100.0, 70.0],
+            velocity=[4.0, 4.0, 2.0, 2.0],
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("svzerodtrees.post_processing.resistance_map.subprocess.run", fake_run)
+    monkeypatch.setenv("SLURM_CPUS_PER_TASK", "8")
+
+    result = compute_pulmonary_resistance_map(
+        svslicer_path=str(svslicer),
+        centerline=str(centerline),
+        frames_csv=str(manifest),
+        output_dir=str(tmp_path / "out"),
+        cycle_duration_s=1.0,
+        max_frames=1,
+        workers="auto",
+    )
+
+    metadata = json.loads(Path(result["metadata_json"]).read_text(encoding="utf-8"))
+
+    assert metadata["workers_requested"] == "auto"
+    assert metadata["workers_used"] == 4
+
+
+def test_compute_pulmonary_resistance_map_auto_workers_fall_back_to_local_cpu_count(
+    monkeypatch, tmp_path: Path
+):
+    svslicer = tmp_path / "svslicer"
+    svslicer.write_text("#!/bin/sh\n", encoding="utf-8")
+    centerline = tmp_path / "centerlines.vtp"
+    _write_centerline(centerline)
+    frame = tmp_path / "result_0001.vtu"
+    frame.write_text("dummy", encoding="utf-8")
+    excluded_frame = tmp_path / "result_0002.vtu"
+    excluded_frame.write_text("dummy", encoding="utf-8")
+    manifest = tmp_path / "frames.csv"
+    manifest.write_text("path,time_s\nresult_0001.vtu,0.0\nresult_0002.vtu,1.0\n", encoding="utf-8")
+
+    def fake_run(cmd, capture_output, text, check):
+        _write_mapped_centerline(
+            Path(cmd[3]),
+            pressure=[100.0, 80.0, 100.0, 70.0],
+            velocity=[4.0, 4.0, 2.0, 2.0],
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("svzerodtrees.post_processing.resistance_map.subprocess.run", fake_run)
+    monkeypatch.delenv("SLURM_CPUS_PER_TASK", raising=False)
+    monkeypatch.setattr("svzerodtrees.post_processing.resistance_map.os.cpu_count", lambda: 3)
+
+    result = compute_pulmonary_resistance_map(
+        svslicer_path=str(svslicer),
+        centerline=str(centerline),
+        frames_csv=str(manifest),
+        output_dir=str(tmp_path / "out"),
+        cycle_duration_s=1.0,
+        max_frames=1,
+        workers="auto",
+    )
+
+    metadata = json.loads(Path(result["metadata_json"]).read_text(encoding="utf-8"))
+
+    assert metadata["workers_requested"] == "auto"
+    assert metadata["workers_used"] == 3
+
+
+def test_compute_pulmonary_resistance_map_worker_failure_raises_cleanly(
+    monkeypatch, tmp_path: Path
+):
+    svslicer = tmp_path / "svslicer"
+    svslicer.write_text("#!/bin/sh\n", encoding="utf-8")
+    centerline = tmp_path / "centerlines.vtp"
+    _write_centerline(centerline)
+    frame_paths = []
+    for idx in range(3):
+        frame = tmp_path / f"result_{idx + 1:04d}.vtu"
+        frame.write_text("dummy", encoding="utf-8")
+        frame_paths.append(frame)
+    manifest = tmp_path / "frames.csv"
+    manifest.write_text(
+        "path,time_s\nresult_0001.vtu,0.0\nresult_0002.vtu,0.5\nresult_0003.vtu,1.0\n",
+        encoding="utf-8",
+    )
+
+    def fake_run(cmd, capture_output, text, check):
+        if Path(cmd[1]).name == "result_0002.vtu":
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
+        _write_mapped_centerline(
+            Path(cmd[3]),
+            pressure=[100.0, 80.0, 100.0, 70.0],
+            velocity=[4.0, 4.0, 2.0, 2.0],
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("svzerodtrees.post_processing.resistance_map.subprocess.run", fake_run)
+
+    with pytest.raises(RuntimeError, match="svSlicer failed"):
+        compute_pulmonary_resistance_map(
+            svslicer_path=str(svslicer),
+            centerline=str(centerline),
+            frames_csv=str(manifest),
+            output_dir=str(tmp_path / "out"),
+            cycle_duration_s=1.0,
+            workers=2,
+        )
+
+    assert not (tmp_path / "out" / "resistance_map_metadata.json").exists()
