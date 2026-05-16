@@ -18,7 +18,12 @@ import pyvista as pv
 
 from ..simulation.simulation_directory import SimulationDirectory
 from ..tune_bcs.clinical_targets import ClinicalTargets
-from .resistance_map import compute_pulmonary_resistance_map
+from .resistance_map import (
+    _compute_pulmonary_resistance_map_for_selected_frames,
+    _load_frames_csv,
+    _select_last_cycle_frames,
+    compute_pulmonary_resistance_map,
+)
 
 CGS_TO_MMHG = 1333.224
 
@@ -347,6 +352,7 @@ def write_frames_csv_for_simulation(
     output_csv_path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
         {
+            "timestep_id": [int(_extract_result_step(path)) for path in vtu_files],
             "path": [str(path.resolve()) for path in vtu_files],
             "time_s": [float(_extract_result_step(path)) * dt for path in vtu_files],
         }
@@ -481,6 +487,78 @@ def render_resistance_map_png(
     return str(output_path)
 
 
+def _select_systolic_frame_from_artifacts(
+    *,
+    pressure_csv: str | Path,
+    frames_csv: str | Path,
+    cycle_duration_s: float,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    frames = _load_frames_csv(frames_csv)
+    if "timestep_id" not in frames.columns:
+        raise ValueError("frames.csv must include timestep_id for systolic frame selection")
+    selected_frames, window_start_s, window_end_s, selection_tolerance_s = _select_last_cycle_frames(
+        frames,
+        cycle_duration_s,
+    )
+
+    pressure_df = pd.read_csv(pressure_csv)
+    required_columns = {"timestep_id", "time_s", "mpa_pressure_mmhg"}
+    missing = required_columns.difference(pressure_df.columns)
+    if missing:
+        raise ValueError(
+            "mpa_pressure_vs_time.csv must contain columns: "
+            + ", ".join(sorted(required_columns))
+        )
+    pressure_subset = pressure_df.loc[:, ["timestep_id", "time_s", "mpa_pressure_mmhg"]].copy()
+    pressure_subset["timestep_id"] = pd.to_numeric(pressure_subset["timestep_id"], errors="coerce")
+    pressure_subset["time_s"] = pd.to_numeric(pressure_subset["time_s"], errors="coerce")
+    pressure_subset["mpa_pressure_mmhg"] = pd.to_numeric(
+        pressure_subset["mpa_pressure_mmhg"],
+        errors="coerce",
+    )
+    pressure_subset = pressure_subset.loc[
+        pressure_subset["timestep_id"].notna()
+        & pressure_subset["time_s"].notna()
+        & pressure_subset["mpa_pressure_mmhg"].notna()
+    ].copy()
+    if pressure_subset.empty:
+        raise ValueError("mpa_pressure_vs_time.csv contains no finite pressure samples")
+    pressure_subset["timestep_id"] = pressure_subset["timestep_id"].astype(int)
+
+    merged = selected_frames.merge(
+        pressure_subset,
+        on="timestep_id",
+        how="inner",
+        suffixes=("_frame", "_pressure"),
+    )
+    if merged.empty:
+        raise ValueError("no overlapping last-cycle frames were found between frames.csv and pressure CSV")
+    merged = merged.sort_values(
+        ["mpa_pressure_mmhg", "timestep_id"],
+        ascending=[False, True],
+        kind="mergesort",
+    ).reset_index(drop=True)
+    selected_row = merged.iloc[0]
+    selected = selected_frames.loc[
+        selected_frames["timestep_id"] == int(selected_row["timestep_id"])
+    ].copy()
+    if selected.empty:
+        raise ValueError("failed to resolve systolic frame from selected last-cycle frames")
+
+    return selected.reset_index(drop=True), {
+        "selection_mode": "max_mpa_pressure_last_cycle",
+        "selection_window_start_s": float(window_start_s),
+        "selection_window_end_s": float(window_end_s),
+        "selection_tolerance_s": float(selection_tolerance_s),
+        "tie_break_policy": "earliest_timestep_id",
+        "selected_timestep_id": int(selected_row["timestep_id"]),
+        "selected_time_s": float(selected_row["time_s_frame"]),
+        "selected_pressure_mmhg": float(selected_row["mpa_pressure_mmhg"]),
+        "selected_frame_path": str(selected_row["path"]),
+        "available_frame_count": int(len(selected_frames)),
+    }
+
+
 def run_pulmonary_threed_postprocess_suite(
     *,
     simulation_dir: str | Path,
@@ -522,6 +600,12 @@ def run_pulmonary_threed_postprocess_suite(
     ranked_candidates_csv = output_path / "ranked_stent_candidates.csv"
     resistance_metadata_json = output_path / "resistance_map_metadata.json"
     resistance_png = output_path / "resistance_map_mean.png"
+    resistance_systolic_dir = output_path / "resistance_map_systolic"
+    resistance_map_systolic_vtp = output_path / "resistance_map_systolic.vtp"
+    branch_summary_systolic_csv = output_path / "branch_resistance_summary_systolic.csv"
+    ranked_candidates_systolic_csv = output_path / "ranked_stent_candidates_systolic.csv"
+    resistance_systolic_metadata_json = output_path / "resistance_map_systolic_metadata.json"
+    resistance_systolic_png = output_path / "resistance_map_systolic.png"
     outputs = {
         "mpa_pressure_csv": str(pressure_csv),
         "mpa_pressure_png": str(pressure_png),
@@ -533,12 +617,18 @@ def run_pulmonary_threed_postprocess_suite(
         "branch_resistance_summary_csv": str(branch_summary_csv),
         "ranked_stent_candidates_csv": str(ranked_candidates_csv),
         "resistance_map_metadata_json": str(resistance_metadata_json),
+        "resistance_map_systolic_vtp": str(resistance_map_systolic_vtp),
+        "resistance_map_systolic_png": str(resistance_systolic_png),
+        "branch_resistance_summary_systolic_csv": str(branch_summary_systolic_csv),
+        "ranked_stent_candidates_systolic_csv": str(ranked_candidates_systolic_csv),
+        "resistance_map_systolic_metadata_json": str(resistance_systolic_metadata_json),
     }
     steps: dict[str, dict[str, Any]] = {
         "pressure": {"status": "pending"},
         "flow_split": {"status": "pending"},
         "frames": {"status": "pending"},
         "resistance_map": {"status": "pending"},
+        "resistance_map_systolic": {"status": "pending"},
     }
     metadata: dict[str, Any] = {
         "kind": "pulmonary_threed_suite",
@@ -609,6 +699,45 @@ def run_pulmonary_threed_postprocess_suite(
         )
         steps["resistance_map"] = {"status": "completed", "result": resistance_result}
         metadata["resistance_map"] = resistance_result
+
+        active_step = "resistance_map_systolic"
+        systolic_frames, systolic_selection = _select_systolic_frame_from_artifacts(
+            pressure_csv=pressure_csv,
+            frames_csv=frames_csv,
+            cycle_duration_s=float(cycle_duration_s),
+        )
+        resistance_systolic_result = _compute_pulmonary_resistance_map_for_selected_frames(
+            svslicer_path=svslicer_path,
+            centerline=str(centerline),
+            selected_frames=systolic_frames,
+            output_dir=str(resistance_systolic_dir),
+            cycle_duration_s=float(cycle_duration_s),
+            available_frame_count=int(systolic_selection["available_frame_count"]),
+            selection_window_start_s=float(systolic_selection["selection_window_start_s"]),
+            selection_window_end_s=float(systolic_selection["selection_window_end_s"]),
+            selection_tolerance_s=float(systolic_selection["selection_tolerance_s"]),
+            selection_policy="max_mpa_pressure_last_cycle",
+            metric_suffix="systolic",
+            workers=resistance_map_workers,
+            metadata_extra=systolic_selection,
+        )
+        shutil.copyfile(resistance_systolic_result["resistance_map"], resistance_map_systolic_vtp)
+        shutil.copyfile(resistance_systolic_result["summary_csv"], branch_summary_systolic_csv)
+        shutil.copyfile(resistance_systolic_result["ranked_csv"], ranked_candidates_systolic_csv)
+        shutil.copyfile(
+            resistance_systolic_result["metadata_json"],
+            resistance_systolic_metadata_json,
+        )
+        render_resistance_map_png(
+            resistance_map_vtp=resistance_map_systolic_vtp,
+            output_png=resistance_systolic_png,
+            scalar_name="branch_resistance_systolic",
+        )
+        steps["resistance_map_systolic"] = {
+            "status": "completed",
+            "result": resistance_systolic_result,
+        }
+        metadata["resistance_map_systolic"] = resistance_systolic_result
 
         metadata["status"] = "completed"
         metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")

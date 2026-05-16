@@ -98,6 +98,9 @@ PipelineWorkflow.from_config(cfg).run()
   Pulmonary resistance-map configs may optionally set `workers: auto|<int>`, and
   pulmonary 3D suite configs may optionally set `resistance_map_workers`, to
   enable bounded frame-level parallelism during svSlicer centerline mapping.
+  The 3D suite writes both a mean resistance map and a systolic resistance map,
+  where systole is the maximum simulated MPA centerline pressure in the final
+  full cardiac cycle.
 
 **Outputs**
 Typical outputs are written under `paths.root` and include:
@@ -105,7 +108,10 @@ Typical outputs are written under `paths.root` and include:
 - `svzerod_config_with_bcs.json` (or `paths.output_config`) from tree construction.
 - `preop`, `postop`, `adapted` directories for pipeline/adaptation runs.
 - Figures from postprocess workflow (PNG outputs you specify).
-- Postprocess analysis artifacts such as `resistance_map_mean.vtp`, ranked CSV summaries, standardized `mpa_pressure_vs_time.csv`, flow-split comparison outputs, and metadata JSON files.
+- Postprocess analysis artifacts such as `resistance_map_mean.vtp`,
+  `resistance_map_systolic.vtp`, ranked CSV summaries, standardized
+  `mpa_pressure_vs_time.csv`, flow-split comparison outputs, and metadata JSON
+  files.
 
 **Examples**
 - YAML configs: `examples/pipeline_example.yml`, `examples/tune_bcs_example.yml`,

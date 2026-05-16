@@ -94,6 +94,7 @@ def _load_frames_csv(frames_csv: str | Path) -> pd.DataFrame:
             + ",".join(sorted(missing))
         )
 
+    has_timestep_id = "timestep_id" in df.columns
     records = []
     for row in df.itertuples(index=False):
         raw_path = Path(str(row.path)).expanduser()
@@ -104,9 +105,21 @@ def _load_frames_csv(frames_csv: str | Path) -> pd.DataFrame:
         time_s = float(row.time_s)
         if not math.isfinite(time_s):
             raise ValueError(f"frames_csv contains non-finite time_s for {raw_path}")
-        records.append({"path": str(raw_path), "time_s": time_s})
+        record = {"path": str(raw_path), "time_s": time_s}
+        if has_timestep_id:
+            timestep_id = getattr(row, "timestep_id")
+            if pd.isna(timestep_id):
+                raise ValueError(f"frames_csv contains missing timestep_id for {raw_path}")
+            timestep_value = float(timestep_id)
+            if not math.isfinite(timestep_value) or not timestep_value.is_integer():
+                raise ValueError(f"frames_csv contains invalid timestep_id for {raw_path}: {timestep_id}")
+            record["timestep_id"] = int(timestep_value)
+        records.append(record)
 
-    return pd.DataFrame.from_records(records).sort_values("time_s").reset_index(drop=True)
+    sort_columns = ["time_s"]
+    if has_timestep_id:
+        sort_columns.append("timestep_id")
+    return pd.DataFrame.from_records(records).sort_values(sort_columns).reset_index(drop=True)
 
 
 def _selection_tolerance_s(frames: pd.DataFrame, cycle_duration_s: float) -> float:
@@ -287,6 +300,49 @@ def _map_frame(
     return frame_index, mapped_path, time_s
 
 
+def _metric_output_names(metric_suffix: str) -> tuple[dict[str, str], dict[str, str]]:
+    metric = str(metric_suffix).strip()
+    if not metric:
+        raise ValueError("metric_suffix must be non-empty")
+    columns = {
+        "pressure_prox": f"pressure_prox_{metric}",
+        "pressure_dist": f"pressure_dist_{metric}",
+        "pressure_drop": f"pressure_drop_{metric}",
+        "flow": f"flow_{metric}",
+        "resistance": f"resistance_{metric}",
+        "resistance_per_cm": f"resistance_per_cm_{metric}",
+        "rank": "rank",
+    }
+    arrays = {
+        "pressure_prox": f"branch_pressure_prox_{metric}",
+        "pressure_dist": f"branch_pressure_dist_{metric}",
+        "pressure_drop": f"branch_pressure_drop_{metric}",
+        "flow": f"branch_flow_{metric}",
+        "resistance": f"branch_resistance_{metric}",
+        "resistance_per_cm": f"branch_resistance_per_cm_{metric}",
+        "rank": "branch_rank",
+    }
+    return columns, arrays
+
+
+def _artifact_paths(output_dir: str | Path, metric_suffix: str) -> dict[str, Path]:
+    output_path = Path(output_dir)
+    if metric_suffix == "mean":
+        return {
+            "summary_csv": output_path / "branch_resistance_summary.csv",
+            "ranked_csv": output_path / "ranked_stent_candidates.csv",
+            "resistance_map": output_path / "resistance_map_mean.vtp",
+            "metadata_json": output_path / "resistance_map_metadata.json",
+        }
+    suffix = f"_{metric_suffix}"
+    return {
+        "summary_csv": output_path / f"branch_resistance_summary{suffix}.csv",
+        "ranked_csv": output_path / f"ranked_stent_candidates{suffix}.csv",
+        "resistance_map": output_path / f"resistance_map{suffix}.vtp",
+        "metadata_json": output_path / f"resistance_map{suffix}_metadata.json",
+    }
+
+
 def _aggregate_branch_metrics(
     mapped_files: Iterable[tuple[Path, float]],
     *,
@@ -294,11 +350,13 @@ def _aggregate_branch_metrics(
     path_array: str,
     pressure_array: str,
     flow_array: str,
+    metric_suffix: str = "mean",
 ) -> tuple[vtk.vtkPolyData, pd.DataFrame, List[Dict[str, Any]]]:
     mapped_files = list(mapped_files)
     if not mapped_files:
         raise ValueError("no mapped centerline files were produced")
 
+    columns, arrays = _metric_output_names(metric_suffix)
     base_poly = _read_polydata(mapped_files[0][0])
     branch_geometry = _branch_geometry(
         base_poly,
@@ -367,8 +425,9 @@ def _aggregate_branch_metrics(
         resistance_per_cm = float("nan")
         if np.isfinite(flow_mean):
             if abs(flow_mean) <= _FLOW_EPSILON:
-                branch_warning_messages.append("mean flow is zero or near zero")
-                warnings.append(_warning_message(branch_id, "mean flow is zero or near zero"))
+                flow_warning = f"{metric_suffix} flow is zero or near zero"
+                branch_warning_messages.append(flow_warning)
+                warnings.append(_warning_message(branch_id, flow_warning))
             elif np.isfinite(pressure_drop_mean):
                 resistance_mean = pressure_drop_mean / flow_mean
                 if np.isfinite(geometry.length_cm) and geometry.length_cm > 0.0:
@@ -381,35 +440,35 @@ def _aggregate_branch_metrics(
             {
                 "branch_id": branch_id,
                 "segment_length_cm": geometry.length_cm,
-                "pressure_prox_mean": pressure_prox_mean,
-                "pressure_dist_mean": pressure_dist_mean,
-                "pressure_drop_mean": pressure_drop_mean,
-                "flow_mean": flow_mean,
-                "resistance_mean": resistance_mean,
-                "resistance_per_cm": resistance_per_cm,
+                columns["pressure_prox"]: pressure_prox_mean,
+                columns["pressure_dist"]: pressure_dist_mean,
+                columns["pressure_drop"]: pressure_drop_mean,
+                columns["flow"]: flow_mean,
+                columns["resistance"]: resistance_mean,
+                columns["resistance_per_cm"]: resistance_per_cm,
                 "warning": "; ".join(dict.fromkeys(branch_warning_messages)),
             }
         )
 
     summary = pd.DataFrame.from_records(rows).sort_values("branch_id").reset_index(drop=True)
-    valid = summary["resistance_mean"].replace([np.inf, -np.inf], np.nan).notna()
+    valid = summary[columns["resistance"]].replace([np.inf, -np.inf], np.nan).notna()
     ranked = summary.loc[valid].sort_values(
-        ["resistance_mean", "resistance_per_cm"],
+        [columns["resistance"], columns["resistance_per_cm"]],
         ascending=[False, False],
     )
     rank_map = {int(branch_id): idx + 1 for idx, branch_id in enumerate(ranked["branch_id"].tolist())}
-    summary["rank"] = summary["branch_id"].map(rank_map)
+    summary[columns["rank"]] = summary["branch_id"].map(rank_map)
 
     output_poly = vtk.vtkPolyData()
     output_poly.DeepCopy(base_poly)
     for column, array_name in (
-        ("pressure_prox_mean", "branch_pressure_prox_mean"),
-        ("pressure_dist_mean", "branch_pressure_dist_mean"),
-        ("pressure_drop_mean", "branch_pressure_drop_mean"),
-        ("flow_mean", "branch_flow_mean"),
-        ("resistance_mean", "branch_resistance_mean"),
-        ("resistance_per_cm", "branch_resistance_per_cm"),
-        ("rank", "branch_rank"),
+        (columns["pressure_prox"], arrays["pressure_prox"]),
+        (columns["pressure_dist"], arrays["pressure_dist"]),
+        (columns["pressure_drop"], arrays["pressure_drop"]),
+        (columns["flow"], arrays["flow"]),
+        (columns["resistance"], arrays["resistance"]),
+        (columns["resistance_per_cm"], arrays["resistance_per_cm"]),
+        (columns["rank"], arrays["rank"]),
     ):
         values = np.full(output_poly.GetNumberOfPoints(), np.nan, dtype=float)
         for row in summary.itertuples(index=False):
@@ -419,18 +478,23 @@ def _aggregate_branch_metrics(
         vtk_array.SetName(array_name)
         output_poly.GetPointData().AddArray(vtk_array)
 
-    ranked_summary = summary.sort_values(["rank", "branch_id"], na_position="last").reset_index(drop=True)
+    ranked_summary = summary.sort_values([columns["rank"], "branch_id"], na_position="last").reset_index(drop=True)
     return output_poly, ranked_summary, warnings
 
 
-def compute_pulmonary_resistance_map(
+def _compute_pulmonary_resistance_map_for_selected_frames(
     *,
     svslicer_path: str,
     centerline: str,
-    frames_csv: str,
+    selected_frames: pd.DataFrame,
     output_dir: str,
     cycle_duration_s: float,
-    max_frames: int | None = None,
+    available_frame_count: int,
+    selection_window_start_s: float,
+    selection_window_end_s: float,
+    selection_tolerance_s: float,
+    selection_policy: str,
+    metric_suffix: str = "mean",
     keep_intermediate_centerlines: bool = False,
     intermediate_dir: str | None = None,
     workers: int | Literal["auto"] | None = None,
@@ -438,6 +502,7 @@ def compute_pulmonary_resistance_map(
     flow_array: str = "velocity",
     branch_id_array: str = "BranchId",
     path_array: str = "Path",
+    metadata_extra: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     centerline_path = Path(centerline).expanduser().resolve()
     svslicer_executable = Path(svslicer_path).expanduser().resolve()
@@ -448,13 +513,11 @@ def compute_pulmonary_resistance_map(
     if not svslicer_executable.exists():
         raise FileNotFoundError(f"svSlicer executable not found: {svslicer_executable}")
 
-    frames = _load_frames_csv(frames_csv)
-    selected_all, window_start_s, window_end_s, selection_tolerance_s = _select_last_cycle_frames(
-        frames, cycle_duration_s
-    )
-    selected = _subsample_frames(selected_all, max_frames)
-    workers_requested, workers_used = _resolve_workers(workers)
+    selected = selected_frames.reset_index(drop=True).copy()
+    if selected.empty:
+        raise ValueError("selected_frames must contain at least one frame")
 
+    workers_requested, workers_used = _resolve_workers(workers)
     output_path.mkdir(parents=True, exist_ok=True)
     if intermediate_dir is None:
         intermediate_path = output_path / "intermediate_centerlines"
@@ -462,19 +525,18 @@ def compute_pulmonary_resistance_map(
         intermediate_path = Path(intermediate_dir).expanduser().resolve()
     intermediate_path.mkdir(parents=True, exist_ok=True)
 
-    metadata_path = output_path / "resistance_map_metadata.json"
+    artifact_paths = _artifact_paths(output_path, metric_suffix)
     metadata: Dict[str, Any] = {
         "svslicer_path": str(svslicer_executable),
         "centerline": str(centerline_path),
-        "frames_csv": str(Path(frames_csv).expanduser().resolve()),
         "cycle_duration_s": float(cycle_duration_s),
-        "selection_window_start_s": float(window_start_s),
-        "selection_window_end_s": float(window_end_s),
+        "selection_window_start_s": float(selection_window_start_s),
+        "selection_window_end_s": float(selection_window_end_s),
         "selection_tolerance_s": float(selection_tolerance_s),
-        "selection_policy": "all_frames_last_full_cycle",
-        "available_frame_count": int(len(selected_all)),
+        "selection_policy": selection_policy,
+        "available_frame_count": int(available_frame_count),
         "selected_frame_count": int(len(selected)),
-        "max_frames": None if max_frames is None else int(max_frames),
+        "max_frames": None,
         "keep_intermediate_centerlines": bool(keep_intermediate_centerlines),
         "intermediate_dir": str(intermediate_path),
         "pressure_array": pressure_array,
@@ -483,9 +545,13 @@ def compute_pulmonary_resistance_map(
         "path_array": path_array,
         "workers_requested": workers_requested,
         "workers_used": int(workers_used),
+        "metric_suffix": metric_suffix,
         "selected_frames": [],
         "warnings": [],
     }
+    if metadata_extra:
+        metadata.update(metadata_extra)
+
     mapped_files_by_index: dict[int, tuple[Path, float]] = {}
     try:
         if workers_used == 1:
@@ -520,9 +586,18 @@ def compute_pulmonary_resistance_map(
                     mapped_files_by_index[frame_index] = (mapped_path, time_s)
 
         mapped_files = [mapped_files_by_index[index] for index in sorted(mapped_files_by_index)]
-        metadata["selected_frames"] = [
-            {"path": str(path), "time_s": time_s} for path, time_s in mapped_files
-        ]
+        selected_records: list[Dict[str, Any]] = []
+        for frame_index, (mapped_path, time_s) in enumerate(mapped_files):
+            row = selected.iloc[frame_index]
+            record: Dict[str, Any] = {
+                "path": str(mapped_path),
+                "time_s": float(time_s),
+                "source_frame_path": str(row.path),
+            }
+            if "timestep_id" in selected.columns:
+                record["timestep_id"] = int(row.timestep_id)
+            selected_records.append(record)
+        metadata["selected_frames"] = selected_records
 
         resistance_map_poly, summary, warnings = _aggregate_branch_metrics(
             mapped_files,
@@ -530,31 +605,78 @@ def compute_pulmonary_resistance_map(
             path_array=path_array,
             pressure_array=pressure_array,
             flow_array=flow_array,
+            metric_suffix=metric_suffix,
         )
 
-        summary_path = output_path / "branch_resistance_summary.csv"
-        ranked_path = output_path / "ranked_stent_candidates.csv"
-        vtp_path = output_path / "resistance_map_mean.vtp"
-        metadata_path = output_path / "resistance_map_metadata.json"
-
-        summary.to_csv(summary_path, index=False)
-        summary.sort_values(["rank", "branch_id"], na_position="last").to_csv(ranked_path, index=False)
-        _write_polydata(resistance_map_poly, vtp_path)
+        summary.to_csv(artifact_paths["summary_csv"], index=False)
+        summary.sort_values(["rank", "branch_id"], na_position="last").to_csv(
+            artifact_paths["ranked_csv"],
+            index=False,
+        )
+        _write_polydata(resistance_map_poly, artifact_paths["resistance_map"])
 
         metadata["warnings"] = warnings
-        metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+        artifact_paths["metadata_json"].write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
         return {
             "kind": "pulmonary_resistance_map",
+            "metric_suffix": metric_suffix,
             "output_dir": str(output_path),
-            "resistance_map": str(vtp_path),
-            "summary_csv": str(summary_path),
-            "ranked_csv": str(ranked_path),
-            "metadata_json": str(metadata_path),
+            "resistance_map": str(artifact_paths["resistance_map"]),
+            "summary_csv": str(artifact_paths["summary_csv"]),
+            "ranked_csv": str(artifact_paths["ranked_csv"]),
+            "metadata_json": str(artifact_paths["metadata_json"]),
             "selected_frame_count": len(mapped_files),
-            "available_frame_count": len(selected_all),
+            "available_frame_count": int(available_frame_count),
             "intermediate_dir": str(intermediate_path) if keep_intermediate_centerlines else None,
         }
     finally:
         if not keep_intermediate_centerlines and intermediate_path.exists():
             shutil.rmtree(intermediate_path)
+
+
+def compute_pulmonary_resistance_map(
+    *,
+    svslicer_path: str,
+    centerline: str,
+    frames_csv: str,
+    output_dir: str,
+    cycle_duration_s: float,
+    max_frames: int | None = None,
+    keep_intermediate_centerlines: bool = False,
+    intermediate_dir: str | None = None,
+    workers: int | Literal["auto"] | None = None,
+    pressure_array: str = "pressure",
+    flow_array: str = "velocity",
+    branch_id_array: str = "BranchId",
+    path_array: str = "Path",
+) -> Dict[str, Any]:
+    frames = _load_frames_csv(frames_csv)
+    selected_all, window_start_s, window_end_s, selection_tolerance_s = _select_last_cycle_frames(
+        frames, cycle_duration_s
+    )
+    selected = _subsample_frames(selected_all, max_frames)
+    return _compute_pulmonary_resistance_map_for_selected_frames(
+        svslicer_path=svslicer_path,
+        centerline=centerline,
+        selected_frames=selected,
+        output_dir=output_dir,
+        cycle_duration_s=cycle_duration_s,
+        available_frame_count=len(selected_all),
+        selection_window_start_s=window_start_s,
+        selection_window_end_s=window_end_s,
+        selection_tolerance_s=selection_tolerance_s,
+        selection_policy="all_frames_last_full_cycle",
+        metric_suffix="mean",
+        keep_intermediate_centerlines=keep_intermediate_centerlines,
+        intermediate_dir=intermediate_dir,
+        workers=workers,
+        pressure_array=pressure_array,
+        flow_array=flow_array,
+        branch_id_array=branch_id_array,
+        path_array=path_array,
+        metadata_extra={
+            "frames_csv": str(Path(frames_csv).expanduser().resolve()),
+            "max_frames": None if max_frames is None else int(max_frames),
+        },
+    )

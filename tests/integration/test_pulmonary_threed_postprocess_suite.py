@@ -9,6 +9,7 @@ import pyvista as pv
 import pytest
 
 from svzerodtrees.post_processing.pulmonary_threed_suite import (
+    _select_systolic_frame_from_artifacts,
     _clinical_targets_from_input,
     run_pulmonary_threed_postprocess_suite,
     write_mpa_pressure_timeseries_csv,
@@ -85,6 +86,93 @@ def test_write_mpa_pressure_timeseries_csv_matches_expected_contract(monkeypatch
     assert result["bifurcation_id"] == 2
 
 
+def test_select_systolic_frame_from_artifacts_uses_last_cycle_and_earliest_tie(tmp_path: Path):
+    pressure_csv = tmp_path / "mpa_pressure_vs_time.csv"
+    pressure_csv.write_text(
+        "\n".join(
+            [
+                "timestep_id,time_s,mpa_pressure_mmhg",
+                "1,0.0,10.0",
+                "2,0.4,25.0",
+                "3,0.8,25.0",
+                "4,1.2,30.0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    frames_csv = tmp_path / "frames.csv"
+    frames_csv.write_text(
+        "\n".join(
+            [
+                "timestep_id,path,time_s",
+                "1,/tmp/result_0001.vtu,0.0",
+                "2,/tmp/result_0002.vtu,0.4",
+                "3,/tmp/result_0003.vtu,0.8",
+                "4,/tmp/result_0004.vtu,1.2",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    selected, metadata = _select_systolic_frame_from_artifacts(
+        pressure_csv=pressure_csv,
+        frames_csv=frames_csv,
+        cycle_duration_s=0.8,
+    )
+
+    assert selected["timestep_id"].tolist() == [2]
+    assert selected["path"].tolist() == ["/tmp/result_0002.vtu"]
+    assert metadata["selection_mode"] == "max_mpa_pressure_last_cycle"
+    assert metadata["selection_window_start_s"] == pytest.approx(0.4)
+    assert metadata["selection_window_end_s"] == pytest.approx(1.2)
+    assert metadata["selected_timestep_id"] == 2
+    assert metadata["selected_time_s"] == pytest.approx(0.4)
+    assert metadata["selected_pressure_mmhg"] == pytest.approx(25.0)
+    assert metadata["selected_frame_path"] == "/tmp/result_0002.vtu"
+    assert metadata["tie_break_policy"] == "earliest_timestep_id"
+    assert metadata["available_frame_count"] == 2
+
+
+def test_select_systolic_frame_from_artifacts_errors_without_finite_last_cycle_pressure(tmp_path: Path):
+    pressure_csv = tmp_path / "mpa_pressure_vs_time.csv"
+    pressure_csv.write_text(
+        "\n".join(
+            [
+                "timestep_id,time_s,mpa_pressure_mmhg",
+                "1,0.0,10.0",
+                "2,0.4,NaN",
+                "3,0.8,NaN",
+                "4,1.2,30.0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    frames_csv = tmp_path / "frames.csv"
+    frames_csv.write_text(
+        "\n".join(
+            [
+                "timestep_id,path,time_s",
+                "1,/tmp/result_0001.vtu,0.0",
+                "2,/tmp/result_0002.vtu,0.4",
+                "3,/tmp/result_0003.vtu,0.8",
+                "4,/tmp/result_0004.vtu,1.2",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="no overlapping last-cycle frames"):
+        _select_systolic_frame_from_artifacts(
+            pressure_csv=pressure_csv,
+            frames_csv=frames_csv,
+            cycle_duration_s=0.8,
+        )
+
+
 def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypatch, tmp_path: Path):
     centerline_path = tmp_path / "centerlines.vtp"
     _write_centerline(centerline_path)
@@ -142,7 +230,33 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
             "metadata_json": str(metadata),
         }
 
+    def fake_compute_selected_frames(**kwargs):
+        assert kwargs["metric_suffix"] == "systolic"
+        assert kwargs["selection_policy"] == "max_mpa_pressure_last_cycle"
+        assert kwargs["selected_frames"]["timestep_id"].tolist() == [2]
+        resistance_dir = Path(kwargs["output_dir"])
+        resistance_dir.mkdir(parents=True, exist_ok=True)
+        summary = resistance_dir / "branch_resistance_summary_systolic.csv"
+        ranked = resistance_dir / "ranked_stent_candidates_systolic.csv"
+        vtp = resistance_dir / "resistance_map_systolic.vtp"
+        metadata = resistance_dir / "resistance_map_systolic_metadata.json"
+        pd.DataFrame([{"branch_id": 1, "resistance_systolic": 5.0}]).to_csv(summary, index=False)
+        pd.DataFrame([{"branch_id": 1, "rank": 1}]).to_csv(ranked, index=False)
+        line = pv.Line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+        line.point_data["branch_resistance_systolic"] = np.array([5.0, 5.0], dtype=float)
+        line.save(vtp)
+        metadata.write_text(json.dumps({"selected_frames": []}), encoding="utf-8")
+        return {
+            "resistance_map": str(vtp),
+            "summary_csv": str(summary),
+            "ranked_csv": str(ranked),
+            "metadata_json": str(metadata),
+        }
+
+    render_calls: list[dict[str, object]] = []
+
     def fake_render_png(**kwargs):
+        render_calls.append(kwargs)
         output = Path(kwargs["output_png"])
         output.write_bytes(b"png")
         return str(output)
@@ -159,6 +273,10 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
     monkeypatch.setattr(
         "svzerodtrees.post_processing.pulmonary_threed_suite.compute_pulmonary_resistance_map",
         fake_compute_pulmonary_resistance_map,
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.post_processing.pulmonary_threed_suite._compute_pulmonary_resistance_map_for_selected_frames",
+        fake_compute_selected_frames,
     )
     monkeypatch.setattr(
         "svzerodtrees.post_processing.pulmonary_threed_suite.render_resistance_map_png",
@@ -186,7 +304,18 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
     assert (output_dir / "branch_resistance_summary.csv").exists()
     assert (output_dir / "ranked_stent_candidates.csv").exists()
     assert (output_dir / "resistance_map_mean.png").exists()
+    assert (output_dir / "resistance_map_systolic.vtp").exists()
+    assert (output_dir / "branch_resistance_summary_systolic.csv").exists()
+    assert (output_dir / "ranked_stent_candidates_systolic.csv").exists()
+    assert (output_dir / "resistance_map_systolic.png").exists()
     assert Path(result["metadata_json"]).exists()
+    assert result["steps"]["resistance_map_systolic"]["status"] == "completed"
+    assert "resistance_map_systolic" in result
+
+    frames = pd.read_csv(output_dir / "frames.csv")
+    assert list(frames.columns) == ["timestep_id", "path", "time_s"]
+    assert render_calls[0].get("scalar_name", "branch_resistance_mean") == "branch_resistance_mean"
+    assert render_calls[1]["scalar_name"] == "branch_resistance_systolic"
 
     flow_split = pd.read_csv(output_dir / "flow_split_comparison.csv")
     assert flow_split["vessel"].tolist() == ["lpa", "rpa"]
@@ -277,6 +406,27 @@ def test_run_pulmonary_threed_postprocess_suite_tolerates_invalid_overlay_target
             "metadata_json": str(metadata),
         }
 
+    def fake_compute_selected_frames(**kwargs):
+        assert kwargs["metric_suffix"] == "systolic"
+        resistance_dir = Path(kwargs["output_dir"])
+        resistance_dir.mkdir(parents=True, exist_ok=True)
+        summary = resistance_dir / "branch_resistance_summary_systolic.csv"
+        ranked = resistance_dir / "ranked_stent_candidates_systolic.csv"
+        vtp = resistance_dir / "resistance_map_systolic.vtp"
+        metadata = resistance_dir / "resistance_map_systolic_metadata.json"
+        pd.DataFrame([{"branch_id": 2, "resistance_systolic": 6.0}]).to_csv(summary, index=False)
+        pd.DataFrame([{"branch_id": 2, "rank": 1}]).to_csv(ranked, index=False)
+        line = pv.Line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+        line.point_data["branch_resistance_systolic"] = np.array([6.0, 6.0], dtype=float)
+        line.save(vtp)
+        metadata.write_text(json.dumps({"selected_frames": []}), encoding="utf-8")
+        return {
+            "resistance_map": str(vtp),
+            "summary_csv": str(summary),
+            "ranked_csv": str(ranked),
+            "metadata_json": str(metadata),
+        }
+
     def fake_render_png(**kwargs):
         output = Path(kwargs["output_png"])
         output.write_bytes(b"png")
@@ -294,6 +444,10 @@ def test_run_pulmonary_threed_postprocess_suite_tolerates_invalid_overlay_target
     monkeypatch.setattr(
         "svzerodtrees.post_processing.pulmonary_threed_suite.compute_pulmonary_resistance_map",
         fake_compute_pulmonary_resistance_map,
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.post_processing.pulmonary_threed_suite._compute_pulmonary_resistance_map_for_selected_frames",
+        fake_compute_selected_frames,
     )
     monkeypatch.setattr(
         "svzerodtrees.post_processing.pulmonary_threed_suite.render_resistance_map_png",
@@ -317,5 +471,7 @@ def test_run_pulmonary_threed_postprocess_suite_tolerates_invalid_overlay_target
     assert (output_dir / "mpa_pressure_vs_time.png").exists()
     assert (output_dir / "flow_split_comparison.png").exists()
     assert (output_dir / "resistance_map_mean.png").exists()
+    assert (output_dir / "resistance_map_systolic.png").exists()
     assert result["steps"]["pressure"]["status"] == "completed"
     assert result["steps"]["resistance_map"]["status"] == "completed"
+    assert result["steps"]["resistance_map_systolic"]["status"] == "completed"

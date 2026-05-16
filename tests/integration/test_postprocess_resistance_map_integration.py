@@ -12,6 +12,9 @@ import vtk
 from vtk.util.numpy_support import numpy_to_vtk
 
 from svzerodtrees.post_processing import compute_pulmonary_resistance_map
+from svzerodtrees.post_processing.resistance_map import (
+    _compute_pulmonary_resistance_map_for_selected_frames,
+)
 
 
 def _write_centerline(path: Path) -> None:
@@ -181,6 +184,78 @@ def test_compute_pulmonary_resistance_map_with_mocked_svslicer(monkeypatch, tmp_
     assert metadata["workers_used"] == 1
     assert not (tmp_path / "out" / "intermediate_centerlines").exists()
     assert Path(result["resistance_map"]).exists()
+
+
+def test_compute_pulmonary_resistance_map_for_selected_frames_writes_systolic_outputs(
+    monkeypatch, tmp_path: Path
+):
+    svslicer = tmp_path / "svslicer"
+    svslicer.write_text("#!/bin/sh\n", encoding="utf-8")
+    centerline = tmp_path / "centerlines.vtp"
+    _write_centerline(centerline)
+
+    selected_frame = tmp_path / "result_0002.vtu"
+    selected_frame.write_text("dummy", encoding="utf-8")
+    selected_frames = pd.DataFrame(
+        [
+            {
+                "timestep_id": 2,
+                "path": str(selected_frame),
+                "time_s": 0.4,
+            }
+        ]
+    )
+
+    def fake_run(cmd, capture_output, text, check):
+        _write_mapped_centerline(
+            Path(cmd[3]),
+            pressure=[110.0, 90.0, 110.0, 75.0],
+            velocity=[5.0, 5.0, 2.5, 2.5],
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr("svzerodtrees.post_processing.resistance_map.subprocess.run", fake_run)
+
+    result = _compute_pulmonary_resistance_map_for_selected_frames(
+        svslicer_path=str(svslicer),
+        centerline=str(centerline),
+        selected_frames=selected_frames,
+        output_dir=str(tmp_path / "out"),
+        cycle_duration_s=0.8,
+        available_frame_count=2,
+        selection_window_start_s=0.4,
+        selection_window_end_s=1.2,
+        selection_tolerance_s=1e-9,
+        selection_policy="max_mpa_pressure_last_cycle",
+        metric_suffix="systolic",
+        metadata_extra={
+            "selection_mode": "max_mpa_pressure_last_cycle",
+            "selected_timestep_id": 2,
+            "selected_time_s": 0.4,
+            "selected_pressure_mmhg": 25.0,
+            "selected_frame_path": str(selected_frame),
+            "tie_break_policy": "earliest_timestep_id",
+        },
+    )
+
+    summary = pd.read_csv(result["summary_csv"])
+    metadata = json.loads(Path(result["metadata_json"]).read_text(encoding="utf-8"))
+    reader = vtk.vtkXMLPolyDataReader()
+    reader.SetFileName(result["resistance_map"])
+    reader.Update()
+    poly = reader.GetOutput()
+
+    branch1 = summary.loc[summary["branch_id"] == 1].iloc[0]
+    assert branch1["pressure_drop_systolic"] == pytest.approx(20.0)
+    assert branch1["flow_systolic"] == pytest.approx(5.0)
+    assert branch1["resistance_systolic"] == pytest.approx(4.0)
+    assert metadata["selection_policy"] == "max_mpa_pressure_last_cycle"
+    assert metadata["selection_mode"] == "max_mpa_pressure_last_cycle"
+    assert metadata["selected_timestep_id"] == 2
+    assert metadata["selected_frames"][0]["timestep_id"] == 2
+    assert metadata["selected_frames"][0]["source_frame_path"] == str(selected_frame)
+    assert poly.GetPointData().GetArray("branch_resistance_systolic") is not None
+    assert Path(result["resistance_map"]).name == "resistance_map_systolic.vtp"
 
 
 def test_compute_pulmonary_resistance_map_selects_all_last_cycle_frames_in_exact_mode(

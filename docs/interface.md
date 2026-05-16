@@ -200,7 +200,9 @@ Supported analysis `kind` values:
 `pulmonary_resistance_map` options:
 - `svslicer_path`: required path to the `svslicer` executable
 - `centerline`: required `centerlines.vtp`
-- `frames_csv`: required CSV with columns `path,time_s`
+- `frames_csv`: required CSV with columns `path,time_s`; `timestep_id` is also
+  accepted and is written automatically by the 3D postprocess suite for
+  downstream frame selection
 - `cycle_duration_s`: required last-cycle selection window. The resistance map
   now uses the exact temporal mean over the final full cardiac period defined
   as the half-open interval `[t_end - cycle_duration_s, t_end)` so the terminal
@@ -232,6 +234,17 @@ If `clinical_targets` is missing or malformed, the suite still generates the
 pressure plot, flow-split plot, frame manifest, and resistance-map artifacts,
 but omits target overlays/comparison values and records a warning in
 `postprocess_suite_metadata.json`.
+
+The suite writes both a mean resistance-map family and a systolic
+resistance-map family. Systole is defined as the frame in the final full
+cardiac cycle where the simulated MPA centerline pressure reaches its maximum;
+ties are broken by earliest `timestep_id`. Additional suite outputs include:
+- `resistance_map_mean.vtp` and `resistance_map_mean.png`
+- `branch_resistance_summary.csv` and `ranked_stent_candidates.csv`
+- `resistance_map_metadata.json`
+- `resistance_map_systolic.vtp` and `resistance_map_systolic.png`
+- `branch_resistance_summary_systolic.csv` and `ranked_stent_candidates_systolic.csv`
+- `resistance_map_systolic_metadata.json`
 
 Example:
 ```yaml
