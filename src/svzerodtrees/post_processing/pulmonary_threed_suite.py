@@ -559,6 +559,44 @@ def _select_systolic_frame_from_artifacts(
     }
 
 
+def _attach_mean_mapped_centerlines_to_selected_frames(
+    *,
+    selected_frames: pd.DataFrame,
+    mean_metadata_json: str | Path,
+) -> pd.DataFrame:
+    metadata = json.loads(Path(mean_metadata_json).read_text(encoding="utf-8"))
+    selected_records = metadata.get("selected_frames", [])
+    if not isinstance(selected_records, list) or not selected_records:
+        raise ValueError("mean resistance-map metadata does not contain selected_frames")
+    mapped_records = pd.DataFrame(selected_records)
+    required_columns = {"path", "source_frame_path"}
+    missing = required_columns.difference(mapped_records.columns)
+    if missing:
+        raise ValueError(
+            "mean resistance-map metadata selected_frames must contain columns: "
+            + ", ".join(sorted(required_columns))
+        )
+
+    enriched = selected_frames.copy()
+    enriched["source_frame_path"] = enriched["path"].astype(str)
+    mapped_records = mapped_records.rename(columns={"path": "mapped_path"})
+    merge_keys = ["source_frame_path"]
+    if "timestep_id" in enriched.columns and "timestep_id" in mapped_records.columns:
+        merge_keys = ["timestep_id", "source_frame_path"]
+    enriched = enriched.merge(
+        mapped_records.loc[:, [*merge_keys, "mapped_path"]],
+        on=merge_keys,
+        how="left",
+    )
+    if enriched["mapped_path"].isna().any():
+        missing_sources = enriched.loc[enriched["mapped_path"].isna(), "source_frame_path"].tolist()
+        raise ValueError(
+            "failed to match systolic frame(s) to mean resistance-map intermediates: "
+            + ", ".join(missing_sources)
+        )
+    return enriched
+
+
 def run_pulmonary_threed_postprocess_suite(
     *,
     simulation_dir: str | Path,
@@ -687,6 +725,7 @@ def run_pulmonary_threed_postprocess_suite(
             frames_csv=str(frames_csv),
             output_dir=str(resistance_dir),
             cycle_duration_s=float(cycle_duration_s),
+            keep_intermediate_centerlines=True,
             workers=resistance_map_workers,
         )
         shutil.copyfile(resistance_result["resistance_map"], resistance_map_vtp)
@@ -705,6 +744,10 @@ def run_pulmonary_threed_postprocess_suite(
             pressure_csv=pressure_csv,
             frames_csv=frames_csv,
             cycle_duration_s=float(cycle_duration_s),
+        )
+        systolic_frames = _attach_mean_mapped_centerlines_to_selected_frames(
+            selected_frames=systolic_frames,
+            mean_metadata_json=resistance_result["metadata_json"],
         )
         resistance_systolic_result = _compute_pulmonary_resistance_map_for_selected_frames(
             svslicer_path=svslicer_path,
@@ -738,6 +781,22 @@ def run_pulmonary_threed_postprocess_suite(
             "result": resistance_systolic_result,
         }
         metadata["resistance_map_systolic"] = resistance_systolic_result
+
+        intermediate_dir = resistance_result.get("intermediate_dir")
+        if intermediate_dir:
+            shutil.rmtree(intermediate_dir, ignore_errors=True)
+            resistance_result["intermediate_dir"] = None
+            mean_metadata = json.loads(Path(resistance_result["metadata_json"]).read_text(encoding="utf-8"))
+            mean_metadata["keep_intermediate_centerlines"] = False
+            mean_metadata["intermediate_dir"] = None
+            Path(resistance_result["metadata_json"]).write_text(
+                json.dumps(mean_metadata, indent=2),
+                encoding="utf-8",
+            )
+            Path(resistance_metadata_json).write_text(
+                json.dumps(mean_metadata, indent=2),
+                encoding="utf-8",
+            )
 
         metadata["status"] = "completed"
         metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")

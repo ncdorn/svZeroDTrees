@@ -213,27 +213,50 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
     def fake_compute_pulmonary_resistance_map(**kwargs):
         assert "max_frames" not in kwargs
         assert kwargs["workers"] == "auto"
+        assert kwargs["keep_intermediate_centerlines"] is True
         resistance_dir = Path(kwargs["output_dir"])
         resistance_dir.mkdir(parents=True, exist_ok=True)
         summary = resistance_dir / "branch_resistance_summary.csv"
         ranked = resistance_dir / "ranked_stent_candidates.csv"
         vtp = resistance_dir / "resistance_map_mean.vtp"
         metadata = resistance_dir / "resistance_map_metadata.json"
+        intermediate_dir = resistance_dir / "intermediate_centerlines"
+        intermediate_dir.mkdir(parents=True, exist_ok=True)
+        mapped_frame = intermediate_dir / "0000_result_0002_centerline.vtp"
+        mapped_frame.write_text("<vtk/>", encoding="utf-8")
         pd.DataFrame([{"branch_id": 1, "resistance_mean": 3.0}]).to_csv(summary, index=False)
         pd.DataFrame([{"branch_id": 1, "rank": 1}]).to_csv(ranked, index=False)
         pv.Line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)).save(vtp)
-        metadata.write_text(json.dumps({"selected_frames": []}), encoding="utf-8")
+        metadata.write_text(
+            json.dumps(
+                {
+                    "selected_frames": [
+                        {
+                            "timestep_id": 2,
+                            "source_frame_path": str(sim_dir / "result_0002.vtu"),
+                            "path": str(mapped_frame),
+                        }
+                    ],
+                    "keep_intermediate_centerlines": True,
+                    "intermediate_dir": str(intermediate_dir),
+                }
+            ),
+            encoding="utf-8",
+        )
         return {
             "resistance_map": str(vtp),
             "summary_csv": str(summary),
             "ranked_csv": str(ranked),
             "metadata_json": str(metadata),
+            "intermediate_dir": str(intermediate_dir),
         }
 
     def fake_compute_selected_frames(**kwargs):
         assert kwargs["metric_suffix"] == "systolic"
         assert kwargs["selection_policy"] == "max_mpa_pressure_last_cycle"
         assert kwargs["selected_frames"]["timestep_id"].tolist() == [2]
+        assert kwargs["selected_frames"]["source_frame_path"].tolist() == [str(sim_dir / "result_0002.vtu")]
+        assert kwargs["selected_frames"]["mapped_path"].iloc[0].endswith("0000_result_0002_centerline.vtp")
         resistance_dir = Path(kwargs["output_dir"])
         resistance_dir.mkdir(parents=True, exist_ok=True)
         summary = resistance_dir / "branch_resistance_summary_systolic.csv"
@@ -311,6 +334,15 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
     assert Path(result["metadata_json"]).exists()
     assert result["steps"]["resistance_map_systolic"]["status"] == "completed"
     assert "resistance_map_systolic" in result
+    assert result["resistance_map"]["intermediate_dir"] is None
+    assert not (output_dir / "resistance_map" / "intermediate_centerlines").exists()
+
+    mean_metadata = json.loads((output_dir / "resistance_map" / "resistance_map_metadata.json").read_text(encoding="utf-8"))
+    assert mean_metadata["keep_intermediate_centerlines"] is False
+    assert mean_metadata["intermediate_dir"] is None
+    top_level_mean_metadata = json.loads((output_dir / "resistance_map_metadata.json").read_text(encoding="utf-8"))
+    assert top_level_mean_metadata["keep_intermediate_centerlines"] is False
+    assert top_level_mean_metadata["intermediate_dir"] is None
 
     frames = pd.read_csv(output_dir / "frames.csv")
     assert list(frames.columns) == ["timestep_id", "path", "time_s"]

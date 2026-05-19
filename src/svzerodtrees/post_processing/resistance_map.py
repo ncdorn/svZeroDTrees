@@ -300,6 +300,18 @@ def _map_frame(
     return frame_index, mapped_path, time_s
 
 
+def _precomputed_mapped_path(row: pd.Series) -> Path | None:
+    if "mapped_path" not in row.index:
+        return None
+    raw_value = row["mapped_path"]
+    if raw_value is None or pd.isna(raw_value):
+        return None
+    mapped_path = Path(str(raw_value)).expanduser().resolve()
+    if not mapped_path.exists():
+        raise FileNotFoundError(f"precomputed mapped centerline not found: {mapped_path}")
+    return mapped_path
+
+
 def _metric_output_names(metric_suffix: str) -> tuple[dict[str, str], dict[str, str]]:
     metric = str(metric_suffix).strip()
     if not metric:
@@ -554,32 +566,41 @@ def _compute_pulmonary_resistance_map_for_selected_frames(
 
     mapped_files_by_index: dict[int, tuple[Path, float]] = {}
     try:
+        scheduled_rows: list[tuple[int, pd.Series]] = []
+        for frame_index in range(len(selected)):
+            row = selected.iloc[frame_index]
+            mapped_path = _precomputed_mapped_path(row)
+            if mapped_path is not None:
+                mapped_files_by_index[frame_index] = (mapped_path, float(row["time_s"]))
+            else:
+                scheduled_rows.append((frame_index, row))
+
         if workers_used == 1:
-            for frame_index, row in enumerate(selected.itertuples(index=False)):
+            for frame_index, row in scheduled_rows:
                 _, mapped_path, time_s = _map_frame(
                     frame_index=frame_index,
-                    frame_path=str(row.path),
-                    time_s=float(row.time_s),
+                    frame_path=str(row["path"]),
+                    time_s=float(row["time_s"]),
                     intermediate_path=intermediate_path,
                     svslicer_executable=svslicer_executable,
                     centerline_path=centerline_path,
                     total_frames=len(selected),
                 )
                 mapped_files_by_index[frame_index] = (mapped_path, time_s)
-        else:
+        elif scheduled_rows:
             with concurrent.futures.ThreadPoolExecutor(max_workers=workers_used) as executor:
                 future_map = {
                     executor.submit(
                         _map_frame,
                         frame_index=frame_index,
-                        frame_path=str(row.path),
-                        time_s=float(row.time_s),
+                        frame_path=str(row["path"]),
+                        time_s=float(row["time_s"]),
                         intermediate_path=intermediate_path,
                         svslicer_executable=svslicer_executable,
                         centerline_path=centerline_path,
                         total_frames=len(selected),
                     ): frame_index
-                    for frame_index, row in enumerate(selected.itertuples(index=False))
+                    for frame_index, row in scheduled_rows
                 }
                 for future in concurrent.futures.as_completed(future_map):
                     frame_index, mapped_path, time_s = future.result()
@@ -592,10 +613,10 @@ def _compute_pulmonary_resistance_map_for_selected_frames(
             record: Dict[str, Any] = {
                 "path": str(mapped_path),
                 "time_s": float(time_s),
-                "source_frame_path": str(row.path),
+                "source_frame_path": str(row["source_frame_path"]) if "source_frame_path" in row.index else str(row["path"]),
             }
             if "timestep_id" in selected.columns:
-                record["timestep_id"] = int(row.timestep_id)
+                record["timestep_id"] = int(row["timestep_id"])
             selected_records.append(record)
         metadata["selected_frames"] = selected_records
 

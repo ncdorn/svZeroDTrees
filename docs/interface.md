@@ -238,7 +238,9 @@ but omits target overlays/comparison values and records a warning in
 The suite writes both a mean resistance-map family and a systolic
 resistance-map family. Systole is defined as the frame in the final full
 cardiac cycle where the simulated MPA centerline pressure reaches its maximum;
-ties are broken by earliest `timestep_id`. Additional suite outputs include:
+ties are broken by earliest `timestep_id`. The systolic map reuses the mapped
+centerline intermediates generated for the mean map instead of remapping the
+selected frame. Additional suite outputs include:
 - `resistance_map_mean.vtp` and `resistance_map_mean.png`
 - `branch_resistance_summary.csv` and `ranked_stent_candidates.csv`
 - `resistance_map_metadata.json`

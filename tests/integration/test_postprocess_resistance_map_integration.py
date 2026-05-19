@@ -258,6 +258,59 @@ def test_compute_pulmonary_resistance_map_for_selected_frames_writes_systolic_ou
     assert Path(result["resistance_map"]).name == "resistance_map_systolic.vtp"
 
 
+def test_compute_pulmonary_resistance_map_for_selected_frames_reuses_precomputed_mapped_paths(
+    monkeypatch, tmp_path: Path
+):
+    svslicer = tmp_path / "svslicer"
+    svslicer.write_text("#!/bin/sh\n", encoding="utf-8")
+    centerline = tmp_path / "centerlines.vtp"
+    _write_centerline(centerline)
+
+    selected_frame = tmp_path / "result_0002.vtu"
+    selected_frame.write_text("dummy", encoding="utf-8")
+    mapped_frame = tmp_path / "intermediate_centerlines" / "0000_result_0002_centerline.vtp"
+    mapped_frame.parent.mkdir(parents=True, exist_ok=True)
+    _write_mapped_centerline(
+        mapped_frame,
+        pressure=[110.0, 90.0, 110.0, 75.0],
+        velocity=[5.0, 5.0, 2.5, 2.5],
+    )
+    selected_frames = pd.DataFrame(
+        [
+            {
+                "timestep_id": 2,
+                "path": str(selected_frame),
+                "source_frame_path": str(selected_frame),
+                "mapped_path": str(mapped_frame),
+                "time_s": 0.4,
+            }
+        ]
+    )
+
+    def fail_run(*args, **kwargs):
+        raise AssertionError("svslicer should not run when mapped_path is already available")
+
+    monkeypatch.setattr("svzerodtrees.post_processing.resistance_map.subprocess.run", fail_run)
+
+    result = _compute_pulmonary_resistance_map_for_selected_frames(
+        svslicer_path=str(svslicer),
+        centerline=str(centerline),
+        selected_frames=selected_frames,
+        output_dir=str(tmp_path / "out"),
+        cycle_duration_s=0.8,
+        available_frame_count=2,
+        selection_window_start_s=0.4,
+        selection_window_end_s=1.2,
+        selection_tolerance_s=1e-9,
+        selection_policy="max_mpa_pressure_last_cycle",
+        metric_suffix="systolic",
+    )
+
+    metadata = json.loads(Path(result["metadata_json"]).read_text(encoding="utf-8"))
+    assert metadata["selected_frames"][0]["path"] == str(mapped_frame.resolve())
+    assert metadata["selected_frames"][0]["source_frame_path"] == str(selected_frame)
+
+
 def test_compute_pulmonary_resistance_map_selects_all_last_cycle_frames_in_exact_mode(
     monkeypatch, tmp_path: Path
 ):

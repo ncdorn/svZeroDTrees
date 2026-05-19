@@ -100,7 +100,8 @@ PipelineWorkflow.from_config(cfg).run()
   enable bounded frame-level parallelism during svSlicer centerline mapping.
   The 3D suite writes both a mean resistance map and a systolic resistance map,
   where systole is the maximum simulated MPA centerline pressure in the final
-  full cardiac cycle.
+  full cardiac cycle, and the systolic map reuses the mapped centerline
+  intermediates generated for the mean map instead of remapping the frame.
 
 **Outputs**
 Typical outputs are written under `paths.root` and include:
