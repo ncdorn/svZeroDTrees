@@ -105,13 +105,40 @@ def _dijkstra(graph: dict[int, dict[int, float]], start: int) -> tuple[dict[int,
     return dist, prev
 
 
-def _find_first_bifurcation(graph: dict[int, dict[int, float]], root_id: int) -> int:
+def _line_incidence_counts(lines: np.ndarray) -> dict[int, int]:
+    counts: dict[int, int] = {}
+    i = 0
+    while i < len(lines):
+        n = int(lines[i])
+        ids = lines[i + 1 : i + 1 + n]
+        for point_id in ids:
+            pid = int(point_id)
+            counts[pid] = counts.get(pid, 0) + 1
+        i += n + 1
+    return counts
+
+
+def _find_first_bifurcation(
+    graph: dict[int, dict[int, float]],
+    root_id: int,
+    *,
+    line_incidence: Mapping[int, int] | None = None,
+) -> int:
     dist, _ = _dijkstra(graph, root_id)
-    candidates = [
-        node_id
-        for node_id, neighbors in graph.items()
-        if len(neighbors) >= 3 and node_id != root_id and node_id in dist
-    ]
+    if line_incidence is not None:
+        candidates = [
+            node_id
+            for node_id, count in line_incidence.items()
+            if count >= 2 and node_id != root_id and node_id in dist
+        ]
+    else:
+        candidates = []
+    if not candidates:
+        candidates = [
+            node_id
+            for node_id, neighbors in graph.items()
+            if len(neighbors) >= 3 and node_id != root_id and node_id in dist
+        ]
     if not candidates:
         raise ValueError("could not detect a bifurcation node with degree >= 3")
     candidates.sort(key=lambda node_id: dist[node_id])
@@ -264,13 +291,14 @@ def write_mpa_pressure_timeseries_csv(
     _compute_arc_length(centerline_poly)
 
     graph = _build_graph(centerline_poly)
+    line_incidence = _line_incidence_counts(centerline_poly.lines)
     if root_id not in graph:
         raise ValueError(f"root_id {root_id} is not a valid connected centerline point")
 
     resolved_bifurcation_id = (
         int(bifurcation_id)
         if bifurcation_id is not None
-        else _find_first_bifurcation(graph, root_id)
+        else _find_first_bifurcation(graph, root_id, line_incidence=line_incidence)
     )
     dist, prev = _dijkstra(graph, root_id)
     if resolved_bifurcation_id not in dist:
@@ -493,12 +521,14 @@ def _select_systolic_frame_from_artifacts(
     frames_csv: str | Path,
     cycle_duration_s: float,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    frames = _load_frames_csv(frames_csv)
+    frames = _load_frames_csv(frames_csv, require_existing_paths=False)
     if "timestep_id" not in frames.columns:
         raise ValueError("frames.csv must include timestep_id for systolic frame selection")
     selected_frames, window_start_s, window_end_s, selection_tolerance_s = _select_last_cycle_frames(
         frames,
         cycle_duration_s,
+        return_metadata=True,
+        include_endpoint=False,
     )
 
     pressure_df = pd.read_csv(pressure_csv)
@@ -566,8 +596,13 @@ def _attach_mean_mapped_centerlines_to_selected_frames(
 ) -> pd.DataFrame:
     metadata = json.loads(Path(mean_metadata_json).read_text(encoding="utf-8"))
     selected_records = metadata.get("selected_frames", [])
-    if not isinstance(selected_records, list) or not selected_records:
-        raise ValueError("mean resistance-map metadata does not contain selected_frames")
+    if not isinstance(selected_records, list):
+        raise ValueError("mean resistance-map metadata selected_frames must be a list")
+    if not selected_records:
+        enriched = selected_frames.copy()
+        enriched["source_frame_path"] = enriched["path"].astype(str)
+        enriched["mapped_path"] = enriched["source_frame_path"]
+        return enriched
     mapped_records = pd.DataFrame(selected_records)
     required_columns = {"path", "source_frame_path"}
     missing = required_columns.difference(mapped_records.columns)

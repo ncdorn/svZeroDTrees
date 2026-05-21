@@ -19,18 +19,20 @@ from svzerodtrees.io.blocks.boundary_condition import (
     validate_flow_cardiac_output_config,
     validate_impedance_timing_config,
 )
-from svzerodtrees.microvasculature import TreeParameters
-from svzerodtrees.simulation import SimulationDirectory
+from svzerodtrees.microvasculature.treeparams import TreeParameters
+from svzerodtrees.simulation.simulation_directory import SimulationDirectory
 from svzerodtrees.simulation.threedutils import get_pa_outlet_scale, vtp_info
-from svzerodtrees.tune_bcs import (
-    ClinicalTargets,
-    FixedParam,
-    FreeParam,
-    ImpedanceTuner,
-    TiedParam,
-    TuneSpace,
+from svzerodtrees.tune_bcs.assign_bcs import (
     construct_impedance_trees,
     validate_cap_to_bc_mapping,
+)
+from svzerodtrees.tune_bcs.clinical_targets import ClinicalTargets
+from svzerodtrees.tune_bcs.impedance_tuner import ImpedanceTuner
+from svzerodtrees.tune_bcs.tune_space import (
+    FixedParam,
+    FreeParam,
+    TiedParam,
+    TuneSpace,
     positive,
     unit_interval,
 )

@@ -6,11 +6,26 @@ import numpy as np
 from ..io import *
 from ..io.blocks.boundary_condition import resolve_impedance_timepoint_contract
 from ..utils import *
-from ..microvasculature import StructuredTree, TreeParameters
+from ..microvasculature.structured_tree.structuredtree import StructuredTree
+from ..microvasculature.treeparams import TreeParameters
 from ..simulation.threedutils import vtp_info
 from .utils import *
 
 # this is where the logic for assigning boundary conditions to the 3D model is implemented
+
+
+def _create_impedance_bc(tree, bc_name, outlet_id, pd, *, verbose):
+    try:
+        return tree.create_impedance_bc(
+            bc_name,
+            outlet_id,
+            pd,
+            verbose=verbose,
+        )
+    except TypeError as exc:
+        if "verbose" not in str(exc):
+            raise
+        return tree.create_impedance_bc(bc_name, outlet_id, pd)
 
 
 def _attach_tree_metadata(tree, params, *, generation_mode, side, bc_names, outlet_names):
@@ -269,7 +284,8 @@ def construct_impedance_trees(config_handler,
                 print(f'generating tree {idx + 1} of {len(cap_info)} for cap {cap_name}...')
             if 'lpa' in cap_name.lower():
                 bc_name = cap_to_bc[cap_name]
-                config_handler.bcs[cap_to_bc[cap_name]] = lpa_tree.create_impedance_bc(
+                config_handler.bcs[cap_to_bc[cap_name]] = _create_impedance_bc(
+                    lpa_tree,
                     bc_name,
                     0,
                     wedge_pressure * 1333.2,
@@ -280,7 +296,8 @@ def construct_impedance_trees(config_handler,
                 lpa_outlet_names.append(cap_name)
             elif 'rpa' in cap_name.lower():
                 bc_name = cap_to_bc[cap_name]
-                config_handler.bcs[cap_to_bc[cap_name]] = rpa_tree.create_impedance_bc(
+                config_handler.bcs[cap_to_bc[cap_name]] = _create_impedance_bc(
+                    rpa_tree,
                     bc_name,
                     1,
                     wedge_pressure * 1333.2,
@@ -352,7 +369,8 @@ def construct_impedance_trees(config_handler,
 
             bc_name = cap_to_bc[cap_name]
 
-            config_handler.bcs[bc_name] = tree.create_impedance_bc(
+            config_handler.bcs[bc_name] = _create_impedance_bc(
+                tree,
                 bc_name,
                 idx,
                 wedge_pressure * 1333.2,

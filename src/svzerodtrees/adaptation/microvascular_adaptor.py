@@ -14,13 +14,14 @@ from ..io.blocks.boundary_condition import (
     resolve_coupled_impedance_timepoint_contract,
     resolve_impedance_timepoint_contract,
 )
-from ..microvasculature import StructuredTree, TreeParameters
+from ..microvasculature.structured_tree.structuredtree import StructuredTree
+from ..microvasculature.treeparams import TreeParameters
 from ..simulation.simulation_directory import SimulationDirectory
 from ..simulation.threedutils import vtp_info
 from ..tune_bcs.clinical_targets import ClinicalTargets
 from ..utils import *
 from .integrator import run_adaptation
-from .models import CWSSIMSAdaptation
+from .models import CWSSAdaptation, CWSSIMSAdaptation
 from .setup import *
 
 
@@ -186,6 +187,7 @@ class MicrovascularAdaptor:
         self.method = method
         self.location = location
         self.bc_type = bc_type
+        self.n_iter = int(n_iter)
         self.tree_params: Dict[str, TreeParameters] = {}
         self.lpa_tree = None
         self.rpa_tree = None
@@ -243,7 +245,7 @@ class MicrovascularAdaptor:
         postop_lpa_flow, postop_rpa_flow = sum_flows(self.postop_simdir)
 
         if self.method == 'cwss':
-            self.lpa_tree.adapt_constant_wss(Q=preop_lpa_flow, Q_new=postop_lpa_flow, n_itern=self.n_iter)
+            self.lpa_tree.adapt_constant_wss(Q=preop_lpa_flow, Q_new=postop_lpa_flow, n_iter=self.n_iter)
             self.rpa_tree.adapt_constant_wss(Q=preop_rpa_flow, Q_new=postop_rpa_flow, n_iter=self.n_iter)
         elif self.method == 'wss-ims':
             self.lpa_tree.adapt_wss_ims(Q=preop_lpa_flow, Q_new=postop_lpa_flow, n_iter=self.n_iter)
@@ -340,10 +342,21 @@ class MicrovascularAdaptor:
         print("saving adapted config to " + self.adapted_simdir.svzerod_3Dcoupling.path)
         self.adapted_simdir.svzerod_3Dcoupling.to_json(self.adapted_simdir.svzerod_3Dcoupling.path)
 
-    def adapt_cwss(self, n_iter: int = 100):
+    def adapt_cwss(
+        self,
+        n_iter: int = 100,
+        *,
+        wss_gain: float = 0.01,
+        t_end: float | None = None,
+        rtol: float = 1e-6,
+        atol: float = 1e-7,
+        max_step: float = 60.0,
+    ):
         """
-        Adapt microvasculature using the constant wall shear stress assumption by scaling
-        the structured tree diameters based on pre/post flow ratios.
+        Adapt microvasculature using a stable WSS-only ODE with frozen thickness.
+
+        ``n_iter`` is retained for compatibility and now scales the default
+        solver horizon rather than repeatedly compounding a CWSS scaling factor.
         """
         # Resolve or compute tuned reduced-order configs
         preop_config_path, postop_config_path = self._resolve_rri_config_paths(nm_iter=5)
@@ -356,20 +369,33 @@ class MicrovascularAdaptor:
             os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv'
         )
 
-        # Gather mean outlet flows
-        sum_flows = lambda d: tuple(map(lambda x: sum(x.values()), d.flow_split(get_mean=True)))
-        preop_lpa_flow, preop_rpa_flow = sum_flows(self.preop_simdir)
-        postop_lpa_flow, postop_rpa_flow = sum_flows(self.postop_simdir)
+        effective_t_end = float(t_end) if t_end is not None else 3600.0 * max(int(n_iter), 1)
+        gain_arr = [float(wss_gain), 0.0, 0.0, 0.0]
 
-        # Scale diameters to enforce constant WSS
-        _apply_constant_wss_scaling(preop_pa.lpa_tree.store, preop_flow=preop_lpa_flow, postop_flow=postop_lpa_flow, n_iter=n_iter)
-        _apply_constant_wss_scaling(preop_pa.rpa_tree.store, preop_flow=preop_rpa_flow, postop_flow=postop_rpa_flow, n_iter=n_iter)
+        result, flow_log, sol, postop_pa, hists = run_adaptation(
+            preop_pa,
+            postop_pa,
+            CWSSAdaptation,
+            gain_arr,
+            t_end=effective_t_end,
+            rtol=rtol,
+            atol=atol,
+            max_step=max_step,
+        )
 
-        # assign adapted trees
-        self.lpa_tree = preop_pa.lpa_tree
-        self.rpa_tree = preop_pa.rpa_tree
+        self.lpa_tree = postop_pa.lpa_tree
+        self.rpa_tree = postop_pa.rpa_tree
 
         self._finalize_coupling_with_adapted_trees()
+        result = dict(result)
+        result["wss_gain"] = float(wss_gain)
+        result["solver_t_end"] = effective_t_end
+        result["solver_rtol"] = float(rtol)
+        result["solver_atol"] = float(atol)
+        result["solver_max_step"] = float(max_step)
+        result["flow_log_points"] = len(flow_log)
+        result["saved_history_figures"] = len(hists)
+        return result
 
     def construct_impedance_trees(self):
         '''

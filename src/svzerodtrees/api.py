@@ -5,19 +5,31 @@ import pandas as pd
 
 from .config import BaseConfig, PathsConfig, BCSConfig, TreesConfig, AdaptationConfig, PipelineConfig, ThreeDConfig
 from .config import load_config
-from .simulation import Simulation
+from .simulation.simulation import Simulation
 from .io import ConfigHandler
-from .tune_bcs import ImpedanceTuner, RCRTuner, ClinicalTargets, construct_impedance_trees, assign_rcr_bcs
+from .tune_bcs.assign_bcs import assign_rcr_bcs, construct_impedance_trees
+from .tune_bcs.clinical_targets import ClinicalTargets
+from .tune_bcs.impedance_tuner import ImpedanceTuner
+from .tune_bcs.rcr_tuner import RCRTuner
 from .microvasculature.treeparams import TreeParameters
-from .adaptation import MicrovascularAdaptor
+from .adaptation.microvascular_adaptor import MicrovascularAdaptor
+from .adaptation.workflow import run_structured_tree_adaptation
 from .simulation.simulation_directory import SimulationDirectory
-from .post_processing.tree_figures import generation_metrics, generation_waveforms
-from .post_processing.tree_figures import visualize_hemodynamics
-from .post_processing import (
-    compute_pulmonary_resistance_map,
-    run_pulmonary_threed_postprocess_suite,
-)
 import pickle
+
+
+def compute_pulmonary_resistance_map(**kwargs):
+    from .post_processing.resistance_map import compute_pulmonary_resistance_map as _impl
+
+    return _impl(**kwargs)
+
+
+def run_pulmonary_threed_postprocess_suite(**kwargs):
+    from .post_processing.pulmonary_threed_suite import (
+        run_pulmonary_threed_postprocess_suite as _impl,
+    )
+
+    return _impl(**kwargs)
 
 
 class PipelineWorkflow:
@@ -286,26 +298,20 @@ class AdaptationWorkflow:
 
         if bcs and bcs.type != "impedance":
             raise ValueError("adapt workflow currently supports impedance BCs only")
-
-        adaptor = MicrovascularAdaptor(
-            preop,
-            postop,
-            adapted,
-            targets,
+        return run_structured_tree_adaptation(
+            preop_dir=paths.preop_dir,
+            postop_dir=paths.postop_dir,
+            adapted_dir=paths.adapted_dir,
+            clinical_targets=paths.clinical_targets,
             reduced_order_pa=paths.zerod_config,
             tree_params=tree_params,
-            method=adaptation.method if adaptation else "cwss",
-            location=adaptation.location if adaptation else "uniform",
-            n_iter=adaptation.iterations if adaptation else 10,
-            bc_type="impedance",
+            model=adaptation.model if adaptation else "M2",
+            territory_scheme=adaptation.territory_scheme if adaptation else "lpa_rpa",
+            parameter_set=adaptation.parameter_set if adaptation else None,
+            mode=adaptation.mode if adaptation else "predict",
             convert_to_cm=convert_to_cm,
+            output_root=paths.adapted_dir,
         )
-        adaptor.adapt()
-
-        return {
-            "status": "ok",
-            "adapted_dir": paths.adapted_dir,
-        }
 
 
 class PostprocessWorkflow:
@@ -330,12 +336,18 @@ class PostprocessWorkflow:
         for fig in postprocess.figures:
             options = fig.options or {}
             if fig.kind == "generation_metrics":
+                from .post_processing.tree_figures import generation_metrics
+
                 tree = self._load_tree(fig.input)
                 fig_obj, _, _, _ = generation_metrics.plot_generation_metrics_for_tree(tree, **options)
             elif fig.kind == "generation_waveforms":
+                from .post_processing.tree_figures import generation_waveforms
+
                 tree = self._load_tree(fig.input)
                 fig_obj, _, _ = generation_waveforms.plot_generation_waveforms_for_tree(tree, **options)
             elif fig.kind == "visualize_hemodynamics":
+                from .post_processing.tree_figures import visualize_hemodynamics
+
                 tree = self._load_tree(fig.input)
                 fig_obj, _ = visualize_hemodynamics.plot_tree_metrics_by_generation(
                     results=tree.results,

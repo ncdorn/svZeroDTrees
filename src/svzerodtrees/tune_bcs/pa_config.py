@@ -15,7 +15,8 @@ from ..io.blocks.boundary_condition import (
     validate_impedance_timing_config,
 )
 from .clinical_targets import ClinicalTargets
-from ..microvasculature import StructuredTree, TreeParameters
+from ..microvasculature.structured_tree.structuredtree import StructuredTree
+from ..microvasculature.treeparams import TreeParameters
 from ..io.blocks import Junction
 from ..io.utils import get_branch_result
 from ..microvasculature.compliance import *

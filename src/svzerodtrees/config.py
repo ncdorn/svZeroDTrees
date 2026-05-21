@@ -49,9 +49,13 @@ class TreesConfig:
 
 @dataclass
 class AdaptationConfig:
+    model: str = "M2"
     method: str = "cwss"
     location: str = "uniform"
     iterations: int = 10
+    territory_scheme: str = "lpa_rpa"
+    mode: str = "predict"
+    parameter_set: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -486,11 +490,19 @@ def load_config(path: str) -> BaseConfig:
     adaptation = None
     if raw.get("adaptation") is not None:
         data = raw["adaptation"]
-        _ensure_keys(data, ["method", "location", "iterations"], "adaptation")
+        _ensure_keys(
+            data,
+            ["model", "method", "location", "iterations", "territory_scheme", "mode", "parameter_set"],
+            "adaptation",
+        )
         adaptation = AdaptationConfig(
+            model=str(data.get("model", "M2")),
             method=data.get("method", "cwss"),
             location=data.get("location", "uniform"),
             iterations=int(data.get("iterations", 10)),
+            territory_scheme=str(data.get("territory_scheme", "lpa_rpa")),
+            mode=str(data.get("mode", "predict")),
+            parameter_set=data.get("parameter_set"),
         )
 
     pipeline = None
@@ -739,9 +751,13 @@ trees:
         value: 66000.0
 
 adaptation:
+  model: M2
   method: cwss
   location: uniform
   iterations: 10
+  territory_scheme: lpa_rpa
+  mode: predict
+  parameter_set: {}
 
 pipeline:
   run_steady: true

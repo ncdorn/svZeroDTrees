@@ -8,7 +8,17 @@ integrator for computing adaptation in a structured tree
 from scipy.integrate import solve_ivp
 from .utils import pack_state, rel_change, time_to_95, unpack_state
 
-def run_adaptation(preop_pa, postop_pa, model, K_arr):
+def run_adaptation(
+    preop_pa,
+    postop_pa,
+    model,
+    K_arr,
+    *,
+    t_end=3600.0,
+    rtol=1e-6,
+    atol=1e-7,
+    max_step=60.0,
+):
 
     postop_pa.lpa_tree = copy.deepcopy(preop_pa.lpa_tree)
     postop_pa.rpa_tree = copy.deepcopy(preop_pa.rpa_tree)
@@ -30,15 +40,14 @@ def run_adaptation(preop_pa, postop_pa, model, K_arr):
 
     pre_adapted_split = postop_pa.rpa_split
 
-    t_end = 3600
     wrapped_event = wrap_event(model_instance.event, postop_pa, last_update_y, flow_log) # need to propagate event rules
     # wrapped_event = model_instance.make_event(postop_pa, last_update_y, last_t_holder)
     sol = solve_ivp(
-        model_instance.compute_rhs, (0, t_end), y0,
+        model_instance.compute_rhs, (0, float(t_end)), y0,
         args=(postop_pa, None, last_update_y, last_t_holder, flow_log),
         events=wrapped_event, # events=lambda t, y, *args: model_instance.event(t, y, postop_pa, last_update_y),
 
-        method='BDF', rtol=1e-6, atol=1e-7, max_step=60.0
+        method='BDF', rtol=float(rtol), atol=float(atol), max_step=float(max_step)
     )
 
     y_final = sol.y[:, -1]
@@ -97,7 +106,17 @@ def run_adaptation(preop_pa, postop_pa, model, K_arr):
     return result, flow_log, sol, postop_pa, hists
 
 
-def run_adaptation_outsidesim(preop_pa, postop_pa, model, K_arr):
+def run_adaptation_outsidesim(
+    preop_pa,
+    postop_pa,
+    model,
+    K_arr,
+    *,
+    t_end=3600.0,
+    rtol=1e-6,
+    atol=1e-7,
+    max_step=60.0,
+):
 
     postop_pa.lpa_tree = copy.deepcopy(preop_pa.lpa_tree)
     postop_pa.rpa_tree = copy.deepcopy(preop_pa.rpa_tree)
@@ -116,8 +135,6 @@ def run_adaptation_outsidesim(preop_pa, postop_pa, model, K_arr):
     postop_pa.simulate()
     pre_adapted_split = postop_pa.rpa_split
 
-    t_end = 3600
-    
     # wrapped_event = model_instance.make_event(postop_pa, last_update_y, last_t_holder)
     wrapped_event = wrap_event(model_instance.event_outsidesim, postop_pa, last_update_y, flow_log) # need to propagate event rules
 
@@ -135,11 +152,11 @@ def run_adaptation_outsidesim(preop_pa, postop_pa, model, K_arr):
         # integrate adaptation to steady state
         print(f"integrating adaptation to steady state")
         sol = solve_ivp(
-            model_instance.compute_rhs_nosim, (0, t_end), y0,
+            model_instance.compute_rhs_nosim, (0, float(t_end)), y0,
             args=(postop_pa, None, last_update_y, last_t_holder, flow_log),
             events=wrapped_event, # events=lambda t, y, *args: model_instance.event(t, y, postop_pa, last_update_y),
 
-            method='BDF', rtol=1e-6, atol=1e-7, max_step=60.0
+            method='BDF', rtol=float(rtol), atol=float(atol), max_step=float(max_step)
         )
 
         geom_rel_change = (sol.y[:, -1] - last_update_y) / last_update_y

@@ -14,11 +14,11 @@ import subprocess
 import shlex
 import shutil
 from .input_builders import *
-from ..tune_bcs import ClinicalTargets
+from ..tune_bcs.clinical_targets import ClinicalTargets
 from ..io.blocks import *
-from ..tune_bcs import construct_impedance_trees, ClinicalTargets
+from ..tune_bcs.assign_bcs import construct_impedance_trees
 from .input_builders.simulation_file import SimulationFile
-from ..microvasculature import StructuredTree
+from ..microvasculature.structured_tree.structuredtree import StructuredTree
 
 _DEFAULT_TREE_LRR = 10.0
 DEFAULT_SLURM_EXECUTABLE = "/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics"

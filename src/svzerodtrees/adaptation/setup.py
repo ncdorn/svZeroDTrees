@@ -1,9 +1,9 @@
 import csv
 import pandas as pd
 import numpy as np
-from ..microvasculature import TreeParameters
+from ..microvasculature.treeparams import TreeParameters
 from ..io import ConfigHandler
-from ..tune_bcs import PAConfig
+from ..tune_bcs.pa_config import PAConfig
 from ..tune_bcs.clinical_targets import ClinicalTargets
 
 '''

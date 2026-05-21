@@ -80,7 +80,11 @@ def _coerce_scalar_array(values: np.ndarray, name: str) -> np.ndarray:
     raise ValueError(f"array '{name}' must be one-dimensional or single-component")
 
 
-def _load_frames_csv(frames_csv: str | Path) -> pd.DataFrame:
+def _load_frames_csv(
+    frames_csv: str | Path,
+    *,
+    require_existing_paths: bool = True,
+) -> pd.DataFrame:
     path = Path(frames_csv)
     if not path.exists():
         raise FileNotFoundError(f"frames_csv not found: {path}")
@@ -100,7 +104,7 @@ def _load_frames_csv(frames_csv: str | Path) -> pd.DataFrame:
         raw_path = Path(str(row.path)).expanduser()
         if not raw_path.is_absolute():
             raw_path = (path.parent / raw_path).resolve()
-        if not raw_path.exists():
+        if require_existing_paths and not raw_path.exists():
             raise FileNotFoundError(f"3D result frame not found: {raw_path}")
         time_s = float(row.time_s)
         if not math.isfinite(time_s):
@@ -138,22 +142,31 @@ def _selection_tolerance_s(frames: pd.DataFrame, cycle_duration_s: float) -> flo
 def _select_last_cycle_frames(
     frames: pd.DataFrame,
     cycle_duration_s: float,
-) -> tuple[pd.DataFrame, float, float, float]:
+    *,
+    return_metadata: bool = False,
+    include_endpoint: bool = True,
+) -> pd.DataFrame | tuple[pd.DataFrame, float, float, float]:
     cycle_duration = float(cycle_duration_s)
     if not math.isfinite(cycle_duration) or cycle_duration <= 0.0:
         raise ValueError("cycle_duration_s must be positive and finite")
     t_end = float(frames["time_s"].max())
     window_start = t_end - cycle_duration
     tol = _selection_tolerance_s(frames, cycle_duration)
-    # Select the final full cycle as the half-open interval [t_end - T, t_end).
-    # The tolerance absorbs floating-point noise while remaining negligible
-    # relative to the native frame spacing.
-    selected = frames.loc[
-        (frames["time_s"] >= window_start - tol) & (frames["time_s"] < t_end - tol)
-    ].copy()
+    upper_mask = (
+        frames["time_s"] <= t_end + tol
+        if include_endpoint
+        else frames["time_s"] < t_end - tol
+    )
+    # By default the helper includes the terminal frame for simple direct use.
+    # Workflow callers that need the final completed cycle pass
+    # ``include_endpoint=False`` to use the half-open interval [t_end - T, t_end).
+    selected = frames.loc[(frames["time_s"] >= window_start - tol) & upper_mask].copy()
     if selected.empty:
         raise ValueError("last full-cycle frame selection is empty")
-    return selected.reset_index(drop=True), window_start, t_end, tol
+    selected = selected.reset_index(drop=True)
+    if not return_metadata:
+        return selected
+    return selected, window_start, t_end, tol
 
 
 def _subsample_frames(frames: pd.DataFrame, max_frames: int | None) -> pd.DataFrame:
@@ -674,7 +687,10 @@ def compute_pulmonary_resistance_map(
 ) -> Dict[str, Any]:
     frames = _load_frames_csv(frames_csv)
     selected_all, window_start_s, window_end_s, selection_tolerance_s = _select_last_cycle_frames(
-        frames, cycle_duration_s
+        frames,
+        cycle_duration_s,
+        return_metadata=True,
+        include_endpoint=False,
     )
     selected = _subsample_frames(selected_all, max_frames)
     return _compute_pulmonary_resistance_map_for_selected_frames(

@@ -2,13 +2,17 @@
 from .setup import *
 from .integrator import run_adaptation, run_adaptation_outsidesim
 from .models import CWSSIMSAdaptation
-from ..tune_bcs import ClinicalTargets
+from ..tune_bcs.clinical_targets import ClinicalTargets
 import pandas as pd
 import itertools
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import List, Tuple
-from .utils import append_result_to_csv
+from .utils import append_result_to_csv, pack_state, rel_change, time_to_95, unpack_state
 import os
+import copy
+
+import numpy as np
+from scipy.integrate import solve_ivp
 
 '''
 this file is for setting up adaptation experiments
@@ -43,7 +47,12 @@ def run_single_gain_cwss_ims_adaptation(
 
     for K_arr in K_arrs:
         print(f"Running adaptation with K_arr: {K_arr}")
-        result, flow_log, sol, postop_pa = run_adaptation(preop_pa, postop_pa, CWSSIMSAdaptation, K_arr)
+        result, flow_log, sol, postop_pa, hists = run_adaptation(
+            preop_pa,
+            postop_pa,
+            CWSSIMSAdaptation,
+            K_arr,
+        )
 
         print(f"Adaptation result: {result}")
         
@@ -68,7 +77,7 @@ def run_single_Karr_worker(args) -> Tuple[List[float], pd.DataFrame]:
             preop_config_path, postop_config_path, optimized_tree_params_csv, clinical_targets_csv
         )
 
-        result, flow_log, sol, postop_pa = run_adaptation(
+        result, flow_log, sol, postop_pa, hists = run_adaptation(
             preop_pa, postop_pa, CWSSIMSAdaptation, K_arr
         )
 
@@ -162,6 +171,103 @@ def run_parallel_gains(
         return pd.concat(all_results, ignore_index=True)
     else:
         return pd.DataFrame()
+
+
+def run_single_tree_cwss_debug(
+    tree,
+    *,
+    q_homeostatic: float,
+    q_target: float,
+    wss_gain: float = 0.01,
+    t_end: float = 3600.0,
+    rtol: float = 1e-6,
+    atol: float = 1e-7,
+    max_step: float = 60.0,
+) -> dict:
+    """
+    Debug a single structured tree with the stabilized WSS-only ODE.
+
+    This helper is intentionally standalone so gain tuning and convergence
+    inspection can happen without the full bilateral PA workflow.
+    """
+    debug_tree = copy.deepcopy(tree)
+    debug_tree.compute_homeostatic_state(q_homeostatic)
+
+    y0 = pack_state(debug_tree)
+    y_initial = y0.copy()
+    last_update_y = y0.copy()
+    last_t_holder = [-float("inf")]
+    residual_log: list[tuple[float, float]] = []
+
+    def _rhs(t, y):
+        y = np.asarray(y, dtype=np.float64)
+        if y.ndim != 1:
+            raise ValueError(f"State vector must be 1-D, received shape {y.shape}.")
+        if not np.all(y > 0.0):
+            raise ValueError("Single-tree CWSS debug requires a strictly positive state.")
+
+        unpack_state(y, debug_tree)
+        pd_val = float(debug_tree.Pd) if getattr(debug_tree, "Pd", None) is not None else 0.0
+        debug_tree.simulate(Q_in=[float(q_target), float(q_target)], Pd=pd_val)
+        tau_ts = debug_tree.results.wss_timeseries()
+        tau = np.mean(tau_ts, axis=1)
+        tau_h = np.asarray(debug_tree.homeostatic_wss, dtype=np.float64)
+        if t > last_t_holder[0] + 1e-12:
+            last_update_y[:] = y
+            last_t_holder[0] = t
+            residual_log.append((float(t), float(np.mean(np.abs(tau - tau_h)))))
+
+        dydt = np.zeros_like(y)
+        dydt[0::2] = float(wss_gain) * (tau - tau_h) * y[0::2]
+        return dydt
+
+    def _event(t, y, triggered=[False], was_positive=[False]):
+        rel_geom_r = np.mean(np.abs((y[0::2] - last_update_y[0::2]) / last_update_y[0::2]))
+        converged = rel_geom_r < 1e-6
+
+        if converged:
+            triggered[0] = True
+
+        if not triggered[0]:
+            was_positive[0] = True
+            return 1.0
+        if was_positive[0]:
+            was_positive[0] = False
+            return -1.0
+        was_positive[0] = True
+        return 1.0
+
+    _event.terminal = True
+    _event.direction = -1
+
+    sol = solve_ivp(
+        _rhs,
+        (0.0, float(t_end)),
+        y0,
+        events=_event,
+        method="BDF",
+        rtol=float(rtol),
+        atol=float(atol),
+        max_step=float(max_step),
+    )
+
+    y_final = sol.y[:, -1]
+    unpack_state(y_final, debug_tree)
+    geom_err = rel_change(y_final, y_initial)
+
+    return {
+        "tree": debug_tree,
+        "solution": sol,
+        "residual_log": residual_log,
+        "metrics": {
+            "geom_err": geom_err,
+            "t95": time_to_95(sol),
+            "stable": int(sol.status == 1),
+            "n_rhs": sol.nfev,
+            "wss_gain": float(wss_gain),
+            "solver_t_end": float(t_end),
+        },
+    }
 
 import itertools
 import pandas as pd
