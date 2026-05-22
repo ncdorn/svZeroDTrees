@@ -155,3 +155,41 @@ def test_resolve_inflow_time_array_uses_rebuilt_primary_flow_boundary_condition(
     handler.inflows.clear()
 
     assert _resolve_inflow_time_array(handler) == [0.0, 0.5, 1.0]
+
+
+def test_resolve_inflow_time_array_falls_back_when_primary_config_has_no_flow_bc():
+    primary = ConfigHandler(
+        {
+            "boundary_conditions": [],
+            "simulation_parameters": {
+                "coupled_simulation": True,
+                "number_of_time_pts": 2,
+                "output_all_cycles": True,
+                "steady_initial": False,
+                "density": 1.06,
+                "viscosity": 0.04,
+            },
+            "external_solver_coupling_blocks": [],
+            "vessels": [],
+            "junctions": [],
+        }
+    )
+    fallback = ConfigHandler(
+        {
+            "boundary_conditions": [
+                {
+                    "bc_name": "INFLOW",
+                    "bc_type": "FLOW",
+                    "bc_values": {"Q": [1.0, 2.0, 1.0], "t": [0.0, 0.5, 1.0]},
+                }
+            ],
+            "simulation_parameters": {
+                "number_of_time_pts_per_cardiac_cycle": 3,
+                "number_of_cardiac_cycles": 1,
+            },
+            "vessels": [],
+            "junctions": [],
+        }
+    )
+
+    assert _resolve_inflow_time_array(primary, fallback) == [0.0, 0.5, 1.0]

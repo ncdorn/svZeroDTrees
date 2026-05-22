@@ -133,8 +133,23 @@ def _resolve_target_pressure_csv(simdir: SimulationDirectory) -> str:
     )
 
 
-def _resolve_inflow_time_array(config_handler: ConfigHandler):
-    return config_handler.ensure_inflow().t
+def _resolve_inflow_time_array(
+    config_handler: ConfigHandler,
+    *fallback_config_handlers: ConfigHandler | None,
+):
+    candidates = (config_handler, *fallback_config_handlers)
+    last_error = None
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        try:
+            return candidate.ensure_inflow().t
+        except KeyError as exc:
+            last_error = exc
+            continue
+    if last_error is not None:
+        raise last_error
+    raise KeyError("config has no FLOW boundary condition to use as inflow")
 
 def _adapt_single_bc_worker(
         bc_name: str,
@@ -430,7 +445,11 @@ class MicrovascularAdaptor:
         if lpa_params is None or rpa_params is None:
             raise RuntimeError("Tree parameters must be loaded before constructing impedance trees.")
 
-        time_array = _resolve_inflow_time_array(self.preop_simdir.svzerod_3Dcoupling)
+        time_array = _resolve_inflow_time_array(
+            self.preop_simdir.svzerod_3Dcoupling,
+            self.simple_pa,
+            self.preop_simdir.zerod_config,
+        )
         
         lpa_tree = StructuredTree(
             name='LPA',
@@ -574,7 +593,11 @@ class MicrovascularAdaptor:
 
     def constructTreesFromConfig(self):
         
-        time_array = _resolve_inflow_time_array(self.preop_simdir.svzerod_3Dcoupling)
+        time_array = _resolve_inflow_time_array(
+            self.preop_simdir.svzerod_3Dcoupling,
+            self.simple_pa,
+            self.preop_simdir.zerod_config,
+        )
 
         for name, params in self.preop_simdir.svzerod_3Dcoupling.tree_params.items():
             print(f'building {name} tree with parameters: {params}')
