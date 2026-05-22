@@ -7,6 +7,7 @@ import json
 import shutil
 
 import numpy as np
+import pandas as pd
 
 from ..io import ConfigHandler
 from ..microvasculature.compliance.constant import ConstantCompliance
@@ -32,8 +33,85 @@ def _mean_resistances(simdir: SimulationDirectory) -> tuple[float, float]:
         _, _, _, lpa_resistance, rpa_resistance = simdir._compute_pressure_drops(get_mean=True)
         return float(lpa_resistance), float(rpa_resistance)
     except Exception:
+        try:
+            return _mean_resistances_from_postprocessed_mpa(simdir)
+        except Exception:
+            pass
         lpa_resistance, rpa_resistance = simdir.compute_pressure_drop(steady=True)
         return float(lpa_resistance), float(rpa_resistance)
+
+
+def _resolve_mpa_pressure_csv(simdir: SimulationDirectory) -> Path:
+    sim_path = Path(simdir.path)
+    candidates = [
+        sim_path / "mpa_pressure_vs_time.csv",
+        sim_path.parent / "results" / "mpa_pressure_vs_time.csv",
+        sim_path.parent / "results" / "postprocess" / "mpa_pressure_vs_time.csv",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        f"mpa_pressure_vs_time.csv not found for simulation directory {sim_path}"
+    )
+
+
+def _mean_mpa_pressure_from_csv(simdir: SimulationDirectory) -> float:
+    pressure_df = pd.read_csv(_resolve_mpa_pressure_csv(simdir))
+    pressure_col = next(
+        (
+            col
+            for col in ("mpa_pressure_mmhg", "pressure_mmhg", "pressure", "mpa_pressure")
+            if col in pressure_df.columns
+        ),
+        None,
+    )
+    if pressure_col is None:
+        raise ValueError(
+            "mpa pressure csv must contain one of: "
+            "mpa_pressure_mmhg, pressure_mmhg, pressure, mpa_pressure"
+        )
+    pressure_mmhg = pd.to_numeric(pressure_df[pressure_col], errors="coerce").to_numpy(dtype=float)
+    pressure_mmhg = pressure_mmhg[np.isfinite(pressure_mmhg)]
+    if pressure_mmhg.size == 0:
+        raise ValueError("mpa pressure csv contains no finite pressure samples")
+    return float(np.mean(pressure_mmhg)) * 1333.2
+
+
+def _mean_resistances_from_postprocessed_mpa(simdir: SimulationDirectory) -> tuple[float, float]:
+    if simdir.svzerod_data is None:
+        raise ValueError("svZeroD_data not found")
+    if simdir.svzerod_3Dcoupling is None:
+        raise ValueError("svzerod_3Dcoupling not found")
+
+    mean_mpa_pressure = _mean_mpa_pressure_from_csv(simdir)
+    lpa_flow, rpa_flow = simdir.flow_split(get_mean=True, verbose=False)
+    q_lpa = float(sum(float(value) for value in lpa_flow.values()))
+    q_rpa = float(sum(float(value) for value in rpa_flow.values()))
+    if not np.isfinite(q_lpa) or not np.isfinite(q_rpa) or q_lpa == 0.0 or q_rpa == 0.0:
+        raise ValueError("mean flow split is required to compute fallback resistances")
+
+    lpa_outlet_pressures: list[float] = []
+    rpa_outlet_pressures: list[float] = []
+    for block in simdir.svzerod_3Dcoupling.coupling_blocks.values():
+        _, _, pressure = simdir.svzerod_data.get_result(block)
+        pressure_arr = np.asarray(pressure, dtype=float)
+        pressure_arr = pressure_arr[np.isfinite(pressure_arr)]
+        if pressure_arr.size == 0:
+            continue
+        mean_pressure = float(np.mean(pressure_arr[-100:]))
+        surface_name = str(getattr(block, "surface", "")).lower()
+        if "lpa" in surface_name:
+            lpa_outlet_pressures.append(mean_pressure)
+        elif "rpa" in surface_name:
+            rpa_outlet_pressures.append(mean_pressure)
+
+    if not lpa_outlet_pressures or not rpa_outlet_pressures:
+        raise ValueError("outlet pressures are required to compute fallback resistances")
+
+    lpa_resistance = (mean_mpa_pressure - float(np.mean(lpa_outlet_pressures))) / q_lpa
+    rpa_resistance = (mean_mpa_pressure - float(np.mean(rpa_outlet_pressures))) / q_rpa
+    return float(lpa_resistance), float(rpa_resistance)
 
 
 def _scale_compliance(tree, *, diameter_scale: float, compliance_gain: float) -> None:

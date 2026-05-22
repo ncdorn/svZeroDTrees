@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from svzerodtrees.api import (
@@ -12,6 +13,7 @@ from svzerodtrees.api import (
     TuneBCsWorkflow,
     run_from_config_file,
 )
+from svzerodtrees.adaptation.workflow import _mean_resistances
 
 
 def test_tune_bcs_workflow_requires_bcs_section():
@@ -205,3 +207,42 @@ def test_postprocess_workflow_dispatches_pulmonary_threed_suite(monkeypatch, tmp
     assert calls["kwargs"]["stage"] == "preop"
     assert calls["kwargs"]["resistance_map_workers"] == 2
     assert result["analysis_outputs"][0]["metadata_json"] == "suite.json"
+
+
+def test_mean_resistances_falls_back_to_postprocessed_mpa_csv(tmp_path):
+    csv_path = tmp_path / "results" / "postprocess" / "mpa_pressure_vs_time.csv"
+    csv_path.parent.mkdir(parents=True)
+    csv_path.write_text("time_s,mpa_pressure_mmhg\n0.0,15.0\n1.0,15.0\n", encoding="utf-8")
+
+    class DummyBlock:
+        def __init__(self, surface):
+            self.surface = surface
+
+    class DummySvZeroDData:
+        def get_result(self, block):
+            pressure = np.array([13332.0, 13332.0]) if "lpa" in block.surface else np.array([10665.6, 10665.6])
+            return np.array([0.0, 1.0]), np.array([2.0, 2.0]), pressure
+
+    class DummySimDir:
+        path = str(tmp_path / "preop")
+        svzerod_data = DummySvZeroDData()
+        svzerod_3Dcoupling = SimpleNamespace(
+            coupling_blocks={
+                "lpa": DummyBlock("lpa.vtp"),
+                "rpa": DummyBlock("rpa.vtp"),
+            }
+        )
+
+        def _compute_pressure_drops(self, get_mean=False):
+            raise KeyError("branch0_seg0")
+
+        def compute_pressure_drop(self, steady=True):
+            raise KeyError("branch0_seg0")
+
+        def flow_split(self, get_mean=True, verbose=False):
+            return {"lpa": 2.0}, {"rpa": 4.0}
+
+    lpa_resistance, rpa_resistance = _mean_resistances(DummySimDir())
+
+    assert lpa_resistance == pytest.approx((15.0 * 1333.2 - 13332.0) / 2.0)
+    assert rpa_resistance == pytest.approx((15.0 * 1333.2 - 10665.6) / 4.0)
