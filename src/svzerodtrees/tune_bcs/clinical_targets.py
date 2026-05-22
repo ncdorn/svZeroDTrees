@@ -63,7 +63,18 @@ class ClinicalTargets():
         # get RPA flow split
         rpa_split = float(df.loc[0,"rpa_split"])
 
-        return cls(mpa_p, q=q, rpa_split=rpa_split, wedge_p=wedge_p, steady=steady, rvot_flow=rvot_flow, ivc_flow=ivc_flow, svc_flow=svc_flow)
+        instance = cls(
+            mpa_p,
+            q=q,
+            rpa_split=rpa_split,
+            wedge_p=wedge_p,
+            steady=steady,
+            rvot_flow=rvot_flow,
+            ivc_flow=ivc_flow,
+            svc_flow=svc_flow,
+        )
+        instance.path = str(clinical_targets)
+        return instance
 
         
     def log_clinical_targets(self, log_file):

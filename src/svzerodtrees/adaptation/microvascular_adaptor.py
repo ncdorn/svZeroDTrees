@@ -208,6 +208,7 @@ class MicrovascularAdaptor:
         self.postop_simdir = postop_simdir
         self.adapted_simdir = adapted_simdir
         self.reduced_order_pa_path = reduced_order_pa
+        self.tree_params_csv = tree_params
             
 
         # grab tree params from csv, of form [k1, k2, k3, lrr, diameter]
@@ -403,8 +404,8 @@ class MicrovascularAdaptor:
         preop_pa, postop_pa = initialize_from_paths(
             preop_config_path,
             postop_config_path,
-            os.path.dirname(self.preop_simdir.path) + '/optimized_params.csv',
-            os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv'
+            self.tree_params_csv,
+            getattr(self.clinical_targets, "path", os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv')
         )
 
         effective_t_end = float(t_end) if t_end is not None else 3600.0 * max(int(n_iter), 1)
@@ -659,8 +660,8 @@ class MicrovascularAdaptor:
         preop_pa, postop_pa = initialize_from_paths(
             preop_config_path,
             postop_config_path,
-            os.path.dirname(self.preop_simdir.path) + '/optimized_params.csv',
-            os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv'
+            self.tree_params_csv,
+            getattr(self.clinical_targets, "path", os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv')
         )
         # run adaptation
         result, flow_log, sol, postop_pa, hists = run_adaptation(preop_pa, postop_pa, CWSSIMSAdaptation, K_arr)
