@@ -508,6 +508,55 @@ class ConfigHandler():
         return np.linspace(min(self.config["boundary_conditions"][0]["bc_values"]["t"]), 
                            max(self.config["boundary_conditions"][0]["bc_values"]["t"]), 
                            self.config["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"])
+
+    def primary_inflow_name(self):
+        '''
+        resolve the canonical inflow boundary-condition name for this config
+        '''
+        if "INFLOW" in self.inflows:
+            return "INFLOW"
+        if self.inflows:
+            return next(iter(self.inflows))
+
+        flow_bc_names = [
+            name for name, bc in self.bcs.items()
+            if str(getattr(bc, "type", "")).strip().upper() == "FLOW"
+        ]
+        if "INFLOW" in flow_bc_names:
+            return "INFLOW"
+        if flow_bc_names:
+            return flow_bc_names[0]
+        return None
+
+    def ensure_inflow(self, bc_name=None):
+        '''
+        return an inflow object for the requested FLOW boundary condition,
+        reconstructing it from boundary-condition data when needed
+        '''
+        resolved_name = bc_name or self.primary_inflow_name()
+        if resolved_name is None:
+            raise KeyError("config has no FLOW boundary condition to use as inflow")
+
+        inflow = self.inflows.get(resolved_name)
+        if inflow is not None:
+            return inflow
+
+        bc = self.bcs.get(resolved_name)
+        if bc is None or str(getattr(bc, "type", "")).strip().upper() != "FLOW":
+            raise KeyError(f"FLOW boundary condition '{resolved_name}' is not available")
+
+        bc_values = getattr(bc, "values", {}) or {}
+        q_values = bc_values.get("Q")
+        t_values = bc_values.get("t")
+        if q_values is None or t_values is None:
+            raise KeyError(
+                f"FLOW boundary condition '{resolved_name}' is missing Q/t waveform samples"
+            )
+
+        period = float(max(t_values)) if len(t_values) else 1.0
+        inflow = Inflow(q_values, t_values, t_per=period, name=resolved_name)
+        self.inflows[resolved_name] = inflow
+        return inflow
     
 
     def set_inflow(self, inflow, bc_name="INFLOW", threed_coupled=False):

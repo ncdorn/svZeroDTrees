@@ -122,6 +122,18 @@ def test_canonical_coupled_simulation_parameters_resolve_from_inflow():
     }
 
 
+def test_ensure_inflow_rebuilds_flow_boundary_condition_when_cache_is_missing():
+    handler = ConfigHandler(_bifurcation_config())
+    handler.inflows.clear()
+
+    inflow = handler.ensure_inflow()
+
+    assert inflow.name == "INFLOW"
+    assert handler.inflows["INFLOW"] is inflow
+    assert inflow.q == [2.0, 2.0, 2.0]
+    assert inflow.t == [0.0, 0.5, 1.0]
+
+
 def test_resolve_impedance_tree_metadata_success_and_failures():
     config = _bifurcation_config(
         trees=[

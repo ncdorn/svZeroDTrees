@@ -6,6 +6,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from svzerodtrees.adaptation.microvascular_adaptor import (
+    _resolve_inflow_time_array,
+    _resolve_target_pressure_csv,
+)
+from svzerodtrees.io.config_handler import ConfigHandler
 from svzerodtrees.adaptation.utils import (
     append_result_to_csv,
     pack_state,
@@ -115,3 +120,38 @@ def test_append_result_to_csv_appends_header_only_once(tmp_path):
     append_result_to_csv(pd.DataFrame([{"a": 3, "b": 4}]), str(output_path))
 
     assert output_path.read_text() == "a,b\n1,2\n3,4\n"
+
+
+def test_resolve_target_pressure_csv_finds_postprocess_output(tmp_path):
+    simdir = tmp_path / "preop"
+    simdir.mkdir()
+    target = tmp_path / "results" / "postprocess" / "mpa_pressure_vs_time.csv"
+    target.parent.mkdir(parents=True)
+    target.write_text("time_s,mpa_pressure_mmhg\n0.0,10.0\n", encoding="utf-8")
+
+    resolved = _resolve_target_pressure_csv(SimpleNamespace(path=str(simdir)))
+
+    assert resolved == str(target)
+
+
+def test_resolve_inflow_time_array_uses_rebuilt_primary_flow_boundary_condition():
+    handler = ConfigHandler(
+        {
+            "boundary_conditions": [
+                {
+                    "bc_name": "QIN",
+                    "bc_type": "FLOW",
+                    "bc_values": {"Q": [1.0, 1.0, 1.0], "t": [0.0, 0.5, 1.0]},
+                }
+            ],
+            "simulation_parameters": {
+                "number_of_time_pts_per_cardiac_cycle": 3,
+                "number_of_cardiac_cycles": 1,
+            },
+            "vessels": [],
+            "junctions": [],
+        }
+    )
+    handler.inflows.clear()
+
+    assert _resolve_inflow_time_array(handler) == [0.0, 0.5, 1.0]

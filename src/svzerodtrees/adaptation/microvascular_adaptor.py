@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.optimize import minimize_scalar
 import pandas as pd
+from pathlib import Path
 
 from ..io import ConfigHandler
 from ..io.blocks.boundary_condition import (
@@ -114,6 +115,26 @@ def _apply_constant_wss_scaling(store, preop_flow: float, postop_flow: float, n_
     orig_dtype = np.asarray(store.d).dtype
     scaled = np.asarray(store.d, dtype=np.float64) * total_scale
     store.d = scaled.astype(orig_dtype, copy=False)
+
+
+def _resolve_target_pressure_csv(simdir: SimulationDirectory) -> str:
+    sim_path = Path(simdir.path)
+    candidates = [
+        sim_path / "mpa_pressure_vs_time.csv",
+        sim_path.parent / "results" / "mpa_pressure_vs_time.csv",
+        sim_path.parent / "results" / "postprocess" / "mpa_pressure_vs_time.csv",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    raise FileNotFoundError(
+        "mpa_pressure_vs_time.csv not found for adaptation RRI regeneration under "
+        f"{sim_path} or sibling results directories"
+    )
+
+
+def _resolve_inflow_time_array(config_handler: ConfigHandler):
+    return config_handler.ensure_inflow().t
 
 def _adapt_single_bc_worker(
         bc_name: str,
@@ -306,7 +327,8 @@ class MicrovascularAdaptor:
             preop_rri = self.preop_simdir.optimize_RRI(
                 self.reduced_order_pa_path,
                 output_name=os.path.basename(preop_rri_path),
-                nm_iter=nm_iter
+                nm_iter=nm_iter,
+                target_pressure_csv=_resolve_target_pressure_csv(self.preop_simdir),
             )
             preop_config_path = preop_rri.get('output_config') if isinstance(preop_rri, dict) else preop_rri_path
 
@@ -317,7 +339,8 @@ class MicrovascularAdaptor:
             postop_rri = self.postop_simdir.optimize_RRI(
                 self.reduced_order_pa_path,
                 output_name=os.path.basename(postop_rri_path),
-                nm_iter=nm_iter
+                nm_iter=nm_iter,
+                target_pressure_csv=_resolve_target_pressure_csv(self.postop_simdir),
             )
             postop_config_path = postop_rri.get('output_config') if isinstance(postop_rri, dict) else postop_rri_path
 
@@ -407,7 +430,7 @@ class MicrovascularAdaptor:
         if lpa_params is None or rpa_params is None:
             raise RuntimeError("Tree parameters must be loaded before constructing impedance trees.")
 
-        time_array = self.preop_simdir.svzerod_3Dcoupling.bcs['INFLOW'].t
+        time_array = _resolve_inflow_time_array(self.preop_simdir.svzerod_3Dcoupling)
         
         lpa_tree = StructuredTree(
             name='LPA',
@@ -551,7 +574,7 @@ class MicrovascularAdaptor:
 
     def constructTreesFromConfig(self):
         
-        time_array = self.preop_simdir.svzerod_3Dcoupling.bcs['INFLOW'].t
+        time_array = _resolve_inflow_time_array(self.preop_simdir.svzerod_3Dcoupling)
 
         for name, params in self.preop_simdir.svzerod_3Dcoupling.tree_params.items():
             print(f'building {name} tree with parameters: {params}')

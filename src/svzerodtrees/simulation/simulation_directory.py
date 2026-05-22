@@ -1560,7 +1560,9 @@ class SimulationDirectory:
         if tuning_iter > 1:
             print(f"Saving config after tuning iteration {tuning_iter}...")
 
-        rri_config.inflows['INFLOW'].rescale(tsteps=500)
+        output_inflow = rri_config.ensure_inflow()
+        output_inflow.rescale(tsteps=500)
+        rri_config.set_inflow(output_inflow, output_inflow.name)
         output_path = os.path.join(self.path, output_name)
         rri_config.to_json(output_path)
 
