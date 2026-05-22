@@ -9,6 +9,7 @@ import pytest
 from svzerodtrees.adaptation.microvascular_adaptor import (
     _resolve_inflow_time_array,
     _resolve_target_pressure_csv,
+    MicrovascularAdaptor,
 )
 from svzerodtrees.io.config_handler import ConfigHandler
 from svzerodtrees.adaptation.utils import (
@@ -193,3 +194,14 @@ def test_resolve_inflow_time_array_falls_back_when_primary_config_has_no_flow_bc
     )
 
     assert _resolve_inflow_time_array(primary, fallback) == [0.0, 0.5, 1.0]
+
+
+def test_tree_metadata_with_outlet_mapping_attaches_bc_names():
+    adaptor = MicrovascularAdaptor.__new__(MicrovascularAdaptor)
+    adaptor._adapted_tree_outlet_mapping = {"lpa_tree": ["LPA_A", "LPA_B"], "rpa_tree": []}
+
+    tree = SimpleNamespace(name="lpa_tree", to_dict=lambda: {"name": "lpa_tree", "inductance": 0.0})
+
+    metadata = adaptor._tree_metadata_with_outlet_mapping(tree)
+
+    assert metadata["outlet_mapping"] == {"bc_names": ["LPA_A", "LPA_B"]}

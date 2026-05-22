@@ -28,6 +28,26 @@ def _sum_flows(simdir: SimulationDirectory) -> tuple[float, float]:
     )
 
 
+def _stage_metrics(
+    *,
+    lpa_flow: float,
+    rpa_flow: float,
+    lpa_resistance: float,
+    rpa_resistance: float,
+) -> dict[str, float]:
+    total_flow = float(lpa_flow) + float(rpa_flow)
+    lpa_split = float(lpa_flow) / total_flow if abs(total_flow) > _FLOW_EPS else 0.0
+    rpa_split = float(rpa_flow) / total_flow if abs(total_flow) > _FLOW_EPS else 0.0
+    return {
+        "lpa_flow": float(lpa_flow),
+        "rpa_flow": float(rpa_flow),
+        "lpa_split": lpa_split,
+        "rpa_split": rpa_split,
+        "lpa_resistance": float(lpa_resistance),
+        "rpa_resistance": float(rpa_resistance),
+    }
+
+
 def _mean_resistances(simdir: SimulationDirectory) -> tuple[float, float]:
     try:
         _, _, _, lpa_resistance, rpa_resistance = simdir._compute_pressure_drops(get_mean=True)
@@ -168,6 +188,11 @@ def _model_parameters_for_summary(parameter_set: dict | None) -> dict:
     return json.loads(json.dumps(parameter_set or {}, sort_keys=True))
 
 
+def _iterations_or_default(parameter_set: dict, default: int = 1) -> int:
+    value = parameter_set.get("iterations")
+    return int(value) if value is not None else int(default)
+
+
 def run_structured_tree_adaptation(
     *,
     preop_dir: str,
@@ -228,12 +253,26 @@ def run_structured_tree_adaptation(
             "postop_resistance": postop_rpa_resistance,
         },
     }
+    threed_hemodynamics = {
+        "preop": _stage_metrics(
+            lpa_flow=preop_lpa_flow,
+            rpa_flow=preop_rpa_flow,
+            lpa_resistance=preop_lpa_resistance,
+            rpa_resistance=preop_rpa_resistance,
+        ),
+        "postop": _stage_metrics(
+            lpa_flow=postop_lpa_flow,
+            rpa_flow=postop_rpa_flow,
+            lpa_resistance=postop_lpa_resistance,
+            rpa_resistance=postop_rpa_resistance,
+        ),
+    }
 
     params = parameter_set or {}
     solver_metrics: dict[str, float | int] | None = None
     if resolved_model == "M1":
         solver_metrics = adaptor.adapt_cwss(
-            n_iter=int(params.get("iterations", 1)),
+            n_iter=_iterations_or_default(params, 1),
             wss_gain=float(params.get("wss_gain", 0.01)),
             t_end=params.get("t_end"),
             rtol=float(params.get("rtol", 1e-6)),
@@ -249,7 +288,7 @@ def run_structured_tree_adaptation(
                 postop_flow=postop_lpa_flow,
                 preop_resistance=preop_lpa_resistance,
                 postop_resistance=postop_lpa_resistance,
-                iterations=int(params.get("iterations", 1)),
+                iterations=_iterations_or_default(params, 1),
                 wss_gain=float(params.get("wss_gain", 1.0)),
                 ims_gain=float(params.get("ims_gain", 1.0)),
                 compliance_gain=float(params.get("compliance_gain", 1.0)),
@@ -262,7 +301,7 @@ def run_structured_tree_adaptation(
                 postop_flow=postop_rpa_flow,
                 preop_resistance=preop_rpa_resistance,
                 postop_resistance=postop_rpa_resistance,
-                iterations=int(params.get("iterations", 1)),
+                iterations=_iterations_or_default(params, 1),
                 wss_gain=float(params.get("wss_gain", 1.0)),
                 ims_gain=float(params.get("ims_gain", 1.0)),
                 compliance_gain=float(params.get("compliance_gain", 1.0)),
@@ -293,14 +332,26 @@ def run_structured_tree_adaptation(
             "adapted_coupler_json": str(exported_coupler),
         },
         "territory_deltas": territory_metrics,
+        "hemodynamics": {
+            "threed": threed_hemodynamics,
+        },
     }
     metrics = {
         "model": resolved_model,
         "territory_metrics": territory_metrics,
+        "hemodynamics": {
+            "threed": threed_hemodynamics,
+        },
     }
     if solver_metrics is not None:
         summary["solver_metrics"] = solver_metrics
         metrics["solver_metrics"] = solver_metrics
+        summary["hemodynamics"]["internal_zerod"] = {
+            "preop": {"rpa_split": float(solver_metrics["preop_rpa_split"])},
+            "postop_initial": {"rpa_split": float(solver_metrics["postop_rpa_split"])},
+            "adapted_final": {"rpa_split": float(solver_metrics["final_rpa_split"])},
+        }
+        metrics["hemodynamics"]["internal_zerod"] = summary["hemodynamics"]["internal_zerod"]
     summary_path = output_dir / "adaptation_summary.json"
     metrics_path = output_dir / "adaptation_metrics.json"
     summary["artifacts"]["adaptation_summary_json"] = str(summary_path)

@@ -4,7 +4,8 @@ import numpy as np
 from typing import Sequence
 
 class CWSSIMSAdaptation(AdaptationModel):
-    
+    event_reason_label = "geometry_converged"
+
     def __init__(self, K_arr: Sequence[float]):
         if not isinstance(K_arr, (list, tuple, np.ndarray)):
             raise TypeError(f"K_arr must be a list, tuple, or ndarray, but got {type(K_arr)}.")
@@ -15,7 +16,7 @@ class CWSSIMSAdaptation(AdaptationModel):
             )
         super().__init__(K_arr)
     
-    def compute_rhs(self, t, y, simple_pa, _vessels, last_update_y, last_t_holder, flow_log):
+    def compute_rhs(self, t, y, simple_pa, _vessels, last_update_y, last_t_holder, flow_log, solver_trace):
         y = np.asarray(y, dtype=np.float64)
         if y.ndim != 1:
             raise ValueError(f"State vector must be 1-D, received shape {y.shape}.")
@@ -60,20 +61,6 @@ class CWSSIMSAdaptation(AdaptationModel):
 
         geom_rel_change = (y - last_update_y) / last_update_y
         geom_change = float(np.mean(np.abs(geom_rel_change)))
-
-        if t > last_t_holder[0] + 1e-12:
-            print(f"Geometry change at t={t:.2f} mean: {geom_change:.3e} and rpa split: {simple_pa.rpa_split:.3f}")
-            simulate_outlet_trees(simple_pa)
-            last_update_y[:] = y
-            last_t_holder[0] = t
-            flow_log.append((t, simple_pa.rpa_split))
-            if len(flow_log) > 1:
-                prev = flow_log[-2][1]
-                curr = flow_log[-1][1]
-                rel_change = (curr - prev) / curr if curr != 0 else "N/A"
-            else:
-                rel_change = "N/A"
-            print(f" -> flow split change: {rel_change}")
 
         # Ensure structured-tree simulations are available for hemodynamic metrics.
         if not hasattr(lpa_tree, "results") or lpa_tree.results is None or \
@@ -130,10 +117,34 @@ class CWSSIMSAdaptation(AdaptationModel):
         dydt[0::2] = self.K_arr[0] * tau_err + self.K_arr[1] * sig_err
         dydt[1::2] = -self.K_arr[2] * tau_err + self.K_arr[3] * sig_err
 
+        if t > max(last_t_holder[0], 1e-12):
+            rhs_l2 = float(np.linalg.norm(dydt))
+            trace_entry = {
+                "t": float(t),
+                "geom_change_mean": geom_change,
+                "rpa_split": float(simple_pa.rpa_split),
+                "rhs_l2": rhs_l2,
+            }
+            print(
+                f"Geometry change at t={t:.6f} mean: {geom_change:.3e} "
+                f"and rpa split: {simple_pa.rpa_split:.6f} (rhs_l2={rhs_l2:.3e})"
+            )
+            last_update_y[:] = y
+            last_t_holder[0] = float(t)
+            flow_log.append({"t": float(t), "rpa_split": float(simple_pa.rpa_split)})
+            solver_trace.append(trace_entry)
+            if len(flow_log) > 1:
+                prev = float(flow_log[-2]["rpa_split"])
+                curr = float(flow_log[-1]["rpa_split"])
+                rel_change = (curr - prev) / curr if curr != 0.0 else "N/A"
+            else:
+                rel_change = "N/A"
+            print(f" -> flow split change: {rel_change}")
+
         return dydt
 
 
-    def event(self, t, y, *args, triggered=[False], was_positive=[False]):
+    def event(self, t, y, *args):
         """
         Terminates integration when EITHER geometry OR flow split change is small.
         Guarantees a sign change by tracking sign history.
@@ -143,6 +154,10 @@ class CWSSIMSAdaptation(AdaptationModel):
         simple_pa = args[0]
         last_y = args[1]
         flow_log = args[2]
+        event_state = args[3]
+
+        if t <= 1e-12:
+            return 1.0
 
         rpa_split = simple_pa.rpa_split
 
@@ -153,7 +168,7 @@ class CWSSIMSAdaptation(AdaptationModel):
 
         # Flow split relative change
         if len(flow_log) > 1:
-            prev_split = flow_log[-2][1]
+            prev_split = float(flow_log[-2]["rpa_split"])
             flow_split_change = abs(prev_split - rpa_split) / abs(rpa_split)
         else:
             flow_split_change = 1.0
@@ -166,17 +181,17 @@ class CWSSIMSAdaptation(AdaptationModel):
         converged = geom_change - geom_tol < 0 # or flow_split_change - split_tol < 0
 
         if converged:
-            triggered[0] = True
+            event_state["triggered"] = True
 
         # # Track if function was ever positive
-        if not triggered[0]:
-            was_positive[0] = True
+        if not event_state["triggered"]:
+            event_state["was_positive"] = True
             val = 1.0  # Safe positive value
-        elif was_positive[0]:
-            was_positive[0] = False
+        elif event_state["was_positive"]:
+            event_state["was_positive"] = False
             val = -1.0  # Force sign change
         else:
-            was_positive[0] = True
+            event_state["was_positive"] = True
             val = 1.0  # Defensive: return positive if it was never positive
         
         # val = 1.0 if not triggered[0] else (-1.0 if was_positive[0] else 1.0)
@@ -192,7 +207,8 @@ class CWSSIMSAdaptation(AdaptationModel):
         Event function for adaptation that checks if the geometry or flow split change is small.
         This is used when the adaptation is run without simulating the model.
         """
-
+        if t <= 1e-12:
+            return 1.0
         last_y = args[1]
 
         rel_geom_r = np.mean(np.abs((y[0::2] - last_y[0::2]) / last_y[0::2]))
@@ -201,6 +217,6 @@ class CWSSIMSAdaptation(AdaptationModel):
         geom_change = max(rel_geom_r, rel_geom_h)
 
         return geom_change - 1e-8  # Adjusted tolerance for event
-    
-        event_outsidesim.terminal = True
-        event_outsidesim.direction = -1
+
+    event_outsidesim.terminal = True
+    event_outsidesim.direction = -1

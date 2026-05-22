@@ -11,6 +11,8 @@ from ..utils import simulate_outlet_trees
 class CWSSAdaptation(AdaptationModel):
     """Stable WSS-only structured-tree adaptation with frozen thickness."""
 
+    event_reason_label = "geometry_converged"
+
     def __init__(self, K_arr: Sequence[float]):
         if not isinstance(K_arr, (list, tuple, np.ndarray)):
             raise TypeError(f"K_arr must be a list, tuple, or ndarray, but got {type(K_arr)}.")
@@ -21,7 +23,7 @@ class CWSSAdaptation(AdaptationModel):
             )
         super().__init__(K_arr)
 
-    def compute_rhs(self, t, y, simple_pa, _vessels, last_update_y, last_t_holder, flow_log):
+    def compute_rhs(self, t, y, simple_pa, _vessels, last_update_y, last_t_holder, flow_log, solver_trace):
         y = np.asarray(y, dtype=np.float64)
         if y.ndim != 1:
             raise ValueError(f"State vector must be 1-D, received shape {y.shape}.")
@@ -61,23 +63,6 @@ class CWSSAdaptation(AdaptationModel):
 
         geom_rel_change = (y - last_update_y) / last_update_y
         geom_change = float(np.mean(np.abs(geom_rel_change)))
-
-        if t > last_t_holder[0] + 1e-12:
-            print(
-                f"Geometry change at t={t:.2f} mean: {geom_change:.3e} "
-                f"and rpa split: {simple_pa.rpa_split:.3f}"
-            )
-            simulate_outlet_trees(simple_pa)
-            last_update_y[:] = y
-            last_t_holder[0] = t
-            flow_log.append((t, simple_pa.rpa_split))
-            if len(flow_log) > 1:
-                prev = flow_log[-2][1]
-                curr = flow_log[-1][1]
-                rel_change = (curr - prev) / curr if curr != 0 else "N/A"
-            else:
-                rel_change = "N/A"
-            print(f" -> flow split change: {rel_change}")
 
         if (
             not hasattr(lpa_tree, "results")
@@ -120,12 +105,42 @@ class CWSSAdaptation(AdaptationModel):
         dydt = np.zeros_like(y)
         tau_err = tau - wss_h
         dydt[0::2] = self.K_arr[0] * tau_err * r_all
+
+        if t > max(last_t_holder[0], 1e-12):
+            rhs_l2 = float(np.linalg.norm(dydt))
+            trace_entry = {
+                "t": float(t),
+                "geom_change_mean": geom_change,
+                "rpa_split": float(simple_pa.rpa_split),
+                "rhs_l2": rhs_l2,
+            }
+            print(
+                f"Geometry change at t={t:.6f} mean: {geom_change:.3e} "
+                f"and rpa split: {simple_pa.rpa_split:.6f} (rhs_l2={rhs_l2:.3e})"
+            )
+            last_update_y[:] = y
+            last_t_holder[0] = float(t)
+            flow_log.append({"t": float(t), "rpa_split": float(simple_pa.rpa_split)})
+            solver_trace.append(trace_entry)
+            if len(flow_log) > 1:
+                prev = float(flow_log[-2]["rpa_split"])
+                curr = float(flow_log[-1]["rpa_split"])
+                rel_change = (curr - prev) / curr if curr != 0.0 else "N/A"
+            else:
+                rel_change = "N/A"
+            print(f" -> flow split change: {rel_change}")
+
         return dydt
 
-    def event(self, t, y, *args, triggered=[False], was_positive=[False]):
+    def event(self, t, y, *args):
         """Terminate integration when relative radius change is small."""
         _simple_pa = args[0]
         last_y = args[1]
+        _flow_log = args[2]
+        event_state = args[3]
+
+        if t <= 1e-12:
+            return 1.0
 
         rel_geom_r = np.mean(np.abs((y[0::2] - last_y[0::2]) / last_y[0::2]))
         geom_change = rel_geom_r
@@ -133,16 +148,16 @@ class CWSSAdaptation(AdaptationModel):
         converged = geom_change - geom_tol < 0
 
         if converged:
-            triggered[0] = True
+            event_state["triggered"] = True
 
-        if not triggered[0]:
-            was_positive[0] = True
+        if not event_state["triggered"]:
+            event_state["was_positive"] = True
             val = 1.0
-        elif was_positive[0]:
-            was_positive[0] = False
+        elif event_state["was_positive"]:
+            event_state["was_positive"] = False
             val = -1.0
         else:
-            was_positive[0] = True
+            event_state["was_positive"] = True
             val = 1.0
 
         return val
@@ -151,6 +166,8 @@ class CWSSAdaptation(AdaptationModel):
     event.direction = -1
 
     def event_outsidesim(self, t, y, *args):
+        if t <= 1e-12:
+            return 1.0
         last_y = args[1]
         rel_geom_r = np.mean(np.abs((y[0::2] - last_y[0::2]) / last_y[0::2]))
         return rel_geom_r - 1e-8

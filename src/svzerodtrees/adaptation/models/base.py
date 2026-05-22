@@ -5,7 +5,7 @@ class AdaptationModel(ABC):
         self.K_arr = K_arr
 
     @abstractmethod
-    def compute_rhs(self, t, y, simple_pa, vessels, last_update_y, last_t_holder, flow_log):
+    def compute_rhs(self, t, y, simple_pa, vessels, last_update_y, last_t_holder, flow_log, solver_trace):
         pass
 
     @abstractmethod

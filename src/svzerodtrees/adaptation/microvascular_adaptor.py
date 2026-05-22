@@ -228,6 +228,10 @@ class MicrovascularAdaptor:
         self.tree_params: Dict[str, TreeParameters] = {}
         self.lpa_tree = None
         self.rpa_tree = None
+        self._adapted_tree_outlet_mapping: Dict[str, list[str]] = {
+            "lpa_tree": [],
+            "rpa_tree": [],
+        }
 
         def _load_tree_parameters(df, side: str) -> TreeParameters:
             subset = df[df["pa"].str.lower() == side.lower()]
@@ -375,11 +379,18 @@ class MicrovascularAdaptor:
         # change path
         self.adapted_simdir.svzerod_3Dcoupling.path = os.path.join(self.adapted_simdir.path, 'svzerod_3Dcoupling.json')
         # update the config with the adapted trees
-        self.adapted_simdir.svzerod_3Dcoupling.tree_params[self.lpa_tree.name] = self.lpa_tree.to_dict()
-        self.adapted_simdir.svzerod_3Dcoupling.tree_params[self.rpa_tree.name] = self.rpa_tree.to_dict()
+        self.adapted_simdir.svzerod_3Dcoupling.tree_params[self.lpa_tree.name] = self._tree_metadata_with_outlet_mapping(self.lpa_tree)
+        self.adapted_simdir.svzerod_3Dcoupling.tree_params[self.rpa_tree.name] = self._tree_metadata_with_outlet_mapping(self.rpa_tree)
 
         print("saving adapted config to " + self.adapted_simdir.svzerod_3Dcoupling.path)
         self.adapted_simdir.svzerod_3Dcoupling.to_json(self.adapted_simdir.svzerod_3Dcoupling.path)
+
+    def _tree_metadata_with_outlet_mapping(self, tree: StructuredTree) -> dict:
+        metadata = tree.to_dict()
+        bc_names = list(self._adapted_tree_outlet_mapping.get(tree.name, []))
+        if bc_names:
+            metadata["outlet_mapping"] = {"bc_names": bc_names}
+        return metadata
 
     def adapt_cwss(
         self,
@@ -394,8 +405,8 @@ class MicrovascularAdaptor:
         """
         Adapt microvasculature using a stable WSS-only ODE with frozen thickness.
 
-        ``n_iter`` is retained for compatibility and now scales the default
-        solver horizon rather than repeatedly compounding a CWSS scaling factor.
+        ``n_iter`` is retained for compatibility but convergence is now governed
+        by the event-based solver rather than a fixed iteration count.
         """
         # Resolve or compute tuned reduced-order configs
         preop_config_path, postop_config_path = self._resolve_rri_config_paths(nm_iter=5)
@@ -408,7 +419,7 @@ class MicrovascularAdaptor:
             getattr(self.clinical_targets, "path", os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv')
         )
 
-        effective_t_end = float(t_end) if t_end is not None else 3600.0 * max(int(n_iter), 1)
+        effective_t_end = float(t_end) if t_end is not None else 86400.0
         gain_arr = [float(wss_gain), 0.0, 0.0, 0.0]
 
         result, flow_log, sol, postop_pa, hists = run_adaptation(
@@ -432,8 +443,16 @@ class MicrovascularAdaptor:
         result["solver_rtol"] = float(rtol)
         result["solver_atol"] = float(atol)
         result["solver_max_step"] = float(max_step)
+        result["requested_iterations_input"] = int(n_iter)
         result["flow_log_points"] = len(flow_log)
         result["saved_history_figures"] = len(hists)
+        result["config_paths"] = {
+            "preop_rri_config": str(preop_config_path),
+            "postop_rri_config": str(postop_config_path),
+            "clinical_targets_csv": str(getattr(self.clinical_targets, "path", "")),
+            "tree_params_csv": str(self.tree_params_csv),
+            "reduced_order_pa": str(self.reduced_order_pa_path),
+        }
         return result
 
     def construct_impedance_trees(self):
@@ -640,14 +659,27 @@ class MicrovascularAdaptor:
         
         cap_to_bc = {list(cap_info.keys())[i]: outlet_bc_names[i] for i in range(len(outlet_bc_names))}
 
+        outlet_mapping = {"lpa_tree": [], "rpa_tree": []}
         for idx, (cap_name, area) in enumerate(cap_info.items()):
-                    print(f'generating tree {idx + 1} of {len(cap_info)} for cap {cap_name}...')
-                    if 'lpa' in cap_name.lower():
-                        self.postop_simdir.svzerod_3Dcoupling.bcs[cap_to_bc[cap_name]] = self.lpa_tree.create_impedance_bc(cap_to_bc[cap_name], 0, self.clinical_targets.wedge_p * 1333.2)
-                    elif 'rpa' in cap_name.lower():
-                        self.postop_simdir.svzerod_3Dcoupling.bcs[cap_to_bc[cap_name]] = self.rpa_tree.create_impedance_bc(cap_to_bc[cap_name], 1, self.clinical_targets.wedge_p * 1333.2)
-                    else:
-                        raise ValueError('cap name not recognized')
+            print(f'generating tree {idx + 1} of {len(cap_info)} for cap {cap_name}...')
+            bc_name = cap_to_bc[cap_name]
+            if 'lpa' in cap_name.lower():
+                self.postop_simdir.svzerod_3Dcoupling.bcs[bc_name] = self.lpa_tree.create_impedance_bc(
+                    bc_name,
+                    0,
+                    self.clinical_targets.wedge_p * 1333.2,
+                )
+                outlet_mapping["lpa_tree"].append(bc_name)
+            elif 'rpa' in cap_name.lower():
+                self.postop_simdir.svzerod_3Dcoupling.bcs[bc_name] = self.rpa_tree.create_impedance_bc(
+                    bc_name,
+                    1,
+                    self.clinical_targets.wedge_p * 1333.2,
+                )
+                outlet_mapping["rpa_tree"].append(bc_name)
+            else:
+                raise ValueError('cap name not recognized')
+        self._adapted_tree_outlet_mapping = outlet_mapping
                     
     
     def adapt_cwss_ims(self, K_arr, fig_dir: str = None):

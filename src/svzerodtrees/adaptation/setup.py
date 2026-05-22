@@ -39,6 +39,7 @@ def create_preop_model(
     preop_pa_config_handler = ConfigHandler.from_json(config_path, is_pulmonary=True)
     preop_pa = PAConfig.from_pa_config(preop_pa_config_handler, clinical_targets)
     preop_pa.create_steady_trees(lpa_params, rpa_params)
+    preop_pa.source_config_path = str(config_path)
     print(f"number of vessels in lpa tree: {preop_pa.lpa_tree.count_vessels()}")
     print(f"number of vessels in rpa tree: {preop_pa.rpa_tree.count_vessels()}")
 
@@ -52,6 +53,7 @@ def create_postop_model(
 
     postop_pa_config_handler = ConfigHandler.from_json(config_path, is_pulmonary=True)
     postop_pa = PAConfig.from_pa_config(postop_pa_config_handler, clinical_targets)
+    postop_pa.source_config_path = str(config_path)
 
     return postop_pa
 

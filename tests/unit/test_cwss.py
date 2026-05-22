@@ -70,15 +70,15 @@ def test_compute_rhs_rejects_invalid_state_shape_and_values():
     simple_pa = FakePA(FakeTree([2.0], [10]), FakeTree([3.0], [20]))
 
     with pytest.raises(ValueError, match="1-D"):
-        _model().compute_rhs(0.0, [[1.0, 2.0]], simple_pa, None, np.ones(2), [0.0], [])
+        _model().compute_rhs(0.0, [[1.0, 2.0]], simple_pa, None, np.ones(2), [0.0], [], [])
 
     with pytest.raises(ValueError, match="non-positive"):
-        _model().compute_rhs(0.0, [1.0, 0.0], simple_pa, None, np.ones(2), [0.0], [])
+        _model().compute_rhs(0.0, [1.0, 0.0], simple_pa, None, np.ones(2), [0.0], [], [])
 
 
 def test_compute_rhs_rejects_missing_or_unbuilt_trees():
     with pytest.raises(AttributeError, match="missing LPA or RPA"):
-        _model().compute_rhs(0.0, [1.0, 0.1], FakePA(), None, np.ones(2), [0.0], [])
+        _model().compute_rhs(0.0, [1.0, 0.1], FakePA(), None, np.ones(2), [0.0], [], [])
 
     with pytest.raises(AttributeError, match="LPA structured tree has not been built"):
         _model().compute_rhs(
@@ -89,6 +89,7 @@ def test_compute_rhs_rejects_missing_or_unbuilt_trees():
             np.ones(4),
             [0.0],
             [],
+            [],
         )
 
 
@@ -96,7 +97,7 @@ def test_compute_rhs_rejects_wrong_state_length():
     simple_pa = FakePA(FakeTree([2.0], [10]), FakeTree([3.0], [20]))
 
     with pytest.raises(ValueError, match="State vector length"):
-        _model().compute_rhs(0.0, [1.0, 0.1], simple_pa, None, np.ones(2), [0.0], [])
+        _model().compute_rhs(0.0, [1.0, 0.1], simple_pa, None, np.ones(2), [0.0], [], [])
 
 
 def test_compute_rhs_happy_path_uses_wss_only_and_freezes_thickness(monkeypatch):
@@ -125,6 +126,7 @@ def test_compute_rhs_happy_path_uses_wss_only_and_freezes_thickness(monkeypatch)
         y.copy(),
         [0.0],
         [],
+        [],
     )
 
     tau = np.array([3.0, 7.0, 11.0])
@@ -146,25 +148,32 @@ def test_event_and_event_outsidesim_convergence_behavior():
 
     assert model.event(
         0.0,
+        last_y,
+        simple_pa,
+        last_y,
+        [],
+        {"triggered": False, "was_positive": False},
+    ) == pytest.approx(1.0)
+    assert model.event(
+        1.0,
         last_y * 1.1,
         simple_pa,
         last_y,
         [],
-        triggered=[False],
-        was_positive=[False],
+        {"triggered": False, "was_positive": False},
     ) == pytest.approx(1.0)
     assert model.event(
-        0.0,
+        1.0,
         last_y,
         simple_pa,
         last_y,
         [],
-        triggered=[False],
-        was_positive=[True],
+        {"triggered": False, "was_positive": True},
     ) == pytest.approx(-1.0)
 
-    assert model.event_outsidesim(0.0, last_y, simple_pa, last_y) < 0.0
-    assert model.event_outsidesim(0.0, last_y * 2.0, simple_pa, last_y) > 0.0
+    assert model.event_outsidesim(0.0, last_y, simple_pa, last_y) > 0.0
+    assert model.event_outsidesim(1.0, last_y, simple_pa, last_y) < 0.0
+    assert model.event_outsidesim(1.0, last_y * 2.0, simple_pa, last_y) > 0.0
 
 
 def test_run_structured_tree_adaptation_m1_uses_stable_dispatch_and_exports_solver_metrics(
@@ -220,6 +229,15 @@ def test_run_structured_tree_adaptation_m1_uses_stable_dispatch_and_exports_solv
                 "solver_max_step": kwargs["max_step"],
                 "flow_log_points": 5,
                 "saved_history_figures": 1,
+                "preop_rpa_split": 0.67,
+                "postop_rpa_split": 0.56,
+                "final_rpa_split": 0.54,
+                "solver_diagnostics": {
+                    "termination_reason": "geometry_converged",
+                    "event_time": 240.0,
+                    "rhs_l2_initial": 0.3,
+                    "rhs_l2_final": 1e-5,
+                },
             }
 
     monkeypatch.setattr(workflow_module.SimulationDirectory, "from_directory", fake_from_directory)
@@ -242,6 +260,8 @@ def test_run_structured_tree_adaptation_m1_uses_stable_dispatch_and_exports_solv
     assert DummyAdaptor.call_kwargs["wss_gain"] == pytest.approx(0.01)
     assert summary["solver_metrics"]["stable"] == 1
     assert summary["solver_metrics"]["solver_t_end"] == pytest.approx(7200.0)
+    assert summary["hemodynamics"]["threed"]["preop"]["rpa_split"] == pytest.approx(20.0 / 30.0)
+    assert summary["hemodynamics"]["internal_zerod"]["adapted_final"]["rpa_split"] == pytest.approx(0.54)
     assert Path(summary["artifacts"]["adapted_coupler_json"]).exists()
 
 

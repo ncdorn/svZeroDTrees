@@ -66,15 +66,15 @@ def test_compute_rhs_rejects_invalid_state_shape_and_values():
     simple_pa = FakePA(FakeTree([2.0], [10]), FakeTree([3.0], [20]))
 
     with pytest.raises(ValueError, match="1-D"):
-        _model().compute_rhs(0.0, [[1.0, 2.0]], simple_pa, None, np.ones(2), [0.0], [])
+        _model().compute_rhs(0.0, [[1.0, 2.0]], simple_pa, None, np.ones(2), [0.0], [], [])
 
     with pytest.raises(ValueError, match="non-positive"):
-        _model().compute_rhs(0.0, [1.0, 0.0], simple_pa, None, np.ones(2), [0.0], [])
+        _model().compute_rhs(0.0, [1.0, 0.0], simple_pa, None, np.ones(2), [0.0], [], [])
 
 
 def test_compute_rhs_rejects_missing_or_unbuilt_trees():
     with pytest.raises(AttributeError, match="missing LPA or RPA"):
-        _model().compute_rhs(0.0, [1.0, 0.1], FakePA(), None, np.ones(2), [0.0], [])
+        _model().compute_rhs(0.0, [1.0, 0.1], FakePA(), None, np.ones(2), [0.0], [], [])
 
     with pytest.raises(AttributeError, match="LPA structured tree has not been built"):
         _model().compute_rhs(
@@ -85,6 +85,7 @@ def test_compute_rhs_rejects_missing_or_unbuilt_trees():
             np.ones(4),
             [0.0],
             [],
+            [],
         )
 
 
@@ -92,7 +93,7 @@ def test_compute_rhs_rejects_wrong_state_length():
     simple_pa = FakePA(FakeTree([2.0], [10]), FakeTree([3.0], [20]))
 
     with pytest.raises(ValueError, match="State vector length"):
-        _model().compute_rhs(0.0, [1.0, 0.1], simple_pa, None, np.ones(2), [0.0], [])
+        _model().compute_rhs(0.0, [1.0, 0.1], simple_pa, None, np.ones(2), [0.0], [], [])
 
 
 def test_compute_rhs_happy_path_uses_results_and_homeostatic_references(monkeypatch):
@@ -124,6 +125,7 @@ def test_compute_rhs_happy_path_uses_results_and_homeostatic_references(monkeypa
         None,
         y.copy(),
         [0.0],
+        [],
         [],
     )
 
@@ -159,6 +161,7 @@ def test_compute_rhs_uses_homeostatic_maps_and_validates_reference_sizes(monkeyp
         np.ones(4),
         [0.0],
         [],
+        [],
     )
     assert dydt.shape == (4,)
 
@@ -172,6 +175,7 @@ def test_compute_rhs_uses_homeostatic_maps_and_validates_reference_sizes(monkeyp
             np.ones(4),
             [0.0],
             [],
+            [],
         )
 
 
@@ -179,26 +183,33 @@ def test_event_and_event_outsidesim_convergence_behavior():
     model = _model()
     simple_pa = SimpleNamespace(rpa_split=0.5)
     last_y = np.array([1.0, 0.2, 2.0, 0.4])
-    flow_log = [(0.0, 0.5), (1.0, 0.50001)]
+    flow_log = [{"t": 0.0, "rpa_split": 0.5}, {"t": 1.0, "rpa_split": 0.50001}]
 
     assert model.event(
         0.0,
+        last_y,
+        simple_pa,
+        last_y,
+        flow_log,
+        {"triggered": False, "was_positive": False},
+    ) == pytest.approx(1.0)
+    assert model.event(
+        1.0,
         last_y * 1.1,
         simple_pa,
         last_y,
         flow_log,
-        triggered=[False],
-        was_positive=[False],
+        {"triggered": False, "was_positive": False},
     ) == pytest.approx(1.0)
     assert model.event(
-        0.0,
+        1.0,
         last_y,
         simple_pa,
         last_y,
         flow_log,
-        triggered=[False],
-        was_positive=[True],
+        {"triggered": False, "was_positive": True},
     ) == pytest.approx(-1.0)
 
-    assert model.event_outsidesim(0.0, last_y, simple_pa, last_y) < 0.0
-    assert model.event_outsidesim(0.0, last_y * 2.0, simple_pa, last_y) > 0.0
+    assert model.event_outsidesim(0.0, last_y, simple_pa, last_y) > 0.0
+    assert model.event_outsidesim(1.0, last_y, simple_pa, last_y) < 0.0
+    assert model.event_outsidesim(1.0, last_y * 2.0, simple_pa, last_y) > 0.0
