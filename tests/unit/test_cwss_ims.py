@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pandas as pd
 import pytest
 
 import svzerodtrees.adaptation.models.cwss_ims as cwss_module
@@ -18,15 +19,6 @@ class FakeStore:
         return self.d.size
 
 
-class FakeResults:
-    def __init__(self, wss, pressure):
-        self._wss = np.asarray(wss, dtype=np.float64)
-        self.pressure_in = np.asarray(pressure, dtype=np.float64)
-
-    def wss_timeseries(self):
-        return self._wss
-
-
 class FakeTree:
     def __init__(self, diameters, ids, *, results=None):
         self.store = FakeStore(diameters, ids)
@@ -40,6 +32,13 @@ class FakePA:
         self.rpa_split = 0.55
         self.update_calls = 0
         self.sim_calls = 0
+        self.clinical_targets = SimpleNamespace(wedge_p=8.0)
+        self.result = pd.DataFrame(
+            {
+                "name": ["branch2_seg0", "branch4_seg0"],
+                "flow_out": [2.0, 3.0],
+            }
+        )
 
     def update_bcs(self):
         self.update_calls += 1
@@ -105,17 +104,18 @@ def test_compute_rhs_happy_path_uses_results_and_homeostatic_references(monkeypa
     rpa.homeostatic_ims = np.array([150.0])
     simple_pa = FakePA(lpa, rpa)
 
-    def fake_simulate_outlet_trees(pa):
-        pa.lpa_tree.results = FakeResults(
-            wss=[[2.0, 4.0], [6.0, 8.0]],
-            pressure=[[10.0, 14.0], [20.0, 24.0]],
-        )
-        pa.rpa_tree.results = FakeResults(
-            wss=[[10.0, 12.0]],
-            pressure=[[30.0, 34.0]],
+    def fake_estimate(tree, *, root_flow, distal_pressure):
+        if tree is lpa:
+            return SimpleNamespace(
+                wall_shear_stress=np.array([3.0, 7.0]),
+                pressure_in=np.array([12.0, 22.0]),
+            )
+        return SimpleNamespace(
+            wall_shear_stress=np.array([11.0]),
+            pressure_in=np.array([32.0]),
         )
 
-    monkeypatch.setattr(cwss_module, "simulate_outlet_trees", fake_simulate_outlet_trees)
+    monkeypatch.setattr(cwss_module, "estimate_steady_tree_hemodynamics", fake_estimate)
 
     y = np.array([1.0, 0.2, 2.0, 0.4, 3.0, 0.6])
     dydt = _model().compute_rhs(
@@ -145,14 +145,21 @@ def test_compute_rhs_happy_path_uses_results_and_homeostatic_references(monkeypa
 
 
 def test_compute_rhs_uses_homeostatic_maps_and_validates_reference_sizes(monkeypatch):
-    lpa = FakeTree([2.0], [10], results=FakeResults([[2.0, 2.0]], [[10.0, 10.0]]))
-    rpa = FakeTree([4.0], [20], results=FakeResults([[3.0, 3.0]], [[20.0, 20.0]]))
+    lpa = FakeTree([2.0], [10])
+    rpa = FakeTree([4.0], [20])
     lpa._homeostatic_wss_map = {10: 1.0}
     rpa._homeostatic_wss_map = {20: 1.0}
     lpa._homeostatic_ims_map = {10: 50.0}
     rpa._homeostatic_ims_map = {20: 50.0}
 
-    monkeypatch.setattr(cwss_module, "simulate_outlet_trees", lambda _pa: None)
+    monkeypatch.setattr(
+        cwss_module,
+        "estimate_steady_tree_hemodynamics",
+        lambda tree, **_: SimpleNamespace(
+            wall_shear_stress=np.array([2.0 if tree is lpa else 3.0]),
+            pressure_in=np.array([10.0 if tree is lpa else 20.0]),
+        ),
+    )
     dydt = _model().compute_rhs(
         0.0,
         [1.0, 0.2, 2.0, 0.4],

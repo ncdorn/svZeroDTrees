@@ -122,6 +122,16 @@ def test_canonical_coupled_simulation_parameters_resolve_from_inflow():
     }
 
 
+def test_assemble_config_omits_cached_inflow_boundary_condition_for_threed_interface():
+    handler = ConfigHandler(_bifurcation_config(coupled=True), is_threed_interface=True)
+
+    handler.assemble_config()
+
+    bc_names = {bc["bc_name"] for bc in handler.config["boundary_conditions"]}
+    assert "INFLOW" not in bc_names
+    assert {"LPA_BC", "RPA_BC"} <= bc_names
+
+
 def test_ensure_inflow_rebuilds_flow_boundary_condition_when_cache_is_missing():
     handler = ConfigHandler(_bifurcation_config())
     handler.inflows.clear()

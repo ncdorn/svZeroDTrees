@@ -123,6 +123,58 @@ def test_svmp_xml_can_save_vtk_every_timestep(tmp_path):
     assert root.findtext(".//Increment_in_saving_VTK_files") == "1"
 
 
+def test_svmp_xml_matches_postop_surface_names_without_branch_underscores(tmp_path):
+    xml_path = Path(tmp_path) / "svFSIplus.xml"
+    writer = SvMPxml(str(xml_path))
+    mesh_complete = SimpleNamespace(
+        volume_mesh="mesh-complete/mesh-complete.mesh.vtu",
+        mesh_surfaces={
+            "inflow": SimpleNamespace(filename="inflow.vtp", path="mesh-complete/mesh-surfaces/inflow.vtp"),
+            "lpa1": SimpleNamespace(filename="lpa1.vtp", path="mesh-complete/mesh-surfaces/lpa1.vtp"),
+            "lpa1_1": SimpleNamespace(filename="lpa1_1.vtp", path="mesh-complete/mesh-surfaces/lpa1_1.vtp"),
+        },
+        walls_combined=SimpleNamespace(path="mesh-complete/walls_combined.vtp"),
+    )
+    threed_coupler = SimpleNamespace(
+        coupling_blocks={
+            "LPA_1": SimpleNamespace(name="LPA_1", surface="mesh-surfaces/lpa_1.vtp"),
+            "LPA_1_1": SimpleNamespace(name="LPA_1_1", surface="mesh-surfaces/lpa_1_1.vtp"),
+        }
+    )
+
+    writer.write(mesh_complete, wall_model="deformable", threed_coupler=threed_coupler)
+
+    root = ET.parse(xml_path).getroot()
+    assert root.findtext(".//Add_BC[@name='lpa1']/svZeroDSolver_block") == "LPA_1"
+    assert root.findtext(".//Add_BC[@name='lpa1_1']/svZeroDSolver_block") == "LPA_1_1"
+
+
+def test_svmp_xml_matches_postop_surface_names_without_x_suffix(tmp_path):
+    xml_path = Path(tmp_path) / "svFSIplus.xml"
+    writer = SvMPxml(str(xml_path))
+    mesh_complete = SimpleNamespace(
+        volume_mesh="mesh-complete/mesh-complete.mesh.vtu",
+        mesh_surfaces={
+            "inflow": SimpleNamespace(filename="inflow.vtp", path="mesh-complete/mesh-surfaces/inflow.vtp"),
+            "rpa1": SimpleNamespace(filename="rpa1.vtp", path="mesh-complete/mesh-surfaces/rpa1.vtp"),
+            "rpa1_1": SimpleNamespace(filename="rpa1_1.vtp", path="mesh-complete/mesh-surfaces/rpa1_1.vtp"),
+        },
+        walls_combined=SimpleNamespace(path="mesh-complete/walls_combined.vtp"),
+    )
+    threed_coupler = SimpleNamespace(
+        coupling_blocks={
+            "RPA_1_X": SimpleNamespace(name="RPA_1_X", surface="mesh-surfaces/rpa_1_x.vtp"),
+            "RPA_1_1_X": SimpleNamespace(name="RPA_1_1_X", surface="mesh-surfaces/rpa_1_1_x.vtp"),
+        }
+    )
+
+    writer.write(mesh_complete, wall_model="deformable", threed_coupler=threed_coupler)
+
+    root = ET.parse(xml_path).getroot()
+    assert root.findtext(".//Add_BC[@name='rpa1']/svZeroDSolver_block") == "RPA_1_X"
+    assert root.findtext(".//Add_BC[@name='rpa1_1']/svZeroDSolver_block") == "RPA_1_1_X"
+
+
 def test_svmp_xml_deformable_writes_uniform_tissue_support(tmp_path):
     xml_path = Path(tmp_path) / "svFSIplus.xml"
     writer = SvMPxml(str(xml_path))

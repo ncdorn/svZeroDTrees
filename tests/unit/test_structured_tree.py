@@ -599,6 +599,48 @@ def test_create_bcs_generates_pressure_and_resistance_outlets(simple_tree):
         simple_tree.create_bcs(distal_bc_type="RCR")
 
 
+def test_truncated_tree_marks_frontier_leaves_as_terminal_outlets():
+    tree = StructuredTree(
+        name="truncated_tree",
+        time=[0.0, 0.5, 1.0],
+        simparams=SimParams({}),
+        compliance_model=ConstantCompliance(1.0),
+    )
+
+    with pytest.warns(UserWarning, match="collapsed into terminal outlets"):
+        tree.build(
+            initial_d=1.0,
+            d_min=0.01,
+            alpha=0.9,
+            beta=0.9,
+            lrr=2.0,
+            max_nodes=5,
+        )
+
+    block_dict = tree.to_block_dict()
+    leaf_vessels = []
+    non_leaf_vessels = []
+    for idx, vessel in enumerate(block_dict["vessels"]):
+        is_leaf = int(tree.store.left[idx]) < 0 and int(tree.store.right[idx]) < 0
+        if is_leaf:
+            leaf_vessels.append(vessel)
+        else:
+            non_leaf_vessels.append(vessel)
+
+    assert leaf_vessels
+    assert all(v["boundary_conditions"]["outlet"] == f"P_d{v['vessel_id']}" for v in leaf_vessels)
+    assert all("outlet" not in v.get("boundary_conditions", {}) for v in non_leaf_vessels)
+    assert len(leaf_vessels) == sum(1 for flag in tree.store.collapsed if flag)
+
+    tree.block_dict = block_dict
+    tree.Q_in = [1.0, 1.0, 1.0]
+    tree.Pd = 9.0
+    tree.create_bcs()
+
+    assert len(tree.block_dict["boundary_conditions"]) == 1 + len(leaf_vessels)
+    assert np.isfinite(tree.equivalent_resistance())
+
+
 def test_count_vessels_and_tree_vessel_views(simple_tree):
     assert simple_tree.count_vessels() == 3
 

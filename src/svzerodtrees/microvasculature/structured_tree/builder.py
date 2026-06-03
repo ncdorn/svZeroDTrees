@@ -73,9 +73,16 @@ def build_tree_soa(initial_d: float,
             right[i] = ri
 
         if truncated:
+            # Treat the remaining frontier as terminal leaves so downstream
+            # traversal and BC generation see a fully constrained tree.
+            while q:
+                i = q.popleft()
+                if left[i] < 0 and right[i] < 0:
+                    collapsed[i] = True
             warnings.warn(
                 f"Structured tree '{name}' reached max_nodes={max_nodes}; "
-                "remaining branches were truncated."
+                "remaining branches were truncated and frontier leaves were "
+                "collapsed into terminal outlets."
             )
 
         # pack to compact arrays

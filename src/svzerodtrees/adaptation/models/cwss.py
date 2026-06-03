@@ -5,13 +5,19 @@ from typing import Sequence
 import numpy as np
 
 from .base import AdaptationModel
-from ..utils import simulate_outlet_trees
+from ..utils import estimate_steady_tree_hemodynamics
 
 
 class CWSSAdaptation(AdaptationModel):
     """Stable WSS-only structured-tree adaptation with frozen thickness."""
 
-    event_reason_label = "geometry_converged"
+    event_reason_label = "rpa_split_window_converged"
+    split_window_duration = 5.0
+    min_window_coverage_fraction = 0.9
+    min_window_samples = 5
+    split_window_tolerance = 1e-3
+    split_window_center_tolerance = 5e-4
+    min_convergence_time = 10.0
 
     def __init__(self, K_arr: Sequence[float]):
         if not isinstance(K_arr, (list, tuple, np.ndarray)):
@@ -64,14 +70,6 @@ class CWSSAdaptation(AdaptationModel):
         geom_rel_change = (y - last_update_y) / last_update_y
         geom_change = float(np.mean(np.abs(geom_rel_change)))
 
-        if (
-            not hasattr(lpa_tree, "results")
-            or lpa_tree.results is None
-            or not hasattr(rpa_tree, "results")
-            or rpa_tree.results is None
-        ):
-            simulate_outlet_trees(simple_pa)
-
         def _ensure_reference(tree, attr_name, n_expected, label):
             ref = getattr(tree, attr_name, None)
             if ref is None:
@@ -90,12 +88,27 @@ class CWSSAdaptation(AdaptationModel):
                 )
             return arr
 
-        def _mean_wss(tree):
-            tau_ts = tree.results.wss_timeseries()
-            return np.mean(tau_ts, axis=1)
+        lpa_root_flow = float(
+            np.mean(simple_pa.result[simple_pa.result.name == "branch2_seg0"]["flow_out"])
+        )
+        rpa_root_flow = float(
+            np.mean(simple_pa.result[simple_pa.result.name == "branch4_seg0"]["flow_out"])
+        )
+        distal_pressure = float(simple_pa.clinical_targets.wedge_p) * 1333.2
 
-        tau_lpa = _mean_wss(lpa_tree)
-        tau_rpa = _mean_wss(rpa_tree)
+        lpa_hemo = estimate_steady_tree_hemodynamics(
+            lpa_tree,
+            root_flow=lpa_root_flow,
+            distal_pressure=distal_pressure,
+        )
+        rpa_hemo = estimate_steady_tree_hemodynamics(
+            rpa_tree,
+            root_flow=rpa_root_flow,
+            distal_pressure=distal_pressure,
+        )
+
+        tau_lpa = lpa_hemo.wall_shear_stress
+        tau_rpa = rpa_hemo.wall_shear_stress
         tau = np.concatenate([tau_lpa, tau_rpa])
 
         wss_h_lpa = _ensure_reference(lpa_tree, "homeostatic_wss", n_lpa, "LPA")
@@ -133,34 +146,70 @@ class CWSSAdaptation(AdaptationModel):
         return dydt
 
     def event(self, t, y, *args):
-        """Terminate integration when relative radius change is small."""
+        """Terminate integration when the RPA split stabilizes over a trailing window."""
         _simple_pa = args[0]
-        last_y = args[1]
-        _flow_log = args[2]
-        event_state = args[3]
+        _reference_y = args[1]
+        flow_log = args[2]
+        _event_state = args[3]
 
-        if t <= 1e-12:
-            return 1.0
+        return self.convergence_margin(t, flow_log)
 
-        rel_geom_r = np.mean(np.abs((y[0::2] - last_y[0::2]) / last_y[0::2]))
-        geom_change = rel_geom_r
-        geom_tol = 1e-6
-        converged = geom_change - geom_tol < 0
+    def convergence_diagnostics(self, t, flow_log):
+        diagnostics = {
+            "t": float(t),
+            "window_duration": float(self.split_window_duration),
+            "window_coverage": 0.0,
+            "window_samples": 0,
+            "window_span": None,
+            "center_deviation": None,
+            "margin": None,
+            "converged": False,
+        }
 
-        if converged:
-            event_state["triggered"] = True
+        if t <= max(1e-12, float(self.min_convergence_time)):
+            diagnostics["margin"] = float(self.min_convergence_time) - float(t)
+            return diagnostics
 
-        if not event_state["triggered"]:
-            event_state["was_positive"] = True
-            val = 1.0
-        elif event_state["was_positive"]:
-            event_state["was_positive"] = False
-            val = -1.0
-        else:
-            event_state["was_positive"] = True
-            val = 1.0
+        window_start = float(t) - float(self.split_window_duration)
+        window_entries = [
+            entry
+            for entry in flow_log
+            if window_start <= float(entry["t"]) <= float(t)
+        ]
+        diagnostics["window_samples"] = len(window_entries)
+        if len(window_entries) < int(self.min_window_samples):
+            diagnostics["margin"] = 1.0
+            return diagnostics
 
-        return val
+        window_times = np.asarray([float(entry["t"]) for entry in window_entries], dtype=np.float64)
+        window_splits = np.asarray([float(entry["rpa_split"]) for entry in window_entries], dtype=np.float64)
+        coverage = float(window_times[-1] - window_times[0])
+        diagnostics["window_coverage"] = coverage
+
+        min_coverage = float(self.min_window_coverage_fraction) * float(self.split_window_duration)
+        coverage_deficit = min_coverage - coverage
+        if coverage_deficit > 0.0:
+            diagnostics["margin"] = coverage_deficit
+            return diagnostics
+
+        window_span = float(np.max(window_splits) - np.min(window_splits))
+        window_mean = float(np.mean(window_splits))
+        latest_split = float(window_splits[-1])
+        center_deviation = abs(window_mean - latest_split)
+
+        span_margin = window_span - float(self.split_window_tolerance)
+        center_margin = center_deviation - float(self.split_window_center_tolerance)
+        margin = max(span_margin, center_margin)
+
+        diagnostics["window_span"] = window_span
+        diagnostics["center_deviation"] = center_deviation
+        diagnostics["margin"] = margin
+        diagnostics["converged"] = margin <= 0.0
+        return diagnostics
+
+    def convergence_margin(self, t, flow_log):
+        """Return a signed margin for accepted-step rolling-window convergence."""
+        return float(self.convergence_diagnostics(t, flow_log)["margin"])
 
     event.terminal = True
     event.direction = -1

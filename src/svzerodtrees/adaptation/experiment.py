@@ -1,18 +1,27 @@
 
 from .setup import *
 from .integrator import run_adaptation, run_adaptation_outsidesim
-from .models import CWSSIMSAdaptation
+from .models import CWSSAdaptation, CWSSIMSAdaptation
+from ..microvasculature.structured_tree.structuredtree import StructuredTree
 from ..tune_bcs.clinical_targets import ClinicalTargets
 import pandas as pd
 import itertools
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import List, Tuple
-from .utils import append_result_to_csv, pack_state, rel_change, time_to_95, unpack_state
+from .utils import (
+    append_result_to_csv,
+    estimate_steady_tree_hemodynamics,
+    pack_state,
+    rel_change,
+    time_to_95,
+    unpack_state,
+)
 import os
 import copy
 
 import numpy as np
 from scipy.integrate import solve_ivp
+from types import SimpleNamespace
 
 '''
 this file is for setting up adaptation experiments
@@ -183,6 +192,7 @@ def run_single_tree_cwss_debug(
     rtol: float = 1e-6,
     atol: float = 1e-7,
     max_step: float = 60.0,
+    method: str = "RK23",
 ) -> dict:
     """
     Debug a single structured tree with the stabilized WSS-only ODE.
@@ -196,6 +206,7 @@ def run_single_tree_cwss_debug(
     y0 = pack_state(debug_tree)
     y_initial = y0.copy()
     last_update_y = y0.copy()
+    event_reference_y = y0.copy()
     last_t_holder = [-float("inf")]
     residual_log: list[tuple[float, float]] = []
 
@@ -208,9 +219,12 @@ def run_single_tree_cwss_debug(
 
         unpack_state(y, debug_tree)
         pd_val = float(debug_tree.Pd) if getattr(debug_tree, "Pd", None) is not None else 0.0
-        debug_tree.simulate(Q_in=[float(q_target), float(q_target)], Pd=pd_val)
-        tau_ts = debug_tree.results.wss_timeseries()
-        tau = np.mean(tau_ts, axis=1)
+        hemo = estimate_steady_tree_hemodynamics(
+            debug_tree,
+            root_flow=float(q_target),
+            distal_pressure=pd_val,
+        )
+        tau = hemo.wall_shear_stress
         tau_h = np.asarray(debug_tree.homeostatic_wss, dtype=np.float64)
         if t > last_t_holder[0] + 1e-12:
             last_update_y[:] = y
@@ -222,7 +236,7 @@ def run_single_tree_cwss_debug(
         return dydt
 
     def _event(t, y, triggered=[False], was_positive=[False]):
-        rel_geom_r = np.mean(np.abs((y[0::2] - last_update_y[0::2]) / last_update_y[0::2]))
+        rel_geom_r = np.mean(np.abs((y[0::2] - event_reference_y[0::2]) / event_reference_y[0::2]))
         converged = rel_geom_r < 1e-6
 
         if converged:
@@ -245,7 +259,7 @@ def run_single_tree_cwss_debug(
         (0.0, float(t_end)),
         y0,
         events=_event,
-        method="BDF",
+        method=str(method),
         rtol=float(rtol),
         atol=float(atol),
         max_step=float(max_step),
@@ -266,6 +280,118 @@ def run_single_tree_cwss_debug(
             "n_rhs": sol.nfev,
             "wss_gain": float(wss_gain),
             "solver_t_end": float(t_end),
+            "integration_method": str(method),
+        },
+    }
+
+
+class _MiniPADebug:
+    def __init__(self, lpa_tree, rpa_tree, *, q_total: float, lpa_upstream_R: float, rpa_upstream_R: float, wedge_p: float):
+        self.lpa_tree = lpa_tree
+        self.rpa_tree = rpa_tree
+        self.q_total = float(q_total)
+        self.lpa_upstream_R = float(lpa_upstream_R)
+        self.rpa_upstream_R = float(rpa_upstream_R)
+        self.clinical_targets = SimpleNamespace(wedge_p=float(wedge_p))
+        self.result = None
+        self.rpa_split = None
+
+    def update_bcs(self):
+        return None
+
+    def simulate(self):
+        lpa_R = self.lpa_upstream_R + float(self.lpa_tree.equivalent_resistance())
+        rpa_R = self.rpa_upstream_R + float(self.rpa_tree.equivalent_resistance())
+        lpa_G = 1.0 / max(lpa_R, 1e-12)
+        rpa_G = 1.0 / max(rpa_R, 1e-12)
+        total_G = lpa_G + rpa_G
+        lpa_flow = self.q_total * lpa_G / total_G
+        rpa_flow = self.q_total * rpa_G / total_G
+        self.rpa_split = float(rpa_flow / max(lpa_flow + rpa_flow, 1e-12))
+        self.result = pd.DataFrame(
+            {
+                "name": ["branch2_seg0", "branch4_seg0"],
+                "flow_out": [lpa_flow, rpa_flow],
+            }
+        )
+        return self.result
+
+
+def run_minipa_cwss_debug(
+    *,
+    initial_d: float = 0.3,
+    d_min: float = 0.1,
+    alpha: float = 0.9,
+    beta: float = 0.6,
+    lrr: float = 10.0,
+    Pd: float = 8.0 * 1333.2,
+    q_total_preop: float = 2.0,
+    q_total_postop: float = 2.0,
+    preop_upstream_R: tuple[float, float] = (500.0, 500.0),
+    postop_upstream_R: tuple[float, float] = (250.0, 750.0),
+    wss_gain: float = 0.01,
+    t_end: float = 200.0,
+    rtol: float = 1e-6,
+    atol: float = 1e-7,
+    max_step: float = 1.0,
+    method: str = "RK23",
+) -> dict:
+    """
+    Run the full CWSS adaptation path on a tiny local bilateral PA surrogate
+    built from real structured trees with a large terminal diameter.
+    """
+
+    def _build_tree(name: str):
+        tree = StructuredTree(name=name, time=[0.0, 1.0], simparams=None, Pd=Pd)
+        tree.build(initial_d=initial_d, d_min=d_min, alpha=alpha, beta=beta, lrr=lrr)
+        return tree
+
+    preop_lpa = _build_tree("debug_lpa")
+    preop_rpa = _build_tree("debug_rpa")
+    preop_pa = _MiniPADebug(
+        preop_lpa,
+        preop_rpa,
+        q_total=q_total_preop,
+        lpa_upstream_R=preop_upstream_R[0],
+        rpa_upstream_R=preop_upstream_R[1],
+        wedge_p=Pd / 1333.2,
+    )
+    preop_pa.simulate()
+    lpa_q_homeostatic = float(preop_pa.result[preop_pa.result.name == "branch2_seg0"]["flow_out"].mean())
+    rpa_q_homeostatic = float(preop_pa.result[preop_pa.result.name == "branch4_seg0"]["flow_out"].mean())
+    preop_pa.lpa_tree.compute_homeostatic_state(lpa_q_homeostatic)
+    preop_pa.rpa_tree.compute_homeostatic_state(rpa_q_homeostatic)
+
+    postop_pa = _MiniPADebug(
+        copy.deepcopy(preop_pa.lpa_tree),
+        copy.deepcopy(preop_pa.rpa_tree),
+        q_total=q_total_postop,
+        lpa_upstream_R=postop_upstream_R[0],
+        rpa_upstream_R=postop_upstream_R[1],
+        wedge_p=Pd / 1333.2,
+    )
+
+    result, flow_log, sol, adapted_pa, hists = run_adaptation(
+        preop_pa,
+        postop_pa,
+        CWSSAdaptation,
+        [float(wss_gain), 0.0, 0.0, 0.0],
+        t_end=float(t_end),
+        rtol=float(rtol),
+        atol=float(atol),
+        max_step=float(max_step),
+        method=str(method),
+    )
+
+    return {
+        "result": result,
+        "solution": sol,
+        "flow_log": flow_log,
+        "adapted_pa": adapted_pa,
+        "figures": hists,
+        "metrics": {
+            **result,
+            "solver_diagnostics": result["solver_diagnostics"],
         },
     }
 

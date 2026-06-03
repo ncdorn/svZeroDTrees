@@ -229,7 +229,14 @@ class ConfigHandler():
         for name, inflow in self.inflows.items():
             self.set_inflow(inflow, name)
         # add the boundary conditions
-        self._config['boundary_conditions'] = [bc.to_dict() for bc in self.bcs.values()]
+        if self.threed_interface:
+            self._config['boundary_conditions'] = [
+                bc.to_dict()
+                for name, bc in self.bcs.items()
+                if name not in self.inflows
+            ]
+        else:
+            self._config['boundary_conditions'] = [bc.to_dict() for bc in self.bcs.values()]
 
         # add the junctions
         self._config['junctions'] = [junction.to_dict() for junction in self.junctions.values()]

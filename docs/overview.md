@@ -37,6 +37,8 @@ svzerodtrees postprocess examples/postprocess_example.yml
 3. Run `tune_bcs` to compute optimized parameters.
 4. Run `construct_trees` to build BCs and write a config with BCs attached.
 5. Run `adapt` to apply microvascular adaptation to preop/postop results.
+   `M1` adaptation also writes reduced-PA flow-split convergence CSV/PNG
+   artifacts for review and sharing.
 6. Run `postprocess` to generate figures from saved tree pickles or compute artifacts such as a pulmonary resistance map from svSlicer-projected centerline results.
 7. For pulmonary 3D simulations, use the `pulmonary_threed_suite` analysis to
    generate a standardized `mpa_pressure_vs_time.csv/png`, preop or postop

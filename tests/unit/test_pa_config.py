@@ -6,7 +6,7 @@ import pytest
 import svzerodtrees.tune_bcs.assign_bcs as assign_bcs_module
 import svzerodtrees.tune_bcs.pa_config as pa_config_module
 from svzerodtrees.io.blocks import BoundaryCondition, SimParams, Vessel
-from svzerodtrees.microvasculature.compliance import ConstantCompliance
+from svzerodtrees.microvasculature.compliance import ConstantCompliance, OlufsenCompliance
 from svzerodtrees.microvasculature.treeparams import TreeParameters
 from svzerodtrees.tune_bcs.assign_bcs import construct_impedance_trees
 from svzerodtrees.tune_bcs.clinical_targets import ClinicalTargets
@@ -124,10 +124,12 @@ def test_create_steady_trees_uses_structured_tree_resistance_bcs(monkeypatch, pa
     created = []
 
     class FakeStructuredTree:
-        def __init__(self, name, time, simparams=None, **_kwargs):
+        def __init__(self, name, time, simparams=None, compliance_model=None, **_kwargs):
             self.name = name
             self.time = time
             self.simparams = simparams
+            self.compliance_model = compliance_model
+            self.inductance = None
             self.build_kwargs = None
             created.append(self)
 
@@ -144,6 +146,8 @@ def test_create_steady_trees_uses_structured_tree_resistance_bcs(monkeypatch, pa
             )
 
     monkeypatch.setattr(pa_config_module, "StructuredTree", FakeStructuredTree)
+    lpa_compliance = ConstantCompliance(1.0)
+    rpa_compliance = ConstantCompliance(2.0)
     lpa_params = TreeParameters(
         name="lpa",
         lrr=2.0,
@@ -151,7 +155,8 @@ def test_create_steady_trees_uses_structured_tree_resistance_bcs(monkeypatch, pa
         d_min=0.1,
         alpha=0.9,
         beta=0.6,
-        compliance_model=ConstantCompliance(1.0),
+        compliance_model=lpa_compliance,
+        inductance=0.125,
     )
     rpa_params = TreeParameters(
         name="rpa",
@@ -160,10 +165,11 @@ def test_create_steady_trees_uses_structured_tree_resistance_bcs(monkeypatch, pa
         d_min=0.2,
         alpha=0.8,
         beta=0.5,
-        compliance_model=ConstantCompliance(1.0),
+        compliance_model=rpa_compliance,
+        inductance=0.25,
     )
 
-    pa_config.create_steady_trees(lpa_params, rpa_params)
+    pa_config.create_steady_trees(lpa_params, rpa_params, max_nodes=200_000)
 
     assert [tree.name for tree in created] == ["lpa_tree", "rpa_tree"]
     assert created[0].build_kwargs == {
@@ -172,9 +178,79 @@ def test_create_steady_trees_uses_structured_tree_resistance_bcs(monkeypatch, pa
         "lrr": 2.0,
         "alpha": 0.9,
         "beta": 0.6,
+        "max_nodes": 200_000,
     }
+    assert created[1].build_kwargs == {
+        "initial_d": 0.6,
+        "d_min": 0.2,
+        "lrr": 3.0,
+        "alpha": 0.8,
+        "beta": 0.5,
+        "max_nodes": 200_000,
+    }
+    assert created[0].compliance_model is lpa_compliance
+    assert created[1].compliance_model is rpa_compliance
+    assert created[0].inductance == pytest.approx(0.125)
+    assert created[1].inductance == pytest.approx(0.25)
     assert pa_config.bcs["LPA_BC"].R == pytest.approx(42.0)
     assert pa_config.bcs["RPA_BC"].R == pytest.approx(84.0)
+
+
+def test_create_steady_trees_preserves_olufsen_compliance_model(monkeypatch, pa_config):
+    created = []
+
+    class FakeStructuredTree:
+        def __init__(self, name, time, simparams=None, compliance_model=None, **_kwargs):
+            self.name = name
+            self.time = time
+            self.simparams = simparams
+            self.compliance_model = compliance_model
+            self.inductance = None
+            created.append(self)
+
+        def build(self, **_kwargs):
+            pass
+
+        def create_resistance_bc(self, name, Pd=0.0):
+            return BoundaryCondition.from_config(
+                {
+                    "bc_name": name,
+                    "bc_type": "RESISTANCE",
+                    "bc_values": {"R": 1.0, "Pd": Pd},
+                }
+            )
+
+    monkeypatch.setattr(pa_config_module, "StructuredTree", FakeStructuredTree)
+    lpa_model = OlufsenCompliance(k1=11.0, k2=-22.0, k3=33.0)
+    rpa_model = OlufsenCompliance(k1=44.0, k2=-55.0, k3=66.0)
+    lpa_params = TreeParameters(
+        name="lpa",
+        lrr=2.0,
+        diameter=0.5,
+        d_min=0.1,
+        alpha=0.9,
+        beta=0.6,
+        compliance_model=lpa_model,
+        inductance=0.75,
+    )
+    rpa_params = TreeParameters(
+        name="rpa",
+        lrr=3.0,
+        diameter=0.6,
+        d_min=0.2,
+        alpha=0.8,
+        beta=0.5,
+        compliance_model=rpa_model,
+        inductance=0.5,
+    )
+
+    pa_config.create_steady_trees(lpa_params, rpa_params)
+
+    assert [type(tree.compliance_model) for tree in created] == [OlufsenCompliance, OlufsenCompliance]
+    assert created[0].compliance_model is lpa_model
+    assert created[1].compliance_model is rpa_model
+    assert created[0].inductance == pytest.approx(0.75)
+    assert created[1].inductance == pytest.approx(0.5)
 
 
 def test_create_impedance_trees_disables_steady_initial(monkeypatch, pa_config):

@@ -228,10 +228,7 @@ class MicrovascularAdaptor:
         self.tree_params: Dict[str, TreeParameters] = {}
         self.lpa_tree = None
         self.rpa_tree = None
-        self._adapted_tree_outlet_mapping: Dict[str, list[str]] = {
-            "lpa_tree": [],
-            "rpa_tree": [],
-        }
+        self._adapted_tree_outlet_mapping: Dict[str, list[str]] = self._empty_outlet_mapping()
 
         def _load_tree_parameters(df, side: str) -> TreeParameters:
             subset = df[df["pa"].str.lower() == side.lower()]
@@ -371,13 +368,14 @@ class MicrovascularAdaptor:
         Attach adapted trees to the coupling config, regenerate impedance BCs,
         and write the adapted coupling file.
         """
-        # distribute the impedance to lpa and rpa specifically
-        self.createImpedanceBCs()
-        
         # work on a deep copy so we do not mutate the original postop coupling config
         self.adapted_simdir.svzerod_3Dcoupling = copy.deepcopy(self.postop_simdir.svzerod_3Dcoupling)
         # change path
         self.adapted_simdir.svzerod_3Dcoupling.path = os.path.join(self.adapted_simdir.path, 'svzerod_3Dcoupling.json')
+        self.adapted_simdir.svzerod_3Dcoupling.bcs.pop("INFLOW", None)
+        self.adapted_simdir.svzerod_3Dcoupling.inflows.pop("INFLOW", None)
+        self.createImpedanceBCs(target_coupler=self.adapted_simdir.svzerod_3Dcoupling)
+        self.adapted_simdir.svzerod_3Dcoupling.tree_params = {}
         # update the config with the adapted trees
         self.adapted_simdir.svzerod_3Dcoupling.tree_params[self.lpa_tree.name] = self._tree_metadata_with_outlet_mapping(self.lpa_tree)
         self.adapted_simdir.svzerod_3Dcoupling.tree_params[self.rpa_tree.name] = self._tree_metadata_with_outlet_mapping(self.rpa_tree)
@@ -392,6 +390,14 @@ class MicrovascularAdaptor:
             metadata["outlet_mapping"] = {"bc_names": bc_names}
         return metadata
 
+    def _empty_outlet_mapping(self) -> Dict[str, list[str]]:
+        lpa_name = getattr(self.lpa_tree, "name", "lpa_tree")
+        rpa_name = getattr(self.rpa_tree, "name", "rpa_tree")
+        return {
+            str(lpa_name): [],
+            str(rpa_name): [],
+        }
+
     def adapt_cwss(
         self,
         n_iter: int = 100,
@@ -401,6 +407,8 @@ class MicrovascularAdaptor:
         rtol: float = 1e-6,
         atol: float = 1e-7,
         max_step: float = 60.0,
+        method: str = "RK23",
+        max_nodes: int = 100_000,
     ):
         """
         Adapt microvasculature using a stable WSS-only ODE with frozen thickness.
@@ -416,7 +424,8 @@ class MicrovascularAdaptor:
             preop_config_path,
             postop_config_path,
             self.tree_params_csv,
-            getattr(self.clinical_targets, "path", os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv')
+            getattr(self.clinical_targets, "path", os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv'),
+            max_nodes=max_nodes,
         )
 
         effective_t_end = float(t_end) if t_end is not None else 86400.0
@@ -431,6 +440,7 @@ class MicrovascularAdaptor:
             rtol=rtol,
             atol=atol,
             max_step=max_step,
+            method=method,
         )
 
         self.lpa_tree = postop_pa.lpa_tree
@@ -443,6 +453,8 @@ class MicrovascularAdaptor:
         result["solver_rtol"] = float(rtol)
         result["solver_atol"] = float(atol)
         result["solver_max_step"] = float(max_step)
+        result["solver_method"] = str(method)
+        result["tree_max_nodes"] = int(max_nodes)
         result["requested_iterations_input"] = int(n_iter)
         result["flow_log_points"] = len(flow_log)
         result["saved_history_figures"] = len(hists)
@@ -455,7 +467,7 @@ class MicrovascularAdaptor:
         }
         return result
 
-    def construct_impedance_trees(self):
+    def construct_impedance_trees(self, *, max_nodes: int = 100_000):
         '''
         construct the trees for the preop and postop simulations
         '''
@@ -485,7 +497,9 @@ class MicrovascularAdaptor:
             lrr=lpa_params.lrr,
             alpha=lpa_params.alpha,
             beta=lpa_params.beta,
+            max_nodes=max_nodes,
         )
+        lpa_tree.inductance = float(lpa_params.inductance)
 
         rpa_tree = StructuredTree(
             name='RPA',
@@ -501,7 +515,9 @@ class MicrovascularAdaptor:
             lrr=rpa_params.lrr,
             alpha=rpa_params.alpha,
             beta=rpa_params.beta,
+            max_nodes=max_nodes,
         )
+        rpa_tree.inductance = float(rpa_params.inductance)
 
         return lpa_tree, rpa_tree
     
@@ -627,14 +643,15 @@ class MicrovascularAdaptor:
                 simparams=self.preop_simdir.svzerod_3Dcoupling.simparams,
             )
 
-    def createImpedanceBCs(self):
+    def createImpedanceBCs(self, *, target_coupler=None):
         '''
         create the impedance boundary conditions for the adapted trees
         '''
         # if self.location == 'uniform':
+        coupler = target_coupler or self.postop_simdir.svzerod_3Dcoupling
 
         kernel_steps = _impedance_kernel_steps_from_config(
-            self.postop_simdir.svzerod_3Dcoupling
+            coupler
         )
         Z_t_l_adapt, time = self.lpa_tree.compute_olufsen_impedance(
             n_procs=24,
@@ -647,42 +664,44 @@ class MicrovascularAdaptor:
 
         cap_info = vtp_info(self.postop_simdir.mesh_complete.mesh_surfaces_dir, convert_to_cm=self.convert_to_cm, pulmonary=False)
 
-        outlet_bc_names = [name for name, bc in self.postop_simdir.svzerod_3Dcoupling.bcs.items() if 'inflow' not in bc.name.lower()]
+        outlet_bc_names = [name for name, bc in coupler.bcs.items() if 'inflow' not in bc.name.lower()]
 
         # assumed that cap and boundary condition orders match, TODO: UPDATE THIS TO BE USED with SIMULATIONDIRECTORY CLASS
         if len(outlet_bc_names) != len(cap_info):
             print('number of outlet boundary conditions does not match number of cap surfaces, automatically assigning bc names...')
             for i, name in enumerate(outlet_bc_names):
                 # delete the unused bcs
-                del self.postop_simdir.svzerod_3Dcoupling.bcs[name]
+                del coupler.bcs[name]
             outlet_bc_names = [f'IMPEDANCE_{i}' for i in range(len(cap_info))]
         
         cap_to_bc = {list(cap_info.keys())[i]: outlet_bc_names[i] for i in range(len(outlet_bc_names))}
 
-        outlet_mapping = {"lpa_tree": [], "rpa_tree": []}
+        outlet_mapping = self._empty_outlet_mapping()
+        lpa_name = str(self.lpa_tree.name)
+        rpa_name = str(self.rpa_tree.name)
         for idx, (cap_name, area) in enumerate(cap_info.items()):
             print(f'generating tree {idx + 1} of {len(cap_info)} for cap {cap_name}...')
             bc_name = cap_to_bc[cap_name]
             if 'lpa' in cap_name.lower():
-                self.postop_simdir.svzerod_3Dcoupling.bcs[bc_name] = self.lpa_tree.create_impedance_bc(
+                coupler.bcs[bc_name] = self.lpa_tree.create_impedance_bc(
                     bc_name,
                     0,
                     self.clinical_targets.wedge_p * 1333.2,
                 )
-                outlet_mapping["lpa_tree"].append(bc_name)
+                outlet_mapping[lpa_name].append(bc_name)
             elif 'rpa' in cap_name.lower():
-                self.postop_simdir.svzerod_3Dcoupling.bcs[bc_name] = self.rpa_tree.create_impedance_bc(
+                coupler.bcs[bc_name] = self.rpa_tree.create_impedance_bc(
                     bc_name,
                     1,
                     self.clinical_targets.wedge_p * 1333.2,
                 )
-                outlet_mapping["rpa_tree"].append(bc_name)
+                outlet_mapping[rpa_name].append(bc_name)
             else:
                 raise ValueError('cap name not recognized')
         self._adapted_tree_outlet_mapping = outlet_mapping
                     
     
-    def adapt_cwss_ims(self, K_arr, fig_dir: str = None):
+    def adapt_cwss_ims(self, K_arr, fig_dir: str = None, *, max_nodes: int = 100_000):
 
         # Optimize reduced-order PA (RRI) separately for preop and postop simulations,
         # unless tuned configs already exist on disk.
@@ -693,7 +712,8 @@ class MicrovascularAdaptor:
             preop_config_path,
             postop_config_path,
             self.tree_params_csv,
-            getattr(self.clinical_targets, "path", os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv')
+            getattr(self.clinical_targets, "path", os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv'),
+            max_nodes=max_nodes,
         )
         # run adaptation
         result, flow_log, sol, postop_pa, hists = run_adaptation(preop_pa, postop_pa, CWSSIMSAdaptation, K_arr)

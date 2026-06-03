@@ -1,13 +1,72 @@
 import copy
+from types import SimpleNamespace
 
 import numpy as np
-from scipy.integrate import solve_ivp
+from scipy.integrate import BDF, DOP853, RK23, RK45, Radau, solve_ivp
 
 from .utils import pack_state, plot_adaptation_histories, rel_change, simulate_outlet_trees, time_to_95, unpack_state, wrap_event
 
 """
 integrator for computing adaptation in a structured tree
 """
+
+
+_SOLVER_CLASSES = {
+    "RK23": RK23,
+    "RK45": RK45,
+    "DOP853": DOP853,
+    "BDF": BDF,
+    "Radau": Radau,
+}
+
+
+def _solver_class(method):
+    try:
+        return _SOLVER_CLASSES[str(method)]
+    except KeyError as exc:
+        supported = ", ".join(sorted(_SOLVER_CLASSES))
+        raise ValueError(f"Unsupported adaptation solver method '{method}'. Supported methods: {supported}.") from exc
+
+
+def _build_solver_result(t_history, y_history, *, status, message, nfev, event_time=None):
+    t_arr = np.asarray(t_history, dtype=np.float64)
+    y_arr = np.column_stack(y_history).astype(np.float64, copy=False)
+    t_events = [np.asarray([float(event_time)], dtype=np.float64)] if event_time is not None else []
+    return SimpleNamespace(
+        t=t_arr,
+        y=y_arr,
+        status=int(status),
+        message=str(message),
+        nfev=int(nfev),
+        t_events=t_events,
+    )
+
+
+def _accepted_step_max_step(model_instance, requested_max_step):
+    effective_max_step = float(requested_max_step)
+    window_duration = getattr(model_instance, "split_window_duration", None)
+    if window_duration is None:
+        return effective_max_step
+
+    # Require at least five accepted samples across the convergence window.
+    sampling_cap = max(float(window_duration) / 5.0, 1e-6)
+    return min(effective_max_step, sampling_cap)
+
+
+def _accepted_step_convergence_diagnostics(model_instance, t, flow_log):
+    if hasattr(model_instance, "convergence_diagnostics"):
+        return model_instance.convergence_diagnostics(t, flow_log)
+
+    margin = float(model_instance.convergence_margin(t, flow_log))
+    return {
+        "t": float(t),
+        "window_duration": None,
+        "window_coverage": None,
+        "window_span": None,
+        "center_deviation": None,
+        "margin": margin,
+        "converged": margin <= 0.0,
+    }
 
 
 def _termination_reason(sol, model_instance):
@@ -23,6 +82,101 @@ def _first_event_time(sol):
         if len(event_group):
             return float(event_group[0])
     return None
+
+
+def _run_with_accepted_step_convergence(
+    postop_pa,
+    trees,
+    y0,
+    model_instance,
+    K_arr,
+    *,
+    t_end,
+    rtol,
+    atol,
+    max_step,
+    method,
+):
+    rhs_flow_log = []
+    accepted_flow_log = [{"t": 0.0, "rpa_split": float(postop_pa.rpa_split)}]
+    accepted_convergence_history = []
+    solver_trace = []
+    last_update_y = y0.copy()
+    last_t_holder = [-float("inf")]
+    effective_max_step = _accepted_step_max_step(model_instance, max_step)
+
+    def rhs(t, y):
+        return model_instance.compute_rhs(
+            t,
+            y,
+            postop_pa,
+            None,
+            last_update_y,
+            last_t_holder,
+            rhs_flow_log,
+            solver_trace,
+        )
+
+    solver_cls = _solver_class(method)
+    solver = solver_cls(
+        rhs,
+        0.0,
+        y0,
+        float(t_end),
+        rtol=float(rtol),
+        atol=float(atol),
+        max_step=float(effective_max_step),
+    )
+
+    t_history = [0.0]
+    y_history = [y0.copy()]
+    event_time = None
+    termination_reason = "t_end_reached"
+    message = "The solver successfully reached the end of the integration interval."
+
+    while solver.status == "running":
+        step_message = solver.step()
+        if solver.status == "failed":
+            termination_reason = "solver_failed"
+            message = str(step_message).strip() or "solver failed"
+            break
+
+        current_t = float(solver.t)
+        current_y = np.asarray(solver.y, dtype=np.float64).copy()
+        t_history.append(current_t)
+        y_history.append(current_y)
+
+        unpack_state(current_y, *trees)
+        postop_pa.update_bcs()
+        postop_pa.simulate()
+        accepted_flow_log.append({"t": current_t, "rpa_split": float(postop_pa.rpa_split)})
+        convergence_diag = _accepted_step_convergence_diagnostics(model_instance, current_t, accepted_flow_log)
+        accepted_convergence_history.append(convergence_diag)
+
+        if bool(convergence_diag["converged"]):
+            event_time = current_t
+            termination_reason = getattr(model_instance, "event_reason_label", "event_converged")
+            message = f"Accepted-step convergence reached at t={current_t:.6f}"
+            break
+
+    status = 1 if event_time is not None else (0 if solver.status == "finished" else -1)
+    sol = _build_solver_result(
+        t_history,
+        y_history,
+        status=status,
+        message=message,
+        nfev=solver.nfev,
+        event_time=event_time,
+    )
+    return (
+        sol,
+        accepted_flow_log,
+        accepted_convergence_history,
+        rhs_flow_log,
+        solver_trace,
+        termination_reason,
+        effective_max_step,
+    )
 
 
 def _radius_change_stats(y_initial, y_final, n_lpa):
@@ -59,9 +213,17 @@ def run_adaptation(
     rtol=1e-6,
     atol=1e-7,
     max_step=60.0,
+    method="RK23",
 ):
     postop_pa.lpa_tree = copy.deepcopy(preop_pa.lpa_tree)
     postop_pa.rpa_tree = copy.deepcopy(preop_pa.rpa_tree)
+    # Force the first RHS evaluation to rebuild outlet-tree hemodynamics from the
+    # postop reduced-order state rather than reusing copied preop results.
+    postop_pa._tree_results_time = None
+    if hasattr(postop_pa.lpa_tree, "results"):
+        postop_pa.lpa_tree.results = None
+    if hasattr(postop_pa.rpa_tree, "results"):
+        postop_pa.rpa_tree.results = None
 
     trees = (postop_pa.lpa_tree, postop_pa.rpa_tree)
     y0 = pack_state(*trees)
@@ -69,34 +231,63 @@ def run_adaptation(
 
     model_instance = model(K_arr)
 
-    last_update_y = y0.copy()
-    last_t_holder = [-float("inf")]
-    flow_log = []
-    solver_trace = []
-    event_state = {"triggered": False, "was_positive": False}
-
     postop_pa.update_bcs()
     postop_pa.simulate()
     pre_adapted_split = postop_pa.rpa_split
 
-    wrapped_event = wrap_event(
-        model_instance.event,
-        postop_pa,
-        last_update_y,
-        flow_log,
-        event_state,
-    )
-    sol = solve_ivp(
-        model_instance.compute_rhs,
-        (0, float(t_end)),
-        y0,
-        args=(postop_pa, None, last_update_y, last_t_holder, flow_log, solver_trace),
-        events=wrapped_event,
-        method="BDF",
-        rtol=float(rtol),
-        atol=float(atol),
-        max_step=float(max_step),
-    )
+    uses_accepted_step_convergence = hasattr(model_instance, "convergence_margin")
+
+    if uses_accepted_step_convergence:
+        (
+            sol,
+            flow_log,
+            accepted_convergence_history,
+            rhs_flow_log,
+            solver_trace,
+            termination_reason,
+            effective_max_step,
+        ) = _run_with_accepted_step_convergence(
+            postop_pa,
+            trees,
+            y0,
+            model_instance,
+            K_arr,
+            t_end=t_end,
+            rtol=rtol,
+            atol=atol,
+            max_step=max_step,
+            method=method,
+        )
+    else:
+        last_update_y = y0.copy()
+        event_reference_y = y0.copy()
+        last_t_holder = [-float("inf")]
+        flow_log = []
+        accepted_convergence_history = []
+        rhs_flow_log = flow_log
+        solver_trace = []
+        event_state = {"triggered": False, "was_positive": False}
+        effective_max_step = float(max_step)
+
+        wrapped_event = wrap_event(
+            model_instance.event,
+            postop_pa,
+            event_reference_y,
+            flow_log,
+            event_state,
+        )
+        sol = solve_ivp(
+            model_instance.compute_rhs,
+            (0, float(t_end)),
+            y0,
+            args=(postop_pa, None, last_update_y, last_t_holder, flow_log, solver_trace),
+            events=wrapped_event,
+            method=str(method),
+            rtol=float(rtol),
+            atol=float(atol),
+            max_step=float(max_step),
+        )
+        termination_reason = _termination_reason(sol, model_instance)
 
     y_final = sol.y[:, -1]
     unpack_state(y_final, *trees)
@@ -124,7 +315,7 @@ def run_adaptation(
 
     rhs_l2_history = [float(entry["rhs_l2"]) for entry in solver_trace]
     solver_diagnostics = {
-        "termination_reason": _termination_reason(sol, model_instance),
+        "termination_reason": termination_reason,
         "solver_message": str(sol.message).strip(),
         "event_time": _first_event_time(sol),
         "integration_time_points": [float(value) for value in sol.t.tolist()],
@@ -132,10 +323,23 @@ def run_adaptation(
             {"t": float(entry["t"]), "rpa_split": float(entry["rpa_split"])}
             for entry in flow_log
         ],
+        "rhs_flow_split_history": [
+            {"t": float(entry["t"]), "rpa_split": float(entry["rpa_split"])}
+            for entry in rhs_flow_log
+        ],
         "solver_trace": solver_trace,
         "rhs_l2_initial": rhs_l2_history[0] if rhs_l2_history else 0.0,
         "rhs_l2_final": rhs_l2_history[-1] if rhs_l2_history else 0.0,
         "radius_change": radius_stats,
+        "integration_method": str(method),
+        "requested_max_step": float(max_step),
+        "effective_max_step": float(effective_max_step),
+        "convergence_check_mode": ("accepted_step_window" if uses_accepted_step_convergence else "scipy_event"),
+        "accepted_step_flow_split_history": [
+            {"t": float(entry["t"]), "rpa_split": float(entry["rpa_split"])}
+            for entry in flow_log
+        ],
+        "accepted_step_convergence_history": accepted_convergence_history,
     }
 
     result = dict(

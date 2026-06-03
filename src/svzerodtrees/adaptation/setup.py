@@ -31,6 +31,8 @@ def create_preop_model(
         clinical_targets: ClinicalTargets,
         lpa_params: TreeParameters,
         rpa_params: TreeParameters,
+        *,
+        max_nodes: int = 100_000,
 ) -> PAConfig:
     '''
     create the preop reduced pa config 
@@ -38,7 +40,7 @@ def create_preop_model(
 
     preop_pa_config_handler = ConfigHandler.from_json(config_path, is_pulmonary=True)
     preop_pa = PAConfig.from_pa_config(preop_pa_config_handler, clinical_targets)
-    preop_pa.create_steady_trees(lpa_params, rpa_params)
+    preop_pa.create_steady_trees(lpa_params, rpa_params, max_nodes=max_nodes)
     preop_pa.source_config_path = str(config_path)
     print(f"number of vessels in lpa tree: {preop_pa.lpa_tree.count_vessels()}")
     print(f"number of vessels in rpa tree: {preop_pa.rpa_tree.count_vessels()}")
@@ -80,7 +82,9 @@ def initialize_from_paths(
         preop_config_path: str,
         postop_config_path: str,
         optimized_tree_params_csv: str,
-        clinical_targets_csv: str
+        clinical_targets_csv: str,
+        *,
+        max_nodes: int = 100_000,
 ) -> tuple[PAConfig, PAConfig]:
     """
     Initialize the preoperative and postoperative PAConfig objects from their respective paths.
@@ -95,7 +99,13 @@ def initialize_from_paths(
     clinical_targets = ClinicalTargets.from_csv(clinical_targets_csv)
     lpa_params, rpa_params = load_optimized_params(optimized_tree_params_csv)
 
-    preop_pa = create_preop_model(preop_config_path, clinical_targets, lpa_params, rpa_params)
+    preop_pa = create_preop_model(
+        preop_config_path,
+        clinical_targets,
+        lpa_params,
+        rpa_params,
+        max_nodes=max_nodes,
+    )
     simulate_homeostatic_state(preop_pa)
 
     postop_pa = create_postop_model(postop_config_path, clinical_targets)

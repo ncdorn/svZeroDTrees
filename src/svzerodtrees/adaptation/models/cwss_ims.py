@@ -1,5 +1,5 @@
 from .base import AdaptationModel
-from ..utils import simulate_outlet_trees
+from ..utils import estimate_steady_tree_hemodynamics
 import numpy as np
 from typing import Sequence
 
@@ -62,11 +62,6 @@ class CWSSIMSAdaptation(AdaptationModel):
         geom_rel_change = (y - last_update_y) / last_update_y
         geom_change = float(np.mean(np.abs(geom_rel_change)))
 
-        # Ensure structured-tree simulations are available for hemodynamic metrics.
-        if not hasattr(lpa_tree, "results") or lpa_tree.results is None or \
-           not hasattr(rpa_tree, "results") or rpa_tree.results is None:
-            simulate_outlet_trees(simple_pa)
-
         def _ensure_reference(tree, attr_name, n_expected, label):
             ref = getattr(tree, attr_name, None)
             if ref is None:
@@ -85,19 +80,31 @@ class CWSSIMSAdaptation(AdaptationModel):
                 )
             return arr
 
-        def _mean_wss(tree):
-            tau_ts = tree.results.wss_timeseries()
-            return np.mean(tau_ts, axis=1)
+        lpa_root_flow = float(
+            np.mean(simple_pa.result[simple_pa.result.name == "branch2_seg0"]["flow_out"])
+        )
+        rpa_root_flow = float(
+            np.mean(simple_pa.result[simple_pa.result.name == "branch4_seg0"]["flow_out"])
+        )
+        distal_pressure = float(simple_pa.clinical_targets.wedge_p) * 1333.2
 
-        def _mean_pressure(tree):
-            return np.mean(tree.results.pressure_in, axis=1)
+        lpa_hemo = estimate_steady_tree_hemodynamics(
+            lpa_tree,
+            root_flow=lpa_root_flow,
+            distal_pressure=distal_pressure,
+        )
+        rpa_hemo = estimate_steady_tree_hemodynamics(
+            rpa_tree,
+            root_flow=rpa_root_flow,
+            distal_pressure=distal_pressure,
+        )
 
-        tau_lpa = _mean_wss(lpa_tree)
-        tau_rpa = _mean_wss(rpa_tree)
+        tau_lpa = lpa_hemo.wall_shear_stress
+        tau_rpa = rpa_hemo.wall_shear_stress
         tau = np.concatenate([tau_lpa, tau_rpa])
 
-        P_lpa = _mean_pressure(lpa_tree)
-        P_rpa = _mean_pressure(rpa_tree)
+        P_lpa = lpa_hemo.pressure_in
+        P_rpa = rpa_hemo.pressure_in
         h_safe = np.maximum(h_all, 1e-9)
         sig_lpa = P_lpa * (r_lpa / h_safe[:n_lpa])
         sig_rpa = P_rpa * (r_rpa / h_safe[n_lpa:])
@@ -152,7 +159,7 @@ class CWSSIMSAdaptation(AdaptationModel):
 
         # Unpack args
         simple_pa = args[0]
-        last_y = args[1]
+        reference_y = args[1]
         flow_log = args[2]
         event_state = args[3]
 
@@ -162,8 +169,8 @@ class CWSSIMSAdaptation(AdaptationModel):
         rpa_split = simple_pa.rpa_split
 
         # Geometry relative change
-        rel_geom_r = np.mean(np.abs((y[0::2] - last_y[0::2]) / last_y[0::2]))
-        rel_geom_h = np.mean(np.abs((y[1::2] - last_y[1::2]) / last_y[1::2]))
+        rel_geom_r = np.mean(np.abs((y[0::2] - reference_y[0::2]) / reference_y[0::2]))
+        rel_geom_h = np.mean(np.abs((y[1::2] - reference_y[1::2]) / reference_y[1::2]))
         geom_change = max(rel_geom_r, rel_geom_h)
 
         # Flow split relative change

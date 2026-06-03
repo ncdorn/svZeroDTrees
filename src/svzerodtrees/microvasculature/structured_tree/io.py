@@ -89,6 +89,20 @@ def to_block_dict(store: StructuredTreeStorage) -> dict:
 
         vessels.append(v)
 
+    leaf_ids_missing_outlets = []
+    for i, vessel in enumerate(vessels):
+        is_leaf = int(store.left[i]) < 0 and int(store.right[i]) < 0
+        if not is_leaf:
+            continue
+        outlet_name = vessel.get("boundary_conditions", {}).get("outlet")
+        if not outlet_name:
+            leaf_ids_missing_outlets.append(int(ids[i]))
+    if leaf_ids_missing_outlets:
+        raise RuntimeError(
+            "StructuredTree export produced leaf vessels without distal outlet "
+            f"boundary conditions: {leaf_ids_missing_outlets[:10]}"
+        )
+
     # --- Junctions block (unchanged shape, but using vessel ids) ---
     junctions = []
     j = 0

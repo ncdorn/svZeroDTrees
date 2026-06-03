@@ -757,7 +757,7 @@ adaptation:
   iterations: 10
   territory_scheme: lpa_rpa
   mode: predict
-  parameter_set: {}
+  parameter_set: {}  # e.g. {max_nodes: 200000, wss_gain: 0.01}
 
 pipeline:
   run_steady: true

@@ -234,7 +234,14 @@ class PAConfig():
             }
 
 
-    def create_impedance_trees(self, lpa_params: TreeParameters, rpa_params: TreeParameters, n_procs):
+    def create_impedance_trees(
+        self,
+        lpa_params: TreeParameters,
+        rpa_params: TreeParameters,
+        n_procs,
+        *,
+        max_nodes: int = 100_000,
+    ):
         '''
         create impedance trees for the LPA and RPA distal vessels
 
@@ -269,7 +276,8 @@ class PAConfig():
                                  d_min=lpa_params.d_min, 
                                  lrr=lpa_params.lrr, 
                                  alpha=lpa_params.alpha, 
-                                 beta=lpa_params.beta)
+                                 beta=lpa_params.beta,
+                                 max_nodes=max_nodes)
 
         # compute the impedance in frequency domain NEED TO SUB IN COMPLIANCE MODEL
         self.lpa_tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
@@ -289,7 +297,8 @@ class PAConfig():
                                  d_min=rpa_params.d_min, 
                                  lrr=rpa_params.lrr, 
                                  alpha=rpa_params.alpha, 
-                                 beta=rpa_params.beta)
+                                 beta=rpa_params.beta,
+                                 max_nodes=max_nodes)
 
         # compute the impedance in frequency domain
         self.rpa_tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
@@ -301,20 +310,40 @@ class PAConfig():
         )
 
 
-    def create_steady_trees(self, lpa_params: TreeParameters, rpa_params: TreeParameters):
+    def create_steady_trees(
+        self,
+        lpa_params: TreeParameters,
+        rpa_params: TreeParameters,
+        *,
+        max_nodes: int = 100_000,
+    ):
         '''
         create trees for steady simulation where we just take the tree resistance
         '''
 
-        self.lpa_tree = StructuredTree(name='lpa_tree', time=self.inflow.t, simparams=None)
+        # Adaptation seeds reuse these tree objects for downstream metadata export,
+        # so the tuned compliance model must remain the source of truth here.
+        self.lpa_tree = StructuredTree(
+            name='lpa_tree',
+            time=self.inflow.t,
+            simparams=None,
+            compliance_model=lpa_params.compliance_model,
+        )
         self.lpa_tree.build(initial_d=lpa_params.diameter, 
-                                 d_min=lpa_params.d_min, lrr=lpa_params.lrr, alpha=lpa_params.alpha, beta=lpa_params.beta)
+                                 d_min=lpa_params.d_min, lrr=lpa_params.lrr, alpha=lpa_params.alpha, beta=lpa_params.beta, max_nodes=max_nodes)
+        self.lpa_tree.inductance = float(lpa_params.inductance)
 
         self.bcs["LPA_BC"] = self.lpa_tree.create_resistance_bc("LPA_BC", self.clinical_targets.wedge_p * 1333.2)
 
-        self.rpa_tree = StructuredTree(name='rpa_tree', time=self.inflow.t, simparams=None)
+        self.rpa_tree = StructuredTree(
+            name='rpa_tree',
+            time=self.inflow.t,
+            simparams=None,
+            compliance_model=rpa_params.compliance_model,
+        )
         self.rpa_tree.build(initial_d=rpa_params.diameter, 
-                                 d_min=rpa_params.d_min, lrr=rpa_params.lrr, alpha=rpa_params.alpha, beta=rpa_params.beta)
+                                 d_min=rpa_params.d_min, lrr=rpa_params.lrr, alpha=rpa_params.alpha, beta=rpa_params.beta, max_nodes=max_nodes)
+        self.rpa_tree.inductance = float(rpa_params.inductance)
 
         self.bcs["RPA_BC"] = self.rpa_tree.create_resistance_bc("RPA_BC", self.clinical_targets.wedge_p * 1333.2)
 

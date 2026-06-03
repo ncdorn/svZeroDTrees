@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from dataclasses import dataclass
 from ..microvasculature.utils import assign_flow_to_root
 from filelock import FileLock
 import pandas as pd
@@ -329,6 +330,108 @@ def unpack_state(y, *trees):
         tree._thickness_state = thickness.copy()
 
         offset += n_nodes
+
+
+@dataclass
+class SteadyTreeHemodynamics:
+    flow_in: np.ndarray
+    pressure_in: np.ndarray
+    pressure_out: np.ndarray
+    wall_shear_stress: np.ndarray
+    equivalent_resistance: np.ndarray
+
+
+def estimate_steady_tree_hemodynamics(tree, root_flow: float, distal_pressure: float | None = None) -> SteadyTreeHemodynamics:
+    """
+    Estimate mean structured-tree hemodynamics from the current geometry using a
+    steady Poiseuille network.
+
+    This preserves the key physiology used by the adaptation model:
+    - mass conservation at each bifurcation
+    - Poiseuille pressure drops along each segment
+    - flow splitting set by the current distal subtree resistances
+
+    It intentionally avoids a full pulsatile 0D tree simulation inside the ODE RHS.
+    """
+    store = getattr(tree, "store", None)
+    if store is None:
+        raise AttributeError("StructuredTree instance is missing built storage; call build() first.")
+
+    if distal_pressure is None:
+        distal_pressure = float(getattr(tree, "Pd", 0.0) or 0.0)
+
+    diameters = np.asarray(store.d, dtype=np.float64)
+    n_nodes = diameters.size
+    if n_nodes == 0:
+        empty = np.empty(0, dtype=np.float64)
+        return SteadyTreeHemodynamics(empty, empty, empty, empty, empty)
+
+    left = np.asarray(store.left, dtype=np.int32)
+    right = np.asarray(store.right, dtype=np.int32)
+    gen = np.asarray(store.gen, dtype=np.int32)
+
+    radii = np.maximum(0.5 * diameters, np.finfo(np.float64).tiny)
+    lengths = float(store.lrr) * radii
+    viscosity = float(store.eta)
+    segment_resistance = 8.0 * viscosity * lengths / (np.pi * radii ** 4)
+
+    order = np.argsort(gen)[::-1]
+    equivalent_resistance = np.array(segment_resistance, dtype=np.float64)
+    for idx in order:
+        li = int(left[idx])
+        ri = int(right[idx])
+        child_resistances = []
+        if li >= 0:
+            child_resistances.append(float(equivalent_resistance[li]))
+        if ri >= 0:
+            child_resistances.append(float(equivalent_resistance[ri]))
+        if not child_resistances:
+            continue
+        conductance = sum(1.0 / max(res, np.finfo(np.float64).tiny) for res in child_resistances)
+        equivalent_resistance[idx] = float(segment_resistance[idx]) + 1.0 / conductance
+
+    flow_in = np.zeros(n_nodes, dtype=np.float64)
+    pressure_in = np.zeros(n_nodes, dtype=np.float64)
+    pressure_out = np.full(n_nodes, float(distal_pressure), dtype=np.float64)
+
+    root_pressure = float(distal_pressure) + float(root_flow) * float(equivalent_resistance[0])
+    stack = [(0, float(root_flow), root_pressure)]
+    eps = np.finfo(np.float64).tiny
+
+    while stack:
+        idx, vessel_flow, vessel_pressure_in = stack.pop()
+        flow_in[idx] = vessel_flow
+        pressure_in[idx] = vessel_pressure_in
+
+        vessel_pressure_out = vessel_pressure_in - vessel_flow * float(segment_resistance[idx])
+        pressure_out[idx] = vessel_pressure_out
+
+        li = int(left[idx])
+        ri = int(right[idx])
+        children = [child for child in (li, ri) if child >= 0]
+        if not children:
+            continue
+
+        if len(children) == 1:
+            stack.append((children[0], vessel_flow, vessel_pressure_out))
+            continue
+
+        left_res = max(float(equivalent_resistance[li]), eps)
+        right_res = max(float(equivalent_resistance[ri]), eps)
+        total_conductance = 1.0 / left_res + 1.0 / right_res
+        left_flow = vessel_flow * ((1.0 / left_res) / total_conductance)
+        right_flow = vessel_flow - left_flow
+        stack.append((ri, right_flow, vessel_pressure_out))
+        stack.append((li, left_flow, vessel_pressure_out))
+
+    wall_shear_stress = 4.0 * viscosity * flow_in / (np.pi * np.maximum(radii ** 3, eps))
+    return SteadyTreeHemodynamics(
+        flow_in=flow_in,
+        pressure_in=pressure_in,
+        pressure_out=pressure_out,
+        wall_shear_stress=wall_shear_stress,
+        equivalent_resistance=equivalent_resistance,
+    )
 
 
 def simulate_outlet_trees(simple_pa):

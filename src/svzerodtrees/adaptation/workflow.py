@@ -14,6 +14,7 @@ from ..microvasculature.compliance.constant import ConstantCompliance
 from ..microvasculature.compliance.olufsen import OlufsenCompliance
 from ..simulation.simulation_directory import SimulationDirectory
 from ..tune_bcs.clinical_targets import ClinicalTargets
+from .artifacts import write_reduced_pa_flow_split_convergence_artifacts
 from .microvascular_adaptor import MicrovascularAdaptor
 
 _FLOW_EPS = 1e-8
@@ -193,6 +194,11 @@ def _iterations_or_default(parameter_set: dict, default: int = 1) -> int:
     return int(value) if value is not None else int(default)
 
 
+def _tree_max_nodes_or_default(parameter_set: dict, default: int = 100_000) -> int:
+    value = parameter_set.get("max_nodes")
+    return int(value) if value is not None else int(default)
+
+
 def run_structured_tree_adaptation(
     *,
     preop_dir: str,
@@ -270,6 +276,7 @@ def run_structured_tree_adaptation(
 
     params = parameter_set or {}
     solver_metrics: dict[str, float | int] | None = None
+    max_nodes = _tree_max_nodes_or_default(params)
     if resolved_model == "M1":
         solver_metrics = adaptor.adapt_cwss(
             n_iter=_iterations_or_default(params, 1),
@@ -278,9 +285,11 @@ def run_structured_tree_adaptation(
             rtol=float(params.get("rtol", 1e-6)),
             atol=float(params.get("atol", 1e-7)),
             max_step=float(params.get("max_step", 60.0)),
+            method=str(params.get("solver_method", "RK23")),
+            max_nodes=max_nodes,
         )
     elif resolved_model == "M2":
-        adaptor.lpa_tree, adaptor.rpa_tree = adaptor.construct_impedance_trees()
+        adaptor.lpa_tree, adaptor.rpa_tree = adaptor.construct_impedance_trees(max_nodes=max_nodes)
         territory_metrics["lpa"].update(
             _apply_territory_homeostatic_update(
                 adaptor.lpa_tree,
@@ -309,7 +318,10 @@ def run_structured_tree_adaptation(
         )
         adaptor._finalize_coupling_with_adapted_trees()
     else:
-        adaptor.adapt_cwss_ims(params.get("k_arr", [1.0, 1.0, 1.0, 1.0]))
+        adaptor.adapt_cwss_ims(
+            params.get("k_arr", [1.0, 1.0, 1.0, 1.0]),
+            max_nodes=max_nodes,
+        )
 
     output_dir = Path(output_root or adapted_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -346,12 +358,28 @@ def run_structured_tree_adaptation(
     if solver_metrics is not None:
         summary["solver_metrics"] = solver_metrics
         metrics["solver_metrics"] = solver_metrics
-        summary["hemodynamics"]["internal_zerod"] = {
+        internal_zerod = {
             "preop": {"rpa_split": float(solver_metrics["preop_rpa_split"])},
             "postop_initial": {"rpa_split": float(solver_metrics["postop_rpa_split"])},
             "adapted_final": {"rpa_split": float(solver_metrics["final_rpa_split"])},
+            "target": {"rpa_split": float(targets.rpa_split)},
         }
-        metrics["hemodynamics"]["internal_zerod"] = summary["hemodynamics"]["internal_zerod"]
+        summary["hemodynamics"]["internal_zerod"] = internal_zerod
+        metrics["hemodynamics"]["internal_zerod"] = internal_zerod
+        if resolved_model == "M1":
+            solver_diagnostics = solver_metrics.get("solver_diagnostics") or {}
+            accepted_history = solver_diagnostics.get("accepted_step_flow_split_history") or []
+            if accepted_history:
+                convergence_artifacts = write_reduced_pa_flow_split_convergence_artifacts(
+                    output_dir=output_dir,
+                    flow_split_history=accepted_history,
+                    preop_rpa_split=float(solver_metrics["preop_rpa_split"]),
+                    postop_rpa_split=float(solver_metrics["postop_rpa_split"]),
+                    target_rpa_split=float(targets.rpa_split),
+                    final_rpa_split=float(solver_metrics["final_rpa_split"]),
+                )
+                summary["artifacts"].update(convergence_artifacts)
+                metrics["artifacts"] = dict(convergence_artifacts)
     summary_path = output_dir / "adaptation_summary.json"
     metrics_path = output_dir / "adaptation_metrics.json"
     summary["artifacts"]["adaptation_summary_json"] = str(summary_path)

@@ -3,6 +3,7 @@ from ...io import ConfigHandler
 from dataclasses import asdict, is_dataclass
 import xml.etree.ElementTree as ET
 import os
+import re
 
 
 def _normalize_tissue_support(tissue_support):
@@ -47,6 +48,23 @@ def _normalize_tissue_support(tissue_support):
             raise ValueError("spatial tissue_support forbids stiffness and damping")
 
     return normalized
+
+
+def _canonicalize_coupled_surface_name(surface_name):
+    if not surface_name:
+        return ""
+    normalized = str(surface_name).strip().lower()
+    return re.sub(r"^([a-z]+)(\d)", r"\1_\2", normalized)
+
+
+def _coupled_surface_name_aliases(surface_name):
+    canonical = _canonicalize_coupled_surface_name(surface_name)
+    aliases = {canonical}
+    if canonical.endswith("_x"):
+        aliases.add(canonical[:-2])
+    else:
+        aliases.add(f"{canonical}_x")
+    return aliases
 
 
 class SvMPxml(SimulationFile):
@@ -358,7 +376,8 @@ class SvMPxml(SimulationFile):
                 if not surface:
                     continue
                 surface_base = os.path.splitext(os.path.basename(surface))[0].lower()
-                coupling_blocks_by_surface[surface_base] = block.name
+                for alias in _coupled_surface_name_aliases(surface_base):
+                    coupling_blocks_by_surface[alias] = block.name
             if coupling_blocks_by_surface:
                 svzerod_interface = ET.SubElement(add_eqn, "svZeroDSolver_interface")
                 coupling_type_node = ET.SubElement(svzerod_interface, "Coupling_type")
@@ -396,7 +415,11 @@ class SvMPxml(SimulationFile):
             typ.text = "Neu"
             time_dep.text = "Coupled"
 
-            block_name = coupling_blocks_by_surface.get(surface_name.lower())
+            block_name = None
+            for alias in _coupled_surface_name_aliases(surface_name):
+                block_name = coupling_blocks_by_surface.get(alias)
+                if block_name:
+                    break
             if block_name:
                 svzerod_block = ET.SubElement(add_bc, "svZeroDSolver_block")
                 svzerod_block.text = block_name
