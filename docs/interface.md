@@ -7,6 +7,7 @@ This document defines the YAML schema used by the CLI and Python API. The schema
 - `tune_bcs`: tune boundary conditions only.
 - `construct_trees`: assign impedance or RCR BCs.
 - `adapt`: run microvascular adaptation (impedance BCs).
+- `adapt_benchmark`: run local reduced-PA adaptation benchmark studies from optimized preop/postop reduced RRI configs.
 - `postprocess`: generate figures from saved tree pickles or compute standalone analysis artifacts.
 
 **Workflow Requirements**
@@ -17,6 +18,7 @@ This document defines the YAML schema used by the CLI and Python API. The schema
 | `tune_bcs` | `version`, `workflow`, `paths`, `bcs` | `threed` |
 | `construct_trees` | `version`, `workflow`, `paths`, `bcs`, `trees` | `threed` |
 | `adapt` | `version`, `workflow`, `paths` | `bcs`, `adaptation`, `threed` |
+| `adapt_benchmark` | `version`, `workflow`, `paths`, `adapt_benchmark` | none |
 | `postprocess` | `version`, `workflow`, `paths`, `postprocess` | none |
 
 **Path Resolution**
@@ -25,9 +27,9 @@ This document defines the YAML schema used by the CLI and Python API. The schema
 
 **Top-Level Keys**
 - `version`: must be `1`.
-- `workflow`: one of `pipeline|tune_bcs|construct_trees|adapt|postprocess`.
+- `workflow`: one of `pipeline|tune_bcs|construct_trees|adapt|adapt_benchmark|postprocess`.
 - `paths`: required for all workflows.
-- `bcs`, `trees`, `adaptation`, `pipeline`, `threed`, `postprocess`: required only for certain workflows.
+- `bcs`, `trees`, `adaptation`, `adapt_benchmark`, `pipeline`, `threed`, `postprocess`: required only for certain workflows.
 
 **Paths**
 ```yaml
@@ -108,6 +110,65 @@ adaptation:
   location: uniform
   iterations: 10
 ```
+
+**Reduced-PA Adaptation Benchmark**
+```yaml
+adapt_benchmark:
+  study_id: tst-stan-1-reduced-pa
+  output_dir: benchmark-results
+  workers: 1
+  models: [M1, M2, M3]
+  tree_params_csv: path/to/optimized_params.csv
+  clinical_targets_csv: path/to/clinical_targets.csv
+  parameter_overrides:
+    M1:
+      wss_gain: 0.01
+    M3:
+      k_arr: [1.0, 1.0, 1.0, 1.0]
+  scenarios:
+    - name: baseline
+      patient_id: tst-stan-1
+      scenario_group: medium_dmin0p05
+      perturbation_severity: medium
+      preop_rri_config: path/to/preop_simplified_zerod_tuned_RRI.json
+      postop_rri_config: path/to/postop_simplified_zerod_tuned_RRI.json
+      parameter_overrides:
+        M1:
+          t_end: 3600.0
+```
+
+Scenario fields `patient_id`, `scenario_group`, and `perturbation_severity` are
+optional metadata for robustness sweeps. They are copied into
+`benchmark_summary.csv` and used for grouped overlay artifacts.
+
+`workers` is optional and defaults to `1`. Values greater than `1` run scenario
+and model jobs through a local `ProcessPoolExecutor`; output rows are sorted back
+to YAML scenario/model order before writing aggregate artifacts.
+
+Dynamic benchmark parameter overrides may also include stability-screen
+thresholds and tree-size guards:
+
+```yaml
+max_nodes: 20000
+collapse_split_floor: 0.01
+collapse_split_ceiling: 0.99
+radius_max_abs_relative_change_limit: 10.0
+thickness_max_abs_relative_change_limit: 10.0
+```
+
+`max_nodes` caps structured-tree construction. Benchmark rows record
+`lpa_tree_nodes`, `rpa_tree_nodes`, `lpa_tree_max_nodes_reached`, and
+`rpa_tree_max_nodes_reached` so capped trees remain visible in run summaries.
+
+Benchmark outputs include:
+
+- `benchmark_summary.csv` and `benchmark_summary.json`
+- `benchmark_convergence_table.csv`
+- `benchmark_failure_table.csv`
+- `benchmark_final_rpa_split.png`
+- `benchmark_aggregate_final_rpa_split.png`
+- `benchmark_rpa_split_overlay.png` and `benchmark_lpa_split_overlay.png`
+- per-patient split overlays when `patient_id` is present
 
 **Pipeline**
 ```yaml
@@ -240,7 +301,11 @@ resistance-map family. Systole is defined as the frame in the final full
 cardiac cycle where the simulated MPA centerline pressure reaches its maximum;
 ties are broken by earliest `timestep_id`. The systolic map reuses the mapped
 centerline intermediates generated for the mean map instead of remapping the
-selected frame. Additional suite outputs include:
+selected frame. When callers provide camera vectors to
+`run_pulmonary_threed_postprocess_suite`, the resistance-map PNG renders use
+that view, resolve the framing against the latest simulation-surface bounds so
+it matches the ParaView viz setup, and include a low-opacity anatomy surface
+extracted from the latest state VTU. Additional suite outputs include:
 - `resistance_map_mean.vtp` and `resistance_map_mean.png`
 - `branch_resistance_summary.csv` and `ranked_stent_candidates.csv`
 - `resistance_map_metadata.json`

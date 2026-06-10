@@ -234,3 +234,51 @@ postprocess:
     assert (tmp_path / "out" / "branch_resistance_summary.csv").exists()
     assert (tmp_path / "out" / "ranked_stent_candidates.csv").exists()
     assert (tmp_path / "out" / "resistance_map_mean.vtp").exists()
+
+
+def test_cli_adapt_benchmark_smoke(monkeypatch, tmp_path):
+    preop = tmp_path / "preop.json"
+    postop = tmp_path / "postop.json"
+    tree_params = tmp_path / "optimized_params.csv"
+    clinical = tmp_path / "clinical_targets.csv"
+    for path in (preop, postop, tree_params, clinical):
+        path.write_text("{}", encoding="utf-8")
+
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: adapt_benchmark
+paths:
+  root: {tmp_path}
+adapt_benchmark:
+  study_id: smoke-study
+  output_dir: benchmark
+  tree_params_csv: {tree_params}
+  clinical_targets_csv: {clinical}
+  scenarios:
+    - name: baseline
+      preop_rri_config: {preop}
+      postop_rri_config: {postop}
+""",
+        encoding="utf-8",
+    )
+
+    def fake_run_benchmark(spec):
+        out = Path(spec.output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "benchmark_summary.csv").write_text("scenario,model\nbaseline,M1\n", encoding="utf-8")
+        (out / "benchmark_summary.json").write_text('{"study_id":"smoke-study"}', encoding="utf-8")
+        return {
+            "study_id": spec.study_id,
+            "summary_csv": str(out / "benchmark_summary.csv"),
+            "summary_json": str(out / "benchmark_summary.json"),
+            "rows": [],
+        }
+
+    monkeypatch.setattr("svzerodtrees.api.run_adaptation_benchmark_study", fake_run_benchmark)
+    monkeypatch.setattr(cli.sys, "argv", ["svzerodtrees", "adapt-benchmark", str(cfg_path)])
+
+    assert cli.main() == 0
+    assert (tmp_path / "benchmark" / "benchmark_summary.csv").exists()
+    assert (tmp_path / "benchmark" / "benchmark_summary.json").exists()

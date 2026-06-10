@@ -18,8 +18,11 @@ __all__ = [
     "TuneBCsWorkflow",
     "ConstructTreesWorkflow",
     "AdaptationWorkflow",
+    "AdaptBenchmarkWorkflow",
     "PostprocessWorkflow",
     "run_structured_tree_adaptation",
+    "run_reduced_pa_adaptation_case",
+    "run_adaptation_benchmark_study",
     "load_config",
     "compute_pulmonary_resistance_map",
     "DEFAULT_CONVERGENCE_TOLERANCE",
@@ -42,8 +45,17 @@ _LAZY_EXPORTS = {
     "TuneBCsWorkflow": ("svzerodtrees.api", "TuneBCsWorkflow"),
     "ConstructTreesWorkflow": ("svzerodtrees.api", "ConstructTreesWorkflow"),
     "AdaptationWorkflow": ("svzerodtrees.api", "AdaptationWorkflow"),
+    "AdaptBenchmarkWorkflow": ("svzerodtrees.api", "AdaptBenchmarkWorkflow"),
     "PostprocessWorkflow": ("svzerodtrees.api", "PostprocessWorkflow"),
     "run_structured_tree_adaptation": ("svzerodtrees.api", "run_structured_tree_adaptation"),
+    "run_reduced_pa_adaptation_case": (
+        "svzerodtrees.adaptation.benchmark",
+        "run_reduced_pa_adaptation_case",
+    ),
+    "run_adaptation_benchmark_study": (
+        "svzerodtrees.adaptation.benchmark",
+        "run_adaptation_benchmark_study",
+    ),
     "load_config": ("svzerodtrees.config", "load_config"),
     "compute_pulmonary_resistance_map": (
         "svzerodtrees.post_processing",
@@ -84,4 +96,3 @@ def __getattr__(name: str):
     value = getattr(import_module(module_name), attr_name)
     globals()[name] = value
     return value
-

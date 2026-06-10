@@ -1,0 +1,22 @@
+{
+  "vessel_count": 36071,
+  "equivalent_resistance": 8444.287631761905,
+  "tree_metadata": {
+    "name": "demo_tree",
+    "initial_d": 0.3,
+    "d_min": 0.01,
+    "lrr": 10.0,
+    "alpha": 0.9,
+    "beta": 0.6,
+    "xi": null,
+    "eta_sym": 0.6666666666666666,
+    "inductance": 0.0,
+    "terminal_resistance": 0.0,
+    "compliance": {
+      "model": "ConstantCompliance",
+      "params": {
+        "Eh/r": 66000.0
+      }
+    }
+  }
+}

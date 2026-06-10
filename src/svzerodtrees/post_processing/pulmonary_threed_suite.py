@@ -7,7 +7,7 @@ import re
 import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, Sequence
 
 import matplotlib
 matplotlib.use("Agg")
@@ -26,6 +26,8 @@ from .resistance_map import (
 )
 
 CGS_TO_MMHG = 1333.224
+_RESISTANCE_MAP_CAMERA_FILL_FACTOR = 2.33
+_RESISTANCE_MAP_ANATOMY_OPACITY = 0.12
 
 
 def _extract_result_step(path: str | Path) -> int:
@@ -57,6 +59,16 @@ def _simulation_timestep_seconds(simulation_dir: str | Path) -> float:
     if not math.isfinite(dt) or dt <= 0.0:
         raise ValueError(f"invalid Time_step_size in {xml_path}: {dt}")
     return dt
+
+
+def _latest_simulation_surface(
+    simulation_dir: str | Path,
+) -> tuple[pv.PolyData | None, str | None, Sequence[float] | None]:
+    overlay_source = _result_vtu_files(simulation_dir)[-1]
+    anatomy_surface = pv.read(str(overlay_source)).extract_surface()
+    if anatomy_surface.n_points <= 0:
+        return None, str(overlay_source), None
+    return anatomy_surface, str(overlay_source), anatomy_surface.bounds
 
 
 def _compute_arc_length(polydata: pv.PolyData) -> np.ndarray:
@@ -486,7 +498,57 @@ def render_resistance_map_png(
     resistance_map_vtp: str | Path,
     output_png: str | Path,
     scalar_name: str = "branch_resistance_mean",
+    simulation_dir: str | Path | None = None,
+    camera_offset_dir: Sequence[float] | None = None,
+    camera_view_up: Sequence[float] | None = None,
+    anatomy_opacity: float = _RESISTANCE_MAP_ANATOMY_OPACITY,
+    metadata_json: str | Path | None = None,
 ) -> str:
+    def _normalized_vec3(values: Sequence[float], *, name: str) -> list[float]:
+        if len(values) != 3:
+            raise ValueError(f"{name} must be a 3-element sequence")
+        array = np.asarray(values, dtype=float)
+        norm = float(np.linalg.norm(array))
+        if norm <= 1e-12:
+            raise ValueError(f"{name} must have non-zero length")
+        return (array / norm).tolist()
+
+    def _resolved_camera(bounds: Sequence[float]) -> dict[str, Any]:
+        cx = 0.5 * (bounds[0] + bounds[1])
+        cy = 0.5 * (bounds[2] + bounds[3])
+        cz = 0.5 * (bounds[4] + bounds[5])
+        dx = bounds[1] - bounds[0]
+        dy = bounds[3] - bounds[2]
+        dz = bounds[5] - bounds[4]
+        diag = math.sqrt(dx * dx + dy * dy + dz * dz) or 1.0
+        direction = _normalized_vec3(camera_offset_dir or [1.0, -1.0, 1.0], name="camera_offset_dir")
+        view_up = (
+            _normalized_vec3(camera_view_up, name="camera_view_up")
+            if camera_view_up is not None
+            else ([0.0, 0.0, 1.0] if abs(direction[2]) < 0.9 else [0.0, 1.0, 0.0])
+        )
+        distance = diag * _RESISTANCE_MAP_CAMERA_FILL_FACTOR
+        focal_point = [cx, cy, cz]
+        position = [
+            cx + direction[0] * distance,
+            cy + direction[1] * distance,
+            cz + direction[2] * distance,
+        ]
+        return {
+            "resolved_camera_position": position,
+            "resolved_camera_focal_point": focal_point,
+            "resolved_camera_view_up": view_up,
+            "resolved_camera_distance": distance,
+        }
+
+    def _record_render_metadata(render_info: dict[str, Any]) -> None:
+        if metadata_json is None:
+            return
+        metadata_path = Path(metadata_json)
+        payload = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.exists() else {}
+        payload["png_render"] = render_info
+        metadata_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
     poly = pv.read(str(resistance_map_vtp))
     if scalar_name not in poly.point_data:
         raise KeyError(
@@ -494,24 +556,72 @@ def render_resistance_map_png(
             f"available={list(poly.point_data.keys())}"
         )
 
-    bounds = poly.bounds
+    resistance_bounds = poly.bounds
     span = max(
-        bounds[1] - bounds[0],
-        bounds[3] - bounds[2],
-        bounds[5] - bounds[4],
+        resistance_bounds[1] - resistance_bounds[0],
+        resistance_bounds[3] - resistance_bounds[2],
+        resistance_bounds[5] - resistance_bounds[4],
         1.0,
     )
     tube_radius = max(span * 0.01, 1e-3)
 
     plotter = pv.Plotter(off_screen=True, window_size=(1400, 1000))
+    camera_bounds: Sequence[float] = resistance_bounds
+    uses_simulation_surface_bounds = False
+    overlay_source_vtu: str | None = None
+    if simulation_dir is not None:
+        anatomy_surface, overlay_source_vtu, anatomy_bounds = _latest_simulation_surface(
+            simulation_dir
+        )
+        if anatomy_surface is not None:
+            plotter.add_mesh(
+                anatomy_surface,
+                color="#d9dde3",
+                opacity=anatomy_opacity,
+                show_scalar_bar=False,
+                smooth_shading=True,
+            )
+        if anatomy_bounds is not None:
+            camera_bounds = anatomy_bounds
+            uses_simulation_surface_bounds = True
     mesh = poly.tube(radius=tube_radius)
     plotter.add_mesh(mesh, scalars=scalar_name, cmap="viridis", show_scalar_bar=True)
-    plotter.view_isometric()
     plotter.set_background("white")
+    render_info: dict[str, Any] = {
+        "camera_offset_dir": list(camera_offset_dir) if camera_offset_dir is not None else None,
+        "camera_view_up": list(camera_view_up) if camera_view_up is not None else None,
+        "camera_bounds_source": "simulation_surface" if uses_simulation_surface_bounds else "resistance_map",
+        "anatomy_overlay": {
+            "source_vtu": overlay_source_vtu,
+            "opacity": float(anatomy_opacity),
+        },
+    }
+    if camera_offset_dir is not None:
+        resolved_camera = _resolved_camera(camera_bounds)
+        plotter.camera_position = [
+            resolved_camera["resolved_camera_position"],
+            resolved_camera["resolved_camera_focal_point"],
+            resolved_camera["resolved_camera_view_up"],
+        ]
+        plotter.reset_camera_clipping_range()
+        render_info.update(resolved_camera)
+    else:
+        plotter.view_isometric()
+        position, focal_point, view_up = plotter.camera_position
+        render_info.update(
+            {
+                "resolved_camera_position": list(position),
+                "resolved_camera_focal_point": list(focal_point),
+                "resolved_camera_view_up": list(view_up),
+                "resolved_camera_distance": float(np.linalg.norm(np.asarray(position) - np.asarray(focal_point))),
+            }
+        )
     output_path = Path(output_png)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     plotter.screenshot(str(output_path))
     plotter.close()
+    render_info["output_png"] = str(output_path)
+    _record_render_metadata(render_info)
     return str(output_path)
 
 
@@ -645,6 +755,8 @@ def run_pulmonary_threed_postprocess_suite(
     pressure_field: str = "Pressure",
     already_mmhg: bool = False,
     resistance_map_workers: int | Literal["auto"] | None = None,
+    camera_offset_dir: Sequence[float] | None = None,
+    camera_view_up: Sequence[float] | None = None,
 ) -> dict[str, Any]:
     if cycle_duration_s is None:
         if inflow_csv is None:
@@ -766,11 +878,15 @@ def run_pulmonary_threed_postprocess_suite(
         shutil.copyfile(resistance_result["resistance_map"], resistance_map_vtp)
         shutil.copyfile(resistance_result["summary_csv"], branch_summary_csv)
         shutil.copyfile(resistance_result["ranked_csv"], ranked_candidates_csv)
-        shutil.copyfile(resistance_result["metadata_json"], resistance_metadata_json)
         render_resistance_map_png(
             resistance_map_vtp=resistance_map_vtp,
             output_png=resistance_png,
+            simulation_dir=simulation_dir,
+            camera_offset_dir=camera_offset_dir,
+            camera_view_up=camera_view_up,
+            metadata_json=resistance_result["metadata_json"],
         )
+        shutil.copyfile(resistance_result["metadata_json"], resistance_metadata_json)
         steps["resistance_map"] = {"status": "completed", "result": resistance_result}
         metadata["resistance_map"] = resistance_result
 
@@ -802,14 +918,18 @@ def run_pulmonary_threed_postprocess_suite(
         shutil.copyfile(resistance_systolic_result["resistance_map"], resistance_map_systolic_vtp)
         shutil.copyfile(resistance_systolic_result["summary_csv"], branch_summary_systolic_csv)
         shutil.copyfile(resistance_systolic_result["ranked_csv"], ranked_candidates_systolic_csv)
-        shutil.copyfile(
-            resistance_systolic_result["metadata_json"],
-            resistance_systolic_metadata_json,
-        )
         render_resistance_map_png(
             resistance_map_vtp=resistance_map_systolic_vtp,
             output_png=resistance_systolic_png,
             scalar_name="branch_resistance_systolic",
+            simulation_dir=simulation_dir,
+            camera_offset_dir=camera_offset_dir,
+            camera_view_up=camera_view_up,
+            metadata_json=resistance_systolic_result["metadata_json"],
+        )
+        shutil.copyfile(
+            resistance_systolic_result["metadata_json"],
+            resistance_systolic_metadata_json,
         )
         steps["resistance_map_systolic"] = {
             "status": "completed",

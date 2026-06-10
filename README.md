@@ -69,10 +69,25 @@ hatch run docs:serve
 Direct `pytest` execution now assumes the package is already installed in the
 active environment. The recommended path is `hatch run test:run`.
 
-**Quickstart**
-CLI (use the example config):
+**Start Here**
+
+New users usually want one of three things:
+
+1. Build a tree in Python: `examples/tutorials/01_build_tree.py`
+2. Run a zero-D simulation through a tree: `examples/tutorials/02_simulate_tree.py`
+3. Apply a tree-derived load back to an `svZeroD` outlet: `examples/tutorials/03_apply_tree_bc.py`
+
+The matching docs are:
+
+- `docs/tutorial_build_tree.md`
+- `docs/tutorial_simulate_tree.md`
+- `docs/tutorial_apply_tree_bc.md`
+
+If you want the broader YAML-driven workflow path instead, use:
+
 ```bash
-svzerodtrees pipeline examples/pipeline_example.yml
+svzerodtrees tune-bcs path/to/config.yml
+svzerodtrees construct-trees path/to/config.yml
 ```
 
 Generate a schema template:
@@ -80,20 +95,14 @@ Generate a schema template:
 svzerodtrees schema
 ```
 
-Python API:
-```python
-from svzerodtrees import load_config
-from svzerodtrees.api import PipelineWorkflow
-
-cfg = load_config("examples/pipeline_example.yml")
-PipelineWorkflow.from_config(cfg).run()
-```
-
 **Workflows**
 - `pipeline`: end-to-end run (0D setup, BC tuning, optional 3D, adaptation).
 - `tune_bcs`: optimize impedance or RCR parameters only.
 - `construct_trees`: assign impedance or RCR BCs to a svZeroD config.
 - `adapt`: run microvascular adaptation using preop/postop results.
+- `adapt-benchmark`: run local reduced-PA adaptation sweeps across `M1`, `M2`,
+  and `M3` from optimized preop/postop reduced RRI configs and write
+  study-level JSON/CSV/PNG summaries.
 - `postprocess`: generate figures from saved tree pickles or compute analysis artifacts such as svSlicer-based pulmonary resistance maps or the standardized pulmonary 3D postprocess suite.
   Pulmonary resistance-map configs may optionally set `workers: auto|<int>`, and
   pulmonary 3D suite configs may optionally set `resistance_map_workers`, to
@@ -115,11 +124,15 @@ Typical outputs are written under `paths.root` and include:
   files.
 
 **Examples**
+- Tutorial scripts: `examples/tutorials/01_build_tree.py`,
+  `examples/tutorials/02_simulate_tree.py`,
+  `examples/tutorials/03_apply_tree_bc.py`.
 - YAML configs: `examples/pipeline_example.yml`, `examples/tune_bcs_example.yml`,
   `examples/construct_tree/construct_trees_example.yml`, `examples/adapt_example.yml`,
-  `examples/postprocess_example.yml`, `examples/postprocess_resistance_map_example.yml`.
+  `examples/adapt_benchmark_tst_stan_1.yml`, `examples/postprocess_example.yml`,
+  `examples/postprocess_resistance_map_example.yml`.
 - Local BC tuning + preop 3D smoke case: `examples/bc-tuning/local_pipeline.yml`.
-- Narrative example: `examples/construct_tree/README.md`.
+- Legacy construct-tree notes: `examples/construct_tree/README.md`.
 
 **Reference**
 - Schema reference: `docs/interface.md`.

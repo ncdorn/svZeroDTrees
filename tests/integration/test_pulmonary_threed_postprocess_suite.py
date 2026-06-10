@@ -11,6 +11,7 @@ import pytest
 from svzerodtrees.post_processing.pulmonary_threed_suite import (
     _select_systolic_frame_from_artifacts,
     _clinical_targets_from_input,
+    render_resistance_map_png,
     run_pulmonary_threed_postprocess_suite,
     write_mpa_pressure_timeseries_csv,
 )
@@ -84,6 +85,81 @@ def test_write_mpa_pressure_timeseries_csv_matches_expected_contract(monkeypatch
     assert df["time_s"].tolist() == pytest.approx([0.1, 0.2])
     assert df["mpa_pressure_mmhg"].tolist() == pytest.approx([12.0, 13.0])
     assert result["bifurcation_id"] == 2
+
+
+def test_render_resistance_map_png_uses_simulation_surface_bounds_for_camera(monkeypatch, tmp_path: Path):
+    resistance_map = tmp_path / "resistance_map_mean.vtp"
+    line = pv.Line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    line.point_data["branch_resistance_mean"] = np.array([2.0, 2.0], dtype=float)
+    line.save(resistance_map)
+
+    sim_dir = tmp_path / "simulation"
+    sim_dir.mkdir()
+    final_vtu = sim_dir / "result_0003.vtu"
+    final_vtu.write_text("dummy", encoding="utf-8")
+    metadata_json = tmp_path / "resistance_map_metadata.json"
+    metadata_json.write_text("{}", encoding="utf-8")
+
+    resistance_poly = pv.read(str(resistance_map))
+
+    class DummySurface:
+        n_points = 4
+        bounds = (-5.0, 5.0, -10.0, 10.0, -2.0, 2.0)
+
+    class DummyMesh:
+        def extract_surface(self):
+            return DummySurface()
+
+    class DummyPlotter:
+        def __init__(self, *args, **kwargs):
+            self.camera_position = None
+
+        def add_mesh(self, *args, **kwargs):
+            return None
+
+        def set_background(self, *args, **kwargs):
+            return None
+
+        def reset_camera_clipping_range(self):
+            return None
+
+        def screenshot(self, path: str):
+            Path(path).write_bytes(b"png")
+
+        def close(self):
+            return None
+
+        def view_isometric(self):
+            self.camera_position = ([1.0, 1.0, 1.0], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0])
+
+    def fake_read(path: str):
+        if Path(path) == final_vtu:
+            return DummyMesh()
+        return resistance_poly
+
+    monkeypatch.setattr(
+        "svzerodtrees.post_processing.pulmonary_threed_suite._result_vtu_files",
+        lambda simulation_dir: [final_vtu],
+    )
+    monkeypatch.setattr("svzerodtrees.post_processing.pulmonary_threed_suite.pv.read", fake_read)
+    monkeypatch.setattr("svzerodtrees.post_processing.pulmonary_threed_suite.pv.Plotter", DummyPlotter)
+
+    output_png = tmp_path / "resistance_map_mean.png"
+    render_resistance_map_png(
+        resistance_map_vtp=resistance_map,
+        output_png=output_png,
+        simulation_dir=sim_dir,
+        camera_offset_dir=[1.0, 0.0, 0.0],
+        camera_view_up=[0.0, 0.0, 1.0],
+        metadata_json=metadata_json,
+    )
+
+    payload = json.loads(metadata_json.read_text(encoding="utf-8"))
+    png_render = payload["png_render"]
+    assert png_render["camera_bounds_source"] == "simulation_surface"
+    assert png_render["anatomy_overlay"]["source_vtu"] == str(final_vtu)
+    assert png_render["resolved_camera_focal_point"] == [0.0, 0.0, 0.0]
+    assert png_render["resolved_camera_position"] == pytest.approx([52.92742578285855, 0.0, 0.0])
 
 
 def test_select_systolic_frame_from_artifacts_uses_last_cycle_and_earliest_tie(tmp_path: Path):
@@ -282,6 +358,18 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
         render_calls.append(kwargs)
         output = Path(kwargs["output_png"])
         output.write_bytes(b"png")
+        metadata_path = Path(kwargs["metadata_json"])
+        payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        payload["png_render"] = {
+            "camera_offset_dir": kwargs.get("camera_offset_dir"),
+            "camera_view_up": kwargs.get("camera_view_up"),
+            "camera_bounds_source": "simulation_surface",
+            "anatomy_overlay": {
+                "source_vtu": str(sim_dir / "result_0003.vtu"),
+                "opacity": 0.12,
+            },
+        }
+        metadata_path.write_text(json.dumps(payload), encoding="utf-8")
         return str(output)
 
     monkeypatch.setattr("svzerodtrees.post_processing.pulmonary_threed_suite.pv.read", fake_read)
@@ -316,6 +404,8 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
         clinical_targets={"mpa_p": [20.0, 10.0, 15.0], "rpa_split": 0.6},
         cycle_duration_s=0.4,
         resistance_map_workers="auto",
+        camera_offset_dir=[0.25, -0.5, 0.75],
+        camera_view_up=[0.0, 0.0, 1.0],
     )
 
     assert (output_dir / "mpa_pressure_vs_time.csv").exists()
@@ -343,11 +433,22 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
     top_level_mean_metadata = json.loads((output_dir / "resistance_map_metadata.json").read_text(encoding="utf-8"))
     assert top_level_mean_metadata["keep_intermediate_centerlines"] is False
     assert top_level_mean_metadata["intermediate_dir"] is None
+    assert top_level_mean_metadata["png_render"]["camera_offset_dir"] == [0.25, -0.5, 0.75]
+    assert top_level_mean_metadata["png_render"]["camera_view_up"] == [0.0, 0.0, 1.0]
+    assert top_level_mean_metadata["png_render"]["camera_bounds_source"] == "simulation_surface"
+    assert top_level_mean_metadata["png_render"]["anatomy_overlay"]["source_vtu"].endswith("result_0003.vtu")
+    assert top_level_mean_metadata["png_render"]["anatomy_overlay"]["opacity"] == pytest.approx(0.12)
 
     frames = pd.read_csv(output_dir / "frames.csv")
     assert list(frames.columns) == ["timestep_id", "path", "time_s"]
     assert render_calls[0].get("scalar_name", "branch_resistance_mean") == "branch_resistance_mean"
     assert render_calls[1]["scalar_name"] == "branch_resistance_systolic"
+    assert render_calls[0]["simulation_dir"] == sim_dir
+    assert render_calls[0]["camera_offset_dir"] == [0.25, -0.5, 0.75]
+    assert render_calls[0]["camera_view_up"] == [0.0, 0.0, 1.0]
+    assert render_calls[1]["simulation_dir"] == sim_dir
+    assert render_calls[1]["camera_offset_dir"] == [0.25, -0.5, 0.75]
+    assert render_calls[1]["camera_view_up"] == [0.0, 0.0, 1.0]
 
     flow_split = pd.read_csv(output_dir / "flow_split_comparison.csv")
     assert flow_split["vessel"].tolist() == ["lpa", "rpa"]
@@ -460,6 +561,8 @@ def test_run_pulmonary_threed_postprocess_suite_tolerates_invalid_overlay_target
         }
 
     def fake_render_png(**kwargs):
+        assert kwargs["camera_offset_dir"] is None
+        assert kwargs["camera_view_up"] is None
         output = Path(kwargs["output_png"])
         output.write_bytes(b"png")
         return str(output)

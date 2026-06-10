@@ -35,10 +35,17 @@ class PolyData:
             float(maxs[2]),
         )
 
+    @property
+    def n_points(self) -> int:
+        return int(len(self.points))
+
     def sample(self, _mesh):
         return self
 
     def tube(self, radius=None):
+        return self
+
+    def extract_surface(self):
         return self
 
     def save(self, path: str | Path) -> None:
@@ -77,11 +84,24 @@ class Plotter:
     def __init__(self, off_screen=True, window_size=None):
         self.off_screen = off_screen
         self.window_size = window_size
+        self.camera_position = (
+            (1.0, 1.0, 1.0),
+            (0.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0),
+        )
 
-    def add_mesh(self, mesh, scalars=None, cmap=None, show_scalar_bar=True):
+    def add_mesh(self, mesh, scalars=None, cmap=None, show_scalar_bar=True, **kwargs):
         return None
 
     def view_isometric(self):
+        self.camera_position = (
+            (1.0, 1.0, 1.0),
+            (0.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0),
+        )
+        return None
+
+    def reset_camera_clipping_range(self):
         return None
 
     def set_background(self, color):

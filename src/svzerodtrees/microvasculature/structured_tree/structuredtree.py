@@ -47,7 +47,8 @@ class StructuredTree:
                  P_in: list[float] = None,
                  Q_in: list[float] = None,
                  tree_config: dict = None,
-                 root: TreeVessel = None):
+                 root: TreeVessel = None,
+                 terminal_resistance: float = 0.0):
         # --- Required core parameters ---
         self.name = name
         self.time = time
@@ -65,6 +66,7 @@ class StructuredTree:
         self.Pd = Pd
         self.P_in = P_in
         self.Q_in = Q_in
+        self.terminal_resistance = float(terminal_resistance or 0.0)
 
         # --- Dimensionless reference values ---
         self.q = 10.0    # reference flow [cm³/s]
@@ -197,6 +199,7 @@ class StructuredTree:
             simparams=simparams,
             diameter=float(metadata["initial_d"]),
             compliance_model=compliance_model,
+            terminal_resistance=float(metadata.get("terminal_resistance", 0.0) or 0.0),
         )
         tree.build(
             initial_d=float(metadata["initial_d"]),
@@ -326,6 +329,9 @@ class StructuredTree:
             "inductance": self._serialize_optional_float(
                 getattr(self, "inductance", 0.0)
             ),
+            "terminal_resistance": self._serialize_optional_float(
+                getattr(self, "terminal_resistance", 0.0)
+            ),
             "compliance": {
                 "model": self.compliance_model.description(),
                 "params": self.compliance_model.params,
@@ -449,6 +455,7 @@ class StructuredTree:
 
         order = np.argsort(gen)[::-1]  # deepest generation first
         R_eq = np.array(R_seg, dtype=np.float64)
+        terminal_resistance = float(getattr(self, "terminal_resistance", 0.0) or 0.0)
 
         for idx in order:
             children = []
@@ -460,6 +467,7 @@ class StructuredTree:
                 children.append(ri)
 
             if not children:
+                R_eq[idx] = float(R_eq[idx]) + terminal_resistance
                 continue
 
             inv_sum = 0.0
@@ -720,7 +728,14 @@ class StructuredTree:
 
                     if g == max_gen or Z_next is None or next_idx.size == 0:
                         if leaf_termination == "zero":
-                            ZL = np.zeros((idx.size, Fc), dtype=np.complex128)
+                            terminal_resistance = float(
+                                getattr(self, "terminal_resistance", 0.0) or 0.0
+                            )
+                            ZL = np.full(
+                                (idx.size, Fc),
+                                terminal_resistance,
+                                dtype=np.complex128,
+                            )
                         elif leaf_termination == "reflectionless":
                             # reflectionless continuation: Z_char = 1/g
                             gk_leaf = g_omega[idx, :]

@@ -10,6 +10,8 @@ __all__ = [
     "CWSSAdaptation",
     "CWSSIMSAdaptation",
     "run_structured_tree_adaptation",
+    "run_reduced_pa_adaptation_case",
+    "run_adaptation_benchmark_study",
 ]
 
 _LAZY_EXPORTS = {
@@ -26,6 +28,14 @@ _LAZY_EXPORTS = {
     "run_structured_tree_adaptation": (
         "svzerodtrees.adaptation.workflow",
         "run_structured_tree_adaptation",
+    ),
+    "run_reduced_pa_adaptation_case": (
+        "svzerodtrees.adaptation.benchmark",
+        "run_reduced_pa_adaptation_case",
+    ),
+    "run_adaptation_benchmark_study": (
+        "svzerodtrees.adaptation.benchmark",
+        "run_adaptation_benchmark_study",
     ),
 }
 

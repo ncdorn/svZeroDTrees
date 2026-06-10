@@ -58,7 +58,16 @@ def test_constructor_validates_gain_array_type_and_length():
     with pytest.raises(ValueError, match="exactly 4"):
         CWSSIMSAdaptation([1.0, 2.0, 3.0])
 
+    with pytest.raises(ValueError, match="K_tau_r"):
+        CWSSIMSAdaptation([-1.0, 2.0, 3.0, 4.0])
+
+    with pytest.raises(ValueError, match="K_sig_h"):
+        CWSSIMSAdaptation([1.0, 2.0, 3.0, -1.0])
+
     assert _model().K_arr == [1.0, 2.0, 3.0, 4.0]
+    assert CWSSIMSAdaptation([0.0, 2.0, 3.0, 4.0]).K_arr == [0.0, 2.0, 3.0, 4.0]
+    assert CWSSIMSAdaptation([1.0, 0.0, 3.0, 4.0]).K_arr == [1.0, 0.0, 3.0, 4.0]
+    assert CWSSIMSAdaptation([1.0, 2.0, 3.0, 0.0]).K_arr == [1.0, 2.0, 3.0, 0.0]
 
 
 def test_compute_rhs_rejects_invalid_state_shape_and_values():
@@ -67,8 +76,8 @@ def test_compute_rhs_rejects_invalid_state_shape_and_values():
     with pytest.raises(ValueError, match="1-D"):
         _model().compute_rhs(0.0, [[1.0, 2.0]], simple_pa, None, np.ones(2), [0.0], [], [])
 
-    with pytest.raises(ValueError, match="non-positive"):
-        _model().compute_rhs(0.0, [1.0, 0.0], simple_pa, None, np.ones(2), [0.0], [], [])
+    with pytest.raises(ValueError, match="finite"):
+        _model().compute_rhs(0.0, [0.0, np.inf], simple_pa, None, np.ones(2), [0.0], [], [])
 
 
 def test_compute_rhs_rejects_missing_or_unbuilt_trees():
@@ -117,7 +126,8 @@ def test_compute_rhs_happy_path_uses_results_and_homeostatic_references(monkeypa
 
     monkeypatch.setattr(cwss_module, "estimate_steady_tree_hemodynamics", fake_estimate)
 
-    y = np.array([1.0, 0.2, 2.0, 0.4, 3.0, 0.6])
+    y_physical = np.array([1.0, 0.2, 2.0, 0.4, 3.0, 0.6])
+    y = _model().encode_state(y_physical)
     dydt = _model().compute_rhs(
         0.0,
         y,
@@ -131,11 +141,13 @@ def test_compute_rhs_happy_path_uses_results_and_homeostatic_references(monkeypa
 
     tau = np.array([3.0, 7.0, 11.0])
     sig = np.array([60.0, 110.0, 160.0])
-    tau_err = tau - np.array([1.0, 1.5, 2.0])
-    sig_err = sig - np.array([80.0, 120.0, 150.0])
+    r = np.array([1.0, 2.0, 3.0])
+    h = np.array([0.2, 0.4, 0.6])
+    tau_err = np.log(tau / np.array([1.0, 1.5, 2.0]))
+    sig_err = np.log(sig / np.array([80.0, 120.0, 150.0]))
     expected = np.empty_like(y)
     expected[0::2] = tau_err + 2.0 * sig_err
-    expected[1::2] = -3.0 * tau_err + 4.0 * sig_err
+    expected[1::2] = 3.0 * tau_err + 4.0 * sig_err
 
     np.testing.assert_allclose(dydt, expected)
     np.testing.assert_allclose(lpa.store.d, [2.0, 4.0])
@@ -162,7 +174,7 @@ def test_compute_rhs_uses_homeostatic_maps_and_validates_reference_sizes(monkeyp
     )
     dydt = _model().compute_rhs(
         0.0,
-        [1.0, 0.2, 2.0, 0.4],
+        _model().encode_state([1.0, 0.2, 2.0, 0.4]),
         FakePA(lpa, rpa),
         None,
         np.ones(4),
@@ -186,37 +198,73 @@ def test_compute_rhs_uses_homeostatic_maps_and_validates_reference_sizes(monkeyp
         )
 
 
+def test_log_stimulus_uses_symmetric_log_ratio():
+    model = _model()
+    stimulus = model._log_stimulus(np.array([12.0, 10.0]), np.array([10.0, 12.0]))
+    np.testing.assert_allclose(stimulus, np.array([np.log(1.2), -np.log(1.2)]))
+
+
+def test_encode_decode_state_round_trips_physical_geometry():
+    model = _model()
+    physical = np.array([1.0, 0.2, 2.0, 0.4])
+    encoded = model.encode_state(physical)
+    decoded = model.decode_state(encoded)
+    np.testing.assert_allclose(decoded, physical)
+
+
+def test_convergence_diagnostics_matches_moving_window_split_logic():
+    model = _model()
+    stable_window = [
+        {"t": 40.0, "rpa_split": 0.50000},
+        {"t": 46.0, "rpa_split": 0.500006},
+        {"t": 52.0, "rpa_split": 0.500010},
+        {"t": 58.0, "rpa_split": 0.500004},
+        {"t": 64.0, "rpa_split": 0.500008},
+        {"t": 70.0, "rpa_split": 0.500002},
+    ]
+    diag = model.convergence_diagnostics(70.0, stable_window)
+    assert diag["window_samples"] == 6
+    assert diag["window_coverage"] == pytest.approx(30.0)
+    assert diag["window_span"] < model.split_window_tolerance
+    assert diag["center_deviation"] < model.split_window_center_tolerance
+    assert diag["converged"] is True
+    assert model.convergence_margin(70.0, stable_window) <= 0.0
+
+    sparse_window = [
+        {"t": 40.0, "rpa_split": 0.5001},
+        {"t": 70.0, "rpa_split": 0.5000},
+    ]
+    sparse_diag = model.convergence_diagnostics(70.0, sparse_window)
+    assert sparse_diag["converged"] is False
+    assert sparse_diag["margin"] > 0.0
+
+    early_diag = model.convergence_diagnostics(50.0, stable_window)
+    assert early_diag["converged"] is False
+    assert early_diag["margin"] > 0.0
+
+
 def test_event_and_event_outsidesim_convergence_behavior():
     model = _model()
     simple_pa = SimpleNamespace(rpa_split=0.5)
-    last_y = np.array([1.0, 0.2, 2.0, 0.4])
-    flow_log = [{"t": 0.0, "rpa_split": 0.5}, {"t": 1.0, "rpa_split": 0.50001}]
+    last_y = model.encode_state(np.array([1.0, 0.2, 2.0, 0.4]))
+    flow_log = [
+        {"t": 40.0, "rpa_split": 0.50000},
+        {"t": 46.0, "rpa_split": 0.500006},
+        {"t": 52.0, "rpa_split": 0.500010},
+        {"t": 58.0, "rpa_split": 0.500004},
+        {"t": 64.0, "rpa_split": 0.500008},
+        {"t": 70.0, "rpa_split": 0.500002},
+    ]
 
     assert model.event(
-        0.0,
+        70.0,
         last_y,
         simple_pa,
         last_y,
         flow_log,
         {"triggered": False, "was_positive": False},
-    ) == pytest.approx(1.0)
-    assert model.event(
-        1.0,
-        last_y * 1.1,
-        simple_pa,
-        last_y,
-        flow_log,
-        {"triggered": False, "was_positive": False},
-    ) == pytest.approx(1.0)
-    assert model.event(
-        1.0,
-        last_y,
-        simple_pa,
-        last_y,
-        flow_log,
-        {"triggered": False, "was_positive": True},
-    ) == pytest.approx(-1.0)
+    ) <= 0.0
 
     assert model.event_outsidesim(0.0, last_y, simple_pa, last_y) > 0.0
     assert model.event_outsidesim(1.0, last_y, simple_pa, last_y) < 0.0
-    assert model.event_outsidesim(1.0, last_y * 2.0, simple_pa, last_y) > 0.0
+    assert model.event_outsidesim(1.0, model.encode_state(model.decode_state(last_y) * 2.0), simple_pa, last_y) > 0.0

@@ -13,6 +13,7 @@ from .tune_bcs.impedance_tuner import ImpedanceTuner
 from .tune_bcs.rcr_tuner import RCRTuner
 from .microvasculature.treeparams import TreeParameters
 from .adaptation.microvascular_adaptor import MicrovascularAdaptor
+from .adaptation.benchmark import run_adaptation_benchmark_study
 from .adaptation.workflow import run_structured_tree_adaptation
 from .simulation.simulation_directory import SimulationDirectory
 import pickle
@@ -314,6 +315,21 @@ class AdaptationWorkflow:
         )
 
 
+class AdaptBenchmarkWorkflow:
+    def __init__(self, config: BaseConfig):
+        self.config = config
+
+    @classmethod
+    def from_config(cls, config: BaseConfig) -> "AdaptBenchmarkWorkflow":
+        return cls(config)
+
+    def run(self) -> Dict[str, Any]:
+        benchmark = self.config.adapt_benchmark
+        if benchmark is None:
+            raise ValueError("adapt_benchmark section is required for adapt_benchmark workflow")
+        return run_adaptation_benchmark_study(benchmark)
+
+
 class PostprocessWorkflow:
     def __init__(self, config: BaseConfig):
         self.config = config
@@ -394,6 +410,7 @@ WORKFLOW_MAP = {
     "tune_bcs": TuneBCsWorkflow,
     "construct_trees": ConstructTreesWorkflow,
     "adapt": AdaptationWorkflow,
+    "adapt_benchmark": AdaptBenchmarkWorkflow,
     "postprocess": PostprocessWorkflow,
 }
 

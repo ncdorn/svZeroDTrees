@@ -17,7 +17,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="svzerodtrees", description="svzerodtrees YAML-first CLI")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    for name in ("pipeline", "tune-bcs", "construct-trees", "adapt", "postprocess"):
+    for name in ("pipeline", "tune-bcs", "construct-trees", "adapt", "adapt-benchmark", "postprocess"):
         p = sub.add_parser(name)
         p.add_argument("config", help="Path to YAML config")
 
@@ -34,6 +34,7 @@ def main() -> int:
         "tune-bcs": "tune_bcs",
         "construct-trees": "construct_trees",
         "adapt": "adapt",
+        "adapt-benchmark": "adapt_benchmark",
         "postprocess": "postprocess",
     }
 

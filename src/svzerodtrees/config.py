@@ -59,6 +59,31 @@ class AdaptationConfig:
 
 
 @dataclass
+class AdaptBenchmarkScenarioConfig:
+    name: str
+    preop_rri_config: str
+    postop_rri_config: str
+    patient_id: Optional[str] = None
+    scenario_group: Optional[str] = None
+    perturbation_severity: Optional[str] = None
+    tree_params_csv: Optional[str] = None
+    clinical_targets_csv: Optional[str] = None
+    parameter_overrides: Optional[Dict[str, Dict[str, Any]]] = None
+
+
+@dataclass
+class AdaptBenchmarkConfig:
+    study_id: str
+    output_dir: str
+    models: List[str] = field(default_factory=lambda: ["M1", "M2", "M3"])
+    workers: int = 1
+    tree_params_csv: Optional[str] = None
+    clinical_targets_csv: Optional[str] = None
+    parameter_overrides: Optional[Dict[str, Dict[str, Any]]] = None
+    scenarios: List[AdaptBenchmarkScenarioConfig] = field(default_factory=list)
+
+
+@dataclass
 class PipelineConfig:
     run_steady: bool = True
     optimize_bcs: bool = True
@@ -139,6 +164,7 @@ class BaseConfig:
     bcs: Optional[BCSConfig] = None
     trees: Optional[TreesConfig] = None
     adaptation: Optional[AdaptationConfig] = None
+    adapt_benchmark: Optional[AdaptBenchmarkConfig] = None
     pipeline: Optional[PipelineConfig] = None
     threed: Optional[ThreeDConfig] = None
     postprocess: Optional[PostprocessConfig] = None
@@ -323,6 +349,164 @@ def _parse_paths(data: Dict[str, Any]) -> PathsConfig:
     )
 
 
+def _normalize_benchmark_models(models: Optional[List[Any]]) -> List[str]:
+    selected = [str(model).upper() for model in (models or ["M1", "M2", "M3"])]
+    invalid = [model for model in selected if model not in {"M1", "M2", "M3"}]
+    if invalid:
+        raise ValueError(
+            "adapt_benchmark.models must contain only M1, M2, or M3"
+        )
+    if not selected:
+        raise ValueError("adapt_benchmark.models must not be empty")
+    return selected
+
+
+def _parse_adapt_benchmark_parameter_overrides(
+    data: Optional[Dict[str, Any]],
+    *,
+    context: str,
+) -> Optional[Dict[str, Dict[str, Any]]]:
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise ValueError(f"{context} must be a mapping of model name to parameter mapping")
+
+    normalized: Dict[str, Dict[str, Any]] = {}
+    for model_name, payload in data.items():
+        resolved_model = str(model_name).upper()
+        if resolved_model not in {"M1", "M2", "M3"}:
+            raise ValueError(f"{context} contains unsupported model '{model_name}'")
+        if payload is None:
+            normalized[resolved_model] = {}
+            continue
+        if not isinstance(payload, dict):
+            raise ValueError(f"{context}.{model_name} must be a mapping")
+        normalized[resolved_model] = dict(payload)
+    return normalized
+
+
+def _parse_adapt_benchmark(
+    root: str,
+    data: Dict[str, Any],
+) -> AdaptBenchmarkConfig:
+    _ensure_keys(
+        data,
+        [
+            "study_id",
+            "output_dir",
+            "models",
+            "workers",
+            "tree_params_csv",
+            "clinical_targets_csv",
+            "parameter_overrides",
+            "scenarios",
+        ],
+        "adapt_benchmark",
+    )
+    study_id = str(data.get("study_id") or "").strip()
+    if not study_id:
+        raise ValueError("adapt_benchmark.study_id is required")
+
+    output_dir_raw = data.get("output_dir")
+    if not output_dir_raw:
+        raise ValueError("adapt_benchmark.output_dir is required")
+
+    scenarios_raw = data.get("scenarios") or []
+    if not scenarios_raw:
+        raise ValueError("adapt_benchmark.scenarios must contain at least one scenario")
+
+    scenarios: List[AdaptBenchmarkScenarioConfig] = []
+    for idx, entry in enumerate(scenarios_raw):
+        if not isinstance(entry, dict):
+            raise ValueError(f"adapt_benchmark.scenarios[{idx}] must be a mapping")
+        _ensure_keys(
+            entry,
+            [
+                "name",
+                "patient_id",
+                "scenario_group",
+                "perturbation_severity",
+                "preop_rri_config",
+                "postop_rri_config",
+                "tree_params_csv",
+                "clinical_targets_csv",
+                "parameter_overrides",
+            ],
+            f"adapt_benchmark.scenarios[{idx}]",
+        )
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            raise ValueError(f"adapt_benchmark.scenarios[{idx}].name is required")
+        preop_rri_config = entry.get("preop_rri_config")
+        postop_rri_config = entry.get("postop_rri_config")
+        if not preop_rri_config:
+            raise ValueError(
+                f"adapt_benchmark.scenarios[{idx}].preop_rri_config is required"
+            )
+        if not postop_rri_config:
+            raise ValueError(
+                f"adapt_benchmark.scenarios[{idx}].postop_rri_config is required"
+            )
+        scenarios.append(
+            AdaptBenchmarkScenarioConfig(
+                name=name,
+                preop_rri_config=_resolve_path(root, str(preop_rri_config)),
+                postop_rri_config=_resolve_path(root, str(postop_rri_config)),
+                patient_id=(
+                    str(entry["patient_id"]).strip()
+                    if entry.get("patient_id") is not None
+                    else None
+                ),
+                scenario_group=(
+                    str(entry["scenario_group"]).strip()
+                    if entry.get("scenario_group") is not None
+                    else None
+                ),
+                perturbation_severity=(
+                    str(entry["perturbation_severity"]).strip()
+                    if entry.get("perturbation_severity") is not None
+                    else None
+                ),
+                tree_params_csv=(
+                    _resolve_path(root, str(entry["tree_params_csv"]))
+                    if entry.get("tree_params_csv")
+                    else None
+                ),
+                clinical_targets_csv=(
+                    _resolve_path(root, str(entry["clinical_targets_csv"]))
+                    if entry.get("clinical_targets_csv")
+                    else None
+                ),
+                parameter_overrides=_parse_adapt_benchmark_parameter_overrides(
+                    entry.get("parameter_overrides"),
+                    context=f"adapt_benchmark.scenarios[{idx}].parameter_overrides",
+                ),
+            )
+        )
+
+    return AdaptBenchmarkConfig(
+        study_id=study_id,
+        output_dir=_resolve_path(root, str(output_dir_raw)),
+        models=_normalize_benchmark_models(data.get("models")),
+        workers=max(1, int(data.get("workers") or 1)),
+        tree_params_csv=(
+            _resolve_path(root, str(data["tree_params_csv"]))
+            if data.get("tree_params_csv")
+            else None
+        ),
+        clinical_targets_csv=(
+            _resolve_path(root, str(data["clinical_targets_csv"]))
+            if data.get("clinical_targets_csv")
+            else None
+        ),
+        parameter_overrides=_parse_adapt_benchmark_parameter_overrides(
+            data.get("parameter_overrides"),
+            context="adapt_benchmark.parameter_overrides",
+        ),
+        scenarios=scenarios,
+    )
+
+
 def _parse_slurm_execution(data: Optional[Dict[str, Any]]) -> SlurmExecutionConfig:
     if data is None:
         return SlurmExecutionConfig()
@@ -443,6 +627,7 @@ def load_config(path: str) -> BaseConfig:
             "bcs",
             "trees",
             "adaptation",
+            "adapt_benchmark",
             "pipeline",
             "threed",
             "postprocess",
@@ -455,8 +640,11 @@ def load_config(path: str) -> BaseConfig:
         raise ValueError(f"Unsupported config version {version}. Expected {CONFIG_VERSION}.")
 
     workflow = raw.get("workflow")
-    if workflow not in {"pipeline", "tune_bcs", "construct_trees", "adapt", "postprocess"}:
-        raise ValueError("workflow must be one of pipeline|tune_bcs|construct_trees|adapt|postprocess")
+    if workflow not in {"pipeline", "tune_bcs", "construct_trees", "adapt", "adapt_benchmark", "postprocess"}:
+        raise ValueError(
+            "workflow must be one of "
+            "pipeline|tune_bcs|construct_trees|adapt|adapt_benchmark|postprocess"
+        )
 
     if "paths" not in raw or raw["paths"] is None:
         raise ValueError("paths section is required")
@@ -504,6 +692,10 @@ def load_config(path: str) -> BaseConfig:
             mode=str(data.get("mode", "predict")),
             parameter_set=data.get("parameter_set"),
         )
+
+    adapt_benchmark = None
+    if raw.get("adapt_benchmark") is not None:
+        adapt_benchmark = _parse_adapt_benchmark(paths.root, raw["adapt_benchmark"])
 
     pipeline = None
     if raw.get("pipeline") is not None:
@@ -680,6 +872,7 @@ def load_config(path: str) -> BaseConfig:
         bcs=bcs,
         trees=trees,
         adaptation=adaptation,
+        adapt_benchmark=adapt_benchmark,
         pipeline=pipeline,
         threed=threed,
         postprocess=postprocess,
@@ -690,7 +883,7 @@ def render_schema() -> str:
     return """
 # svzerodtrees config (v1)
 version: 1
-workflow: pipeline  # pipeline | tune_bcs | construct_trees | adapt | postprocess
+workflow: pipeline  # pipeline | tune_bcs | construct_trees | adapt | adapt_benchmark | postprocess
 
 paths:
   root: .
@@ -758,6 +951,28 @@ adaptation:
   territory_scheme: lpa_rpa
   mode: predict
   parameter_set: {}  # e.g. {max_nodes: 200000, wss_gain: 0.01}
+
+adapt_benchmark:
+  study_id: tst-stan-1-reduced-pa
+  output_dir: benchmark-results
+  models: [M1, M2, M3]
+  tree_params_csv: path/to/optimized_params.csv
+  clinical_targets_csv: path/to/clinical_targets.csv
+  parameter_overrides:
+    M1:
+      wss_gain: 0.01
+    M3:
+      k_arr: [1.0, 1.0, 1.0, 1.0]
+  scenarios:
+    - name: baseline
+      patient_id: tst-stan-1
+      scenario_group: medium_dmin0p05
+      perturbation_severity: medium
+      preop_rri_config: path/to/preop_simplified_zerod_tuned_RRI.json
+      postop_rri_config: path/to/postop_simplified_zerod_tuned_RRI.json
+      parameter_overrides:
+        M1:
+          t_end: 3600.0
 
 pipeline:
   run_steady: true

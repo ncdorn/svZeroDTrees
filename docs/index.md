@@ -13,6 +13,9 @@ repository.
 :caption: Contents
 
 overview
+tutorial_build_tree
+tutorial_simulate_tree
+tutorial_apply_tree_bc
 interface
 performance_improvements
 API Reference <api/index>
@@ -36,7 +39,10 @@ clean, reusable package interface.
 
 ## Quick Links
 
-- Repository overview: [overview.md](overview.md)
+- Getting oriented: [overview.md](overview.md)
+- Build a tree: [tutorial_build_tree.md](tutorial_build_tree.md)
+- Simulate a tree directly: [tutorial_simulate_tree.md](tutorial_simulate_tree.md)
+- Apply a tree as a boundary condition: [tutorial_apply_tree_bc.md](tutorial_apply_tree_bc.md)
 - YAML interface reference: [interface.md](interface.md)
 - Package README, development guide, and contribution policy live in the
   repository root alongside this `docs/` directory.

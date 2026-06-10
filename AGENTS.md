@@ -42,6 +42,20 @@
 - Prefer small upstream changes that improve reuse over workspace-specific coupling.
 - Preserve scientific clarity and reproducibility when exposing new integration surfaces.
 
+## Adaptation Work Notes
+
+- Before modifying adaptation models, benchmark specs, or patient-specific adaptation integration, read `docs/adaptation/README.md`.
+- For toy-model stability lessons, read `docs/adaptation/toy-stability-notes.md`.
+- For the staged implementation plan from PA harness work through `svzt-agent` orchestration, read `docs/adaptation/stage-2-to-5-plan.md`.
+- Keep chronological experiment results in `ADAPTATION_RUN_LOG.md`; keep distilled guidance in `docs/adaptation/`.
+
+## Git And Sherlock Workflow
+
+- Treat GitHub as the authoritative sync point for `svZeroDTrees` changes that need to reach Sherlock.
+- When making changes in this repo, push the branch or commit to GitHub as part of the workflow instead of leaving the only authoritative copy local.
+- Update the Sherlock `svZeroDTrees` checkout by pulling from GitHub.
+- Do not make divergent remote-only edits in the Sherlock `svZeroDTrees` instance.
+
 ## Output And Interface Expectations
 
 - Favor deterministic behavior for the same inputs and configuration.

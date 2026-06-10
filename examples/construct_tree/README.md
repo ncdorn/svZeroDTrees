@@ -1,7 +1,26 @@
-This example will construct a simple tree from a simple svZeroDSolver config with one outlet `simple_config.json`.
-The config file used to run this experiment is `construct_trees_example.yml`. This is run by the command in `construct_trees.py`.
-The outputs from this experiment are:
-1. `config_w_cwss_trees.in`, a pickled file which contains the StructuredTreeBC class linked to the original config handler for the svZeroDSolver input file. 
-2. `construct_trees_example.log` a log file which has information about the number of vessels in the tree. In a more complex experiment, such as a tree optimization, this would include information about the optimization and the various optimized tree resistances 
+# Legacy `construct_trees` Example
 
-`config_w_cwss_trees.in` can be loaded into a `ConfigHandler` instance to inspect the tree and access the various `StructuredTree` class attributes. see the `ConfigHandler` and `StructuredTree` code for more information.
+This directory shows the shape of the YAML-driven `construct_trees` workflow
+around the tiny `simple_config.json` model.
+
+The main files are:
+
+1. `construct_trees_example.yml`: example workflow config
+2. `construct_trees.py`: tiny runner script
+3. `simple_config.json`: one-outlet `svZeroD` config used by the example
+
+## Important Caveat
+
+This is not the best onboarding example for a new user.
+
+The full impedance-construction workflow depends on outlet surface data under
+`mesh-surfaces/`, and that minimal dataset is not currently shipped here as a
+complete self-contained tutorial case.
+
+For first-time users, start with:
+
+- `examples/tutorials/01_build_tree.py`
+- `examples/tutorials/02_simulate_tree.py`
+- `examples/tutorials/03_apply_tree_bc.py`
+
+Then move to the YAML workflow once you have real `mesh-surfaces` data.

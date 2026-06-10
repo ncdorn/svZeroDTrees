@@ -78,3 +78,7 @@ coverage.xml
 # === Optional: ignore your local config files ===
 # If you keep personal experiment configs
 configs/local_*.json
+
+# adaptation examples
+examples/adaptation/*
+# TODO: filter through adaptation examples and save some

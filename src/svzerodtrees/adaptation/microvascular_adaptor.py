@@ -403,6 +403,7 @@ class MicrovascularAdaptor:
         n_iter: int = 100,
         *,
         wss_gain: float = 0.01,
+        terminal_resistance: float = 0.0,
         t_end: float | None = None,
         rtol: float = 1e-6,
         atol: float = 1e-7,
@@ -427,6 +428,8 @@ class MicrovascularAdaptor:
             getattr(self.clinical_targets, "path", os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv'),
             max_nodes=max_nodes,
         )
+        preop_pa.lpa_tree.terminal_resistance = float(terminal_resistance or 0.0)
+        preop_pa.rpa_tree.terminal_resistance = float(terminal_resistance or 0.0)
 
         effective_t_end = float(t_end) if t_end is not None else 86400.0
         gain_arr = [float(wss_gain), 0.0, 0.0, 0.0]
@@ -449,6 +452,7 @@ class MicrovascularAdaptor:
         self._finalize_coupling_with_adapted_trees()
         result = dict(result)
         result["wss_gain"] = float(wss_gain)
+        result["terminal_resistance"] = float(terminal_resistance or 0.0)
         result["solver_t_end"] = effective_t_end
         result["solver_rtol"] = float(rtol)
         result["solver_atol"] = float(atol)
@@ -701,7 +705,18 @@ class MicrovascularAdaptor:
         self._adapted_tree_outlet_mapping = outlet_mapping
                     
     
-    def adapt_cwss_ims(self, K_arr, fig_dir: str = None, *, max_nodes: int = 100_000):
+    def adapt_cwss_ims(
+        self,
+        K_arr,
+        fig_dir: str = None,
+        *,
+        t_end: float = 3600.0,
+        rtol: float = 1e-6,
+        atol: float = 1e-7,
+        max_step: float = 60.0,
+        method: str = "RK23",
+        max_nodes: int = 100_000,
+    ):
 
         # Optimize reduced-order PA (RRI) separately for preop and postop simulations,
         # unless tuned configs already exist on disk.
@@ -716,7 +731,17 @@ class MicrovascularAdaptor:
             max_nodes=max_nodes,
         )
         # run adaptation
-        result, flow_log, sol, postop_pa, hists = run_adaptation(preop_pa, postop_pa, CWSSIMSAdaptation, K_arr)
+        result, flow_log, sol, postop_pa, hists = run_adaptation(
+            preop_pa,
+            postop_pa,
+            CWSSIMSAdaptation,
+            K_arr,
+            t_end=t_end,
+            rtol=rtol,
+            atol=atol,
+            max_step=max_step,
+            method=method,
+        )
 
         print(f"Adaptation result: {result}")
 
@@ -727,3 +752,21 @@ class MicrovascularAdaptor:
         # rescale inflow
 
         self._finalize_coupling_with_adapted_trees()
+        result = dict(result)
+        result["k_arr"] = [float(value) for value in K_arr]
+        result["solver_t_end"] = float(t_end)
+        result["solver_rtol"] = float(rtol)
+        result["solver_atol"] = float(atol)
+        result["solver_max_step"] = float(max_step)
+        result["solver_method"] = str(method)
+        result["tree_max_nodes"] = int(max_nodes)
+        result["flow_log_points"] = len(flow_log)
+        result["saved_history_figures"] = len(hists)
+        result["config_paths"] = {
+            "preop_rri_config": str(preop_config_path),
+            "postop_rri_config": str(postop_config_path),
+            "clinical_targets_csv": str(getattr(self.clinical_targets, "path", "")),
+            "tree_params_csv": str(self.tree_params_csv),
+            "reduced_order_pa": str(self.reduced_order_pa_path),
+        }
+        return result

@@ -129,6 +129,7 @@ def test_segment_resistances_matches_poiseuille(simple_tree):
 
 def test_tree_metadata_round_trip_preserves_rebuild_inputs(simple_tree):
     simple_tree.inductance = 0.05
+    simple_tree.terminal_resistance = 123.0
     simple_tree.generation_mode = "per_outlet"
     simple_tree.outlet_mapping = {
         "mode": "per_outlet",
@@ -150,6 +151,7 @@ def test_tree_metadata_round_trip_preserves_rebuild_inputs(simple_tree):
     assert rebuilt.alpha == pytest.approx(simple_tree.alpha)
     assert rebuilt.beta == pytest.approx(simple_tree.beta)
     assert rebuilt.inductance == pytest.approx(0.05)
+    assert rebuilt.terminal_resistance == pytest.approx(123.0)
     assert rebuilt.generation_mode == "per_outlet"
     assert rebuilt.outlet_mapping["bc_names"] == ["IMPEDANCE_0"]
 
@@ -275,6 +277,17 @@ def test_from_outlet_vessel_uses_vessel_branch_name_and_diameter():
 def test_equivalent_resistance_reduces_series_and_parallel(simple_tree):
     seg_R = simple_tree.segment_resistances()
     expected_root = float(seg_R[0] + 1.0 / (1.0 / seg_R[1] + 1.0 / seg_R[2]))
+    assert simple_tree.equivalent_resistance() == pytest.approx(expected_root)
+
+
+def test_equivalent_resistance_includes_terminal_leaf_resistance(simple_tree):
+    simple_tree.terminal_resistance = 25.0
+    seg_R = simple_tree.segment_resistances()
+    expected_root = float(
+        seg_R[0]
+        + 1.0
+        / (1.0 / (seg_R[1] + 25.0) + 1.0 / (seg_R[2] + 25.0))
+    )
     assert simple_tree.equivalent_resistance() == pytest.approx(expected_root)
 
 
@@ -565,6 +578,13 @@ def test_compute_olufsen_impedance_reflectionless_is_opt_in(simple_tree):
         leaf_termination="reflectionless",
     )
     assert np.max(np.abs(np.asarray(zero_kernel) - np.asarray(reflectionless_kernel))) > 1e-6
+
+
+def test_compute_olufsen_impedance_terminal_resistance_changes_zero_termination_kernel(simple_tree):
+    zero_kernel, _ = simple_tree.compute_olufsen_impedance(tsteps=2, leaf_termination="zero")
+    simple_tree.terminal_resistance = 100.0
+    loaded_kernel, _ = simple_tree.compute_olufsen_impedance(tsteps=2, leaf_termination="zero")
+    assert np.max(np.abs(np.asarray(zero_kernel) - np.asarray(loaded_kernel))) > 1e-6
 
 
 def test_create_bcs_generates_pressure_and_resistance_outlets(simple_tree):

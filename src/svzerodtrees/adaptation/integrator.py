@@ -42,6 +42,31 @@ def _build_solver_result(t_history, y_history, *, status, message, nfev, event_t
     )
 
 
+def _encode_state(model_instance, y):
+    encoder = getattr(model_instance, "encode_state", None)
+    if encoder is None:
+        return np.asarray(y, dtype=np.float64)
+    return np.asarray(encoder(y), dtype=np.float64)
+
+
+def _decode_state(model_instance, y):
+    decoder = getattr(model_instance, "decode_state", None)
+    if decoder is None:
+        return np.asarray(y, dtype=np.float64)
+    return np.asarray(decoder(y), dtype=np.float64)
+
+
+def _decode_solver_result(sol, model_instance):
+    return SimpleNamespace(
+        t=np.asarray(sol.t, dtype=np.float64),
+        y=_decode_state(model_instance, sol.y),
+        status=int(sol.status),
+        message=str(sol.message),
+        nfev=int(sol.nfev),
+        t_events=getattr(sol, "t_events", []),
+    )
+
+
 def _accepted_step_max_step(model_instance, requested_max_step):
     effective_max_step = float(requested_max_step)
     window_duration = getattr(model_instance, "split_window_duration", None)
@@ -96,6 +121,10 @@ def _run_with_accepted_step_convergence(
     atol,
     max_step,
     method,
+    collapse_split_floor=None,
+    collapse_split_ceiling=None,
+    radius_max_abs_relative_change_limit=None,
+    thickness_max_abs_relative_change_limit=None,
 ):
     rhs_flow_log = []
     accepted_flow_log = [{"t": 0.0, "rpa_split": float(postop_pa.rpa_split)}]
@@ -129,7 +158,9 @@ def _run_with_accepted_step_convergence(
     )
 
     t_history = [0.0]
-    y_history = [y0.copy()]
+    y_initial_physical = _decode_state(model_instance, y0)
+    y_history = [y_initial_physical]
+    n_lpa = int(trees[0].store.n_nodes()) if hasattr(trees[0], "store") else 0
     event_time = None
     termination_reason = "t_end_reached"
     message = "The solver successfully reached the end of the integration interval."
@@ -143,13 +174,51 @@ def _run_with_accepted_step_convergence(
 
         current_t = float(solver.t)
         current_y = np.asarray(solver.y, dtype=np.float64).copy()
+        current_y_physical = _decode_state(model_instance, current_y)
         t_history.append(current_t)
-        y_history.append(current_y)
+        y_history.append(current_y_physical)
 
-        unpack_state(current_y, *trees)
+        unpack_state(current_y_physical, *trees)
         postop_pa.update_bcs()
         postop_pa.simulate()
-        accepted_flow_log.append({"t": current_t, "rpa_split": float(postop_pa.rpa_split)})
+        current_split = float(postop_pa.rpa_split)
+        accepted_flow_log.append({"t": current_t, "rpa_split": current_split})
+        if (
+            collapse_split_floor is not None
+            and current_split <= float(collapse_split_floor)
+        ) or (
+            collapse_split_ceiling is not None
+            and current_split >= float(collapse_split_ceiling)
+        ):
+            event_time = current_t
+            termination_reason = "rpa_split_collapse"
+            message = f"RPA split collapse threshold reached at t={current_t:.6f}"
+            break
+        radius_stats = _radius_change_stats(y_initial_physical, current_y_physical, n_lpa)
+        radius_max_change = max(
+            radius_stats["lpa_radius"]["max_abs_relative_change"],
+            radius_stats["rpa_radius"]["max_abs_relative_change"],
+        )
+        thickness_max_change = max(
+            radius_stats["lpa_thickness"]["max_abs_relative_change"],
+            radius_stats["rpa_thickness"]["max_abs_relative_change"],
+        )
+        if (
+            radius_max_abs_relative_change_limit is not None
+            and radius_max_change > float(radius_max_abs_relative_change_limit)
+        ):
+            event_time = current_t
+            termination_reason = "radius_bounds_violation"
+            message = f"Radius change bound reached at t={current_t:.6f}"
+            break
+        if (
+            thickness_max_abs_relative_change_limit is not None
+            and thickness_max_change > float(thickness_max_abs_relative_change_limit)
+        ):
+            event_time = current_t
+            termination_reason = "thickness_bounds_violation"
+            message = f"Thickness change bound reached at t={current_t:.6f}"
+            break
         convergence_diag = _accepted_step_convergence_diagnostics(model_instance, current_t, accepted_flow_log)
         accepted_convergence_history.append(convergence_diag)
 
@@ -214,6 +283,10 @@ def run_adaptation(
     atol=1e-7,
     max_step=60.0,
     method="RK23",
+    collapse_split_floor=None,
+    collapse_split_ceiling=None,
+    radius_max_abs_relative_change_limit=None,
+    thickness_max_abs_relative_change_limit=None,
 ):
     postop_pa.lpa_tree = copy.deepcopy(preop_pa.lpa_tree)
     postop_pa.rpa_tree = copy.deepcopy(preop_pa.rpa_tree)
@@ -226,10 +299,9 @@ def run_adaptation(
         postop_pa.rpa_tree.results = None
 
     trees = (postop_pa.lpa_tree, postop_pa.rpa_tree)
-    y0 = pack_state(*trees)
-    y_initial = y0.copy()
-
     model_instance = model(K_arr)
+    y_initial = pack_state(*trees)
+    y0 = _encode_state(model_instance, y_initial)
 
     postop_pa.update_bcs()
     postop_pa.simulate()
@@ -257,6 +329,10 @@ def run_adaptation(
             atol=atol,
             max_step=max_step,
             method=method,
+            collapse_split_floor=collapse_split_floor,
+            collapse_split_ceiling=collapse_split_ceiling,
+            radius_max_abs_relative_change_limit=radius_max_abs_relative_change_limit,
+            thickness_max_abs_relative_change_limit=thickness_max_abs_relative_change_limit,
         )
     else:
         last_update_y = y0.copy()
@@ -276,7 +352,7 @@ def run_adaptation(
             flow_log,
             event_state,
         )
-        sol = solve_ivp(
+        raw_sol = solve_ivp(
             model_instance.compute_rhs,
             (0, float(t_end)),
             y0,
@@ -287,7 +363,8 @@ def run_adaptation(
             atol=float(atol),
             max_step=float(max_step),
         )
-        termination_reason = _termination_reason(sol, model_instance)
+        termination_reason = _termination_reason(raw_sol, model_instance)
+        sol = _decode_solver_result(raw_sol, model_instance)
 
     y_final = sol.y[:, -1]
     unpack_state(y_final, *trees)
@@ -375,9 +452,8 @@ def run_adaptation_outsidesim(
     postop_pa.rpa_tree = copy.deepcopy(preop_pa.rpa_tree)
 
     trees = (postop_pa.lpa_tree, postop_pa.rpa_tree)
-    y0 = pack_state(*trees)
-
     model_instance = model(K_arr)
+    y0 = _encode_state(model_instance, pack_state(*trees))
 
     last_update_y = y0.copy()
     last_t_holder = [-float("inf")]
@@ -393,14 +469,14 @@ def run_adaptation_outsidesim(
     relative_split_change = 1.0
 
     while relative_split_change - 1e-5 > 0.0:
-        y0 = pack_state(*trees)
+        y0 = _encode_state(model_instance, pack_state(*trees))
 
         print("\nsimulating postop_pa")
         postop_pa.update_bcs()
         postop_pa.simulate()
 
         print("integrating adaptation to steady state")
-        sol = solve_ivp(
+        raw_sol = solve_ivp(
             model_instance.compute_rhs_nosim,
             (0, float(t_end)),
             y0,
@@ -411,8 +487,9 @@ def run_adaptation_outsidesim(
             atol=float(atol),
             max_step=float(max_step),
         )
-
-        geom_rel_change = (sol.y[:, -1] - last_update_y) / last_update_y
+        sol = _decode_solver_result(raw_sol, model_instance)
+        last_update_y_physical = _decode_state(model_instance, last_update_y)
+        geom_rel_change = (sol.y[:, -1] - last_update_y_physical) / last_update_y_physical
         geom_change = np.mean(np.abs(geom_rel_change))
 
         unpack_state(sol.y[:, -1], *trees)
@@ -426,9 +503,9 @@ def run_adaptation_outsidesim(
         last_rpa_split = postop_pa.rpa_split
 
     final_rpa_split = postop_pa.rpa_split
-    stable = int(sol.status == 1)
+    stable = int(raw_sol.status == 1)
     t95 = time_to_95(sol)
-    geom_err = rel_change(sol.y[:, -1], y0)
+    geom_err = rel_change(sol.y[:, -1], _decode_state(model_instance, y0))
 
     result = dict(
         K_tau_r=K_arr[0],
@@ -441,7 +518,7 @@ def run_adaptation_outsidesim(
         geom_err=geom_err,
         t95=t95,
         stable=stable,
-        n_rhs=sol.nfev,
+        n_rhs=raw_sol.nfev,
     )
 
     return result, flow_log, sol, postop_pa

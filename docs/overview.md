@@ -1,92 +1,64 @@
 # svZeroDTrees Overview
 
-svZeroDTrees builds and adapts structured microvascular trees for svZeroD models. It supports both impedance and RCR outlet boundary conditions, optional tuning to clinical targets, and a full pipeline that can include 3D coupling via SimVascular tools.
+`svZeroDTrees` builds structured microvascular trees and uses them to create or
+adapt outlet boundary conditions for `svZeroD` models.
 
-**Where It Fits**
-- Input: an svZeroD config and clinical targets.
-- Output: boundary conditions assigned to outlets, optional adaptation results, and postprocess figures or analysis artifacts.
-- Optional: 3D coupling using `svpre`, `svsolver`, and `svpost`.
+For a new user, the package is easiest to learn in three steps:
 
-**Inputs You Need**
-- `zerod_config.json`: svZeroD configuration.
-- `clinical_targets.csv`: target flow/pressure metrics used for tuning and adaptation.
-- `mesh-surfaces` directory: outlet surface data from SimVascular preprocessing.
-- Optional `inflow.csv`: custom inflow waveform.
+1. build a tree
+2. simulate flow and pressure through that tree
+3. apply the resulting tree-derived load back to an `svZeroD` outlet
 
-**Typical Usage Paths**
+Those steps are documented separately:
 
-Minimal path (tune + construct):
-```bash
-svzerodtrees tune-bcs examples/tune_bcs_example.yml
-svzerodtrees construct-trees examples/construct_tree/construct_trees_example.yml
-```
+- [Build a tree](tutorial_build_tree.md)
+- [Simulate a tree directly](tutorial_simulate_tree.md)
+- [Apply a tree as a boundary condition](tutorial_apply_tree_bc.md)
 
-Full pipeline:
-```bash
-svzerodtrees pipeline examples/pipeline_example.yml
-```
+## What The Package Covers
 
-Postprocess saved trees:
-```bash
-svzerodtrees postprocess examples/postprocess_example.yml
-```
+- direct `StructuredTree` construction and simulation
+- impedance or RCR boundary-condition workflows
+- optional BC tuning to clinical targets
+- adaptation workflows built on top of structured trees
+- optional 3D coupling and postprocessing utilities
 
-**Step-by-Step Sketch**
-1. Provide `paths` to your svZeroD config, clinical targets, and mesh-surfaces.
-2. Choose `bcs.type` as `impedance` or `rcr`.
-3. Run `tune_bcs` to compute optimized parameters.
-4. Run `construct_trees` to build BCs and write a config with BCs attached.
-5. Run `adapt` to apply microvascular adaptation to preop/postop results.
-   `M1` adaptation also writes reduced-PA flow-split convergence CSV/PNG
-   artifacts for review and sharing.
-6. Run `postprocess` to generate figures from saved tree pickles or compute artifacts such as a pulmonary resistance map from svSlicer-projected centerline results.
-7. For pulmonary 3D simulations, use the `pulmonary_threed_suite` analysis to
-   generate a standardized `mpa_pressure_vs_time.csv/png`, preop or postop
-   flow-split comparison CSV/PNG, and resistance-map outputs from one entry
-   point.
+## Main Inputs
 
-**Common Gotchas**
-- The `mesh-surfaces` directory must come from SimVascular preprocessing and must exist.
-- 3D coupling requires `svpre`, `svsolver`, and `svpost` to be available in PATH.
-- Relative paths are resolved relative to `paths.root`.
+- `zerod_config.json`: an `svZeroD` model configuration
+- `clinical_targets.csv`: target hemodynamics for tuning or adaptation
+- `mesh-surfaces`: outlet surfaces used by the full `construct_trees` workflow
+- optional `inflow.csv`: custom inflow waveform
 
-**Short YAML Examples**
-Minimal `tune_bcs`:
-```yaml
-version: 1
-workflow: tune_bcs
-paths:
-  root: .
-  zerod_config: zerod_config.json
-  clinical_targets: clinical_targets.csv
-  mesh_surfaces: mesh-surfaces
-bcs:
-  type: impedance
-  compliance_model: constant
-  is_pulmonary: true
-```
+## Which Path To Start With
 
-Minimal `construct_trees`:
-```yaml
-version: 1
-workflow: construct_trees
-paths:
-  root: .
-  zerod_config: zerod_config.json
-  clinical_targets: clinical_targets.csv
-  mesh_surfaces: mesh-surfaces
-bcs:
-  type: impedance
-  compliance_model: constant
-  is_pulmonary: true
-trees:
-  d_min: 0.01
-  use_mean: true
-  specify_diameter: true
-  optimized_params_csv: optimized_params.csv
-```
+Start with the direct Python tutorials if your goal is to understand behavior.
 
-**Where to Go Next**
-- Full schema reference: `docs/interface.md`.
-- Complete examples: `examples/*.yml` and `examples/construct_tree/README.md`.
-- Iteration helper API: `svzerodtrees.tuning.iteration` (`compute_centerline_mpa_metrics`, `compute_flow_split_metrics`, `evaluate_iteration_gate`, `generate_reduced_pa_from_iteration`, `run_impedance_tuning_for_iteration`). `compute_centerline_mpa_metrics` can evaluate only the last cardiac period when supplied a pressure CSV with `time_s` and a `cycle_duration`. The impedance helper supports `tuning_model: full_pa` and validates that `pa_config_tuning_snapshot.json` preserves the full 0D vessel/outlet topology instead of falling back to a reduced RRI snapshot.
+Start with the YAML workflows if your goal is to prepare a real pulmonary
+config for downstream simulation.
+
+### Direct Python Path
+
+- build only: `examples/tutorials/01_build_tree.py`
+- build + simulate: `examples/tutorials/02_simulate_tree.py`
+- attach a tree-derived BC to a tiny config: `examples/tutorials/03_apply_tree_bc.py`
+
+### Workflow Path
+
+- tune BC parameters: `svzerodtrees tune-bcs ...`
+- assign tree BCs to a model: `svzerodtrees construct-trees ...`
+- run the broader pipeline: `svzerodtrees pipeline ...`
+
+## Important Caveat About Examples
+
+Some of the older YAML examples are workflow-shaped examples rather than
+minimal, self-contained onboarding examples. In particular, the impedance
+construction flow depends on a real `mesh-surfaces` directory.
+
+That is why the tutorial pages start with direct Python examples first.
+
+## Reference Material
+
+- strict YAML schema: [interface.md](interface.md)
+- package API reference: `docs/api/` in the built Sphinx site
+- performance notes: [performance_improvements.md](performance_improvements.md)

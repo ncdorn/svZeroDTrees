@@ -281,6 +281,7 @@ def run_structured_tree_adaptation(
         solver_metrics = adaptor.adapt_cwss(
             n_iter=_iterations_or_default(params, 1),
             wss_gain=float(params.get("wss_gain", 0.01)),
+            terminal_resistance=float(params.get("terminal_resistance") or 0.0),
             t_end=params.get("t_end"),
             rtol=float(params.get("rtol", 1e-6)),
             atol=float(params.get("atol", 1e-7)),
@@ -318,8 +319,13 @@ def run_structured_tree_adaptation(
         )
         adaptor._finalize_coupling_with_adapted_trees()
     else:
-        adaptor.adapt_cwss_ims(
+        solver_metrics = adaptor.adapt_cwss_ims(
             params.get("k_arr", [1.0, 1.0, 1.0, 1.0]),
+            t_end=float(params.get("t_end", 3600.0)),
+            rtol=float(params.get("rtol", 1e-6)),
+            atol=float(params.get("atol", 1e-7)),
+            max_step=float(params.get("max_step", 60.0)),
+            method=str(params.get("solver_method", "RK23")),
             max_nodes=max_nodes,
         )
 

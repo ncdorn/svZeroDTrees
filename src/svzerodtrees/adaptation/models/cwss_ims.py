@@ -4,7 +4,14 @@ import numpy as np
 from typing import Sequence
 
 class CWSSIMSAdaptation(AdaptationModel):
-    event_reason_label = "geometry_converged"
+    event_reason_label = "rpa_split_window_converged"
+    split_window_duration = 30.0
+    min_window_coverage_fraction = 0.9
+    min_window_samples = 5
+    split_window_tolerance = 2e-5
+    split_window_center_tolerance = 1e-5
+    min_convergence_time = 60.0
+    _eps = 1e-12
 
     def __init__(self, K_arr: Sequence[float]):
         if not isinstance(K_arr, (list, tuple, np.ndarray)):
@@ -14,17 +21,37 @@ class CWSSIMSAdaptation(AdaptationModel):
                 f"K_arr must contain exactly 4 elements: "
                 f"[K_tau_r, K_sig_r, K_tau_h, K_sig_h], but got {len(K_arr)}."
             )
+        if float(K_arr[0]) < 0.0:
+            raise ValueError("K_tau_r must be >= 0.")
+        if float(K_arr[3]) < 0.0:
+            raise ValueError("K_sig_h must be >= 0.")
         super().__init__(K_arr)
+
+    @staticmethod
+    def _log_stimulus(current, reference):
+        current = np.maximum(np.asarray(current, dtype=np.float64), CWSSIMSAdaptation._eps)
+        reference = np.maximum(np.asarray(reference, dtype=np.float64), CWSSIMSAdaptation._eps)
+        return np.log(current / reference)
+
+    def encode_state(self, y):
+        y = np.asarray(y, dtype=np.float64)
+        if not np.all(y > 0.0):
+            raise ValueError("Physical adaptation state must remain strictly positive before log encoding.")
+        return np.log(np.maximum(y, self._eps))
+
+    def decode_state(self, y):
+        y = np.asarray(y, dtype=np.float64)
+        return np.exp(y)
     
     def compute_rhs(self, t, y, simple_pa, _vessels, last_update_y, last_t_holder, flow_log, solver_trace):
         y = np.asarray(y, dtype=np.float64)
         if y.ndim != 1:
             raise ValueError(f"State vector must be 1-D, received shape {y.shape}.")
-        if not np.all(y > 0.0):
-            bad_indices = np.where(y <= 0.0)[0]
+        if not np.all(np.isfinite(y)):
+            bad_indices = np.where(~np.isfinite(y))[0]
             raise ValueError(
-                f"Invalid values in y: all values must be > 0. "
-                f"Found {len(bad_indices)} non-positive values at indices: {bad_indices.tolist()}"
+                "Invalid values in y: all log-state values must be finite. "
+                f"Found {len(bad_indices)} invalid values at indices: {bad_indices.tolist()}"
             )
 
         lpa_tree = getattr(simple_pa, "lpa_tree", None)
@@ -45,8 +72,9 @@ class CWSSIMSAdaptation(AdaptationModel):
                 "Ensure pack_state reflects StructuredTree storage ordering."
             )
 
-        r_all = y[0::2]
-        h_all = y[1::2]
+        physical_y = self.decode_state(y)
+        r_all = physical_y[0::2]
+        h_all = physical_y[1::2]
 
 
         r_lpa, r_rpa = r_all[:n_lpa], r_all[n_lpa:]
@@ -59,7 +87,8 @@ class CWSSIMSAdaptation(AdaptationModel):
         simple_pa.update_bcs()
         simple_pa.simulate()
 
-        geom_rel_change = (y - last_update_y) / last_update_y
+        previous_physical_y = self.decode_state(last_update_y)
+        geom_rel_change = (physical_y - previous_physical_y) / previous_physical_y
         geom_change = float(np.mean(np.abs(geom_rel_change)))
 
         def _ensure_reference(tree, attr_name, n_expected, label):
@@ -119,10 +148,14 @@ class CWSSIMSAdaptation(AdaptationModel):
         ims_h = np.concatenate([ims_h_lpa, ims_h_rpa])
 
         dydt = np.empty_like(y)
-        tau_err = tau - wss_h
-        sig_err = sig - ims_h
+        tau_err = self._log_stimulus(tau, wss_h)
+        sig_err = self._log_stimulus(sig, ims_h)
+        # Evolve log-radius and log-thickness directly. This keeps the state
+        # positive by construction and makes the gains act on relative changes.
         dydt[0::2] = self.K_arr[0] * tau_err + self.K_arr[1] * sig_err
-        dydt[1::2] = -self.K_arr[2] * tau_err + self.K_arr[3] * sig_err
+        # Match the MATLAB stress-adaptation convention: WSS and IMS both
+        # enter the thickness equation with positive gain signs.
+        dydt[1::2] = self.K_arr[2] * tau_err + self.K_arr[3] * sig_err
 
         if t > max(last_t_holder[0], 1e-12):
             rhs_l2 = float(np.linalg.norm(dydt))
@@ -152,62 +185,70 @@ class CWSSIMSAdaptation(AdaptationModel):
 
 
     def event(self, t, y, *args):
-        """
-        Terminates integration when EITHER geometry OR flow split change is small.
-        Guarantees a sign change by tracking sign history.
-        """
-
-        # Unpack args
-        simple_pa = args[0]
-        reference_y = args[1]
+        _simple_pa = args[0]
+        _reference_y = args[1]
         flow_log = args[2]
-        event_state = args[3]
-
-        if t <= 1e-12:
-            return 1.0
-
-        rpa_split = simple_pa.rpa_split
-
-        # Geometry relative change
-        rel_geom_r = np.mean(np.abs((y[0::2] - reference_y[0::2]) / reference_y[0::2]))
-        rel_geom_h = np.mean(np.abs((y[1::2] - reference_y[1::2]) / reference_y[1::2]))
-        geom_change = max(rel_geom_r, rel_geom_h)
-
-        # Flow split relative change
-        if len(flow_log) > 1:
-            prev_split = float(flow_log[-2]["rpa_split"])
-            flow_split_change = abs(prev_split - rpa_split) / abs(rpa_split)
-        else:
-            flow_split_change = 1.0
-
-        # Tolerances
-        geom_tol = 1e-6 # 1e-5 was better?
-        split_tol = 1e-4
-
-        # Determine convergence
-        converged = geom_change - geom_tol < 0 # or flow_split_change - split_tol < 0
-
-        if converged:
-            event_state["triggered"] = True
-
-        # # Track if function was ever positive
-        if not event_state["triggered"]:
-            event_state["was_positive"] = True
-            val = 1.0  # Safe positive value
-        elif event_state["was_positive"]:
-            event_state["was_positive"] = False
-            val = -1.0  # Force sign change
-        else:
-            event_state["was_positive"] = True
-            val = 1.0  # Defensive: return positive if it was never positive
-        
-        # val = 1.0 if not triggered[0] else (-1.0 if was_positive[0] else 1.0)
-        # print(f"[event] t={t:.4f}, geom_change={geom_change:.2e}, flow_split_change={flow_split_change:.2e}, val={val}")
-
-        return val
+        _event_state = args[3]
+        return self.convergence_margin(t, flow_log)
 
     event.terminal = True
     event.direction = -1
+
+    def convergence_diagnostics(self, t, flow_log):
+        diagnostics = {
+            "t": float(t),
+            "window_duration": float(self.split_window_duration),
+            "window_coverage": 0.0,
+            "window_samples": 0,
+            "window_span": None,
+            "center_deviation": None,
+            "margin": None,
+            "converged": False,
+        }
+
+        if t <= max(1e-12, float(self.min_convergence_time)):
+            diagnostics["margin"] = float(self.min_convergence_time) - float(t)
+            return diagnostics
+
+        window_start = float(t) - float(self.split_window_duration)
+        window_entries = [
+            entry
+            for entry in flow_log
+            if window_start <= float(entry["t"]) <= float(t)
+        ]
+        diagnostics["window_samples"] = len(window_entries)
+        if len(window_entries) < int(self.min_window_samples):
+            diagnostics["margin"] = 1.0
+            return diagnostics
+
+        window_times = np.asarray([float(entry["t"]) for entry in window_entries], dtype=np.float64)
+        window_splits = np.asarray([float(entry["rpa_split"]) for entry in window_entries], dtype=np.float64)
+        coverage = float(window_times[-1] - window_times[0])
+        diagnostics["window_coverage"] = coverage
+
+        min_coverage = float(self.min_window_coverage_fraction) * float(self.split_window_duration)
+        coverage_deficit = min_coverage - coverage
+        if coverage_deficit > 0.0:
+            diagnostics["margin"] = coverage_deficit
+            return diagnostics
+
+        window_span = float(np.max(window_splits) - np.min(window_splits))
+        window_mean = float(np.mean(window_splits))
+        latest_split = float(window_splits[-1])
+        center_deviation = abs(window_mean - latest_split)
+
+        span_margin = window_span - float(self.split_window_tolerance)
+        center_margin = center_deviation - float(self.split_window_center_tolerance)
+        margin = max(span_margin, center_margin)
+
+        diagnostics["window_span"] = window_span
+        diagnostics["center_deviation"] = center_deviation
+        diagnostics["margin"] = margin
+        diagnostics["converged"] = margin <= 0.0
+        return diagnostics
+
+    def convergence_margin(self, t, flow_log):
+        return float(self.convergence_diagnostics(t, flow_log)["margin"])
 
     def event_outsidesim(self, t, y, *args):
         """
@@ -218,8 +259,10 @@ class CWSSIMSAdaptation(AdaptationModel):
             return 1.0
         last_y = args[1]
 
-        rel_geom_r = np.mean(np.abs((y[0::2] - last_y[0::2]) / last_y[0::2]))
-        rel_geom_h = np.mean(np.abs((y[1::2] - last_y[1::2]) / last_y[1::2]))
+        y_physical = self.decode_state(y)
+        last_y_physical = self.decode_state(last_y)
+        rel_geom_r = np.mean(np.abs((y_physical[0::2] - last_y_physical[0::2]) / last_y_physical[0::2]))
+        rel_geom_h = np.mean(np.abs((y_physical[1::2] - last_y_physical[1::2]) / last_y_physical[1::2]))
 
         geom_change = max(rel_geom_r, rel_geom_h)
 

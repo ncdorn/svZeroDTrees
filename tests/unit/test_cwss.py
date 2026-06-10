@@ -362,6 +362,55 @@ def test_run_adaptation_stops_on_accepted_step_convergence():
     assert len(hists) == 1
 
 
+def test_run_adaptation_decodes_log_space_model_outputs():
+    class LogSpaceAcceptedStepModel:
+        event_reason_label = "accepted_step_window_converged"
+
+        def __init__(self, K_arr):
+            self.K_arr = K_arr
+
+        def encode_state(self, y):
+            return np.log(np.asarray(y, dtype=np.float64))
+
+        def decode_state(self, y):
+            return np.exp(np.asarray(y, dtype=np.float64))
+
+        def compute_rhs(self, t, y, simple_pa, _vessels, last_update_y, last_t_holder, flow_log, solver_trace):
+            if t > max(last_t_holder[0], 1e-12):
+                last_update_y[:] = y
+                last_t_holder[0] = float(t)
+                flow_log.append({"t": float(t), "rpa_split": float(simple_pa.rpa_split)})
+                solver_trace.append(
+                    {
+                        "t": float(t),
+                        "geom_change_mean": 0.0,
+                        "rpa_split": float(simple_pa.rpa_split),
+                        "rhs_l2": 0.0,
+                    }
+                )
+            return np.zeros_like(y)
+
+        def convergence_margin(self, t, flow_log):
+            return -1.0 if t >= 3.0 else 1.0
+
+    preop = FakePA(FakeTree([2.0], [10]), FakeTree([3.0], [20]))
+    postop = FakePA(FakeTree([2.0], [10]), FakeTree([3.0], [20]))
+
+    _result, _flow_log, sol, adapted_pa, _hists = run_adaptation(
+        preop,
+        postop,
+        LogSpaceAcceptedStepModel,
+        [1.0, 0.0, 0.0, 0.0],
+        t_end=10.0,
+        max_step=0.5,
+        method="RK23",
+    )
+
+    np.testing.assert_allclose(sol.y[:, 0], np.array([1.0, 0.1, 1.5, 0.15]))
+    np.testing.assert_allclose(adapted_pa.lpa_tree.store.d, np.array([2.0]))
+    np.testing.assert_allclose(adapted_pa.rpa_tree.store.d, np.array([3.0]))
+
+
 def test_run_minipa_cwss_debug_converges_with_large_terminal_diameter():
     debug = run_minipa_cwss_debug(
         initial_d=0.3,
@@ -469,13 +518,18 @@ def test_run_structured_tree_adaptation_m1_uses_stable_dispatch_and_exports_solv
         reduced_order_pa=str(tmp_path / "reduced.json"),
         tree_params=str(tmp_path / "optimized_params.csv"),
         model="M1",
-        parameter_set={"iterations": 2, "max_nodes": 200_000},
+        parameter_set={
+            "iterations": 2,
+            "max_nodes": 200_000,
+            "terminal_resistance": 50_000.0,
+        },
         output_root=str(tmp_path / "results"),
     )
 
     assert DummyAdaptor.call_kwargs["n_iter"] == 2
     assert DummyAdaptor.call_kwargs["max_nodes"] == 200_000
     assert DummyAdaptor.call_kwargs["wss_gain"] == pytest.approx(0.01)
+    assert DummyAdaptor.call_kwargs["terminal_resistance"] == pytest.approx(50_000.0)
     assert summary["solver_metrics"]["stable"] == 1
     assert summary["solver_metrics"]["solver_t_end"] == pytest.approx(7200.0)
     assert summary["solver_metrics"]["tree_max_nodes"] == 200_000
@@ -577,6 +631,106 @@ def test_run_structured_tree_adaptation_m2_omits_flow_split_convergence_artifact
     )
     assert "artifacts" not in metrics_payload
     assert "internal_zerod" not in metrics_payload["hemodynamics"]
+
+
+def test_run_structured_tree_adaptation_m3_exports_solver_metrics(
+    monkeypatch,
+    tmp_path,
+):
+    adapted_dir = tmp_path / "adapted"
+    adapted_dir.mkdir()
+    (adapted_dir / "svzerod_3Dcoupling.json").write_text(
+        json.dumps({"kind": "adapted"}),
+        encoding="utf-8",
+    )
+
+    class DummySimDir:
+        def __init__(self, path, lpa_flow, rpa_flow, lpa_res, rpa_res):
+            self.path = path
+            self._lpa_flow = lpa_flow
+            self._rpa_flow = rpa_flow
+            self._lpa_res = lpa_res
+            self._rpa_res = rpa_res
+
+        def flow_split(self, get_mean=True, verbose=False):
+            return ({"lpa": self._lpa_flow}, {"rpa": self._rpa_flow})
+
+        def _compute_pressure_drops(self, get_mean=True):
+            return (0.0, 0.0, 0.0, self._lpa_res, self._rpa_res)
+
+    def fake_from_directory(path, convert_to_cm=False):
+        path = str(path)
+        if path.endswith("preop"):
+            return DummySimDir(path, 10.0, 20.0, 100.0, 200.0)
+        if path.endswith("postop"):
+            return DummySimDir(path, 12.0, 18.0, 110.0, 190.0)
+        return SimpleNamespace(path=path, svzerod_3Dcoupling=None)
+
+    class DummyAdaptor:
+        call_args = None
+
+        def __init__(self, preop, postop, adapted, targets, **kwargs):
+            self.adapted_simdir = adapted
+
+        def adapt_cwss_ims(self, k_arr, **kwargs):
+            DummyAdaptor.call_args = {"k_arr": k_arr, **kwargs}
+            return {
+                "stable": 1,
+                "geom_err": 0.03,
+                "t95": 18.0,
+                "n_rhs": 27,
+                "k_arr": [float(value) for value in k_arr],
+                "preop_rpa_split": 0.67,
+                "postop_rpa_split": 0.56,
+                "final_rpa_split": 0.51,
+                "solver_method": kwargs["method"],
+                "solver_diagnostics": {
+                    "termination_reason": "geometry_converged",
+                    "event_time": 180.0,
+                    "accepted_step_flow_split_history": [
+                        {"t": 0.0, "rpa_split": 0.56},
+                        {"t": 90.0, "rpa_split": 0.53},
+                        {"t": 180.0, "rpa_split": 0.51},
+                    ],
+                },
+            }
+
+    monkeypatch.setattr(workflow_module.SimulationDirectory, "from_directory", fake_from_directory)
+    monkeypatch.setattr(
+        workflow_module.ClinicalTargets,
+        "from_csv",
+        lambda _path: SimpleNamespace(rpa_split=0.58),
+    )
+    monkeypatch.setattr(workflow_module, "MicrovascularAdaptor", DummyAdaptor)
+
+    summary = run_structured_tree_adaptation(
+        preop_dir=str(tmp_path / "preop"),
+        postop_dir=str(tmp_path / "postop"),
+        adapted_dir=str(adapted_dir),
+        clinical_targets=str(tmp_path / "clinical_targets.csv"),
+        reduced_order_pa=str(tmp_path / "reduced.json"),
+        tree_params=str(tmp_path / "optimized_params.csv"),
+        model="M3",
+        parameter_set={
+            "k_arr": [1.0, 2.0, 3.0, 4.0],
+            "t_end": 5400.0,
+            "solver_method": "BDF",
+        },
+        output_root=str(tmp_path / "results"),
+    )
+
+    assert DummyAdaptor.call_args["k_arr"] == [1.0, 2.0, 3.0, 4.0]
+    assert DummyAdaptor.call_args["method"] == "BDF"
+    assert DummyAdaptor.call_args["t_end"] == pytest.approx(5400.0)
+    assert summary["solver_metrics"]["stable"] == 1
+    assert summary["solver_metrics"]["k_arr"] == [1.0, 2.0, 3.0, 4.0]
+    assert summary["solver_metrics"]["solver_diagnostics"]["termination_reason"] == "geometry_converged"
+    assert summary["hemodynamics"]["internal_zerod"]["target"]["rpa_split"] == pytest.approx(0.58)
+    metrics_payload = json.loads(
+        Path(summary["artifacts"]["adaptation_metrics_json"]).read_text(encoding="utf-8")
+    )
+    assert metrics_payload["solver_metrics"]["k_arr"] == [1.0, 2.0, 3.0, 4.0]
+    assert metrics_payload["hemodynamics"]["internal_zerod"]["adapted_final"]["rpa_split"] == pytest.approx(0.51)
 
 
 def test_run_single_tree_cwss_debug_smoke():
