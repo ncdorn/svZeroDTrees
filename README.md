@@ -115,6 +115,10 @@ svzerodtrees schema
 **Outputs**
 Typical outputs are written under `paths.root` and include:
 - `optimized_params.csv` or `optimized_rcr_params.csv` from tuning.
+- `pa_config_tuning_snapshot.json` from pulmonary impedance tuning. This
+  snapshot can be re-simulated later with the Python helper
+  `svzerodtrees.tuning.summarize_pulmonary_zerod_config(...)` to recover
+  pre-mapping MPA pressure and branch-flow metrics for iteration diagnostics.
 - `svzerod_config_with_bcs.json` (or `paths.output_config`) from tree construction.
 - `preop`, `postop`, `adapted` directories for pipeline/adaptation runs.
 - Figures from postprocess workflow (PNG outputs you specify).

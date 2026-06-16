@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from svzerodtrees.io import ConfigHandler
+from svzerodtrees._pysvzerod import simulate_pysvzerod
 from svzerodtrees.io.inflow_handler import mean_flow_from_path
 from svzerodtrees.io.blocks.boundary_condition import (
     _resolve_flow_mean_config,
@@ -61,6 +62,7 @@ OPTIMIZED_PARAMS_FILENAME = "optimized_params.csv"
 OPTIMIZATION_LOG_FILENAME = "stree_impedance_optimization.log"
 PA_CONFIG_SNAPSHOT_FILENAME = "pa_config_tuning_snapshot.json"
 TUNED_ZEROD_CONFIG_FILENAME = "svzerod_3d_coupling_tuned.json"
+MMHG_TO_BARYE = 1333.2
 
 
 def _clear_tuning_outputs(output_dir: Path, *, tuned_config_name: str) -> None:
@@ -753,6 +755,171 @@ def _to_float_array(values: Sequence[float]) -> np.ndarray:
     if arr.size == 0:
         raise ValueError("input sequence has no finite values")
     return arr
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(result):
+        return None
+    return result
+
+
+def _load_pulmonary_config(
+    config: str | Path | Mapping[str, Any],
+) -> tuple[dict[str, Any], str | None]:
+    if isinstance(config, Mapping):
+        return json.loads(json.dumps(config)), None
+
+    path = Path(config)
+    if not path.exists():
+        raise FileNotFoundError(f"pulmonary 0D config not found: {path}")
+    return _load_json_payload(path), str(path)
+
+
+def _inflow_period_from_config(config: Mapping[str, Any]) -> float | None:
+    simparams = config.get("simulation_parameters", {})
+    period = simparams.get("cardiac_period") if isinstance(simparams, Mapping) else None
+    if period is not None:
+        period_value = _float_or_none(period)
+        if period_value is not None and period_value > 0.0:
+            return period_value
+
+    boundary_conditions = config.get("boundary_conditions")
+    if not isinstance(boundary_conditions, list):
+        return None
+    for bc in boundary_conditions:
+        if not isinstance(bc, Mapping) or str(bc.get("bc_type") or "").upper() != "FLOW":
+            continue
+        values = bc.get("bc_values")
+        if not isinstance(values, Mapping) or "t" not in values:
+            continue
+        try:
+            times = np.asarray(values["t"], dtype=float)
+        except (TypeError, ValueError):
+            continue
+        times = times[np.isfinite(times)]
+        if times.size >= 2:
+            inferred = float(times.max() - times.min())
+            if inferred > 0.0:
+                return inferred
+    return None
+
+
+def _result_for_vessel(result: pd.DataFrame, vessel_name: str) -> pd.DataFrame:
+    if "name" not in result.columns:
+        raise ValueError("solver result is missing required 'name' column")
+    rows = result[result["name"] == vessel_name].copy()
+    if rows.empty:
+        raise ValueError(f"solver result missing vessel '{vessel_name}'")
+    return rows
+
+
+def _series_from_rows(rows: pd.DataFrame, column: str) -> np.ndarray:
+    if column not in rows.columns:
+        raise ValueError(f"solver result is missing required '{column}' column")
+    values = pd.to_numeric(rows[column], errors="coerce").to_numpy(dtype=float)
+    return _to_float_array(values)
+
+
+def _time_from_rows(rows: pd.DataFrame) -> np.ndarray | None:
+    if "time" not in rows.columns:
+        return None
+    values = pd.to_numeric(rows["time"], errors="coerce").to_numpy(dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size == 0:
+        return None
+    return values
+
+
+def _slice_rows_last_cycle(rows: pd.DataFrame, cycle_duration: float | None) -> tuple[pd.DataFrame, str]:
+    if cycle_duration is None:
+        return rows, "all"
+
+    time_values = pd.to_numeric(rows.get("time"), errors="coerce").to_numpy(dtype=float)
+    finite_mask = np.isfinite(time_values)
+    if not np.any(finite_mask):
+        return rows, "all"
+
+    cutoff = float(np.max(time_values[finite_mask])) - float(cycle_duration)
+    mask = finite_mask & (time_values > cutoff)
+    sliced = rows.loc[mask].copy()
+    if sliced.empty:
+        return rows, "all"
+    return sliced, "last_cycle"
+
+
+def _integral_or_mean(values: np.ndarray, time: np.ndarray | None) -> float:
+    if time is not None and time.size == values.size and time.size >= 2:
+        return float(np.trapz(values, time))
+    return float(np.mean(values))
+
+
+def _vessel_name(vessel: Any, label: str) -> str:
+    name = getattr(vessel, "name", None)
+    if not name:
+        raise ValueError(f"pulmonary vessel object is missing name for {label}")
+    return str(name)
+
+
+def summarize_pulmonary_zerod_config(
+    config: str | Path | Mapping[str, Any],
+    *,
+    force_last_cycle: bool = False,
+) -> dict[str, Any]:
+    """Run a pulmonary 0D config and extract MPA pressure plus branch-flow metrics."""
+
+    config_payload, config_path = _load_pulmonary_config(config)
+    handler = ConfigHandler(config_payload, is_pulmonary=True)
+
+    mpa = getattr(handler, "mpa", None)
+    lpa = getattr(handler, "lpa", None)
+    rpa = getattr(handler, "rpa", None)
+    if mpa is None or lpa is None or rpa is None:
+        raise ValueError(
+            "could not identify MPA/LPA/RPA vessels; expected a pulmonary config"
+        )
+
+    result = simulate_pysvzerod(config_payload)
+    cycle_duration = _inflow_period_from_config(config_payload)
+    use_last_cycle = force_last_cycle or cycle_duration is not None
+
+    mpa_rows = _result_for_vessel(result, _vessel_name(mpa, "mpa"))
+    lpa_rows = _result_for_vessel(result, _vessel_name(lpa, "lpa"))
+    rpa_rows = _result_for_vessel(result, _vessel_name(rpa, "rpa"))
+
+    window = "all"
+    if use_last_cycle:
+        mpa_rows, mpa_window = _slice_rows_last_cycle(mpa_rows, cycle_duration)
+        lpa_rows, lpa_window = _slice_rows_last_cycle(lpa_rows, cycle_duration)
+        rpa_rows, rpa_window = _slice_rows_last_cycle(rpa_rows, cycle_duration)
+        if mpa_window == lpa_window == rpa_window == "last_cycle":
+            window = "last_cycle"
+
+    pressure = _series_from_rows(mpa_rows, "pressure_in") / MMHG_TO_BARYE
+    mpa_flow = _integral_or_mean(_series_from_rows(mpa_rows, "flow_in"), _time_from_rows(mpa_rows))
+    lpa_flow = _integral_or_mean(_series_from_rows(lpa_rows, "flow_in"), _time_from_rows(lpa_rows))
+    rpa_flow = _integral_or_mean(_series_from_rows(rpa_rows, "flow_in"), _time_from_rows(rpa_rows))
+    if not np.isfinite(mpa_flow) or abs(mpa_flow) <= 0.0:
+        raise ValueError("MPA flow is zero or non-finite; cannot compute RPA split")
+
+    return {
+        "config_path": config_path,
+        "mpa_vessel": _vessel_name(mpa, "mpa"),
+        "lpa_vessel": _vessel_name(lpa, "lpa"),
+        "rpa_vessel": _vessel_name(rpa, "rpa"),
+        "window": window,
+        "cycle_duration": cycle_duration,
+        "mpa_sys": float(np.max(pressure)),
+        "mpa_dia": float(np.min(pressure)),
+        "mpa_mean": float(np.mean(pressure)),
+        "mpa_flow": float(mpa_flow),
+        "lpa_flow": float(lpa_flow),
+        "rpa_flow": float(rpa_flow),
+        "rpa_split": float(rpa_flow / mpa_flow),
+    }
 
 
 def _load_centerline_pressure_series(
