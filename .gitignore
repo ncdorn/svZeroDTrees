@@ -73,6 +73,7 @@ coverage.xml
 *.bak
 *.old
 *.tmp
+tmp/
 *~
 
 # === Optional: ignore your local config files ===
