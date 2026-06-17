@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from svzerodtrees.simulation import simulation_directory as simulation_directory_module
 from svzerodtrees.simulation.simulation_directory import SimulationDirectory
 from svzerodtrees.simulation.input_builders.solver_runscript import SolverRunscript
@@ -58,7 +60,7 @@ def test_solver_runscript_omits_mail_directives_by_default(tmp_path: Path):
     runscript_path = tmp_path / "run_solver.sh"
     runscript = SolverRunscript(str(runscript_path))
 
-    runscript.write(working_dir=str(tmp_path))
+    runscript.write(working_dir=str(tmp_path), svfsiplus_path="svmultiphysics")
 
     rendered = runscript_path.read_text(encoding="utf-8")
     assert "--mail-user" not in rendered
@@ -71,6 +73,7 @@ def test_solver_runscript_writes_mail_directives_when_configured(tmp_path: Path)
 
     runscript.write(
         working_dir=str(tmp_path),
+        svfsiplus_path="svmultiphysics",
         mail_user="user@example.com",
         mail_types=["fail", "end"],
     )
@@ -79,6 +82,14 @@ def test_solver_runscript_writes_mail_directives_when_configured(tmp_path: Path)
     assert "#SBATCH --mail-user=user@example.com" in rendered
     assert "#SBATCH --mail-type=fail" in rendered
     assert "#SBATCH --mail-type=end" in rendered
+
+
+def test_solver_runscript_requires_solver_path(tmp_path: Path):
+    runscript_path = tmp_path / "run_solver.sh"
+    runscript = SolverRunscript(str(runscript_path))
+
+    with pytest.raises(ValueError, match="svfsiplus_path is required"):
+        runscript.write(working_dir=str(tmp_path))
 
 
 def test_simulation_directory_run_local_invokes_solver(monkeypatch, tmp_path: Path):
@@ -131,6 +142,62 @@ def test_simulation_directory_run_slurm_submits_batch(monkeypatch, tmp_path: Pat
     assert calls == [(["sbatch", "run_solver.sh"], {"cwd": str(tmp_path), "check": True})]
 
 
+def test_write_files_requires_solver_path_in_execution_config(tmp_path: Path):
+    calls = []
+
+    class ZeroDConfig:
+        def generate_threed_coupler(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                simparams=SimpleNamespace(external_step_size=None, cardiac_period=None),
+                coupling_blocks={},
+                regenerate_impedance_bcs_for_coupled_timing=lambda: None,
+                to_json=lambda _path: None,
+            ), []
+
+        def generate_inflow_file(self, *_args, **_kwargs):
+            return None
+
+    sim_dir = SimulationDirectory.__new__(SimulationDirectory)
+    sim_dir.path = str(tmp_path)
+    sim_dir.zerod_config = ZeroDConfig()
+    sim_dir.mesh_complete = SimpleNamespace()
+    sim_dir.svzerod_3Dcoupling = SimpleNamespace(
+        simparams=SimpleNamespace(external_step_size=None, cardiac_period=None),
+        coupling_blocks={},
+        regenerate_impedance_bcs_for_coupled_timing=lambda: None,
+        to_json=lambda _path: None,
+        path=str(tmp_path / "svzerod_3Dcoupling.json"),
+    )
+    sim_dir.svFSIxml = SimpleNamespace(
+        is_written=True,
+        write=lambda *_args, **_kwargs: calls.append("write_xml"),
+        path=str(tmp_path / "svFSIplus.xml"),
+    )
+    sim_dir.solver_runscript = SimpleNamespace(
+        is_written=False,
+        write=lambda **_kwargs: calls.append("write_runscript"),
+        path=str(tmp_path / "run_solver.sh"),
+    )
+    sim_dir.convert_to_cm = False
+    sim_dir.mesh_scale_factor = 1.0
+    sim_dir.explicit_threed_coupler = True
+    sim_dir.check_files = lambda verbose=False: calls.append("check_files")
+
+    with pytest.raises(ValueError, match="execution_config.executable is required"):
+        sim_dir.write_files(
+            user_input=False,
+            sim_config={
+                "n_tsteps": 10,
+                "dt": 0.01,
+                "execution": {
+                    "mode": "slurm",
+                },
+            },
+        )
+
+    assert "write_runscript" not in calls
+
+
 def test_write_files_preserves_explicit_threed_coupler(tmp_path: Path):
     coupling_path = tmp_path / "svzerod_3Dcoupling.json"
     coupling_path.write_text("explicit", encoding="utf-8")
@@ -181,6 +248,10 @@ def test_write_files_preserves_explicit_threed_coupler(tmp_path: Path):
             "n_tsteps": 10,
             "dt": 0.01,
             "inflow_boundary_condition": "dirichlet",
+            "execution": {
+                "mode": "slurm",
+                "executable": "svmultiphysics",
+            },
         },
     )
 
@@ -246,6 +317,10 @@ def test_write_files_generates_canonical_coupler_from_tuned_source(tmp_path: Pat
             "n_tsteps": 10,
             "dt": 0.01,
             "inflow_boundary_condition": "dirichlet",
+            "execution": {
+                "mode": "slurm",
+                "executable": "svmultiphysics",
+            },
         },
     )
 

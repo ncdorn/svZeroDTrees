@@ -21,8 +21,6 @@ from .input_builders.simulation_file import SimulationFile
 from ..microvasculature.structured_tree.structuredtree import StructuredTree
 
 _DEFAULT_TREE_LRR = 10.0
-DEFAULT_SLURM_EXECUTABLE = "/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics"
-
 
 def _has_valid_external_solver_coupling_blocks(path):
     with open(path, encoding="utf-8") as ff:
@@ -41,9 +39,13 @@ def _normalise_execution_config(execution_config=None):
     if not isinstance(slurm, dict):
         slurm = vars(slurm)
 
+    executable = execution_config.get("executable")
+    if executable is not None:
+        executable = str(executable)
+
     return {
         "mode": str(execution_config.get("mode", "slurm")).lower(),
-        "executable": execution_config.get("executable", DEFAULT_SLURM_EXECUTABLE),
+        "executable": executable,
         "submit_command": execution_config.get("submit_command", "sbatch"),
         "clean_command": execution_config.get("clean_command", "clean"),
         "slurm": {
@@ -57,6 +59,13 @@ def _normalise_execution_config(execution_config=None):
             "mail_types": list(slurm.get("mail_types", ["begin", "end"])),
         },
     }
+
+
+def _require_solver_executable(execution_config, *, context):
+    executable = execution_config.get("executable")
+    if executable is None or not str(executable).strip():
+        raise ValueError(f"execution_config.executable is required for {context}")
+    return str(executable)
 
 class SimulationDirectory:
     '''
@@ -295,8 +304,9 @@ class SimulationDirectory:
                 pass
 
         if mode == "local":
+            executable = _require_solver_executable(execution_config, context="local 3D execution")
             subprocess.run(
-                [execution_config["executable"], os.path.basename(self.svFSIxml.path)],
+                [executable, os.path.basename(self.svFSIxml.path)],
                 cwd=self.path,
                 check=True,
             )
@@ -468,7 +478,9 @@ class SimulationDirectory:
                 qos = "normal"
                 mail_user = None
                 mail_types = ["begin", "end"]
-                svfsiplus_path = DEFAULT_SLURM_EXECUTABLE
+                svfsiplus_path = input('path to svFSIplus executable: ').strip()
+                if not svfsiplus_path:
+                    raise ValueError("svfsiplus_path is required to write run_solver.sh")
             else:
                 execution = _normalise_execution_config((sim_config or {}).get("execution"))
                 slurm = execution["slurm"]
@@ -480,7 +492,10 @@ class SimulationDirectory:
                 qos = slurm["qos"]
                 mail_user = slurm["mail_user"]
                 mail_types = slurm["mail_types"]
-                svfsiplus_path = execution["executable"]
+                svfsiplus_path = _require_solver_executable(
+                    execution,
+                    context="writing run_solver.sh",
+                )
             self.solver_runscript.write(
                 nodes=nodes,
                 procs_per_node=procs_per_node,

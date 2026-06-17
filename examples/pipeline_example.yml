@@ -38,7 +38,7 @@ threed:
   # prestress_file_path: path/to/prestress_result.vtu
   execution:
     mode: slurm
-    executable: /home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics
+    executable: /path/to/svmultiphysics
     submit_command: sbatch
     clean_command: clean
     slurm:

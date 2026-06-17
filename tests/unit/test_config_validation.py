@@ -176,6 +176,9 @@ threed:
   poisson_ratio: 0.49
   shell_thickness: 0.22
   prestress_file: auto
+  execution:
+    mode: local
+    executable: svmultiphysics
   tissue_support:
     enabled: true
     type: uniform
@@ -214,6 +217,9 @@ paths:
   adapted_dir: adapted
 threed:
   wall_model: deformable
+  execution:
+    mode: local
+    executable: svmultiphysics
 """
     )
     cfg = load_config(str(cfg_path))
@@ -297,6 +303,40 @@ threed:
 """
     )
     with pytest.raises(ValueError, match="execution.mode"):
+        load_config(str(cfg_path))
+
+
+def test_missing_threed_execution_executable_raises(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        """
+version: 1
+workflow: pipeline
+paths:
+  root: .
+threed:
+  wall_model: rigid
+  execution:
+    mode: local
+"""
+    )
+    with pytest.raises(ValueError, match="threed.execution.executable"):
+        load_config(str(cfg_path))
+
+
+def test_missing_threed_execution_section_raises(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        """
+version: 1
+workflow: pipeline
+paths:
+  root: .
+threed:
+  wall_model: rigid
+"""
+    )
+    with pytest.raises(ValueError, match="threed.execution.executable"):
         load_config(str(cfg_path))
 
 
@@ -400,6 +440,9 @@ threed:
     enabled: true
     type: spatial
     spatial_values_file_path: robin/values.vtp
+  execution:
+    mode: local
+    executable: svmultiphysics
 """
     )
     cfg = load_config(str(cfg_path))
@@ -450,6 +493,9 @@ paths:
 threed:
   wall_model: deformable
   prestress_file: {prestress_path}
+  execution:
+    mode: local
+    executable: svmultiphysics
 """
     )
     cfg = load_config(str(cfg_path))

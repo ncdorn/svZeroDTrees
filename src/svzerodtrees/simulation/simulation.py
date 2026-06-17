@@ -17,9 +17,6 @@ import os
 import glob
 import re
 
-DEFAULT_SLURM_EXECUTABLE = "/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics"
-
-
 def _normalise_execution_config(execution_config=None):
     if execution_config is None:
         execution_config = {}
@@ -30,9 +27,13 @@ def _normalise_execution_config(execution_config=None):
     if not isinstance(slurm, dict):
         slurm = vars(slurm)
 
+    executable = execution_config.get("executable")
+    if executable is not None:
+        executable = str(executable)
+
     return {
         "mode": str(execution_config.get("mode", "slurm")).lower(),
-        "executable": execution_config.get("executable", DEFAULT_SLURM_EXECUTABLE),
+        "executable": executable,
         "submit_command": execution_config.get("submit_command", "sbatch"),
         "clean_command": execution_config.get("clean_command", "clean"),
         "slurm": {
@@ -46,6 +47,13 @@ def _normalise_execution_config(execution_config=None):
             "mail_types": list(slurm.get("mail_types", ["begin", "end"])),
         },
     }
+
+
+def _require_solver_executable(execution_config, *, context):
+    executable = execution_config.get("executable")
+    if executable is None or not str(executable).strip():
+        raise ValueError(f"execution_config.executable is required for {context}")
+    return str(executable)
 
 
 class Simulation:

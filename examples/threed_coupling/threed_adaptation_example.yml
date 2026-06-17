@@ -36,6 +36,18 @@ threed:
   shell_thickness: 0.12
   prestress_file: auto
   # prestress_file_path: path/to/prestress_result.vtu
+  execution:
+    mode: slurm
+    executable: /path/to/svmultiphysics
+    submit_command: sbatch
+    clean_command: clean
+    slurm:
+      nodes: 3
+      procs_per_node: 24
+      memory: 16
+      hours: 20
+      partition: amarsden
+      qos: normal
   solver_paths:
     svpre: svpre
     svsolver: svsolver

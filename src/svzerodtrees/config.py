@@ -11,7 +11,6 @@ from .microvasculature.compliance.constant import ConstantCompliance
 from .microvasculature.compliance.olufsen import OlufsenCompliance
 
 CONFIG_VERSION = 1
-DEFAULT_SLURM_EXECUTABLE = "/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics"
 
 
 @dataclass
@@ -106,7 +105,7 @@ class SlurmExecutionConfig:
 @dataclass
 class ThreeDExecutionConfig:
     mode: str = "slurm"
-    executable: str = DEFAULT_SLURM_EXECUTABLE
+    executable: Optional[str] = None
     submit_command: str = "sbatch"
     clean_command: Optional[str] = "clean"
     slurm: SlurmExecutionConfig = field(default_factory=SlurmExecutionConfig)
@@ -587,12 +586,15 @@ def _parse_threed_execution(data: Optional[Dict[str, Any]]) -> ThreeDExecutionCo
     mode = str(data.get("mode", "slurm")).lower()
     if mode not in {"local", "slurm"}:
         raise ValueError("threed.execution.mode must be one of local|slurm")
+    executable = data.get("executable")
+    if executable is None or not str(executable).strip():
+        raise ValueError("threed.execution.executable is required")
     clean_command = data.get("clean_command", "clean")
     if clean_command is not None:
         clean_command = str(clean_command)
     return ThreeDExecutionConfig(
         mode=mode,
-        executable=str(data.get("executable", "svmultiphysics")),
+        executable=str(executable),
         submit_command=str(data.get("submit_command", "sbatch")),
         clean_command=clean_command,
         slurm=_parse_slurm_execution(data.get("slurm")),
@@ -925,6 +927,13 @@ def load_config(path: str) -> BaseConfig:
                 raise ValueError("threed.shell_thickness must be > 0 for deformable wall model")
             if not (-1.0 < poisson_ratio <= 0.5):
                 raise ValueError("threed.poisson_ratio must satisfy -1.0 < v <= 0.5 for deformable wall model")
+        tissue_support = _parse_tissue_support(
+            paths.root,
+            data.get("tissue_support"),
+            wall_model=wall_model,
+        )
+        if data.get("execution") is None:
+            raise ValueError("threed.execution.executable is required when threed is provided")
         threed = ThreeDConfig(
             mesh_scale_factor=float(data.get("mesh_scale_factor", 1.0)),
             convert_to_cm=bool(data.get("convert_to_cm", False)),
@@ -936,11 +945,7 @@ def load_config(path: str) -> BaseConfig:
             prestress_file=prestress_file,
             prestress_file_path=prestress_file_path,
             execution=_parse_threed_execution(data.get("execution")),
-            tissue_support=_parse_tissue_support(
-                paths.root,
-                data.get("tissue_support"),
-                wall_model=wall_model,
-            ),
+            tissue_support=tissue_support,
         )
 
     postprocess = None
@@ -1194,7 +1199,7 @@ threed:
     spatial_values_file_path: null
   execution:
     mode: slurm  # slurm | local
-    executable: svmultiphysics
+    executable: /path/to/svmultiphysics  # required
     submit_command: sbatch
     clean_command: clean
     slurm:

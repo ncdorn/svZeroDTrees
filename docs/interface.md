@@ -238,7 +238,7 @@ threed:
     spatial_values_file_path: null
   execution:
     mode: slurm  # slurm | local
-    executable: svmultiphysics
+    executable: /path/to/svmultiphysics  # required
     submit_command: sbatch
     clean_command: clean
     slurm:

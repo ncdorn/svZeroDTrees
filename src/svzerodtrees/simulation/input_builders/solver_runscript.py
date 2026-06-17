@@ -27,7 +27,7 @@ class SolverRunscript(SimulationFile):
               procs_per_node=24, 
               hours=6, 
               memory=16,
-              svfsiplus_path='/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics',
+              svfsiplus_path=None,
               working_dir=None,
               partition='amarsden',
               qos='normal',
@@ -41,6 +41,8 @@ class SolverRunscript(SimulationFile):
         self.procs_per_node = procs_per_node
         self.hours = hours
         self.memory = memory
+        if svfsiplus_path is None or not str(svfsiplus_path).strip():
+            raise ValueError("svfsiplus_path is required")
         self.svfsiplus_path = svfsiplus_path
         self.working_dir = os.path.abspath(working_dir or os.path.dirname(self.path))
         self.partition = partition

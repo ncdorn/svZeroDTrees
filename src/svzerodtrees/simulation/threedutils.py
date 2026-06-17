@@ -190,7 +190,7 @@ def prepare_adapted_simdir(postop_dir, adapted_dir):
 '''
 
 def setup_simdir_from_mesh(sim_dir, zerod_config, 
-                           svfsiplus_path='/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics'):
+                           svfsiplus_path=None):
     '''
     setup a simulation directory solely from a mesh-complete.
     :param sim_dir: path to the simulation directory where the mesh complete is located
@@ -228,7 +228,7 @@ def setup_simdir_from_mesh(sim_dir, zerod_config,
     # os.system('cp ' + inflow_file + ' ' + sim_dir)
 
 
-def setup_svfsi_simdir(sim_dir, zerod_config, svfsi_path='/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics'):
+def setup_svfsi_simdir(sim_dir, zerod_config, svfsi_path=None):
 
     # need to write a method to create a svfsiplus.xml file
     pass
@@ -456,7 +456,7 @@ def get_inflow_period(inflow_file):
 
 
 def write_svfsi_runscript(sim_dir,
-                          svfsiplus_path='/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics',
+                          svfsiplus_path=None,
                           hours=6, nodes=2, procs_per_node=24,
                           mail_user=None, mail_types=None):
     '''
@@ -465,6 +465,8 @@ def write_svfsi_runscript(sim_dir,
     print('writing svFSIplus runscript...')
     if mail_types is None:
         mail_types = ["begin", "end"]
+    if svfsiplus_path is None or not str(svfsiplus_path).strip():
+        raise ValueError("svfsiplus_path is required")
 
     with open(os.path.join(sim_dir, 'run_solver.sh'), 'w') as ff:
         ff.write("#!/bin/bash\n\n")

@@ -22,3 +22,6 @@ adaptation:
 
 threed:
   convert_to_cm: false
+  execution:
+    mode: local
+    executable: svmultiphysics
