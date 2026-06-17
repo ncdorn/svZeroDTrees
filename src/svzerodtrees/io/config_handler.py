@@ -62,7 +62,7 @@ class ConfigHandler():
 
         with open(file_name) as ff:
             config = json.load(ff)
-        if "external_solver_coupling_blocks" in config:
+        if (not is_pulmonary) and "external_solver_coupling_blocks" in config:
             is_threed_interface = True
 
         return ConfigHandler(config, is_pulmonary, is_threed_interface, path=os.path.abspath(file_name))
@@ -76,7 +76,7 @@ class ConfigHandler():
         with open(file_name, 'rb') as ff:
             config = pickle.load(ff)
         
-        if "external_solver_coupling_blocks" in config:
+        if (not is_pulmonary) and "external_solver_coupling_blocks" in config:
             is_threed_interface = True
 
         return ConfigHandler(config, is_pulmonary, is_threed_interface, path=os.path.abspath(file_name))
@@ -510,6 +510,10 @@ class ConfigHandler():
             for bc_config in self.config["boundary_conditions"]:
                 if str(bc_config.get("bc_type", "")).strip().upper() == "FLOW":
                     return np.asarray(bc_config["bc_values"]["t"], dtype=float)
+            inflow_name = self.primary_inflow_name()
+            if inflow_name is not None:
+                inflow = self.ensure_inflow(inflow_name)
+                return np.asarray(inflow.t, dtype=float)
             raise ValueError("coupled config requires a FLOW boundary condition to resolve time series")
 
         return np.linspace(min(self.config["boundary_conditions"][0]["bc_values"]["t"]), 

@@ -844,7 +844,7 @@ def _slice_rows_last_cycle(rows: pd.DataFrame, cycle_duration: float | None) -> 
         return rows, "all"
 
     cutoff = float(np.max(time_values[finite_mask])) - float(cycle_duration)
-    mask = finite_mask & (time_values > cutoff)
+    mask = finite_mask & (time_values >= cutoff)
     sliced = rows.loc[mask].copy()
     if sliced.empty:
         return rows, "all"
