@@ -1,0 +1,70 @@
+{
+  "svslicer_path": "/home/users/ndorn/svSlicer/Release-sherlock/svslicer",
+  "centerline": "/oak/stanford/groups/amarsden/ndorn/PPAS-study/tof-stent/TST-STAN-5/centerlines.vtp",
+  "cycle_duration_s": 0.8,
+  "selection_window_start_s": 0.8,
+  "selection_window_end_s": 1.6,
+  "selection_tolerance_s": 7.999999999999785e-09,
+  "selection_policy": "max_mpa_pressure_last_cycle",
+  "available_frame_count": 100,
+  "selected_frame_count": 1,
+  "max_frames": null,
+  "keep_intermediate_centerlines": false,
+  "intermediate_dir": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map_systolic/intermediate_centerlines",
+  "pressure_array": "pressure",
+  "flow_array": "velocity",
+  "branch_id_array": "BranchId",
+  "path_array": "Path",
+  "workers_requested": 24,
+  "workers_used": 24,
+  "metric_suffix": "systolic",
+  "selected_frames": [
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0024_result_2480_centerline.vtp",
+      "time_s": 0.992,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2480.vtu",
+      "timestep_id": 2480
+    }
+  ],
+  "warnings": [],
+  "selection_mode": "max_mpa_pressure_last_cycle",
+  "tie_break_policy": "earliest_timestep_id",
+  "selected_timestep_id": 2480,
+  "selected_time_s": 0.992,
+  "selected_pressure_mmhg": 33.8772520776442,
+  "selected_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2480.vtu",
+  "png_render": {
+    "camera_offset_dir": [
+      0.40843895287418513,
+      -0.36806263530149963,
+      -0.8352888831236498
+    ],
+    "camera_view_up": [
+      0.2901210689043006,
+      -0.8152983227207212,
+      0.5011171622950116
+    ],
+    "camera_bounds_source": "simulation_surface",
+    "anatomy_overlay": {
+      "source_vtu": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_4000.vtu",
+      "opacity": 0.12
+    },
+    "resolved_camera_position": [
+      29.62897408659922,
+      2.1623279543292853,
+      -16.074743961090835
+    ],
+    "resolved_camera_focal_point": [
+      15.410079002380371,
+      14.975611209869385,
+      13.003983497619629
+    ],
+    "resolved_camera_view_up": [
+      0.2901210689043006,
+      -0.8152983227207212,
+      0.5011171622950116
+    ],
+    "resolved_camera_distance": 34.81277920276818,
+    "output_png": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map_systolic.png"
+  }
+}

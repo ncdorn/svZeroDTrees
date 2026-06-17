@@ -17,7 +17,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="svzerodtrees", description="svzerodtrees YAML-first CLI")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    for name in ("pipeline", "tune-bcs", "construct-trees", "adapt", "adapt-benchmark", "postprocess"):
+    for name in (
+        "pipeline",
+        "tune-bcs",
+        "construct-trees",
+        "adapt",
+        "adapt-benchmark",
+        "postprocess",
+        "calibrate-0d-from-3d",
+    ):
         p = sub.add_parser(name)
         p.add_argument("config", help="Path to YAML config")
 
@@ -36,6 +44,7 @@ def main() -> int:
         "adapt": "adapt",
         "adapt-benchmark": "adapt_benchmark",
         "postprocess": "postprocess",
+        "calibrate-0d-from-3d": "calibrate_0d_from_3d",
     }
 
     cfg = load_config(args.config)

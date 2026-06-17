@@ -42,6 +42,8 @@ def _normalise_execution_config(execution_config=None):
             "hours": int(slurm.get("hours", 20)),
             "partition": slurm.get("partition", "amarsden"),
             "qos": slurm.get("qos", "normal"),
+            "mail_user": slurm.get("mail_user"),
+            "mail_types": list(slurm.get("mail_types", ["begin", "end"])),
         },
     }
 

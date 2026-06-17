@@ -7,6 +7,7 @@ import pytest
 
 from svzerodtrees.api import (
     AdaptationWorkflow,
+    Calibrate0DFrom3DWorkflow,
     ConstructTreesWorkflow,
     PipelineWorkflow,
     PostprocessWorkflow,
@@ -63,6 +64,19 @@ def test_adaptation_workflow_requires_simulation_directories():
 
     with pytest.raises(ValueError, match="preop_dir"):
         AdaptationWorkflow.from_config(cfg).run()
+
+
+def test_calibrate_0d_from_3d_workflow_requires_calibration_section():
+    cfg = SimpleNamespace(
+        paths=SimpleNamespace(
+            zerod_config="model.json",
+            output_config="calibrated.json",
+        ),
+        calibration=None,
+    )
+
+    with pytest.raises(ValueError, match="calibration section is required"):
+        Calibrate0DFrom3DWorkflow.from_config(cfg).run()
 
 
 def test_run_from_config_file_dispatches_pipeline(monkeypatch, tmp_path):

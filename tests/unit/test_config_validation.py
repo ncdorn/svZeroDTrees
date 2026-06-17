@@ -72,6 +72,68 @@ def test_invalid_workflow_raises(tmp_path):
         load_config(str(cfg_path))
 
 
+def test_load_valid_calibrate_0d_from_3d_config(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: calibrate_0d_from_3d
+paths:
+  root: {tmp_path}
+  zerod_config: zerod.json
+  output_config: calibrated.json
+calibration:
+  data_source:
+    mode: mapped_centerline
+    mapped_centerline_result: mapped.vtp
+    centerline: centerline.vtp
+  parameters:
+    vessels:
+      default: [R_poiseuille, C]
+      overrides:
+        branch0_seg0: [R_poiseuille]
+    junctions:
+      default: [R_poiseuille, L]
+  solver:
+    maximum_iterations: 12
+""",
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    assert cfg.workflow == "calibrate_0d_from_3d"
+    assert cfg.calibration is not None
+    assert cfg.calibration.data_source.mapped_centerline_result == str(tmp_path / "mapped.vtp")
+    assert cfg.calibration.parameters.vessels.overrides["branch0_seg0"] == ["R_poiseuille"]
+    assert cfg.calibration.solver.maximum_iterations == 12
+
+
+def test_calibration_requires_mapped_centerline_source_fields(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        """
+version: 1
+workflow: calibrate_0d_from_3d
+paths:
+  root: .
+  zerod_config: zerod.json
+  output_config: calibrated.json
+calibration:
+  data_source:
+    mode: mapped_centerline
+    centerline: centerline.vtp
+  parameters:
+    vessels: {}
+    junctions: {}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="mapped_centerline_result is required"):
+        load_config(str(cfg_path))
+
+
 def test_paths_resolve_relative_to_root(tmp_path):
     root = tmp_path / "case"
     cfg_path = tmp_path / "cfg.yml"
@@ -205,6 +267,8 @@ threed:
       hours: 4
       partition: test
       qos: debug
+      mail_user: user@example.com
+      mail_types: [fail, end]
 """
     )
     cfg = load_config(str(cfg_path))
@@ -215,6 +279,8 @@ threed:
     assert cfg.threed.execution.slurm.procs_per_node == 8
     assert cfg.threed.execution.slurm.partition == "test"
     assert cfg.threed.execution.slurm.qos == "debug"
+    assert cfg.threed.execution.slurm.mail_user == "user@example.com"
+    assert cfg.threed.execution.slurm.mail_types == ["fail", "end"]
 
 
 def test_invalid_threed_execution_mode_raises(tmp_path):

@@ -9,6 +9,7 @@ This document defines the YAML schema used by the CLI and Python API. The schema
 - `adapt`: run microvascular adaptation (impedance BCs).
 - `adapt_benchmark`: run local reduced-PA adaptation benchmark studies from optimized preop/postop reduced RRI configs.
 - `postprocess`: generate figures from saved tree pickles or compute standalone analysis artifacts.
+- `calibrate_0d_from_3d`: run stage-1 0D calibration from a precomputed mapped centerline result.
 
 **Workflow Requirements**
 
@@ -20,6 +21,7 @@ This document defines the YAML schema used by the CLI and Python API. The schema
 | `adapt` | `version`, `workflow`, `paths` | `bcs`, `adaptation`, `threed` |
 | `adapt_benchmark` | `version`, `workflow`, `paths`, `adapt_benchmark` | none |
 | `postprocess` | `version`, `workflow`, `paths`, `postprocess` | none |
+| `calibrate_0d_from_3d` | `version`, `workflow`, `paths`, `calibration` | none |
 
 **Path Resolution**
 - `paths.root` is resolved to an absolute path.
@@ -27,9 +29,9 @@ This document defines the YAML schema used by the CLI and Python API. The schema
 
 **Top-Level Keys**
 - `version`: must be `1`.
-- `workflow`: one of `pipeline|tune_bcs|construct_trees|adapt|adapt_benchmark|postprocess`.
+- `workflow`: one of `pipeline|tune_bcs|construct_trees|adapt|adapt_benchmark|postprocess|calibrate_0d_from_3d`.
 - `paths`: required for all workflows.
-- `bcs`, `trees`, `adaptation`, `adapt_benchmark`, `pipeline`, `threed`, `postprocess`: required only for certain workflows.
+- `bcs`, `trees`, `adaptation`, `adapt_benchmark`, `pipeline`, `threed`, `postprocess`, `calibration`: required only for certain workflows.
 
 **Paths**
 ```yaml
@@ -45,6 +47,43 @@ paths:
   optimized_params: optimized_params.csv
   output_config: svzerod_config_with_bcs.json
 ```
+
+For `calibrate_0d_from_3d`, `paths.zerod_config` and `paths.output_config` are required.
+
+**Calibration**
+```yaml
+calibration:
+  data_source:
+    mode: mapped_centerline
+    mapped_centerline_result: path/to/result_centerline.vtp
+    centerline: path/to/centerline.vtp
+    pressure_array: pressure
+    flow_array: velocity
+    branch_id_array: BranchId
+    path_array: Path
+  parameters:
+    vessels:
+      default: [R_poiseuille, C, L]
+      overrides:
+        branch0_seg0: [R_poiseuille]
+    junctions:
+      default: [R_poiseuille, L]
+      overrides:
+        J0: [R_poiseuille]
+  solver:
+    initial_damping_factor: 1.0
+    maximum_iterations: 100
+    tolerance_gradient: 1e-6
+    tolerance_increment: 1e-10
+```
+
+Stage-1 calibration constraints:
+
+- `calibration.data_source.mode` must currently be `mapped_centerline`.
+- The mapped result must already contain scalar point-data arrays for pressure and flow observations.
+- Stage 1 currently supports one `branch<id>_seg0` vessel per centerline branch.
+- The mapped centerline result and reference centerline must have matching point counts.
+- `dy` observations are emitted as zeros for this stage.
 
 **BCs**
 ```yaml
@@ -227,6 +266,9 @@ not support `tissue_support`.
 `svmultiphysics svFSIplus.xml` in each generated simulation directory.
 `threed.execution.mode: slurm` writes `run_solver.sh` and submits it with
 `submit_command`, defaulting to `sbatch`.
+Optional `threed.execution.slurm.mail_user` and `mail_types` can be set when
+Slurm email notifications are desired; otherwise the generated script omits
+mail directives.
 
 **Postprocess**
 ```yaml

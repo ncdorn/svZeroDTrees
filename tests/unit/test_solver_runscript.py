@@ -54,6 +54,33 @@ def test_solver_runscript_writes_configurable_slurm_options(tmp_path: Path):
     assert "srun /custom/svmultiphysics svFSIplus.xml" in rendered
 
 
+def test_solver_runscript_omits_mail_directives_by_default(tmp_path: Path):
+    runscript_path = tmp_path / "run_solver.sh"
+    runscript = SolverRunscript(str(runscript_path))
+
+    runscript.write(working_dir=str(tmp_path))
+
+    rendered = runscript_path.read_text(encoding="utf-8")
+    assert "--mail-user" not in rendered
+    assert "--mail-type" not in rendered
+
+
+def test_solver_runscript_writes_mail_directives_when_configured(tmp_path: Path):
+    runscript_path = tmp_path / "run_solver.sh"
+    runscript = SolverRunscript(str(runscript_path))
+
+    runscript.write(
+        working_dir=str(tmp_path),
+        mail_user="user@example.com",
+        mail_types=["fail", "end"],
+    )
+
+    rendered = runscript_path.read_text(encoding="utf-8")
+    assert "#SBATCH --mail-user=user@example.com" in rendered
+    assert "#SBATCH --mail-type=fail" in rendered
+    assert "#SBATCH --mail-type=end" in rendered
+
+
 def test_simulation_directory_run_local_invokes_solver(monkeypatch, tmp_path: Path):
     calls = []
 

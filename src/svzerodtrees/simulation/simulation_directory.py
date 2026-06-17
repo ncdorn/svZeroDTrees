@@ -53,6 +53,8 @@ def _normalise_execution_config(execution_config=None):
             "hours": int(slurm.get("hours", 20)),
             "partition": slurm.get("partition", "amarsden"),
             "qos": slurm.get("qos", "normal"),
+            "mail_user": slurm.get("mail_user"),
+            "mail_types": list(slurm.get("mail_types", ["begin", "end"])),
         },
     }
 
@@ -464,6 +466,8 @@ class SimulationDirectory:
                 hours = int(input('number of hours (default 6): ') or 12)
                 partition = "amarsden"
                 qos = "normal"
+                mail_user = None
+                mail_types = ["begin", "end"]
                 svfsiplus_path = DEFAULT_SLURM_EXECUTABLE
             else:
                 execution = _normalise_execution_config((sim_config or {}).get("execution"))
@@ -474,6 +478,8 @@ class SimulationDirectory:
                 hours = sim_config.get('hours', slurm["hours"])
                 partition = slurm["partition"]
                 qos = slurm["qos"]
+                mail_user = slurm["mail_user"]
+                mail_types = slurm["mail_types"]
                 svfsiplus_path = execution["executable"]
             self.solver_runscript.write(
                 nodes=nodes,
@@ -482,6 +488,8 @@ class SimulationDirectory:
                 memory=memory,
                 partition=partition,
                 qos=qos,
+                mail_user=mail_user,
+                mail_types=mail_types,
                 svfsiplus_path=svfsiplus_path,
                 working_dir=self.path,
             )

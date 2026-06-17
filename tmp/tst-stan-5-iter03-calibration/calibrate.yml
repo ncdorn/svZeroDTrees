@@ -1,0 +1,27 @@
+version: 1
+workflow: calibrate_0d_from_3d
+
+paths:
+  root: /Users/ndorn/Documents/Stanford/PhD/Marsden_Lab/SimVascular/ppas-dev/svZeroDTrees/tmp/tst-stan-5-iter03-calibration
+  zerod_config: case/baseline_0d.json
+  output_config: calibrated_baseline_0d.json
+
+calibration:
+  data_source:
+    mode: mapped_centerline
+    mapped_centerline_result: postprocess/resistance_map_mean.vtp
+    centerline: case/centerlines.vtp
+    pressure_array: Pressure
+    flow_array: Velocity
+    branch_id_array: BranchId
+    path_array: Path
+  parameters:
+    vessels:
+      default: [R_poiseuille]
+    junctions:
+      default: [R_poiseuille]
+  solver:
+    initial_damping_factor: 1.0
+    maximum_iterations: 20
+    tolerance_gradient: 1e-6
+    tolerance_increment: 1e-10

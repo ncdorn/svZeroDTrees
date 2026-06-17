@@ -32,7 +32,7 @@ class SolverRunscript(SimulationFile):
               partition='amarsden',
               qos='normal',
               modules=None,
-              mail_user='ndorn@stanford.edu',
+              mail_user=None,
               mail_types=None):
         '''
         write the solver runscript file'''

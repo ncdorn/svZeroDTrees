@@ -15,6 +15,7 @@ from .microvasculature.treeparams import TreeParameters
 from .adaptation.microvascular_adaptor import MicrovascularAdaptor
 from .adaptation.benchmark import run_adaptation_benchmark_study
 from .adaptation.workflow import run_structured_tree_adaptation
+from .calibration import calibrate_0d_from_mapped_centerline
 from .simulation.simulation_directory import SimulationDirectory
 import pickle
 
@@ -405,6 +406,32 @@ class PostprocessWorkflow:
         }
 
 
+class Calibrate0DFrom3DWorkflow:
+    def __init__(self, config: BaseConfig):
+        self.config = config
+
+    @classmethod
+    def from_config(cls, config: BaseConfig) -> "Calibrate0DFrom3DWorkflow":
+        return cls(config)
+
+    def run(self) -> Dict[str, Any]:
+        paths = self.config.paths
+        calibration = self.config.calibration
+
+        if paths.zerod_config is None:
+            raise ValueError("paths.zerod_config is required for calibrate_0d_from_3d workflow")
+        if paths.output_config is None:
+            raise ValueError("paths.output_config is required for calibrate_0d_from_3d workflow")
+        if calibration is None:
+            raise ValueError("calibration section is required for calibrate_0d_from_3d workflow")
+
+        return calibrate_0d_from_mapped_centerline(
+            zerod_config_path=paths.zerod_config,
+            output_config_path=paths.output_config,
+            calibration=calibration,
+        )
+
+
 WORKFLOW_MAP = {
     "pipeline": PipelineWorkflow,
     "tune_bcs": TuneBCsWorkflow,
@@ -412,6 +439,7 @@ WORKFLOW_MAP = {
     "adapt": AdaptationWorkflow,
     "adapt_benchmark": AdaptBenchmarkWorkflow,
     "postprocess": PostprocessWorkflow,
+    "calibrate_0d_from_3d": Calibrate0DFrom3DWorkflow,
 }
 
 

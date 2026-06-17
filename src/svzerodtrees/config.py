@@ -99,6 +99,8 @@ class SlurmExecutionConfig:
     hours: int = 20
     partition: str = "amarsden"
     qos: str = "normal"
+    mail_user: Optional[str] = None
+    mail_types: List[str] = field(default_factory=lambda: ["begin", "end"])
 
 
 @dataclass
@@ -157,6 +159,44 @@ class PostprocessConfig:
 
 
 @dataclass
+class CalibrationDataSourceConfig:
+    mode: str = "mapped_centerline"
+    mapped_centerline_result: Optional[str] = None
+    centerline: Optional[str] = None
+    pressure_array: str = "pressure"
+    flow_array: str = "velocity"
+    branch_id_array: str = "BranchId"
+    path_array: str = "Path"
+
+
+@dataclass
+class CalibrationParameterSelectionConfig:
+    default: List[str] = field(default_factory=list)
+    overrides: Dict[str, List[str]] = field(default_factory=dict)
+
+
+@dataclass
+class CalibrationParametersConfig:
+    vessels: CalibrationParameterSelectionConfig = field(default_factory=CalibrationParameterSelectionConfig)
+    junctions: CalibrationParameterSelectionConfig = field(default_factory=CalibrationParameterSelectionConfig)
+
+
+@dataclass
+class CalibrationSolverConfig:
+    initial_damping_factor: float = 1.0
+    maximum_iterations: int = 100
+    tolerance_gradient: float = 1e-6
+    tolerance_increment: float = 1e-10
+
+
+@dataclass
+class CalibrationConfig:
+    data_source: CalibrationDataSourceConfig
+    parameters: CalibrationParametersConfig
+    solver: CalibrationSolverConfig = field(default_factory=CalibrationSolverConfig)
+
+
+@dataclass
 class BaseConfig:
     version: int
     workflow: str
@@ -168,6 +208,7 @@ class BaseConfig:
     pipeline: Optional[PipelineConfig] = None
     threed: Optional[ThreeDConfig] = None
     postprocess: Optional[PostprocessConfig] = None
+    calibration: Optional[CalibrationConfig] = None
 
 
 def _ensure_keys(data: Dict[str, Any], allowed: List[str], context: str) -> None:
@@ -512,9 +553,17 @@ def _parse_slurm_execution(data: Optional[Dict[str, Any]]) -> SlurmExecutionConf
         return SlurmExecutionConfig()
     _ensure_keys(
         data,
-        ["nodes", "procs_per_node", "memory", "hours", "partition", "qos"],
+        ["nodes", "procs_per_node", "memory", "hours", "partition", "qos", "mail_user", "mail_types"],
         "threed.execution.slurm",
     )
+    mail_user = data.get("mail_user")
+    if mail_user is not None:
+        mail_user = str(mail_user)
+    mail_types = data.get("mail_types", ["begin", "end"])
+    if mail_types is None:
+        mail_types = []
+    if not isinstance(mail_types, list):
+        raise ValueError("threed.execution.slurm.mail_types must be a list when provided")
     return SlurmExecutionConfig(
         nodes=int(data.get("nodes", 3)),
         procs_per_node=int(data.get("procs_per_node", 24)),
@@ -522,6 +571,8 @@ def _parse_slurm_execution(data: Optional[Dict[str, Any]]) -> SlurmExecutionConf
         hours=int(data.get("hours", 20)),
         partition=str(data.get("partition", "amarsden")),
         qos=str(data.get("qos", "normal")),
+        mail_user=mail_user,
+        mail_types=[str(mail_type) for mail_type in mail_types],
     )
 
 
@@ -614,6 +665,115 @@ def _parse_tissue_support(
     )
 
 
+def _parse_calibration_parameter_selection(
+    data: Optional[Dict[str, Any]],
+    *,
+    context: str,
+) -> CalibrationParameterSelectionConfig:
+    if data is None:
+        return CalibrationParameterSelectionConfig()
+    _ensure_keys(data, ["default", "overrides"], context)
+
+    default_raw = data.get("default") or []
+    if not isinstance(default_raw, list):
+        raise ValueError(f"{context}.default must be a list of parameter names")
+    default = [str(name) for name in default_raw]
+
+    overrides_raw = data.get("overrides") or {}
+    if not isinstance(overrides_raw, dict):
+        raise ValueError(f"{context}.overrides must be a mapping of block name to parameter list")
+    overrides: Dict[str, List[str]] = {}
+    for block_name, names in overrides_raw.items():
+        if not isinstance(names, list):
+            raise ValueError(f"{context}.overrides.{block_name} must be a list of parameter names")
+        overrides[str(block_name)] = [str(name) for name in names]
+
+    return CalibrationParameterSelectionConfig(
+        default=default,
+        overrides=overrides,
+    )
+
+
+def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
+    _ensure_keys(data, ["data_source", "parameters", "solver"], "calibration")
+
+    data_source_raw = data.get("data_source")
+    if not isinstance(data_source_raw, dict):
+        raise ValueError("calibration.data_source is required")
+    _ensure_keys(
+        data_source_raw,
+        [
+            "mode",
+            "mapped_centerline_result",
+            "centerline",
+            "pressure_array",
+            "flow_array",
+            "branch_id_array",
+            "path_array",
+        ],
+        "calibration.data_source",
+    )
+    mode = str(data_source_raw.get("mode", "mapped_centerline"))
+    if mode != "mapped_centerline":
+        raise ValueError(
+            "calibration.data_source.mode must be 'mapped_centerline' for calibrate_0d_from_3d stage 1"
+        )
+    if data_source_raw.get("mapped_centerline_result") in (None, ""):
+        raise ValueError("calibration.data_source.mapped_centerline_result is required")
+    if data_source_raw.get("centerline") in (None, ""):
+        raise ValueError("calibration.data_source.centerline is required")
+    data_source = CalibrationDataSourceConfig(
+        mode=mode,
+        mapped_centerline_result=_resolve_path(root, str(data_source_raw["mapped_centerline_result"])),
+        centerline=_resolve_path(root, str(data_source_raw["centerline"])),
+        pressure_array=str(data_source_raw.get("pressure_array", "pressure")),
+        flow_array=str(data_source_raw.get("flow_array", "velocity")),
+        branch_id_array=str(data_source_raw.get("branch_id_array", "BranchId")),
+        path_array=str(data_source_raw.get("path_array", "Path")),
+    )
+
+    parameters_raw = data.get("parameters")
+    if not isinstance(parameters_raw, dict):
+        raise ValueError("calibration.parameters is required")
+    _ensure_keys(parameters_raw, ["vessels", "junctions"], "calibration.parameters")
+    parameters = CalibrationParametersConfig(
+        vessels=_parse_calibration_parameter_selection(
+            parameters_raw.get("vessels"),
+            context="calibration.parameters.vessels",
+        ),
+        junctions=_parse_calibration_parameter_selection(
+            parameters_raw.get("junctions"),
+            context="calibration.parameters.junctions",
+        ),
+    )
+
+    solver_raw = data.get("solver") or {}
+    if not isinstance(solver_raw, dict):
+        raise ValueError("calibration.solver must be a mapping")
+    _ensure_keys(
+        solver_raw,
+        [
+            "initial_damping_factor",
+            "maximum_iterations",
+            "tolerance_gradient",
+            "tolerance_increment",
+        ],
+        "calibration.solver",
+    )
+    solver = CalibrationSolverConfig(
+        initial_damping_factor=float(solver_raw.get("initial_damping_factor", 1.0)),
+        maximum_iterations=int(solver_raw.get("maximum_iterations", 100)),
+        tolerance_gradient=float(solver_raw.get("tolerance_gradient", 1e-6)),
+        tolerance_increment=float(solver_raw.get("tolerance_increment", 1e-10)),
+    )
+
+    return CalibrationConfig(
+        data_source=data_source,
+        parameters=parameters,
+        solver=solver,
+    )
+
+
 def load_config(path: str) -> BaseConfig:
     with open(path, "r") as fh:
         raw = yaml.safe_load(fh) or {}
@@ -631,6 +791,7 @@ def load_config(path: str) -> BaseConfig:
             "pipeline",
             "threed",
             "postprocess",
+            "calibration",
         ],
         "config",
     )
@@ -640,10 +801,18 @@ def load_config(path: str) -> BaseConfig:
         raise ValueError(f"Unsupported config version {version}. Expected {CONFIG_VERSION}.")
 
     workflow = raw.get("workflow")
-    if workflow not in {"pipeline", "tune_bcs", "construct_trees", "adapt", "adapt_benchmark", "postprocess"}:
+    if workflow not in {
+        "pipeline",
+        "tune_bcs",
+        "construct_trees",
+        "adapt",
+        "adapt_benchmark",
+        "postprocess",
+        "calibrate_0d_from_3d",
+    }:
         raise ValueError(
             "workflow must be one of "
-            "pipeline|tune_bcs|construct_trees|adapt|adapt_benchmark|postprocess"
+            "pipeline|tune_bcs|construct_trees|adapt|adapt_benchmark|postprocess|calibrate_0d_from_3d"
         )
 
     if "paths" not in raw or raw["paths"] is None:
@@ -865,6 +1034,10 @@ def load_config(path: str) -> BaseConfig:
             raise ValueError("postprocess requires at least one figure or analysis")
         postprocess = PostprocessConfig(figures=figures, analyses=analyses)
 
+    calibration = None
+    if raw.get("calibration") is not None:
+        calibration = _parse_calibration(paths.root, raw["calibration"])
+
     return BaseConfig(
         version=version,
         workflow=workflow,
@@ -876,6 +1049,7 @@ def load_config(path: str) -> BaseConfig:
         pipeline=pipeline,
         threed=threed,
         postprocess=postprocess,
+        calibration=calibration,
     )
 
 
@@ -883,7 +1057,7 @@ def render_schema() -> str:
     return """
 # svzerodtrees config (v1)
 version: 1
-workflow: pipeline  # pipeline | tune_bcs | construct_trees | adapt | adapt_benchmark | postprocess
+workflow: pipeline  # pipeline | tune_bcs | construct_trees | adapt | adapt_benchmark | postprocess | calibrate_0d_from_3d
 
 paths:
   root: .
@@ -896,6 +1070,28 @@ paths:
   inflow: path/to/inflow.csv
   optimized_params: path/to/optimized_params.csv
   output_config: path/to/output_config.json
+
+calibration:
+  data_source:
+    mode: mapped_centerline  # mapped_centerline
+    mapped_centerline_result: path/to/result_centerline.vtp
+    centerline: path/to/centerline.vtp
+    pressure_array: pressure
+    flow_array: velocity
+    branch_id_array: BranchId
+    path_array: Path
+  parameters:
+    vessels:
+      default: [R_poiseuille, C, L]
+      overrides: {}
+    junctions:
+      default: [R_poiseuille, L]
+      overrides: {}
+  solver:
+    initial_damping_factor: 1.0
+    maximum_iterations: 100
+    tolerance_gradient: 1e-6
+    tolerance_increment: 1e-10
 
 bcs:
   type: impedance  # impedance | rcr

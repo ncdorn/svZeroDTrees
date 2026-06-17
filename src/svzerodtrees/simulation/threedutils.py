@@ -457,11 +457,14 @@ def get_inflow_period(inflow_file):
 
 def write_svfsi_runscript(sim_dir,
                           svfsiplus_path='/home/users/ndorn/svMP-build/svMultiPhysics-build/bin/svmultiphysics',
-                          hours=6, nodes=2, procs_per_node=24):
+                          hours=6, nodes=2, procs_per_node=24,
+                          mail_user=None, mail_types=None):
     '''
     write a bash script to submit a job on sherlock'''
 
     print('writing svFSIplus runscript...')
+    if mail_types is None:
+        mail_types = ["begin", "end"]
 
     with open(os.path.join(sim_dir, 'run_solver.sh'), 'w') as ff:
         ff.write("#!/bin/bash\n\n")
@@ -482,10 +485,11 @@ def write_svfsi_runscript(sim_dir,
         ff.write("#SBATCH --mem=8G\n\n")
         ff.write("# Number of processors per node \n")
         ff.write(f"#SBATCH --ntasks-per-node={procs_per_node} \n\n")
-        ff.write("# Send an email to this address when your job starts and finishes \n")
-        ff.write("#SBATCH --mail-user=ndorn@stanford.edu \n")
-        ff.write("#SBATCH --mail-type=begin \n")
-        ff.write("#SBATCH --mail-type=end \n")
+        if mail_user:
+            ff.write("# Send an email to this address when your job starts and finishes \n")
+            ff.write(f"#SBATCH --mail-user={mail_user} \n")
+            for mail_type in mail_types:
+                ff.write(f"#SBATCH --mail-type={mail_type} \n")
         ff.write("module --force purge\n\n")
         ff.write("ml devel\n")
         ff.write("ml math\n")

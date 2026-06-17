@@ -93,6 +93,42 @@ trees:
     assert RecordingWorkflow.seen[0].workflow == "construct_trees"
 
 
+def test_cli_dispatches_real_config_to_calibration_workflow(monkeypatch, tmp_path):
+    RecordingWorkflow.seen = []
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: calibrate_0d_from_3d
+paths:
+  root: {tmp_path}
+  zerod_config: model.json
+  output_config: calibrated.json
+calibration:
+  data_source:
+    mode: mapped_centerline
+    mapped_centerline_result: mapped.vtp
+    centerline: centerline.vtp
+  parameters:
+    vessels:
+      default: [R_poiseuille]
+    junctions:
+      default: [R_poiseuille]
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(cli, "WORKFLOW_MAP", {"calibrate_0d_from_3d": RecordingWorkflow})
+    monkeypatch.setattr(
+        cli.sys,
+        "argv",
+        ["svzerodtrees", "calibrate-0d-from-3d", str(cfg_path)],
+    )
+
+    assert cli.main() == 0
+    assert RecordingWorkflow.seen[0].workflow == "calibrate_0d_from_3d"
+
+
 def test_cli_rejects_subcommand_workflow_mismatch(monkeypatch, tmp_path):
     cfg_path = tmp_path / "cfg.yml"
     cfg_path.write_text(

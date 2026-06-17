@@ -171,6 +171,8 @@ def test_pipeline_mapping_passes_threed_execution_config(monkeypatch, tmp_path):
             hours=1,
             partition="test",
             qos="debug",
+            mail_user="user@example.com",
+            mail_types=["fail"],
         ),
     )
     cfg = SimpleNamespace(
@@ -207,3 +209,4 @@ def test_pipeline_mapping_passes_threed_execution_config(monkeypatch, tmp_path):
     assert called["init"]["execution_config"]["executable"] == "svmultiphysics"
     assert called["init"]["execution_config"]["clean_command"] is None
     assert called["init"]["execution_config"]["slurm"].partition == "test"
+    assert called["init"]["execution_config"]["slurm"].mail_user == "user@example.com"

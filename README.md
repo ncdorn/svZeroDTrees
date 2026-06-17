@@ -88,6 +88,7 @@ If you want the broader YAML-driven workflow path instead, use:
 ```bash
 svzerodtrees tune-bcs path/to/config.yml
 svzerodtrees construct-trees path/to/config.yml
+svzerodtrees calibrate-0d-from-3d path/to/config.yml
 ```
 
 Generate a schema template:
@@ -103,6 +104,8 @@ svzerodtrees schema
 - `adapt-benchmark`: run local reduced-PA adaptation sweeps across `M1`, `M2`,
   and `M3` from optimized preop/postop reduced RRI configs and write
   study-level JSON/CSV/PNG summaries.
+- `calibrate_0d_from_3d`: run stage-1 Levenberg-Marquardt calibration from a
+  precomputed mapped centerline result and write a calibrated 0D JSON.
 - `postprocess`: generate figures from saved tree pickles or compute analysis artifacts such as svSlicer-based pulmonary resistance maps or the standardized pulmonary 3D postprocess suite.
   Pulmonary resistance-map configs may optionally set `workers: auto|<int>`, and
   pulmonary 3D suite configs may optionally set `resistance_map_workers`, to
@@ -120,6 +123,7 @@ Typical outputs are written under `paths.root` and include:
   `svzerodtrees.tuning.summarize_pulmonary_zerod_config(...)` to recover
   pre-mapping MPA pressure and branch-flow metrics for iteration diagnostics.
 - `svzerod_config_with_bcs.json` (or `paths.output_config`) from tree construction.
+- calibrated 0D JSON at `paths.output_config` from `calibrate_0d_from_3d`.
 - `preop`, `postop`, `adapted` directories for pipeline/adaptation runs.
 - Figures from postprocess workflow (PNG outputs you specify).
 - Postprocess analysis artifacts such as `resistance_map_mean.vtp`,

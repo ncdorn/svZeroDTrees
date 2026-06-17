@@ -144,3 +144,7 @@ def simulate_pysvzerod(config):
         }
     )
     return result
+
+
+def calibrate_pysvzerod(config):
+    return require_pysvzerod().calibrate(config)

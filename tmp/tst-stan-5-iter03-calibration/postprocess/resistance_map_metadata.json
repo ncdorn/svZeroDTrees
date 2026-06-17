@@ -1,0 +1,659 @@
+{
+  "svslicer_path": "/home/users/ndorn/svSlicer/Release-sherlock/svslicer",
+  "centerline": "/oak/stanford/groups/amarsden/ndorn/PPAS-study/tof-stent/TST-STAN-5/centerlines.vtp",
+  "cycle_duration_s": 0.8,
+  "selection_window_start_s": 0.8,
+  "selection_window_end_s": 1.6,
+  "selection_tolerance_s": 7.999999999999785e-09,
+  "selection_policy": "all_frames_last_full_cycle",
+  "available_frame_count": 100,
+  "selected_frame_count": 100,
+  "max_frames": null,
+  "keep_intermediate_centerlines": false,
+  "intermediate_dir": null,
+  "pressure_array": "pressure",
+  "flow_array": "velocity",
+  "branch_id_array": "BranchId",
+  "path_array": "Path",
+  "workers_requested": 24,
+  "workers_used": 24,
+  "metric_suffix": "mean",
+  "selected_frames": [
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0000_result_2000_centerline.vtp",
+      "time_s": 0.8,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2000.vtu",
+      "timestep_id": 2000
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0001_result_2020_centerline.vtp",
+      "time_s": 0.808,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2020.vtu",
+      "timestep_id": 2020
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0002_result_2040_centerline.vtp",
+      "time_s": 0.8160000000000001,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2040.vtu",
+      "timestep_id": 2040
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0003_result_2060_centerline.vtp",
+      "time_s": 0.8240000000000001,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2060.vtu",
+      "timestep_id": 2060
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0004_result_2080_centerline.vtp",
+      "time_s": 0.8320000000000001,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2080.vtu",
+      "timestep_id": 2080
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0005_result_2100_centerline.vtp",
+      "time_s": 0.8400000000000001,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2100.vtu",
+      "timestep_id": 2100
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0006_result_2120_centerline.vtp",
+      "time_s": 0.8480000000000001,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2120.vtu",
+      "timestep_id": 2120
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0007_result_2140_centerline.vtp",
+      "time_s": 0.8560000000000001,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2140.vtu",
+      "timestep_id": 2140
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0008_result_2160_centerline.vtp",
+      "time_s": 0.864,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2160.vtu",
+      "timestep_id": 2160
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0009_result_2180_centerline.vtp",
+      "time_s": 0.872,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2180.vtu",
+      "timestep_id": 2180
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0010_result_2200_centerline.vtp",
+      "time_s": 0.88,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2200.vtu",
+      "timestep_id": 2200
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0011_result_2220_centerline.vtp",
+      "time_s": 0.888,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2220.vtu",
+      "timestep_id": 2220
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0012_result_2240_centerline.vtp",
+      "time_s": 0.896,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2240.vtu",
+      "timestep_id": 2240
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0013_result_2260_centerline.vtp",
+      "time_s": 0.904,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2260.vtu",
+      "timestep_id": 2260
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0014_result_2280_centerline.vtp",
+      "time_s": 0.912,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2280.vtu",
+      "timestep_id": 2280
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0015_result_2300_centerline.vtp",
+      "time_s": 0.92,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2300.vtu",
+      "timestep_id": 2300
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0016_result_2320_centerline.vtp",
+      "time_s": 0.928,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2320.vtu",
+      "timestep_id": 2320
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0017_result_2340_centerline.vtp",
+      "time_s": 0.936,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2340.vtu",
+      "timestep_id": 2340
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0018_result_2360_centerline.vtp",
+      "time_s": 0.944,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2360.vtu",
+      "timestep_id": 2360
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0019_result_2380_centerline.vtp",
+      "time_s": 0.952,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2380.vtu",
+      "timestep_id": 2380
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0020_result_2400_centerline.vtp",
+      "time_s": 0.96,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2400.vtu",
+      "timestep_id": 2400
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0021_result_2420_centerline.vtp",
+      "time_s": 0.968,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2420.vtu",
+      "timestep_id": 2420
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0022_result_2440_centerline.vtp",
+      "time_s": 0.976,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2440.vtu",
+      "timestep_id": 2440
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0023_result_2460_centerline.vtp",
+      "time_s": 0.984,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2460.vtu",
+      "timestep_id": 2460
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0024_result_2480_centerline.vtp",
+      "time_s": 0.992,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2480.vtu",
+      "timestep_id": 2480
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0025_result_2500_centerline.vtp",
+      "time_s": 1.0,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2500.vtu",
+      "timestep_id": 2500
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0026_result_2520_centerline.vtp",
+      "time_s": 1.008,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2520.vtu",
+      "timestep_id": 2520
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0027_result_2540_centerline.vtp",
+      "time_s": 1.016,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2540.vtu",
+      "timestep_id": 2540
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0028_result_2560_centerline.vtp",
+      "time_s": 1.024,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2560.vtu",
+      "timestep_id": 2560
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0029_result_2580_centerline.vtp",
+      "time_s": 1.032,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2580.vtu",
+      "timestep_id": 2580
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0030_result_2600_centerline.vtp",
+      "time_s": 1.04,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2600.vtu",
+      "timestep_id": 2600
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0031_result_2620_centerline.vtp",
+      "time_s": 1.048,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2620.vtu",
+      "timestep_id": 2620
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0032_result_2640_centerline.vtp",
+      "time_s": 1.056,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2640.vtu",
+      "timestep_id": 2640
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0033_result_2660_centerline.vtp",
+      "time_s": 1.064,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2660.vtu",
+      "timestep_id": 2660
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0034_result_2680_centerline.vtp",
+      "time_s": 1.072,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2680.vtu",
+      "timestep_id": 2680
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0035_result_2700_centerline.vtp",
+      "time_s": 1.08,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2700.vtu",
+      "timestep_id": 2700
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0036_result_2720_centerline.vtp",
+      "time_s": 1.088,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2720.vtu",
+      "timestep_id": 2720
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0037_result_2740_centerline.vtp",
+      "time_s": 1.096,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2740.vtu",
+      "timestep_id": 2740
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0038_result_2760_centerline.vtp",
+      "time_s": 1.104,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2760.vtu",
+      "timestep_id": 2760
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0039_result_2780_centerline.vtp",
+      "time_s": 1.112,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2780.vtu",
+      "timestep_id": 2780
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0040_result_2800_centerline.vtp",
+      "time_s": 1.12,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2800.vtu",
+      "timestep_id": 2800
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0041_result_2820_centerline.vtp",
+      "time_s": 1.128,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2820.vtu",
+      "timestep_id": 2820
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0042_result_2840_centerline.vtp",
+      "time_s": 1.136,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2840.vtu",
+      "timestep_id": 2840
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0043_result_2860_centerline.vtp",
+      "time_s": 1.144,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2860.vtu",
+      "timestep_id": 2860
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0044_result_2880_centerline.vtp",
+      "time_s": 1.152,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2880.vtu",
+      "timestep_id": 2880
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0045_result_2900_centerline.vtp",
+      "time_s": 1.16,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2900.vtu",
+      "timestep_id": 2900
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0046_result_2920_centerline.vtp",
+      "time_s": 1.168,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2920.vtu",
+      "timestep_id": 2920
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0047_result_2940_centerline.vtp",
+      "time_s": 1.1760000000000002,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2940.vtu",
+      "timestep_id": 2940
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0048_result_2960_centerline.vtp",
+      "time_s": 1.1840000000000002,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2960.vtu",
+      "timestep_id": 2960
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0049_result_2980_centerline.vtp",
+      "time_s": 1.192,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_2980.vtu",
+      "timestep_id": 2980
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0050_result_3000_centerline.vtp",
+      "time_s": 1.2,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3000.vtu",
+      "timestep_id": 3000
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0051_result_3020_centerline.vtp",
+      "time_s": 1.208,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3020.vtu",
+      "timestep_id": 3020
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0052_result_3040_centerline.vtp",
+      "time_s": 1.216,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3040.vtu",
+      "timestep_id": 3040
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0053_result_3060_centerline.vtp",
+      "time_s": 1.224,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3060.vtu",
+      "timestep_id": 3060
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0054_result_3080_centerline.vtp",
+      "time_s": 1.232,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3080.vtu",
+      "timestep_id": 3080
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0055_result_3100_centerline.vtp",
+      "time_s": 1.24,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3100.vtu",
+      "timestep_id": 3100
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0056_result_3120_centerline.vtp",
+      "time_s": 1.248,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3120.vtu",
+      "timestep_id": 3120
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0057_result_3140_centerline.vtp",
+      "time_s": 1.256,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3140.vtu",
+      "timestep_id": 3140
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0058_result_3160_centerline.vtp",
+      "time_s": 1.264,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3160.vtu",
+      "timestep_id": 3160
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0059_result_3180_centerline.vtp",
+      "time_s": 1.272,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3180.vtu",
+      "timestep_id": 3180
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0060_result_3200_centerline.vtp",
+      "time_s": 1.28,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3200.vtu",
+      "timestep_id": 3200
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0061_result_3220_centerline.vtp",
+      "time_s": 1.288,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3220.vtu",
+      "timestep_id": 3220
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0062_result_3240_centerline.vtp",
+      "time_s": 1.296,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3240.vtu",
+      "timestep_id": 3240
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0063_result_3260_centerline.vtp",
+      "time_s": 1.304,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3260.vtu",
+      "timestep_id": 3260
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0064_result_3280_centerline.vtp",
+      "time_s": 1.312,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3280.vtu",
+      "timestep_id": 3280
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0065_result_3300_centerline.vtp",
+      "time_s": 1.32,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3300.vtu",
+      "timestep_id": 3300
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0066_result_3320_centerline.vtp",
+      "time_s": 1.328,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3320.vtu",
+      "timestep_id": 3320
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0067_result_3340_centerline.vtp",
+      "time_s": 1.336,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3340.vtu",
+      "timestep_id": 3340
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0068_result_3360_centerline.vtp",
+      "time_s": 1.344,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3360.vtu",
+      "timestep_id": 3360
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0069_result_3380_centerline.vtp",
+      "time_s": 1.352,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3380.vtu",
+      "timestep_id": 3380
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0070_result_3400_centerline.vtp",
+      "time_s": 1.36,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3400.vtu",
+      "timestep_id": 3400
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0071_result_3420_centerline.vtp",
+      "time_s": 1.368,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3420.vtu",
+      "timestep_id": 3420
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0072_result_3440_centerline.vtp",
+      "time_s": 1.376,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3440.vtu",
+      "timestep_id": 3440
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0073_result_3460_centerline.vtp",
+      "time_s": 1.384,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3460.vtu",
+      "timestep_id": 3460
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0074_result_3480_centerline.vtp",
+      "time_s": 1.392,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3480.vtu",
+      "timestep_id": 3480
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0075_result_3500_centerline.vtp",
+      "time_s": 1.4,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3500.vtu",
+      "timestep_id": 3500
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0076_result_3520_centerline.vtp",
+      "time_s": 1.408,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3520.vtu",
+      "timestep_id": 3520
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0077_result_3540_centerline.vtp",
+      "time_s": 1.416,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3540.vtu",
+      "timestep_id": 3540
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0078_result_3560_centerline.vtp",
+      "time_s": 1.4240000000000002,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3560.vtu",
+      "timestep_id": 3560
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0079_result_3580_centerline.vtp",
+      "time_s": 1.4320000000000002,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3580.vtu",
+      "timestep_id": 3580
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0080_result_3600_centerline.vtp",
+      "time_s": 1.4400000000000002,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3600.vtu",
+      "timestep_id": 3600
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0081_result_3620_centerline.vtp",
+      "time_s": 1.4480000000000002,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3620.vtu",
+      "timestep_id": 3620
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0082_result_3640_centerline.vtp",
+      "time_s": 1.456,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3640.vtu",
+      "timestep_id": 3640
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0083_result_3660_centerline.vtp",
+      "time_s": 1.464,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3660.vtu",
+      "timestep_id": 3660
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0084_result_3680_centerline.vtp",
+      "time_s": 1.472,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3680.vtu",
+      "timestep_id": 3680
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0085_result_3700_centerline.vtp",
+      "time_s": 1.48,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3700.vtu",
+      "timestep_id": 3700
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0086_result_3720_centerline.vtp",
+      "time_s": 1.488,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3720.vtu",
+      "timestep_id": 3720
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0087_result_3740_centerline.vtp",
+      "time_s": 1.496,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3740.vtu",
+      "timestep_id": 3740
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0088_result_3760_centerline.vtp",
+      "time_s": 1.504,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3760.vtu",
+      "timestep_id": 3760
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0089_result_3780_centerline.vtp",
+      "time_s": 1.512,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3780.vtu",
+      "timestep_id": 3780
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0090_result_3800_centerline.vtp",
+      "time_s": 1.52,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3800.vtu",
+      "timestep_id": 3800
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0091_result_3820_centerline.vtp",
+      "time_s": 1.528,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3820.vtu",
+      "timestep_id": 3820
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0092_result_3840_centerline.vtp",
+      "time_s": 1.536,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3840.vtu",
+      "timestep_id": 3840
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0093_result_3860_centerline.vtp",
+      "time_s": 1.544,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3860.vtu",
+      "timestep_id": 3860
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0094_result_3880_centerline.vtp",
+      "time_s": 1.552,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3880.vtu",
+      "timestep_id": 3880
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0095_result_3900_centerline.vtp",
+      "time_s": 1.56,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3900.vtu",
+      "timestep_id": 3900
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0096_result_3920_centerline.vtp",
+      "time_s": 1.568,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3920.vtu",
+      "timestep_id": 3920
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0097_result_3940_centerline.vtp",
+      "time_s": 1.576,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3940.vtu",
+      "timestep_id": 3940
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0098_result_3960_centerline.vtp",
+      "time_s": 1.584,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3960.vtu",
+      "timestep_id": 3960
+    },
+    {
+      "path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map/intermediate_centerlines/0099_result_3980_centerline.vtp",
+      "time_s": 1.592,
+      "source_frame_path": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_3980.vtu",
+      "timestep_id": 3980
+    }
+  ],
+  "warnings": [],
+  "frames_csv": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/frames.csv",
+  "png_render": {
+    "camera_offset_dir": [
+      0.40843895287418513,
+      -0.36806263530149963,
+      -0.8352888831236498
+    ],
+    "camera_view_up": [
+      0.2901210689043006,
+      -0.8152983227207212,
+      0.5011171622950116
+    ],
+    "camera_bounds_source": "simulation_surface",
+    "anatomy_overlay": {
+      "source_vtu": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/preop/72-procs/result_4000.vtu",
+      "opacity": 0.12
+    },
+    "resolved_camera_position": [
+      29.62897408659922,
+      2.1623279543292853,
+      -16.074743961090835
+    ],
+    "resolved_camera_focal_point": [
+      15.410079002380371,
+      14.975611209869385,
+      13.003983497619629
+    ],
+    "resolved_camera_view_up": [
+      0.2901210689043006,
+      -0.8152983227207212,
+      0.5011171622950116
+    ],
+    "resolved_camera_distance": 34.81277920276818,
+    "output_png": "/scratch/users/ndorn/svzt_runs/tst-stan-5-20260608/iterations/iter-03/results/postprocess/resistance_map_mean.png"
+  }
+}
