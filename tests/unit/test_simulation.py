@@ -254,6 +254,66 @@ def test_run_pipeline_updates_config_with_new_inflow(simulation_env):
     assert inflow_values == simulation_env.inflow_factory.default_q
 
 
+def test_run_pipeline_rcr_uses_existing_optimized_csv_when_tuning_is_skipped(simulation_env, monkeypatch):
+    sim_mod = simulation_env.module
+    tmp_path = simulation_env.tmp_path
+
+    simplified_path = tmp_path / "simplified_nonlinear_zerod.json"
+    simplified_path.write_text(
+        json.dumps(
+            {
+                "boundary_conditions": [],
+                "vessels": [],
+                "junctions": [],
+                "simulation_parameters": {"number_of_time_pts_per_cardiac_cycle": 2},
+                "external_solver_coupling_blocks": [],
+                "trees": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "optimized_rcr_params.csv").write_text(
+        "R_LPA,C_LPA,R_RPA,C_RPA\n1.0,2.0,3.0,4.0\n",
+        encoding="utf-8",
+    )
+
+    calls = {}
+
+    class DummyConfigHandler:
+        def __init__(self):
+            self.inflows = {}
+
+        def set_inflow(self, inflow):
+            self.inflows[inflow.name] = inflow
+
+        def to_json(self, path):
+            calls.setdefault("saved_paths", []).append(path)
+
+        def generate_threed_coupler(self, *args, **kwargs):
+            calls["generate_threed_coupler"] = {"args": args, "kwargs": kwargs}
+            return self, []
+
+    monkeypatch.setattr(
+        sim_mod,
+        "ConfigHandler",
+        SimpleNamespace(from_json=lambda *_args, **_kwargs: DummyConfigHandler()),
+    )
+    monkeypatch.setattr(
+        sim_mod,
+        "assign_rcr_bcs",
+        lambda _cfg, _mesh, _wedge, rcr_params, **_kwargs: calls.setdefault(
+            "assign_rcr_bcs",
+            list(rcr_params),
+        ),
+    )
+    monkeypatch.setattr(DummySimulationDirectory, "write_files", lambda self, **kwargs: None, raising=False)
+
+    sim = sim_mod.Simulation(path=tmp_path, bc_type="rcr")
+    sim.run_pipeline(run_steady=False, optimize_bcs=False, run_threed=True, adapt=False)
+
+    assert calls["assign_rcr_bcs"] == [1.0, 2.0, 3.0, 4.0]
+
+
 def test_deformable_auto_prestress_invokes_setup(simulation_env, monkeypatch):
     sim_mod = simulation_env.module
     sim = sim_mod.Simulation(path=simulation_env.tmp_path, wall_model="deformable", prestress_file="auto")

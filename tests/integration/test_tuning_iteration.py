@@ -11,6 +11,7 @@ from svzerodtrees.tune_bcs.impedance_tuner import ImpedanceTuner
 from svzerodtrees.tuning.iteration import (
     OPTIMIZATION_LOG_FILENAME,
     OPTIMIZED_PARAMS_FILENAME,
+    OPTIMIZED_RCR_PARAMS_FILENAME,
     PA_CONFIG_SNAPSHOT_FILENAME,
     _build_tune_space_from_config,
     _resolve_impedance_config,
@@ -19,6 +20,7 @@ from svzerodtrees.tuning.iteration import (
     evaluate_iteration_gate,
     generate_reduced_pa_from_iteration,
     run_impedance_tuning_for_iteration,
+    run_rcr_tuning_for_iteration,
     write_iteration_decision,
     write_iteration_metrics,
 )
@@ -63,6 +65,7 @@ def _constant_tune_space() -> dict[str, list[dict[str, object]]]:
 
 def _impedance_artifact_payload(
     *,
+    bc_type: str = "IMPEDANCE",
     bc_values: dict[str, object],
     coupled: bool = False,
     number_of_time_pts: int = 2,
@@ -102,7 +105,7 @@ def _impedance_artifact_payload(
             },
             {
                 "bc_name": "OUT",
-                "bc_type": "IMPEDANCE",
+                "bc_type": bc_type,
                 "bc_values": bc_values,
             }
         ],
@@ -794,6 +797,92 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
     assert "rpa.alpha" not in free_names
     assert "lpa.beta" not in free_names
     assert "rpa.beta" not in free_names
+
+
+def test_run_rcr_tuning_for_iteration_contract(monkeypatch, tmp_path: Path):
+    seed = tmp_path / "simplified_nonlinear_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
+    iteration_dir = tmp_path / "iter-01"
+    seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+
+    calls: dict[str, object] = {}
+
+    class DummyConfigHandler:
+        @classmethod
+        def from_json(cls, path: str, is_pulmonary: bool = False):
+            calls.setdefault("from_json", []).append((path, is_pulmonary))
+            return cls()
+
+        def to_json(self, path: str):
+            Path(path).write_text(
+                json.dumps(
+                    _impedance_artifact_payload(
+                        bc_type="RCR",
+                        bc_values={"Rp": 10.0, "C": 1.0e-5, "Rd": 90.0, "Pd": 12.0},
+                        coupled=False,
+                        number_of_time_pts_per_cardiac_cycle=2,
+                        inflow_q=[3.0, 3.0],
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+    class DummyClinicalTargets:
+        wedge_p = 12.0
+
+        @classmethod
+        def from_csv(cls, path: str):
+            calls["targets_path"] = path
+            return cls()
+
+    class DummyRCRTuner:
+        def __init__(self, *args, **kwargs):
+            calls["tuner_kwargs"] = kwargs
+
+        def tune(self):
+            return SimpleNamespace(x=[100.0, 1.0e-5, 200.0, 2.0e-5])
+
+    def _fake_assign(config_handler, mesh_path, wedge_p, rcr_params, **kwargs):
+        calls["assign"] = {
+            "mesh_path": mesh_path,
+            "wedge_p": wedge_p,
+            "rcr_params": list(rcr_params),
+            "kwargs": kwargs,
+        }
+
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.RCRTuner", DummyRCRTuner)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.assign_rcr_bcs", _fake_assign)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.get_pa_outlet_scale", lambda *_args, **_kwargs: 2.0)
+
+    result = run_rcr_tuning_for_iteration(
+        iteration_dir=iteration_dir,
+        seed_config=seed,
+        mesh_surfaces=mesh_surfaces,
+        clinical_targets=targets,
+        inflow_path=inflow_path,
+        rcr_config={
+            "n_procs": 12,
+            "convert_to_cm": True,
+            "rescale_inflow": True,
+        },
+    )
+
+    assert Path(result["optimized_params_csv"]).name == OPTIMIZED_RCR_PARAMS_FILENAME
+    assert result["stree_optimization_log"] is None
+    assert Path(result["pa_config_snapshot"]).name == PA_CONFIG_SNAPSHOT_FILENAME
+    assert Path(result["tuned_zerod_config"]).exists()
+    assert calls["tuner_kwargs"]["n_procs"] == 12
+    assert calls["tuner_kwargs"]["convert_to_cm"] is True
+    assert calls["assign"]["mesh_path"] == str(mesh_surfaces)
+    assert calls["assign"]["wedge_p"] == 12.0
+    assert calls["assign"]["rcr_params"] == [100.0, 1.0e-5, 200.0, 2.0e-5]
+    assert calls["assign"]["kwargs"]["convert_to_cm"] is True
 
 
 def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_path: Path):

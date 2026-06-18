@@ -48,6 +48,93 @@ def test_construct_trees_workflow_requires_tree_section():
         ConstructTreesWorkflow.from_config(cfg).run()
 
 
+def test_construct_trees_workflow_loads_rcr_params_from_csv(monkeypatch, tmp_path):
+    optimized_csv = tmp_path / "optimized_rcr_params.csv"
+    optimized_csv.write_text(
+        "R_LPA,C_LPA,R_RPA,C_RPA\n1.0,2.0,3.0,4.0\n",
+        encoding="utf-8",
+    )
+
+    calls = {}
+
+    class DummyConfigHandler:
+        def to_json(self, path):
+            calls["output_path"] = path
+
+    monkeypatch.setattr(
+        "svzerodtrees.api.ConfigHandler",
+        SimpleNamespace(from_json=lambda *_args, **_kwargs: DummyConfigHandler()),
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.api.ClinicalTargets",
+        SimpleNamespace(from_csv=lambda *_args, **_kwargs: SimpleNamespace(wedge_p=12.0)),
+    )
+
+    def fake_assign_rcr_bcs(config_handler, mesh_surfaces_path, wedge_pressure, rcr_params, **kwargs):
+        calls["mesh_surfaces_path"] = mesh_surfaces_path
+        calls["wedge_pressure"] = wedge_pressure
+        calls["rcr_params"] = rcr_params
+        calls["kwargs"] = kwargs
+
+    monkeypatch.setattr("svzerodtrees.api.assign_rcr_bcs", fake_assign_rcr_bcs)
+
+    cfg = SimpleNamespace(
+        paths=SimpleNamespace(
+            root=str(tmp_path),
+            zerod_config=str(tmp_path / "model.json"),
+            clinical_targets=str(tmp_path / "targets.csv"),
+            mesh_surfaces=str(tmp_path / "mesh-surfaces"),
+            output_config=str(tmp_path / "svzerod_config_with_bcs.json"),
+            optimized_params=None,
+        ),
+        bcs=SimpleNamespace(type="rcr", rcr_params=None, is_pulmonary=True),
+        trees=SimpleNamespace(),
+        threed=None,
+    )
+
+    result = ConstructTreesWorkflow.from_config(cfg).run()
+
+    assert result == {
+        "status": "ok",
+        "output_config": str(tmp_path / "svzerod_config_with_bcs.json"),
+    }
+    assert calls["rcr_params"] == [1.0, 2.0, 3.0, 4.0]
+    assert calls["kwargs"]["convert_to_cm"] is False
+    assert calls["kwargs"]["is_pulmonary"] is True
+
+
+def test_construct_trees_workflow_rejects_missing_rcr_params(monkeypatch, tmp_path):
+    class DummyConfigHandler:
+        def to_json(self, path):
+            raise AssertionError("to_json should not be called when params are missing")
+
+    monkeypatch.setattr(
+        "svzerodtrees.api.ConfigHandler",
+        SimpleNamespace(from_json=lambda *_args, **_kwargs: DummyConfigHandler()),
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.api.ClinicalTargets",
+        SimpleNamespace(from_csv=lambda *_args, **_kwargs: SimpleNamespace(wedge_p=12.0)),
+    )
+
+    cfg = SimpleNamespace(
+        paths=SimpleNamespace(
+            root=str(tmp_path),
+            zerod_config=str(tmp_path / "model.json"),
+            clinical_targets=str(tmp_path / "targets.csv"),
+            mesh_surfaces=str(tmp_path / "mesh-surfaces"),
+            output_config=str(tmp_path / "svzerod_config_with_bcs.json"),
+            optimized_params=None,
+        ),
+        bcs=SimpleNamespace(type="rcr", rcr_params=None, is_pulmonary=True),
+        trees=SimpleNamespace(),
+        threed=None,
+    )
+
+    with pytest.raises(ValueError, match="optimized_rcr_params.csv"):
+        ConstructTreesWorkflow.from_config(cfg).run()
+
+
 def test_adaptation_workflow_requires_simulation_directories():
     cfg = SimpleNamespace(
         paths=SimpleNamespace(

@@ -405,29 +405,17 @@ def assign_rcr_bcs(config_handler,
         n_procs: The number of processes to use.
     """
 
-    # get outlet areas
-    if is_pulmonary:
-        rpa_info, lpa_info, inflow_info = vtp_info(mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=True)
+    if not is_pulmonary:
+        raise ValueError("assign_rcr_bcs currently supports pulmonary LPA/RPA models only")
 
-        cap_info = lpa_info | rpa_info
-    else:
-        cap_info = vtp_info(mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=False)
+    # get outlet areas
+    rpa_info, lpa_info, inflow_info = vtp_info(mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=True)
+    cap_info = lpa_info | rpa_info
     
     # get the mean and standard deviation of the cap areas
     lpa_total_area = np.sum(np.array(list(lpa_info.values())))
     rpa_total_area = np.sum(np.array(list(rpa_info.values())))
-
-    outlet_bc_names = [name for name, bc in config_handler.bcs.items() if 'inflow' not in bc.name.lower()]
-
-    # assumed that cap and boundary condition orders match
-    if len(outlet_bc_names) != len(cap_info):
-        print('number of outlet boundary conditions does not match number of cap surfaces, automatically assigning bc names...')
-        for i, name in enumerate(outlet_bc_names):
-            # delete the unused bcs
-            del config_handler.bcs[name]
-        outlet_bc_names = [f'RCR_{i}' for i in range(len(cap_info))]
-
-    cap_to_bc = {list(cap_info.keys())[i]: outlet_bc_names[i] for i in range(len(outlet_bc_names))}
+    cap_to_bc = resolve_cap_to_bc_mapping(config_handler, cap_info, bc_prefix="RCR")
 
     # build a unique tree for each outlet
     for idx, (cap_name, area) in enumerate(cap_info.items()):

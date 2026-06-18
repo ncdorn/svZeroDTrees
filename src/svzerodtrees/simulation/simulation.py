@@ -4,7 +4,7 @@ from ..io import *
 from ..tune_bcs.assign_bcs import assign_rcr_bcs, construct_impedance_trees
 from ..tune_bcs.clinical_targets import ClinicalTargets
 from ..tune_bcs.impedance_tuner import ImpedanceTuner
-from ..tune_bcs.rcr_tuner import RCRTuner
+from ..tune_bcs.rcr_tuner import RCRTuner, write_rcr_params_csv
 from ..tune_bcs.tune_space import FixedParam, FreeParam, TuneSpace, positive
 from .simulation_directory import *
 from ..adaptation.microvascular_adaptor import MicrovascularAdaptor
@@ -242,6 +242,7 @@ class Simulation:
             self._sync_config_inflow(config, self.simplified_zerod_config, inflow=self.inflow_0d)
 
         reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
+        rcr_params = None
         
         if optimize_bcs:
             if self.bc_type == 'impedance':
@@ -279,6 +280,8 @@ class Simulation:
             elif self.bc_type == 'rcr':
                 rcr_tuner = RCRTuner(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, rescale_inflow=run_steady, convert_to_cm=self.convert_to_cm, n_procs=24)
                 result = rcr_tuner.tune() # r_LPA, c_LPA, r_RPA, c_RPA = result.x
+                rcr_params = result.x.tolist()
+                write_rcr_params_csv(rcr_params, os.path.join(self.path, "optimized_rcr_params.csv"))
 
         if self.bc_type == 'impedance':
             # construct trees
@@ -316,10 +319,28 @@ class Simulation:
                                           specify_diameter=True) # NEED TO IMPLEMENT LPA/RPA PARAMS
                 
             elif self.bc_type == 'rcr':
+                if rcr_params is None:
+                    rcr_csv = os.path.join(self.path, "optimized_rcr_params.csv")
+                    if not os.path.exists(rcr_csv):
+                        raise ValueError(
+                            "RCR pipeline requires optimized_rcr_params.csv when "
+                            "run_threed=True and optimize_bcs=False"
+                        )
+                    rcr_df = pd.read_csv(rcr_csv)
+                    required_columns = ["R_LPA", "C_LPA", "R_RPA", "C_RPA"]
+                    missing_columns = [column for column in required_columns if column not in rcr_df.columns]
+                    if missing_columns:
+                        raise ValueError(
+                            "optimized_rcr_params.csv is missing required columns: "
+                            + ", ".join(missing_columns)
+                        )
+                    if rcr_df.empty:
+                        raise ValueError("optimized_rcr_params.csv does not contain any rows")
+                    rcr_params = [float(rcr_df.iloc[0][column]) for column in required_columns]
                 assign_rcr_bcs(self.zerod_config, 
                                self.preop_dir.mesh_complete.mesh_surfaces_dir, 
                                self.clinical_targets.wedge_p, 
-                               result.x, 
+                               rcr_params, 
                                convert_to_cm=self.convert_to_cm, 
                                is_pulmonary=True)
 

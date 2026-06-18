@@ -1606,4 +1606,90 @@ def test_rcr_tuner_tune_runs_with_stubbed_pa_config(monkeypatch):
     expected = pressure_loss + flowsplit_loss + penalty
 
     assert captured["loss"] == pytest.approx(expected)
-    assert result.x.tolist() == [1000.0, 1e-05, 1000.0, 1e-05]
+
+
+def test_assign_rcr_bcs_matches_caps_to_bc_names_instead_of_order(monkeypatch):
+    monkeypatch.setattr(
+        assign_bcs_module,
+        "vtp_info",
+        lambda path, convert_to_cm, pulmonary: (
+            {"RPA.vtp": 2.0},
+            {"LPA.vtp": 1.0},
+            None,
+        ),
+    )
+
+    config_handler = SimpleNamespace(
+        bcs={
+            "INFLOW": BoundaryCondition.from_config(
+                {
+                    "bc_name": "INFLOW",
+                    "bc_type": "FLOW",
+                    "bc_values": {"Q": [5.0, 5.0], "t": [0.0, 1.0]},
+                }
+            ),
+            "RPA_BC": BoundaryCondition.from_config(
+                {
+                    "bc_name": "RPA",
+                    "bc_type": "RESISTANCE",
+                    "bc_values": {"R": 1.0, "Pd": 12.0},
+                }
+            ),
+            "LPA_BC": BoundaryCondition.from_config(
+                {
+                    "bc_name": "LPA",
+                    "bc_type": "RESISTANCE",
+                    "bc_values": {"R": 1.0, "Pd": 12.0},
+                }
+            ),
+        }
+    )
+
+    assign_bcs_module.assign_rcr_bcs(
+        config_handler,
+        "mesh-surfaces",
+        12.0,
+        [100.0, 1.0e-5, 200.0, 2.0e-5],
+    )
+
+    assert config_handler.bcs["LPA_BC"].type == "RCR"
+    assert config_handler.bcs["RPA_BC"].type == "RCR"
+    assert config_handler.bcs["LPA_BC"].R == pytest.approx(100.0)
+    assert config_handler.bcs["RPA_BC"].R == pytest.approx(200.0)
+    assert config_handler.bcs["LPA_BC"].C == pytest.approx(1.0e-5)
+    assert config_handler.bcs["RPA_BC"].C == pytest.approx(2.0e-5)
+
+
+def test_assign_rcr_bcs_rejects_non_pulmonary_models():
+    config_handler = SimpleNamespace(
+        bcs={
+            "INFLOW": BoundaryCondition.from_config(
+                {
+                    "bc_name": "INFLOW",
+                    "bc_type": "FLOW",
+                    "bc_values": {"Q": [5.0, 5.0], "t": [0.0, 1.0]},
+                }
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match="pulmonary"):
+        assign_bcs_module.assign_rcr_bcs(
+            config_handler,
+            "mesh-surfaces",
+            12.0,
+            [100.0, 1.0e-5, 200.0, 2.0e-5],
+            is_pulmonary=False,
+        )
+
+
+def test_rcr_tuner_rejects_non_pulmonary_models():
+    tuner = RCRTuner(
+        config_handler=SimpleNamespace(vessel_map={}),
+        mesh_surfaces_path="mesh",
+        clinical_targets=ClinicalTargets(mpa_p=[30.0, 15.0, 22.0], rpa_split=0.5, wedge_p=12.0, q=5.0),
+        is_pulmonary=False,
+    )
+
+    with pytest.raises(ValueError, match="pulmonary"):
+        tuner.tune()

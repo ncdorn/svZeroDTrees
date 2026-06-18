@@ -1,9 +1,27 @@
+import csv
+import os
+
 from .base import BoundaryConditionTuner
 import numpy as np
 from scipy.optimize import minimize, Bounds
 from ..simulation.threedutils import vtp_info
 from ..tune_bcs.pa_config import PAConfig  # assuming your project structure
-import os
+
+
+def write_rcr_params_csv(params, output_csv):
+    values = np.asarray(params, dtype=float).reshape(-1)
+    if values.size != 4:
+        raise ValueError(
+            "RCR tuning results must contain exactly four values: "
+            "R_LPA, C_LPA, R_RPA, C_RPA"
+        )
+
+    output_path = os.fspath(output_csv)
+    with open(output_path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["R_LPA", "C_LPA", "R_RPA", "C_RPA"])
+        writer.writerow(values.tolist())
+    return output_path
 
 class RCRTuner(BoundaryConditionTuner):
     def __init__(self, config_handler, mesh_surfaces_path, clinical_targets,
@@ -20,8 +38,9 @@ class RCRTuner(BoundaryConditionTuner):
 
     def tune(self):
         # --- Geometry and Model Checks ---
-        if self.is_pulmonary:
-            rpa_info, lpa_info, inflow_info = vtp_info(self.mesh_surfaces_path, convert_to_cm=self.convert_to_cm, pulmonary=True)
+        if not self.is_pulmonary:
+            raise ValueError("RCRTuner currently supports pulmonary LPA/RPA models only")
+        rpa_info, lpa_info, inflow_info = vtp_info(self.mesh_surfaces_path, convert_to_cm=self.convert_to_cm, pulmonary=True)
 
         # --- Configuration Setup ---
         if len(self.config_handler.vessel_map.values()) == 5:
@@ -38,9 +57,17 @@ class RCRTuner(BoundaryConditionTuner):
         pa_config.initialize_resistance_bcs() # will recognize inflow and create RCR BCs
 
         # --- Objective Function ---
+        def _apply_params(params):
+            (
+                pa_config.bcs['LPA_BC'].R,
+                pa_config.bcs['LPA_BC'].C,
+                pa_config.bcs['RPA_BC'].R,
+                pa_config.bcs['RPA_BC'].C,
+            ) = params
+
         def loss_fn(params):
             # R_LPA, C_LPA, R_RPA, C_RPA
-            pa_config.bcs['LPA_BC'].R, pa_config.bcs['LPA_BC'].C, pa_config.bcs['RPA_BC'].R, pa_config.bcs['RPA_BC'].C = params
+            _apply_params(params)
 
             try:
                 pa_config.to_json(f'pa_config_test_tuning.json')
@@ -57,25 +84,19 @@ class RCRTuner(BoundaryConditionTuner):
             capacitance_loss = self.capacitance_penalty(params[1], params[3])
             total_loss = pressure_loss + flowsplit_loss + capacitance_loss
 
-            with open('optimized_params.csv', 'w') as f:
-                f.write(f"R_LPA,C_LPA,R_RPA,C_RPA,Pressure_Loss,Flow_Split_Loss,Total_Loss\n")
-                f.write(f"{pa_config.bcs['LPA_BC'].R},{pa_config.bcs['LPA_BC'].C},{pa_config.bcs['RPA_BC'].R},{pa_config.bcs['RPA_BC'].C},{pressure_loss},{flowsplit_loss},{total_loss}\n")
-
             print(f'\n***PRESSURE LOSS: {pressure_loss}, FS LOSS: {flowsplit_loss}, TOTAL LOSS: {total_loss} ***\n')
 
             return total_loss
 
-        # --- Optimization Constraints ---
-        constraints = [ # constrain capacitances to not be more than twice each other.
-            {"type": "ineq", "fun": lambda x: 2 * x[1] - x[3]},  # x[0] ≤ 2 * x[1]
-            {"type": "ineq", "fun": lambda x: 2 * x[3] - x[1]}   # x[1] ≤ 2 * x[0]
-        ]
         # --- Optimization ---
         initial_guess = [1000.0, 1e-5, 1000.0, 1e-5]  # Initial guess for R and C values
         bounds = Bounds([0.0, 1e-10, 0.0, 1e-10], [np.inf, 1.0, np.inf, 1.0])  # Bounds for R and C values
-        result = minimize(loss_fn, initial_guess, method='Nelder-Mead', bounds=bounds, options={'maxiter': 200}, constraints=constraints)
+        # Nelder-Mead ignores nonlinear constraints, so capacitance balance is
+        # enforced through capacitance_penalty() in the objective instead.
+        result = minimize(loss_fn, initial_guess, method='Nelder-Mead', bounds=bounds, options={'maxiter': 200})
 
         print(f"Optimized parameters: {result.x}")
+        _apply_params(result.x)
         pa_config.simulate()
         pa_config.plot_mpa()
 

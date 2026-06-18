@@ -24,11 +24,13 @@ from svzerodtrees.microvasculature.treeparams import TreeParameters
 from svzerodtrees.simulation.simulation_directory import SimulationDirectory
 from svzerodtrees.simulation.threedutils import get_pa_outlet_scale, vtp_info
 from svzerodtrees.tune_bcs.assign_bcs import (
+    assign_rcr_bcs,
     construct_impedance_trees,
     validate_cap_to_bc_mapping,
 )
 from svzerodtrees.tune_bcs.clinical_targets import ClinicalTargets
 from svzerodtrees.tune_bcs.impedance_tuner import ImpedanceTuner
+from svzerodtrees.tune_bcs.rcr_tuner import RCRTuner, write_rcr_params_csv
 from svzerodtrees.tune_bcs.tune_space import (
     FixedParam,
     FreeParam,
@@ -57,8 +59,15 @@ DEFAULT_IMPEDANCE_TUNING_CONFIG: dict[str, Any] = {
     "allow_ordered_outlet_mapping": False,
     "tuning_model": "rri",
 }
+DEFAULT_RCR_TUNING_CONFIG: dict[str, Any] = {
+    "solver": "Nelder-Mead",
+    "n_procs": 24,
+    "rescale_inflow": True,
+    "convert_to_cm": False,
+}
 
 OPTIMIZED_PARAMS_FILENAME = "optimized_params.csv"
+OPTIMIZED_RCR_PARAMS_FILENAME = "optimized_rcr_params.csv"
 OPTIMIZATION_LOG_FILENAME = "stree_impedance_optimization.log"
 PA_CONFIG_SNAPSHOT_FILENAME = "pa_config_tuning_snapshot.json"
 TUNED_ZEROD_CONFIG_FILENAME = "svzerod_3d_coupling_tuned.json"
@@ -294,6 +303,29 @@ def _resolve_impedance_config(
     if merged["diameter_scale"] > 0.0:
         merged["use_mean"] = False
 
+    return merged
+
+
+def _resolve_rcr_config(
+    config: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    merged = dict(DEFAULT_RCR_TUNING_CONFIG)
+    if config is not None:
+        for key, value in config.items():
+            if value is not None:
+                merged[key] = value
+
+    solver = str(merged.get("solver", "")).strip()
+    if not solver:
+        raise ValueError("RCR tuning solver cannot be empty")
+    if solver != "Nelder-Mead":
+        raise ValueError("RCR tuning currently supports solver='Nelder-Mead' only")
+    merged["solver"] = solver
+    merged["n_procs"] = int(merged["n_procs"])
+    merged["rescale_inflow"] = bool(merged["rescale_inflow"])
+    merged["convert_to_cm"] = bool(merged["convert_to_cm"])
+    if merged["n_procs"] <= 0:
+        raise ValueError("RCR tuning n_procs must be > 0")
     return merged
 
 
@@ -583,6 +615,20 @@ def _validate_impedance_artifact(
         )
 
 
+def _validate_zerod_artifact(
+    path: Path,
+    expected_inflow_cardiac_output: float | None = None,
+) -> None:
+    with path.open(encoding="utf-8") as ff:
+        payload = json.load(ff)
+    validate_boundary_condition_configs(payload.get("boundary_conditions", []))
+    if expected_inflow_cardiac_output is not None:
+        validate_flow_cardiac_output_config(
+            payload,
+            expected_cardiac_output=expected_inflow_cardiac_output,
+        )
+
+
 def run_impedance_tuning_for_iteration(
     *,
     iteration_dir: str | Path,
@@ -746,6 +792,104 @@ def run_impedance_tuning_for_iteration(
         "tuned_zerod_config": str(tuned_zerod_config),
         "tuning_model": tuning["tuning_model"],
         "impedance_config": tuning,
+    }
+
+
+def run_rcr_tuning_for_iteration(
+    *,
+    iteration_dir: str | Path,
+    seed_config: str | Path,
+    mesh_surfaces: str | Path,
+    clinical_targets: str | Path,
+    inflow_path: str | Path | None = None,
+    rcr_config: Mapping[str, Any] | None = None,
+    results_dir: str | Path | None = None,
+    tuned_config_name: str = TUNED_ZEROD_CONFIG_FILENAME,
+) -> dict[str, Any]:
+    """Run RCR tuning + BC assignment for one tuning iteration."""
+
+    iteration_path = Path(iteration_dir)
+    output_dir = Path(results_dir) if results_dir is not None else iteration_path / "results"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    seed_config_path = Path(seed_config)
+    mesh_surfaces_path = Path(mesh_surfaces)
+    targets_path = Path(clinical_targets)
+
+    if not seed_config_path.exists():
+        raise FileNotFoundError(f"seed 0D config not found: {seed_config_path}")
+    if not mesh_surfaces_path.exists():
+        raise FileNotFoundError(f"mesh-surfaces path not found: {mesh_surfaces_path}")
+    if not targets_path.exists():
+        raise FileNotFoundError(f"clinical targets not found: {targets_path}")
+
+    tuning = _resolve_rcr_config(rcr_config)
+    for filename in (
+        OPTIMIZED_RCR_PARAMS_FILENAME,
+        PA_CONFIG_SNAPSHOT_FILENAME,
+        tuned_config_name,
+    ):
+        path = output_dir / filename
+        if path.exists() and path.is_file():
+            path.unlink()
+
+    targets = ClinicalTargets.from_csv(str(targets_path))
+    expected_inflow_co = _expected_snapshot_inflow_cardiac_output(
+        seed_config=seed_config_path,
+        mesh_surfaces=mesh_surfaces_path,
+        rescale_inflow=bool(tuning["rescale_inflow"]),
+        convert_to_cm=bool(tuning["convert_to_cm"]),
+        tuning_model="rri",
+        inflow_path=inflow_path,
+    )
+
+    with _pushd(output_dir):
+        reduced_config = ConfigHandler.from_json(str(seed_config_path), is_pulmonary=True)
+        tuner = RCRTuner(
+            reduced_config,
+            str(mesh_surfaces_path),
+            targets,
+            rescale_inflow=bool(tuning["rescale_inflow"]),
+            n_procs=int(tuning["n_procs"]),
+            convert_to_cm=bool(tuning["convert_to_cm"]),
+        )
+        result = tuner.tune()
+        optimized_csv = output_dir / OPTIMIZED_RCR_PARAMS_FILENAME
+        write_rcr_params_csv(result.x, optimized_csv)
+
+        tuned_config = ConfigHandler.from_json(str(seed_config_path), is_pulmonary=True)
+        assign_rcr_bcs(
+            tuned_config,
+            str(mesh_surfaces_path),
+            targets.wedge_p,
+            [float(value) for value in np.asarray(result.x, dtype=float).tolist()],
+            convert_to_cm=bool(tuning["convert_to_cm"]),
+            is_pulmonary=True,
+        )
+        tuned_zerod_config = output_dir / tuned_config_name
+        tuned_config.to_json(str(tuned_zerod_config))
+
+    pa_snapshot = output_dir / PA_CONFIG_SNAPSHOT_FILENAME
+    pa_snapshot.write_text(
+        tuned_zerod_config.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    _validate_zerod_artifact(
+        pa_snapshot,
+        expected_inflow_cardiac_output=expected_inflow_co,
+    )
+    _validate_zerod_artifact(
+        tuned_zerod_config,
+        expected_inflow_cardiac_output=expected_inflow_co,
+    )
+
+    return {
+        "optimized_params_csv": str(optimized_csv),
+        "stree_optimization_log": None,
+        "pa_config_snapshot": str(pa_snapshot),
+        "tuned_zerod_config": str(tuned_zerod_config),
+        "rcr_config": tuning,
     }
 
 

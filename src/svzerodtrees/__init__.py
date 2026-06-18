@@ -31,6 +31,7 @@ __all__ = [
     "evaluate_iteration_gate",
     "generate_reduced_pa_from_iteration",
     "run_impedance_tuning_for_iteration",
+    "run_rcr_tuning_for_iteration",
     "summarize_pulmonary_zerod_config",
     "write_iteration_decision",
     "write_iteration_metrics",
@@ -82,6 +83,10 @@ _LAZY_EXPORTS = {
     "run_impedance_tuning_for_iteration": (
         "svzerodtrees.tuning",
         "run_impedance_tuning_for_iteration",
+    ),
+    "run_rcr_tuning_for_iteration": (
+        "svzerodtrees.tuning",
+        "run_rcr_tuning_for_iteration",
     ),
     "summarize_pulmonary_zerod_config": (
         "svzerodtrees.tuning",

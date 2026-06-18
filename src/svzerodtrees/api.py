@@ -10,7 +10,7 @@ from .io import ConfigHandler
 from .tune_bcs.assign_bcs import assign_rcr_bcs, construct_impedance_trees
 from .tune_bcs.clinical_targets import ClinicalTargets
 from .tune_bcs.impedance_tuner import ImpedanceTuner
-from .tune_bcs.rcr_tuner import RCRTuner
+from .tune_bcs.rcr_tuner import RCRTuner, write_rcr_params_csv
 from .microvasculature.treeparams import TreeParameters
 from .adaptation.microvascular_adaptor import MicrovascularAdaptor
 from .adaptation.benchmark import run_adaptation_benchmark_study
@@ -32,6 +32,42 @@ def run_pulmonary_threed_postprocess_suite(**kwargs):
     )
 
     return _impl(**kwargs)
+
+
+_RCR_PARAM_COLUMNS = ("R_LPA", "C_LPA", "R_RPA", "C_RPA")
+
+
+def _load_rcr_params_csv(csv_path: str) -> list[float]:
+    df = pd.read_csv(csv_path)
+    missing = [column for column in _RCR_PARAM_COLUMNS if column not in df.columns]
+    if missing:
+        raise ValueError(
+            f"RCR params CSV {csv_path} is missing required columns: {', '.join(missing)}"
+        )
+    if df.empty:
+        raise ValueError(f"RCR params CSV {csv_path} does not contain any rows")
+    row = df.iloc[0]
+    return [float(row[column]) for column in _RCR_PARAM_COLUMNS]
+
+
+def _resolve_rcr_params(paths: PathsConfig, bcs: BCSConfig) -> list[float]:
+    if bcs.rcr_params is not None:
+        values = [float(value) for value in bcs.rcr_params]
+        if len(values) != 4:
+            raise ValueError("bcs.rcr_params must contain exactly 4 values")
+        return values
+
+    if paths.optimized_params is not None:
+        return _load_rcr_params_csv(paths.optimized_params)
+
+    default_csv = os.path.join(paths.root, "optimized_rcr_params.csv")
+    if os.path.exists(default_csv):
+        return _load_rcr_params_csv(default_csv)
+
+    raise ValueError(
+        "bcs.rcr_params is required for rcr tree construction unless "
+        "paths.optimized_params or paths.root/optimized_rcr_params.csv is available"
+    )
 
 
 class PipelineWorkflow:
@@ -176,7 +212,7 @@ class TuneBCsWorkflow:
             )
             result = tuner.tune()
             output_csv = os.path.join(paths.root, "optimized_rcr_params.csv")
-            pd.DataFrame([result.x], columns=["R_LPA", "C_LPA", "R_RPA", "C_RPA"]).to_csv(output_csv, index=False)
+            write_rcr_params_csv(result.x, output_csv)
         else:
             raise ValueError("bcs.type must be 'impedance' or 'rcr'")
 
@@ -242,13 +278,11 @@ class ConstructTreesWorkflow:
                 specify_diameter=trees.specify_diameter,
             )
         elif bcs.type == "rcr":
-            if bcs.rcr_params is None:
-                raise ValueError("bcs.rcr_params is required for rcr tree construction")
             assign_rcr_bcs(
                 config_handler,
                 paths.mesh_surfaces,
                 targets.wedge_p,
-                bcs.rcr_params,
+                _resolve_rcr_params(paths, bcs),
                 convert_to_cm=convert_to_cm,
                 is_pulmonary=bcs.is_pulmonary,
             )
