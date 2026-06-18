@@ -11,8 +11,8 @@ import time
 _INSTALL_HINT = (
     "pysvzerod is required for solver-backed svZeroDTrees workflows. "
     "Install the sibling svZeroDSolver checkout first with "
-    "`python -m pip install -e ../svZeroDSolver` "
-    "(or `python -m pip install -e /home/users/ndorn/svZeroDSolver` on Sherlock)."
+    "`python3 -m pip install -e ../svZeroDSolver` "
+    "(or `python3 -m pip install -e /home/users/ndorn/svZeroDSolver` on Sherlock)."
 )
 
 

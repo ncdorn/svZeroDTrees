@@ -30,7 +30,7 @@ Use Hatch when you want isolated build or test runs that follow the configured
 project scripts.
 
 ```bash
-python -m pip install hatch
+python3 -m pip install hatch
 hatch run test:run
 hatch run build:check
 hatch run docs:serve
@@ -44,7 +44,7 @@ through the `solver` dependency group.
 
 ```bash
 UV_CACHE_DIR=/tmp/uv-cache uv sync --group dev --group tests --group build --group solver
-UV_CACHE_DIR=/tmp/uv-cache uv run python -c "import svzerodtrees, pysvzerod"
+UV_CACHE_DIR=/tmp/uv-cache uv run python3 -c "import svzerodtrees, pysvzerod"
 ```
 
 ### Option 3: pip-managed editable installs
@@ -53,8 +53,8 @@ Use plain `pip` when you want an explicit local environment without `uv`.
 Install the sibling solver checkout first when you need solver-backed workflows.
 
 ```bash
-python -m pip install -e ../svZeroDSolver
-python -m pip install -e .
+python3 -m pip install -e ../svZeroDSolver
+python3 -m pip install -e .
 ```
 
 `svZeroDTrees` itself can be imported without `pysvzerod`, but any workflow

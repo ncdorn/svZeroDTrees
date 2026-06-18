@@ -43,7 +43,7 @@ git checkout -b fix-short-description
 Hatch-managed workflow:
 
 ```bash
-python -m pip install hatch
+python3 -m pip install hatch
 hatch run test:run
 ```
 

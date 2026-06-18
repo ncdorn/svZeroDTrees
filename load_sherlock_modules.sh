@@ -31,4 +31,4 @@ python3 -m pip install -e "${solver_root}"
 python3 -m pip install -e "${repo_root}"
 
 # Uncomment the line below to run an experiment from a run_experiment.py file.
-# python run_experiment.py
+# python3 run_experiment.py

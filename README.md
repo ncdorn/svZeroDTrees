@@ -10,7 +10,7 @@ Structured tree boundary condition modeling for svZeroD cardiovascular simulatio
 **Requirements**
 - Python >= 3.8.
 - Validated on Sherlock with `python/3.12.1`.
-- Runtime dependencies are installed via `python -m pip install -e .`.
+- Runtime dependencies are installed via `python3 -m pip install -e .`.
 - Solver-backed workflows additionally require `pysvzerod` from a sibling
   `svZeroDSolver` checkout.
 - External tools for 3D coupling only: SimVascular `svpre`, `svsolver`, `svpost`
@@ -26,9 +26,9 @@ Structured tree boundary condition modeling for svZeroD cardiovascular simulatio
 ```bash
 git clone https://github.com/ncdorn/svZeroDTrees.git
 git clone https://github.com/ncdorn/svZeroDSolver.git
-python -m pip install -e svZeroDSolver
+python3 -m pip install -e svZeroDSolver
 cd svZeroDTrees
-python -m pip install -e .
+python3 -m pip install -e .
 ```
 
 If you only need non-solver code paths, `svZeroDTrees` can now be installed
@@ -39,7 +39,7 @@ For `uv` workflows in this workspace, the sibling `../svZeroDSolver` checkout is
 still supported via the `solver` dependency group:
 ```bash
 UV_CACHE_DIR=/tmp/uv-cache uv sync --group dev --group tests --group build --group solver
-UV_CACHE_DIR=/tmp/uv-cache uv run python -c "import svzerodtrees, pysvzerod"
+UV_CACHE_DIR=/tmp/uv-cache uv run python3 -c "import svzerodtrees, pysvzerod"
 ```
 
 **Sherlock**
@@ -57,7 +57,7 @@ killed for lack of memory there.
 **Development**
 Preferred package-validation workflows use Hatch-managed environments:
 ```bash
-python -m pip install hatch
+python3 -m pip install hatch
 hatch run test:run
 hatch run test:unit
 hatch run test:integration

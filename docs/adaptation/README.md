@@ -51,7 +51,7 @@ examples/adapt_benchmark_stage3_tst_stan_1_9_robustness.yml
 Run it from `svZeroDTrees/`:
 
 ```bash
-MPLCONFIGDIR=/private/tmp PYTHONPATH=src python -m svzerodtrees.cli adapt-benchmark examples/adapt_benchmark_stage3_tst_stan_1_9_robustness.yml
+MPLCONFIGDIR=/private/tmp PYTHONPATH=src python3 -m svzerodtrees.cli adapt-benchmark examples/adapt_benchmark_stage3_tst_stan_1_9_robustness.yml
 ```
 
 Output:

@@ -111,7 +111,7 @@ svZeroDTrees
 Primary workflow:
 
 ```text
-PYTHONPATH=src python -m svzerodtrees.cli adapt-benchmark <spec.yml>
+PYTHONPATH=src python3 -m svzerodtrees.cli adapt-benchmark <spec.yml>
 ```
 
 Recommended initial target:
@@ -200,7 +200,7 @@ examples/adapt_benchmark_stage3_tst_stan_1_9_robustness.yml
 Run from `svZeroDTrees/`:
 
 ```bash
-MPLCONFIGDIR=/private/tmp PYTHONPATH=src python -m svzerodtrees.cli adapt-benchmark examples/adapt_benchmark_stage3_tst_stan_1_9_robustness.yml
+MPLCONFIGDIR=/private/tmp PYTHONPATH=src python3 -m svzerodtrees.cli adapt-benchmark examples/adapt_benchmark_stage3_tst_stan_1_9_robustness.yml
 ```
 
 This pilot spec covers one selected patient-specific preop/postop simplified

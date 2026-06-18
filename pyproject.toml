@@ -108,7 +108,7 @@ description = "Serve the repository docs directory for local preview."
 dependency-groups = ["docs"]
 
 [tool.hatch.envs.docs.scripts]
-serve = "python -m http.server --directory docs {args:8000}"
+serve = "python3 -m http.server --directory docs {args:8000}"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

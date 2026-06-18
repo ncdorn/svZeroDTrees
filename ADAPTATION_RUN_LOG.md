@@ -30,7 +30,7 @@ In this log, "tested well" means the run was numerically well behaved and useful
 - Models: `M3` only
 - Command:
   ```bash
-  MPLCONFIGDIR=/private/tmp PYTHONPATH=src python -m svzerodtrees.cli adapt-benchmark examples/adapt_benchmark_stage3_tst_stan_1_9_robustness.yml
+  MPLCONFIGDIR=/private/tmp PYTHONPATH=src python3 -m svzerodtrees.cli adapt-benchmark examples/adapt_benchmark_stage3_tst_stan_1_9_robustness.yml
   ```
 - Execution notes:
   - Local process parallelism was enabled with `workers: 8`.
