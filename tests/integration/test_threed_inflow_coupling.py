@@ -8,6 +8,8 @@ from types import SimpleNamespace
 from svzerodtrees.io.config_handler import ConfigHandler
 from svzerodtrees.simulation.input_builders.svmp_xml import SvMPxml
 
+_SHARED_LIBRARY_PATH = "/opt/svZeroDSolver-build/src/interface/libsvzero_interface.so"
+
 
 def _sample_config_payload() -> dict[str, object]:
     return {
@@ -122,6 +124,7 @@ def test_svmp_xml_dirichlet_inflow_writes_prescribed_inlet(tmp_path: Path):
         threed_coupler=threed_coupler,
         inflow_boundary_condition="dirichlet",
         inflow_file_path=str(tmp_path / "inflow.flow"),
+        shared_library=_SHARED_LIBRARY_PATH,
     )
 
     root = ET.parse(xml_path).getroot()

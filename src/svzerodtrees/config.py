@@ -1213,6 +1213,8 @@ threed:
     svpre: svpre
     svsolver: svsolver
     svpost: postsolver
+    svzerodsolver_build_dir: /path/to/svZeroDSolver-build
+    svzerod_interface_library: /path/to/svZeroDSolver-build/src/interface/libsvzero_interface.so
 
 postprocess:
   figures:

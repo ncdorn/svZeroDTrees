@@ -41,7 +41,7 @@ class SvZeroDInterface(SimulationFile):
 
     def write(self,
               threed_coupler_path,
-              interface_path='/home/users/ndorn/svZeroDSolver/Release/src/interface/libsvzero_interface.so',
+              interface_path=None,
               initialize_flows=0,
               initial_flow=0.0,
               initialize_pressures=1,
@@ -50,6 +50,9 @@ class SvZeroDInterface(SimulationFile):
         write the svZeroD_interface.dat file'''
         
         print('writing svZeroD interface file...')
+
+        if interface_path is None or not str(interface_path).strip():
+            raise ValueError("interface_path is required to write svZeroD_interface.dat")
 
         threed_coupler = ConfigHandler.from_json(threed_coupler_path, is_pulmonary=False, is_threed_interface=True)
 

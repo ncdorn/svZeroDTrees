@@ -101,7 +101,7 @@ class SvMPxml(SimulationFile):
               inflow_file_path=None,
               coupling_type="semi-implicit",
               configuration_file="svzerod_3Dcoupling.json",
-              shared_library="/home/users/ndorn/svZeroDSolver/Release/src/interface/libsvzero_interface.so",
+              shared_library=None,
               initial_flows=0.0,
               initial_pressures=0.0,
               vtk_save_increment=20):
@@ -379,6 +379,11 @@ class SvMPxml(SimulationFile):
                 for alias in _coupled_surface_name_aliases(surface_base):
                     coupling_blocks_by_surface[alias] = block.name
             if coupling_blocks_by_surface:
+                if shared_library is None or not str(shared_library).strip():
+                    raise ValueError(
+                        "shared_library is required when threed_coupler defines "
+                        "svZeroDSolver coupling blocks"
+                    )
                 svzerod_interface = ET.SubElement(add_eqn, "svZeroDSolver_interface")
                 coupling_type_node = ET.SubElement(svzerod_interface, "Coupling_type")
                 coupling_type_node.text = str(coupling_type)

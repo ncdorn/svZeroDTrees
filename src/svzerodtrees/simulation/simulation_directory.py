@@ -22,6 +22,12 @@ from ..microvasculature.structured_tree.structuredtree import StructuredTree
 
 _DEFAULT_TREE_LRR = 10.0
 
+_SVZERODSOLVER_INTERFACE_LIBRARY_RELATIVE_PATH = os.path.join(
+    "src",
+    "interface",
+    "libsvzero_interface.so",
+)
+
 def _has_valid_external_solver_coupling_blocks(path):
     with open(path, encoding="utf-8") as ff:
         payload = json.load(ff)
@@ -66,6 +72,28 @@ def _require_solver_executable(execution_config, *, context):
     if executable is None or not str(executable).strip():
         raise ValueError(f"execution_config.executable is required for {context}")
     return str(executable)
+
+
+def _resolve_svzerodsolver_interface_library(solver_paths=None):
+    if solver_paths is None:
+        return None
+    if not isinstance(solver_paths, dict):
+        solver_paths = vars(solver_paths)
+
+    explicit_library = (
+        solver_paths.get("svzerod_interface_library")
+        or solver_paths.get("svzerodsolver_interface_library")
+    )
+    if explicit_library is not None and str(explicit_library).strip():
+        return str(explicit_library)
+
+    build_dir = solver_paths.get("svzerodsolver_build_dir")
+    if build_dir is not None and str(build_dir).strip():
+        return os.path.join(
+            str(build_dir),
+            _SVZERODSOLVER_INTERFACE_LIBRARY_RELATIVE_PATH,
+        )
+    return None
 
 class SimulationDirectory:
     '''
@@ -413,6 +441,8 @@ class SimulationDirectory:
             simulation_mode = "flow" if sim_config is None else str(sim_config.get("simulation_mode", "flow")).lower()
             traction_file_path = None if sim_config is None else sim_config.get("traction_file_path")
             vtk_save_increment = 20 if sim_config is None else int(sim_config.get("vtk_save_increment", 20))
+            solver_paths = None if sim_config is None else sim_config.get("solver_paths")
+            shared_library = _resolve_svzerodsolver_interface_library(solver_paths)
             mesh_scale_factor = self._resolve_mesh_scale_factor()
             if self.convert_to_cm:
                 print("scaling mesh to cm...")
@@ -466,6 +496,7 @@ class SimulationDirectory:
                                 tissue_support=tissue_support,
                                 simulation_mode=simulation_mode,
                                 traction_file_path=traction_file_path,
+                                shared_library=shared_library,
                                 vtk_save_increment=vtk_save_increment)
         
         def write_runscript_input_params(user_input=user_input, sim_config=sim_config):
@@ -584,6 +615,7 @@ class SimulationDirectory:
             'memory': 16,
             'hours': 6,
             'wall_model': 'rigid',
+            'solver_paths': getattr(self, 'solver_paths', None),
             'execution': _normalise_execution_config(execution_config),
         }
 

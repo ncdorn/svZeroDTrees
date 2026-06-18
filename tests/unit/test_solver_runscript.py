@@ -331,6 +331,60 @@ def test_write_files_generates_canonical_coupler_from_tuned_source(tmp_path: Pat
     assert payload["external_solver_coupling_blocks"]
 
 
+def test_write_files_resolves_svzerodsolver_interface_library_from_build_dir(tmp_path: Path):
+    calls = []
+
+    class Coupler:
+        path = str(tmp_path / "svzerod_3Dcoupling.json")
+        simparams = SimpleNamespace(external_step_size=None, cardiac_period=None)
+        coupling_blocks = {"OUTLET": SimpleNamespace(name="OUTLET")}
+
+        def regenerate_impedance_bcs_for_coupled_timing(self):
+            return None
+
+        def to_json(self, path):
+            Path(path).write_text("{}", encoding="utf-8")
+
+    sim_dir = SimulationDirectory.__new__(SimulationDirectory)
+    sim_dir.path = str(tmp_path)
+    sim_dir.zerod_config = None
+    sim_dir.mesh_complete = SimpleNamespace()
+    sim_dir.svzerod_3Dcoupling = Coupler()
+    sim_dir.svFSIxml = SimpleNamespace(
+        is_written=False,
+        write=lambda *_args, **kwargs: calls.append(kwargs),
+    )
+    sim_dir.solver_runscript = SimpleNamespace(
+        is_written=False,
+        write=lambda **_kwargs: None,
+    )
+    sim_dir.convert_to_cm = False
+    sim_dir.mesh_scale_factor = 1.0
+    sim_dir.explicit_threed_coupler = True
+    sim_dir.check_files = lambda verbose=False: None
+
+    sim_dir.write_files(
+        user_input=False,
+        sim_config={
+            "n_tsteps": 10,
+            "dt": 0.01,
+            "solver_paths": {
+                "svzerodsolver_build_dir": "/opt/svZeroDSolver-build",
+            },
+            "execution": {
+                "mode": "slurm",
+                "executable": "svmultiphysics",
+            },
+        },
+    )
+
+    assert calls
+    assert (
+        calls[0]["shared_library"]
+        == "/opt/svZeroDSolver-build/src/interface/libsvzero_interface.so"
+    )
+
+
 def test_from_directory_preserves_explicit_valid_coupler(monkeypatch, tmp_path: Path):
     mesh_dir = tmp_path / "mesh-complete"
     mesh_dir.mkdir()

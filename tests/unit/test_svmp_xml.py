@@ -6,6 +6,8 @@ import pytest
 
 from svzerodtrees.simulation.input_builders.svmp_xml import SvMPxml
 
+_SHARED_LIBRARY_PATH = "/opt/svZeroDSolver-build/src/interface/libsvzero_interface.so"
+
 
 def _make_mesh_complete():
     return SimpleNamespace(
@@ -142,7 +144,12 @@ def test_svmp_xml_matches_postop_surface_names_without_branch_underscores(tmp_pa
         }
     )
 
-    writer.write(mesh_complete, wall_model="deformable", threed_coupler=threed_coupler)
+    writer.write(
+        mesh_complete,
+        wall_model="deformable",
+        threed_coupler=threed_coupler,
+        shared_library=_SHARED_LIBRARY_PATH,
+    )
 
     root = ET.parse(xml_path).getroot()
     assert root.findtext(".//Add_BC[@name='lpa1']/svZeroDSolver_block") == "LPA_1"
@@ -168,7 +175,12 @@ def test_svmp_xml_matches_postop_surface_names_without_x_suffix(tmp_path):
         }
     )
 
-    writer.write(mesh_complete, wall_model="deformable", threed_coupler=threed_coupler)
+    writer.write(
+        mesh_complete,
+        wall_model="deformable",
+        threed_coupler=threed_coupler,
+        shared_library=_SHARED_LIBRARY_PATH,
+    )
 
     root = ET.parse(xml_path).getroot()
     assert root.findtext(".//Add_BC[@name='rpa1']/svZeroDSolver_block") == "RPA_1_X"
@@ -281,3 +293,42 @@ def test_svmp_xml_prestress_mode_writes_shell_cmm_setup(tmp_path):
     assert add_bf.get("mesh") == "wall"
     assert add_bf.findtext("Type") == "traction"
     assert add_bf.findtext("Spatial_values_file_path") == "/tmp/rigid_wall_mean_traction.vtp"
+
+
+def test_svmp_xml_requires_shared_library_for_coupled_svzerodsolver(tmp_path):
+    xml_path = Path(tmp_path) / "svFSIplus.xml"
+    writer = SvMPxml(str(xml_path))
+    threed_coupler = SimpleNamespace(
+        coupling_blocks={
+            "OUTLET": SimpleNamespace(
+                name="OUTLET",
+                surface="mesh-complete/mesh-surfaces/outlet.vtp",
+            ),
+        }
+    )
+
+    with pytest.raises(ValueError, match="shared_library is required"):
+        writer.write(_make_mesh_complete(), wall_model="rigid", threed_coupler=threed_coupler)
+
+
+def test_svmp_xml_writes_configured_shared_library_path(tmp_path):
+    xml_path = Path(tmp_path) / "svFSIplus.xml"
+    writer = SvMPxml(str(xml_path))
+    threed_coupler = SimpleNamespace(
+        coupling_blocks={
+            "OUTLET": SimpleNamespace(
+                name="OUTLET",
+                surface="mesh-complete/mesh-surfaces/outlet.vtp",
+            ),
+        }
+    )
+
+    writer.write(
+        _make_mesh_complete(),
+        wall_model="rigid",
+        threed_coupler=threed_coupler,
+        shared_library=_SHARED_LIBRARY_PATH,
+    )
+
+    root = ET.parse(xml_path).getroot()
+    assert root.findtext(".//svZeroDSolver_interface/Shared_library") == _SHARED_LIBRARY_PATH

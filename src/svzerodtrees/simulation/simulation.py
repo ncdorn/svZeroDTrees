@@ -100,6 +100,7 @@ class Simulation:
                  prestress_file=None,
                  prestress_file_path=None,
                  tissue_support=None,
+                 solver_paths=None,
                  optimized=False, 
                  inflow_path=None,
                  execution_config=None):
@@ -150,6 +151,7 @@ class Simulation:
                 'prestress_file': prestress_file,
                 'prestress_file_path': prestress_file_path,
                 'tissue_support': tissue_support,
+                'solver_paths': solver_paths,
                 'execution': self.execution_config,
             }
         if wall_model == "deformable":
@@ -471,6 +473,7 @@ class Simulation:
             "poisson_ratio": self.threed_sim_config["poisson_ratio"],
             "shell_thickness": self.threed_sim_config["shell_thickness"],
             "tissue_support": self.threed_sim_config.get("tissue_support"),
+            "solver_paths": self.threed_sim_config.get("solver_paths"),
             "execution": self.execution_config,
         }
         prestress_sim.write_files(simname="Prestress Simulation", user_input=False, sim_config=prestress_config)
@@ -622,6 +625,7 @@ class Simulation:
             os.makedirs(dir_path, exist_ok=True)
             # create the steady simulation
             steady_sims[label] = SimulationDirectory.from_directory(path=dir_path, mesh_complete=self.preop_dir.mesh_complete.path, convert_to_cm=self.convert_to_cm, mesh_scale_factor=self.mesh_scale_factor)
+            steady_sims[label].solver_paths = self.threed_sim_config.get("solver_paths")
             steady_sims[label].generate_steady_sim(flow_rate=q, execution_config=self.execution_config)
             # cd into directory to sumit simulation
             os.chdir(steady_sims[label].path)

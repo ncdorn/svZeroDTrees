@@ -570,7 +570,7 @@ def write_svpre_file(sim_dir, mesh_complete):
     return inlet_idx, outlet_idxs
 
 
-def write_svzerod_interface(sim_dir, interface_path='/home/users/ndorn/svZeroDSolver/Release/src/interface/libsvzero_interface.so'):
+def write_svzerod_interface(sim_dir, interface_path=None):
     '''
     write the svZeroD_interface.dat file for the simulation
     
@@ -578,6 +578,9 @@ def write_svzerod_interface(sim_dir, interface_path='/home/users/ndorn/svZeroDSo
     :param zerod_coupler: path to the 3D-0D coupling file'''
 
     print('writing svZeroD interface file...')
+
+    if interface_path is None or not str(interface_path).strip():
+        raise ValueError("interface_path is required to write svZeroD interface file")
 
     zerod_coupler = os.path.join(sim_dir, 'svzerod_3Dcoupling.json')
 
