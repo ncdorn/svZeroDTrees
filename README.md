@@ -106,18 +106,34 @@ svzerodtrees schema
   study-level JSON/CSV/PNG summaries.
 - `calibrate_0d_from_3d`: run stage-1 Levenberg-Marquardt calibration from a
   precomputed mapped centerline result and write a calibrated 0D JSON. The
-  mapped input may be a single scalar pressure/flow field pair or a numbered
-  pressure/flow timeseries such as `pressure_0..N` and `velocity_0..N`. When
-  the mapped field is velocity, stage 1 converts it to volumetric flow with
-  `CenterlineSectionArea` before calibration, and derives `dy` from periodic
-  finite differences using the 0D inflow period. If the solver returns
+  mapped input may be a single scalar pressure/flow field pair or the ordered
+  final-cycle timeseries emitted by svzt-agent. Numbered timeseries require a
+  metadata sidecar; `flow_0..N` is integrated volumetric flow in `cm^3/s` and
+  is consumed without area multiplication. A legacy `velocity_0..N` stack is
+  accepted only when configured with `flow_observation_type: flow`, which also
+  prevents area multiplication. A true velocity field must be explicitly
+  declared with `flow_observation_type: velocity` and an area array. `dy` is
+  derived from recorded sidecar timestamps, including periodic wraparound; if
+  the solver returns
   non-finite calibrated parameters, or if the input 0D config contains
   unsupported non-finite numeric values, the workflow raises an error instead
   of writing an invalid JSON file. For rigid-vessel inputs that use positive
   infinity for compliance, opt in with
   `calibration.input_normalization.infinite_vessel_compliance: zero`; only
   `vessels[*].zero_d_element_values.C` is converted to `0.0`, and the result
-  records the changed JSON paths.
+  records the changed JSON paths. External interfaces are sampled from
+  adjacent interior cross-sections and require at least three usable branch
+  paths; internal junction interfaces remain topology-derived interpolations.
+  An under-resolved vessel must be explicitly excluded with an empty vessel
+  parameter override, and the result records selected interface paths and
+  exclusions. After QC, the unchanged calibrator is invoked twice: the second
+  invocation starts from the first calibrated block values and preserves the
+  same observations, solver controls, and parameter selections. The workflow
+  publishes only a fixed-point-confirmed result; confirmation tolerances are
+  configured with `confirmation_absolute_tolerance` and
+  `confirmation_relative_tolerance`. Negative selected parameters and large
+  parameter ratios are recorded as warnings, not rejected solely for their
+  sign or ratio.
 - `postprocess`: generate figures from saved tree pickles or compute analysis artifacts such as svSlicer-based pulmonary resistance maps or the standardized pulmonary 3D postprocess suite.
   Pulmonary resistance-map configs may optionally set `workers: auto|<int>`, and
   pulmonary 3D suite configs may optionally set `resistance_map_workers`, to
@@ -136,6 +152,12 @@ Typical outputs are written under `paths.root` and include:
   pre-mapping MPA pressure and branch-flow metrics for iteration diagnostics.
 - `svzerod_config_with_bcs.json` (or `paths.output_config`) from tree construction.
 - calibrated 0D JSON at `paths.output_config` from `calibrate_0d_from_3d`.
+- `calibration_observation_qc.json` beside the calibration output; failed
+  conservation, inflow, pressure-direction, path-coverage, or sampling checks
+  prevent solver dispatch and leave the output JSON unwritten.
+- `calibration_confirmation.json` beside the calibration output; it records both
+  black-box calibrator invocations, fixed-point deltas and tolerances, inactive
+  parameter validation, solver provenance, and negative/large-ratio warnings.
 - `preop`, `postop`, `adapted` directories for pipeline/adaptation runs.
 - Figures from postprocess workflow (PNG outputs you specify).
 - Postprocess analysis artifacts such as `resistance_map_mean.vtp`,
@@ -150,7 +172,8 @@ Typical outputs are written under `paths.root` and include:
 - YAML configs: `examples/pipeline_example.yml`, `examples/tune_bcs_example.yml`,
   `examples/construct_tree/construct_trees_example.yml`, `examples/adapt_example.yml`,
   `examples/adapt_benchmark_tst_stan_1.yml`, `examples/postprocess_example.yml`,
-  `examples/postprocess_resistance_map_example.yml`.
+  `examples/postprocess_resistance_map_example.yml`,
+  `examples/calibration/calibrate_svslicer_timeseries.yml`.
 - Local BC tuning + preop 3D smoke case: `examples/bc-tuning/local_pipeline.yml`.
 - Legacy construct-tree notes: `examples/construct_tree/README.md`.
 

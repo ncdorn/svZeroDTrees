@@ -81,7 +81,7 @@ pysvzerod = { path = "../svZeroDSolver", editable = true }
 # changes during development, but releases must update this revision.
 source = "../svZeroDSolver"
 source_commit = "991fa17cfe4d436395f649a2c6be0bbda987c23e"
-required_capabilities = ["per_block_parameter_selection", "calibration_diagnostics"]
+required_capabilities = ["per_block_parameter_selection"]
 
 [tool.hatch.build]
 only-packages = true

@@ -8,8 +8,10 @@ import vtk
 from vtk.util.numpy_support import numpy_to_vtk
 
 from svzerodtrees.calibration.workflow import (
+    CalibrationAssembly,
     _normalize_calibration_input,
     assemble_calibration_payload,
+    calibrate_0d_from_mapped_centerline,
 )
 from svzerodtrees.config import (
     CalibrationConfig,
@@ -30,40 +32,60 @@ def _write_polydata(
     flow=None,
     area=None,
     extra_arrays: dict[str, list[float]] | None = None,
+    expand_two_point_branches: bool = True,
 ) -> None:
+    groups = []
+    group_start = 0
+    for index in range(1, len(branch_ids) + 1):
+        if index == len(branch_ids) or branch_ids[index] != branch_ids[group_start]:
+            groups.append((group_start, index))
+            group_start = index
+
+    def expand(values):
+        if values is None:
+            return None
+        expanded = []
+        for start, end in groups:
+            group = list(values[start:end])
+            expanded.extend(group)
+            if expand_two_point_branches and len(group) == 2:
+                expanded.insert(-1, (group[0] + group[1]) / 2.0)
+        return expanded
+
+    expanded_branch_ids = expand(branch_ids)
+    expanded_paths = expand(paths)
+    expanded_area = expand(area) if area is not None else [1.0] * len(expanded_branch_ids)
     points = vtk.vtkPoints()
-    for point in (
-        (0.0, 0.0, 0.0),
-        (1.0, 0.0, 0.0),
-        (1.0, 0.0, 0.0),
-        (2.0, 1.0, 0.0),
-        (1.0, 0.0, 0.0),
-        (2.0, -1.0, 0.0),
-    ):
-        points.InsertNextPoint(*point)
+    for index in range(len(expanded_branch_ids)):
+        points.InsertNextPoint(float(index), 0.0, 0.0)
 
     poly = vtk.vtkPolyData()
     poly.SetPoints(points)
 
     lines = vtk.vtkCellArray()
-    for start in (0, 2, 4):
-        line = vtk.vtkLine()
-        line.GetPointIds().SetId(0, start)
-        line.GetPointIds().SetId(1, start + 1)
-        lines.InsertNextCell(line)
+    point_offset = 0
+    for start, end in groups:
+        count = end - start
+        expanded_count = 3 if expand_two_point_branches and count == 2 else count
+        for index in range(expanded_count - 1):
+            line = vtk.vtkLine()
+            line.GetPointIds().SetId(0, point_offset + index)
+            line.GetPointIds().SetId(1, point_offset + index + 1)
+            lines.InsertNextCell(line)
+        point_offset += expanded_count
     poly.SetLines(lines)
 
     arrays = {
-        "BranchId": branch_ids,
-        "Path": paths,
-        "CenterlineSectionArea": area if area is not None else [1.0] * len(branch_ids),
+        "BranchId": expanded_branch_ids,
+        "Path": expanded_paths,
+        "CenterlineSectionArea": expanded_area,
     }
     if pressure is not None:
-        arrays["pressure"] = pressure
+        arrays["pressure"] = expand(pressure)
     if flow is not None:
-        arrays["velocity"] = flow
+        arrays["velocity"] = expand(flow)
     if extra_arrays:
-        arrays.update(extra_arrays)
+        arrays.update({name: expand(values) for name, values in extra_arrays.items()})
 
     for name, values in arrays.items():
         array = numpy_to_vtk(values, deep=True)
@@ -132,12 +154,53 @@ def _write_zerod_config(path: Path) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _write_timeseries_metadata(
+    path: Path,
+    *,
+    frame_count: int,
+    point_count: int = 9,
+    flow_array: str = "velocity",
+    cycle_duration_s: float = 1.0,
+) -> None:
+    timestamps = [cycle_duration_s * index / frame_count for index in range(frame_count)]
+    processed_frames = [
+        {
+            "frame_index": index,
+            "time_s": timestamp,
+            "point_arrays": [f"pressure_{index}", f"{flow_array}_{index}"],
+        }
+        for index, timestamp in enumerate(timestamps)
+    ]
+    path.write_text(
+        json.dumps(
+            {
+                "kind": "centerline_timeseries_last_cycle",
+                "frame_count": frame_count,
+                "point_count": point_count,
+                "frame_indices": list(range(frame_count)),
+                "timestamps_s": timestamps,
+                "cycle_duration_s": cycle_duration_s,
+                "data_contract": {
+                    "pressure": {"quantity": "pressure", "units": "mmHg"},
+                    "flow": {"quantity": "volumetric_flow", "units": "cm^3/s"},
+                },
+                "processed_frames": processed_frames,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def _calibration_config(tmp_path: Path) -> CalibrationConfig:
     return CalibrationConfig(
         data_source=CalibrationDataSourceConfig(
             mode="mapped_centerline",
             mapped_centerline_result=str(tmp_path / "mapped.vtp"),
+            metadata_json=str(tmp_path / "mapped_metadata.json"),
             centerline=str(tmp_path / "centerline.vtp"),
+            flow_array="velocity",
+            flow_observation_type="flow",
+            area_array="CenterlineSectionArea",
         ),
         parameters=CalibrationParametersConfig(
             vessels=CalibrationParameterSelectionConfig(
@@ -187,17 +250,212 @@ def test_assemble_calibration_payload_from_mapped_centerline(tmp_path):
     assert assembly.solver_payload["y"]["flow:INFLOW:branch0_seg0"] == [10.0]
     assert assembly.solver_payload["y"]["pressure:branch0_seg0:J0"] == [90.0]
     assert assembly.solver_payload["y"]["flow:J0:branch1_seg0"] == [6.0]
-    assert assembly.solver_payload["y"]["pressure:branch2_seg0:OUT2"] == [70.0]
+    assert assembly.solver_payload["y"]["pressure:branch2_seg0:OUT2"] == [80.0]
     assert assembly.solver_payload["dy"]["pressure:J0:branch2_seg0"] == [0.0]
     assert assembly.solver_payload["vessels"][0]["calibrate"] == ["R_poiseuille", "C"]
     assert assembly.solver_payload["vessels"][2]["calibrate"] == ["R_poiseuille"]
     assert assembly.solver_payload["junctions"][0]["calibrate"] == ["R_poiseuille", "L"]
+    assert assembly.observation_qc["status"] == "pass"
+    assert assembly.observation_qc["checks"] == {
+        "junction_mass_balance": True,
+        "path_coverage": True,
+        "pressure_drop_direction": True,
+        "root_waveform_agreement": True,
+        "sampling_resolution": True,
+        "vessel_flow_continuity": True,
+    }
+    assert assembly.interface_sampling["branch0_seg0:upstream"] == {
+        "interface_kind": "external_upstream",
+        "quality_status": "qualified_interior",
+        "requested_path": 0.0,
+        "selected_path": 0.5,
+        "inset_distance": 0.5,
+        "usable_sample_count": 3,
+        "paired_observation": True,
+        "excluded_from_calibration": False,
+    }
+    assert assembly.interface_sampling["branch0_seg0:downstream"]["selected_path"] == 1.0
     assert assembly.solver_payload["calibration_parameters"] == {
         "initial_damping_factor": 2.0,
         "maximum_iterations": 7,
         "tolerance_gradient": 1e-05,
         "tolerance_increment": 1e-08,
     }
+
+
+def test_endpoint_qualification_rejects_underresolved_branch(tmp_path):
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "mapped.vtp"
+    zerod = tmp_path / "zerod.json"
+    _write_polydata(
+        centerline,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        expand_two_point_branches=False,
+    )
+    _write_polydata(
+        mapped,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        pressure=[100.0, 90.0, 90.0, 80.0, 90.0, 70.0],
+        flow=[10.0, 10.0, 6.0, 6.0, 4.0, 4.0],
+        expand_two_point_branches=False,
+    )
+    _write_zerod_config(zerod)
+
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(zerod),
+        calibration=_calibration_config(tmp_path),
+    )
+
+    assert assembly.observation_qc["status"] == "fail"
+    assert not assembly.observation_qc["checks"]["sampling_resolution"]
+    assert assembly.interface_sampling["branch0_seg0:upstream"]["quality_status"] == (
+        "underresolved"
+    )
+
+
+def test_explicit_empty_parameter_override_records_underresolved_exclusion(tmp_path):
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "mapped.vtp"
+    zerod = tmp_path / "zerod.json"
+    for path in (centerline, mapped):
+        _write_polydata(
+            path,
+            branch_ids=[0, 0, 1, 1, 2, 2],
+            paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+            pressure=([100.0, 90.0, 90.0, 80.0, 90.0, 70.0] if path == mapped else None),
+            flow=([10.0, 10.0, 6.0, 6.0, 4.0, 4.0] if path == mapped else None),
+            expand_two_point_branches=False,
+        )
+    _write_zerod_config(zerod)
+
+    calibration = _calibration_config(tmp_path)
+    calibration.parameters.vessels.overrides = {
+        "branch0_seg0": [],
+        "branch1_seg0": [],
+        "branch2_seg0": [],
+    }
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(zerod),
+        calibration=calibration,
+    )
+
+    assert assembly.excluded_blocks == {
+        "branch0_seg0": "empty_vessel_parameter_override",
+        "branch1_seg0": "empty_vessel_parameter_override",
+        "branch2_seg0": "empty_vessel_parameter_override",
+    }
+    assert assembly.interface_sampling["branch0_seg0:upstream"]["quality_status"] == (
+        "excluded_underresolved"
+    )
+    assert assembly.interface_sampling["branch0_seg0:upstream"]["excluded_from_calibration"]
+
+
+def test_failed_observation_qc_writes_report_without_dispatching_solver(monkeypatch, tmp_path):
+    output_path = tmp_path / "calibrated.json"
+    assembly = CalibrationAssembly(
+        solver_payload={},
+        observation_count=1,
+        variable_count=0,
+        input_normalization={},
+        observation_qc={
+            "status": "fail",
+            "checks": {"junction_mass_balance": False},
+            "metrics": {},
+            "thresholds": {},
+            "selected_interfaces": {},
+            "exclusions": {},
+        },
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.assemble_calibration_payload",
+        lambda **_kwargs: assembly,
+    )
+    solver_called = False
+
+    def fail_if_called(_payload):
+        nonlocal solver_called
+        solver_called = True
+        raise AssertionError("solver dispatch must be gated by observation QC")
+
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.calibrate_pysvzerod",
+        fail_if_called,
+    )
+
+    with pytest.raises(ValueError, match="observation QC failed before solver dispatch"):
+        calibrate_0d_from_mapped_centerline(
+            zerod_config_path="unused.json",
+            output_config_path=str(output_path),
+            calibration=None,
+        )
+
+    assert not solver_called
+    assert not output_path.exists()
+    report = json.loads(
+        (tmp_path / "calibration_observation_qc.json").read_text(encoding="utf-8")
+    )
+    assert report["status"] == "fail"
+
+
+def test_confirmation_failure_does_not_publish_solver_config(monkeypatch, tmp_path):
+    output_path = tmp_path / "calibrated.json"
+    assembly = CalibrationAssembly(
+        solver_payload={
+            "vessels": [
+                {
+                    "vessel_name": "branch0_seg0",
+                    "zero_d_element_values": {"R_poiseuille": 1.0, "C": 2.0},
+                    "calibrate": ["R_poiseuille"],
+                }
+            ],
+            "junctions": [],
+            "y": {"flow:IN:branch0_seg0": [1.0]},
+            "dy": {"flow:IN:branch0_seg0": [0.0]},
+            "calibration_parameters": {"maximum_iterations": 1},
+        },
+        observation_count=1,
+        variable_count=1,
+        input_normalization={},
+        observation_qc={
+            "status": "pass",
+            "checks": {},
+            "metrics": {},
+            "thresholds": {},
+            "selected_interfaces": {},
+            "exclusions": {},
+        },
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.assemble_calibration_payload",
+        lambda **_kwargs: assembly,
+    )
+    calls = []
+
+    def fake_calibrate(payload):
+        calls.append(json.loads(json.dumps(payload)))
+        result = json.loads(json.dumps(payload))
+        if len(calls) == 2:
+            result["vessels"][0]["zero_d_element_values"]["R_poiseuille"] = 2.0
+        return result
+
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.calibrate_pysvzerod",
+        fake_calibrate,
+    )
+
+    with pytest.raises(ValueError, match="did not reach a parameter fixed point"):
+        calibrate_0d_from_mapped_centerline(
+            zerod_config_path="unused.json",
+            output_config_path=str(output_path),
+            calibration=_calibration_config(tmp_path),
+        )
+
+    assert len(calls) == 2
+    assert calls[1]["vessels"][0]["zero_d_element_values"]["R_poiseuille"] == 1.0
+    assert not output_path.exists()
+    assert not (tmp_path / "calibration_confirmation.json").exists()
 
 
 def test_normalizes_only_positive_infinite_vessel_compliance(tmp_path):
@@ -284,6 +542,7 @@ def test_assemble_calibration_payload_from_mapped_centerline_timeseries(tmp_path
             "velocity_1": [11.0, 11.0, 7.0, 7.0, 5.0, 5.0],
         },
     )
+    _write_timeseries_metadata(tmp_path / "mapped_metadata.json", frame_count=2)
     _write_zerod_config(zerod)
 
     calibration = _calibration_config(tmp_path)
@@ -300,7 +559,7 @@ def test_assemble_calibration_payload_from_mapped_centerline_timeseries(tmp_path
     assert assembly.solver_payload["y"]["flow:INFLOW:branch0_seg0"] == [10.0, 11.0]
     assert assembly.solver_payload["y"]["pressure:branch0_seg0:J0"] == [90.0, 91.0]
     assert assembly.solver_payload["y"]["flow:J0:branch1_seg0"] == [6.0, 7.0]
-    assert assembly.solver_payload["y"]["pressure:branch2_seg0:OUT2"] == [70.0, 71.0]
+    assert assembly.solver_payload["y"]["pressure:branch2_seg0:OUT2"] == [80.0, 81.0]
     assert assembly.solver_payload["dy"]["pressure:J0:branch2_seg0"] == [0.0, 0.0]
 
 
@@ -322,17 +581,25 @@ def test_assemble_calibration_payload_converts_velocity_to_flow_with_area(tmp_pa
         pressure=[100.0, 90.0, 90.0, 80.0, 90.0, 70.0],
         flow=[10.0, 10.0, 6.0, 6.0, 4.0, 4.0],
         area=[2.0, 2.0, 3.0, 3.0, 4.0, 4.0],
+        extra_arrays={
+            "centerline_velocity": [10.0, 10.0, 6.0, 6.0, 4.0, 4.0]
+        },
     )
     _write_zerod_config(zerod)
 
+    calibration = _calibration_config(tmp_path)
+    calibration.data_source.flow_array = "centerline_velocity"
+    calibration.data_source.flow_observation_type = "velocity"
     assembly = assemble_calibration_payload(
         zerod_config_path=str(zerod),
-        calibration=_calibration_config(tmp_path),
+        calibration=calibration,
     )
 
     assert assembly.solver_payload["y"]["flow:INFLOW:branch0_seg0"] == [20.0]
     assert assembly.solver_payload["y"]["flow:J0:branch1_seg0"] == [18.0]
     assert assembly.solver_payload["y"]["flow:J0:branch2_seg0"] == [16.0]
+    assert assembly.observation_qc["status"] == "fail"
+    assert not assembly.observation_qc["checks"]["junction_mass_balance"]
 
 
 def test_assemble_calibration_payload_supports_direct_flow_observations(tmp_path):
@@ -344,13 +611,15 @@ def test_assemble_calibration_payload_supports_direct_flow_observations(tmp_path
         centerline,
         branch_ids=[0, 0, 1, 1, 2, 2],
         paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        area=[2.0, 2.0, 3.0, 3.0, 4.0, 4.0],
     )
     _write_polydata(
         mapped,
         branch_ids=[0, 0, 1, 1, 2, 2],
         paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
         pressure=[100.0, 90.0, 90.0, 80.0, 90.0, 70.0],
-        extra_arrays={"flow_0": [10.0, 10.0, 6.0, 6.0, 4.0, 4.0]},
+        area=[2.0, 2.0, 3.0, 3.0, 4.0, 4.0],
+        extra_arrays={"flow": [10.0, 10.0, 6.0, 6.0, 4.0, 4.0]},
     )
     _write_zerod_config(zerod)
 
@@ -367,6 +636,56 @@ def test_assemble_calibration_payload_supports_direct_flow_observations(tmp_path
     assert assembly.solver_payload["y"]["flow:INFLOW:branch0_seg0"] == [10.0]
     assert assembly.solver_payload["y"]["flow:J0:branch1_seg0"] == [6.0]
     assert assembly.solver_payload["y"]["flow:J0:branch2_seg0"] == [4.0]
+
+
+def test_numbered_timeseries_requires_matching_metadata(tmp_path):
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "mapped.vtp"
+    zerod = tmp_path / "zerod.json"
+    _write_polydata(
+        centerline,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+    )
+    _write_polydata(
+        mapped,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        extra_arrays={
+            "pressure_0": [100.0, 90.0, 90.0, 80.0, 90.0, 70.0],
+            "flow_0": [10.0, 10.0, 6.0, 6.0, 4.0, 4.0],
+        },
+    )
+    _write_zerod_config(zerod)
+
+    calibration = _calibration_config(tmp_path)
+    calibration.data_source.flow_array = "flow"
+    calibration.data_source.metadata_json = None
+    with pytest.raises(ValueError, match="require data_source.metadata_json"):
+        assemble_calibration_payload(zerod_config_path=str(zerod), calibration=calibration)
+
+
+def test_mean_resistance_map_is_not_a_timeseries_source(tmp_path):
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "resistance_map_mean.vtp"
+    zerod = tmp_path / "zerod.json"
+    _write_polydata(
+        centerline,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+    )
+    _write_polydata(
+        mapped,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        pressure=[100.0, 90.0, 90.0, 80.0, 90.0, 70.0],
+        flow=[10.0, 10.0, 6.0, 6.0, 4.0, 4.0],
+    )
+    _write_zerod_config(zerod)
+    calibration = _calibration_config(tmp_path)
+    calibration.data_source.mapped_centerline_result = str(mapped)
+    with pytest.raises(ValueError, match="not an ordered timeseries"):
+        assemble_calibration_payload(zerod_config_path=str(zerod), calibration=calibration)
 
 
 def test_assemble_calibration_payload_derives_periodic_dy_for_timeseries(tmp_path):
@@ -394,13 +713,16 @@ def test_assemble_calibration_payload_derives_periodic_dy_for_timeseries(tmp_pat
             "flow_3": [-1.0, -1.0, 6.0, 6.0, 4.0, 4.0],
         },
     )
+    _write_timeseries_metadata(
+        tmp_path / "mapped_metadata.json", frame_count=4, flow_array="flow"
+    )
 
     payload = {
         "boundary_conditions": [
             {
                 "bc_name": "INFLOW",
                 "bc_type": "FLOW",
-                "bc_values": {"Q": [0.0, 1.0, 0.0, -1.0, 0.0], "t": [0.0, 0.25, 0.5, 0.75, 1.0]},
+                    "bc_values": {"Q": [0.0, 1.0, 0.0, -1.0, 0.0], "t": [0.0, 0.5, 1.0, 1.5, 2.0]},
             },
             {"bc_name": "OUT1", "bc_type": "RESISTANCE", "bc_values": {"R": 1.0}},
             {"bc_name": "OUT2", "bc_type": "RESISTANCE", "bc_values": {"R": 1.0}},
@@ -540,18 +862,30 @@ def test_assemble_calibration_payload_supports_multiple_segments_per_branch(tmp_
                 mode="mapped_centerline",
                 mapped_centerline_result=str(mapped),
                 centerline=str(centerline),
+                flow_array="velocity",
+                flow_observation_type="flow",
             ),
             parameters=CalibrationParametersConfig(),
         ),
     )
 
     assert assembly.observation_count == 1
-    assert assembly.solver_payload["y"]["pressure:INFLOW:branch0_seg0"] == [100.0]
+    assert assembly.solver_payload["y"]["pressure:INFLOW:branch0_seg0"] == [98.0]
     assert assembly.solver_payload["y"]["pressure:branch0_seg0:J0"] == [98.0]
     assert assembly.solver_payload["y"]["pressure:J0:branch0_seg1"] == [98.0]
     assert assembly.solver_payload["y"]["pressure:branch0_seg1:J1"] == [94.0]
     assert assembly.solver_payload["y"]["pressure:J1:branch0_seg2"] == [94.0]
-    assert assembly.solver_payload["y"]["pressure:branch0_seg2:OUT"] == [90.0]
+    assert assembly.solver_payload["y"]["pressure:branch0_seg2:OUT"] == [92.0]
+    assert assembly.interface_sampling["branch0_seg1:upstream"] == {
+        "interface_kind": "internal",
+        "quality_status": "interpolated_internal",
+        "requested_path": 0.1635,
+        "selected_path": 0.1635,
+        "inset_distance": 0.0,
+        "usable_sample_count": 6,
+        "paired_observation": True,
+        "excluded_from_calibration": False,
+    }
 
 
 def test_assemble_calibration_payload_rejects_unavailable_junction_parameters(tmp_path):
@@ -625,11 +959,13 @@ def test_assemble_calibration_payload_rejects_unavailable_junction_parameters(tm
         assemble_calibration_payload(
             zerod_config_path=str(zerod),
             calibration=CalibrationConfig(
-                data_source=CalibrationDataSourceConfig(
-                    mode="mapped_centerline",
-                    mapped_centerline_result=str(mapped),
-                    centerline=str(centerline),
-                ),
+            data_source=CalibrationDataSourceConfig(
+                mode="mapped_centerline",
+                mapped_centerline_result=str(mapped),
+                centerline=str(centerline),
+                flow_array="velocity",
+                flow_observation_type="flow",
+            ),
                 parameters=CalibrationParametersConfig(
                     junctions=CalibrationParameterSelectionConfig(default=["R_poiseuille"]),
                 ),

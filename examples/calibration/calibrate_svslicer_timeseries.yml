@@ -1,0 +1,50 @@
+version: 1
+workflow: calibrate_0d_from_3d
+
+# The paths below are relative to this case directory. The canonical Stage 1
+# case uses the finite rigid-vessel baseline and the final-cycle stack emitted
+# by svzt-agent.
+paths:
+  root: .
+  zerod_config: baseline_0d_c0.json
+  output_config: calibrated_0d.json
+
+calibration:
+  data_source:
+    mode: mapped_centerline
+    mapped_centerline_result: centerline_timeseries_last_cycle.vtp
+    metadata_json: centerline_timeseries_last_cycle_metadata.json
+    centerline: centerlines.vtp
+    pressure_array: pressure
+    flow_array: flow
+    flow_observation_type: flow
+    area_array: null
+    branch_id_array: BranchId
+    path_array: Path
+  parameters:
+    vessels:
+      default: [R_poiseuille]
+      overrides:
+        # These mapped branches have only two usable cross-sections and are
+        # excluded until they are remapped at adequate resolution.
+        branch15_seg0: []
+        branch27_seg0: []
+        branch28_seg0: []
+        branch31_seg0: []
+    junctions:
+      default: []
+      overrides: {}
+  solver:
+    initial_damping_factor: 1.0
+    maximum_iterations: 100
+    tolerance_gradient: 1.0e-6
+    tolerance_increment: 1.0e-10
+  input_normalization:
+    infinite_vessel_compliance: error
+  observation_qc:
+    vessel_flow_continuity_tolerance: 0.10
+    junction_mass_balance_tolerance: 0.10
+    root_waveform_rms_tolerance: 0.10
+    minimum_pressure_drop_fraction: 0.95
+    minimum_path_coverage: 0.99
+    minimum_usable_samples: 3

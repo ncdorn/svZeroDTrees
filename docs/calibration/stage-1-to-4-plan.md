@@ -114,7 +114,12 @@ calibration:
   data_source:
     mode: mapped_centerline # mapped_centerline | threed_simulation
     mapped_centerline_result: path/to/result_centerline.vtp
+    metadata_json: path/to/result_centerline_metadata.json
     centerline: path/to/centerlines.vtp
+    pressure_array: pressure
+    flow_array: flow
+    flow_observation_type: flow
+    area_array: null
     simulation_dir: path/to/3d-simulation
     svslicer_path: path/to/svslicer
     cycle_duration_s: 1.0
@@ -129,6 +134,9 @@ calibration:
     maximum_iterations: 100
     tolerance_gradient: 1e-6
     tolerance_increment: 1e-10
+    parameter_ratio_warning_threshold: 100.0
+    confirmation_absolute_tolerance: 1e-8
+    confirmation_relative_tolerance: 1e-6
   outputs:
     write_debug_plots: false
     mapped_centerline_output: path/to/mapped_centerline.vtp
@@ -163,11 +171,15 @@ calibrator from a precomputed mapped centerline result.
 - Support either:
   - a single mapped pressure/flow field pair
   - a numbered mapped timeseries field set such as `pressure_0..N` and
-    `velocity_0..N`, assembled into full solver observation arrays
+    `flow_0..N`, assembled into full solver observation arrays using the
+    sidecar's frame ordering and timestamps
 - Support multi-segment 0D branches by sampling mapped centerline observations
   at cumulative `vessel_length` interface locations along each branch `Path`.
 - Invoke `pysvzerod.calibrate`.
-- Write calibrated solver JSON to `paths.output_config`.
+- Invoke the unchanged calibrator a second time from the first calibrated block
+  values to confirm a downstream-observed parameter fixed point.
+- Write calibrated solver JSON to `paths.output_config` only after confirmation;
+  write deterministic QC and confirmation reports beside it.
 
 ### Stage 1 Deliverables
 
@@ -267,7 +279,7 @@ threed_simulation
 
 ## Stage 3: Parameter Selection, Reporting, and Interface Hardening
 
-Status: planned
+Status: implemented in repo; replay and schema normalization remain Stage 4
 
 Goal: stabilize the public calibration contract so it is safe to consume from
 other workflows and from `svzt-agent`.
@@ -276,12 +288,16 @@ other workflows and from `svzt-agent`.
 
 - Finalize how users specify calibrated parameters.
 - Prefer a contract that maps directly to solver block-level `calibrate` lists.
+- Confirm the unchanged solver as a black box by invoking calibration twice and
+  comparing the selected scalar/list parameters at a downstream-observed fixed
+  point.
 - Decide and document defaults for:
   - vessel parameters
   - junction parameters
   - whether stenosis terms are included
 - Add structured outputs:
-  - calibration summary JSON or CSV
+  - observation QC report
+  - two-pass calibration confirmation JSON
   - effective config snapshot
   - generated mapped-centerline metadata when Stage 2 mode is used
 - Add clear error behavior for:
@@ -289,21 +305,28 @@ other workflows and from `svzt-agent`.
   - malformed centerline arrays
   - inconsistent time resolution
   - unsupported parameter names
+- Treat negative selected resistance and large parameter ratios as reportable
+  warnings; they do not independently reject a converged fixed point.
 
 ### Stage 3 Deliverables
 
 - hardened parameter-selection schema
-- output contract documentation
+- output and fixed-point confirmation contract documentation
 - focused tests for:
   - parameter-selection parsing
   - solver-input assembly
   - artifact presence and naming
+  - inactive-parameter preservation and fixed-point failure behavior
 - docs updates with copyable examples
 
 ### Stage 3 Completion Requirements
 
 - there is one documented way to specify what gets calibrated
 - output artifacts are stable enough for downstream automation
+- the solver is not required to return calibration diagnostics beyond its
+  existing calibrated configuration API
+- inactive parameters remain exactly unchanged and selected parameters pass the
+  two-pass confirmation tolerance
 - the workflow no longer depends on estimator-only concepts like `project`
 - the workflow contract is explicit enough for pipeline integration
 

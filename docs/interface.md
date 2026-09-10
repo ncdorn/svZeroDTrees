@@ -56,11 +56,12 @@ calibration:
   data_source:
     mode: mapped_centerline
     mapped_centerline_result: path/to/result_centerline.vtp
+    metadata_json: path/to/result_centerline_metadata.json
     centerline: path/to/centerline.vtp
     pressure_array: pressure
-    flow_array: velocity
-    flow_observation_type: velocity
-    area_array: CenterlineSectionArea
+    flow_array: flow
+    flow_observation_type: flow  # required: flow | velocity
+    area_array: null
     branch_id_array: BranchId
     path_array: Path
   parameters:
@@ -77,19 +78,34 @@ calibration:
     maximum_iterations: 100
     tolerance_gradient: 1e-6
     tolerance_increment: 1e-10
+    parameter_ratio_warning_threshold: 100.0
+    confirmation_absolute_tolerance: 1e-8
+    confirmation_relative_tolerance: 1e-6
   input_normalization:
     infinite_vessel_compliance: error  # error | zero
+  observation_qc:
+    vessel_flow_continuity_tolerance: 0.10
+    junction_mass_balance_tolerance: 0.10
+    root_waveform_rms_tolerance: 0.10
+    minimum_pressure_drop_fraction: 0.95
+    minimum_path_coverage: 0.99
+    minimum_usable_samples: 3
 ```
 
 Stage-1 calibration constraints:
 
 - `calibration.data_source.mode` must currently be `mapped_centerline`.
-- The mapped result must contain either scalar point-data arrays named by `pressure_array` and `flow_array`, or contiguous numbered series such as `pressure_0..N` and `velocity_0..N`.
-- `flow_observation_type: flow` means `flow_array` already stores volumetric flow.
-- `flow_observation_type: velocity` means `flow_array` stores mapped centerline velocity and stage 1 converts it to volumetric flow using `area_array`, defaulting to `CenterlineSectionArea`.
-- When numbered series are provided, stage 1 builds full time-series `y` and `dy` arrays for the solver in observation-index order.
-- For timeseries calibration, stage 1 derives `dy` from periodic finite differences across the observation cycle using the `INFLOW` boundary-condition period from `bc_values.t`.
+- `flow_observation_type` is required; an omitted value is rejected because mapped flow names are otherwise ambiguous.
+- svSlicer stack output is configured as `flow_array: flow` and `flow_observation_type: flow`. Its `flow_0..N` arrays are integrated volumetric flow in `cm^3/s` and are never multiplied by cross-sectional area.
+- Legacy svSlicer stacks named `velocity_0..N` are accepted with `flow_array: velocity` and `flow_observation_type: flow`; the values are still treated as already integrated flow and are not area-scaled.
+- `flow_observation_type: velocity` is reserved for a true velocity field and explicitly converts it with `area_array`.
+- Numbered series require `metadata_json`. The sidecar must identify the final-cycle artifact, match point/frame counts and frame indices, list the paired pressure/flow arrays, declare pressure units and volumetric-flow units, and provide ordered timestamps plus `cycle_duration_s`.
+- For timeseries calibration, stage 1 derives `dy` from the recorded sidecar timestamps, including the periodic wrap interval. Nonuniform timing fails before calibration.
 - Stage 1 supports multi-segment branches when each 0D vessel includes `vessel_length`, so internal segment interfaces can be placed along the branch `Path`.
+- External boundary interfaces are qualified from the adjacent interior mapped cross-section: the upstream endpoint uses the second usable path sample and the downstream endpoint uses the penultimate usable path sample. Automatic qualification requires at least three unique usable branch paths; no endpoint extrapolation is performed.
+- Interfaces attached to a 0D junction remain topology-derived path queries and are linearly interpolated at the requested `Path`, including interfaces between segments of one branch.
+- The calibration result records `interface_sampling` for every assembled upstream/downstream interface, including `requested_path`, `selected_path`, `inset_distance`, `usable_sample_count`, pairing status, and quality status. A vessel can be explicitly excluded from calibration with an empty `calibration.parameters.vessels.overrides` list; such exclusions are recorded in `excluded_blocks`. Under-resolved endpoints otherwise fail before solver dispatch.
+- Before solver dispatch, the workflow writes `calibration_observation_qc.json` beside the requested output config. The report contains deterministic metrics and checks for vessel continuity, junction mass balance, root inflow waveform agreement, pressure-drop direction, path coverage, and sampling resolution. Any failed check prevents the solver call and leaves the output solver JSON unwritten.
 - The mapped centerline result and reference centerline must have matching point counts.
 - Single-snapshot calibration still emits zero `dy` observations.
 - The input 0D config must not contain non-finite numeric values such as `NaN` or `inf`.
@@ -98,6 +114,10 @@ Stage-1 calibration constraints:
   Every other non-finite value fails with its JSON path, and the source file is
   never modified. The calibration result records the normalized paths and count.
 - Non-finite values returned by the solver are treated as calibration failure and no output JSON is written.
+- `resistance_map_mean.vtp` and `resistance_map_systolic.vtp` are summary artifacts and are rejected as timeseries sources. Use `centerline_timeseries_last_cycle.vtp` with its sidecar.
+- After observation QC, the unchanged `pysvzerod.calibrate` API is invoked twice. The confirmation payload is a copy of the first payload with only vessel/junction parameter values replaced by the first result; observations, solver controls, and per-block `calibrate` selections remain unchanged.
+- A selected scalar or list parameter is fixed-point confirmed when its confirmation delta satisfies `abs(delta) <= confirmation_absolute_tolerance + confirmation_relative_tolerance * max(abs(first), abs(confirmation))`. Non-finite results, missing selected parameters, changed inactive parameters, solver exceptions, and failed confirmation deltas prevent output publication.
+- The calibrator is not required to return `calibration_diagnostics`. `parameter_ratio_warning_threshold` replaces the former hard maximum ratio, and negative selected parameters—including negative resistance—are accepted when the two-pass fixed-point check succeeds. Both passes, confirmation deltas, solver provenance, negative-parameter paths, and large-ratio paths are written to `calibration_confirmation.json`.
 
 **BCs**
 ```yaml

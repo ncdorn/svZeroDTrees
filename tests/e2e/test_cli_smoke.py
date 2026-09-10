@@ -109,6 +109,7 @@ calibration:
     mode: mapped_centerline
     mapped_centerline_result: mapped.vtp
     centerline: centerline.vtp
+    flow_observation_type: flow
   parameters:
     vessels:
       default: [R_poiseuille]

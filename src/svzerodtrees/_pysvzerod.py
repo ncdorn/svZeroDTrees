@@ -11,7 +11,6 @@ import time
 REQUIRED_CALIBRATION_CAPABILITIES = frozenset(
     {
         "per_block_parameter_selection",
-        "calibration_diagnostics",
     }
 )
 

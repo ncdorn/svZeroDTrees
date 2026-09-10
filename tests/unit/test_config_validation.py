@@ -87,6 +87,7 @@ calibration:
     mode: mapped_centerline
     mapped_centerline_result: mapped.vtp
     centerline: centerline.vtp
+    flow_observation_type: flow
   parameters:
     vessels:
       default: [R_poiseuille, C]
@@ -105,11 +106,16 @@ calibration:
     assert cfg.workflow == "calibrate_0d_from_3d"
     assert cfg.calibration is not None
     assert cfg.calibration.data_source.mapped_centerline_result == str(tmp_path / "mapped.vtp")
-    assert cfg.calibration.data_source.flow_observation_type == "velocity"
-    assert cfg.calibration.data_source.area_array == "CenterlineSectionArea"
+    assert cfg.calibration.data_source.flow_observation_type == "flow"
+    assert cfg.calibration.data_source.area_array is None
     assert cfg.calibration.input_normalization.infinite_vessel_compliance == "error"
+    assert cfg.calibration.observation_qc.vessel_flow_continuity_tolerance == 0.10
+    assert cfg.calibration.observation_qc.minimum_usable_samples == 3
     assert cfg.calibration.parameters.vessels.overrides["branch0_seg0"] == ["R_poiseuille"]
     assert cfg.calibration.solver.maximum_iterations == 12
+    assert cfg.calibration.solver.parameter_ratio_warning_threshold == 100.0
+    assert cfg.calibration.solver.confirmation_absolute_tolerance == 1e-8
+    assert cfg.calibration.solver.confirmation_relative_tolerance == 1e-6
 
 
 def test_calibration_requires_mapped_centerline_source_fields(tmp_path):
@@ -126,6 +132,7 @@ calibration:
   data_source:
     mode: mapped_centerline
     centerline: centerline.vtp
+    flow_observation_type: flow
   parameters:
     vessels: {}
     junctions: {}
@@ -152,6 +159,7 @@ calibration:
     mode: mapped_centerline
     mapped_centerline_result: mapped.vtp
     centerline: centerline.vtp
+    flow_observation_type: flow
     flow_observation_type: bogus
   parameters:
     vessels: {{}}
@@ -161,6 +169,32 @@ calibration:
     )
 
     with pytest.raises(ValueError, match="flow_observation_type must be one of flow\\|velocity"):
+        load_config(str(cfg_path))
+
+
+def test_calibration_requires_explicit_flow_observation_type(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: calibrate_0d_from_3d
+paths:
+  root: {tmp_path}
+  zerod_config: zerod.json
+  output_config: calibrated.json
+calibration:
+  data_source:
+    mode: mapped_centerline
+    mapped_centerline_result: mapped.vtp
+    centerline: centerline.vtp
+  parameters:
+    vessels: {{}}
+    junctions: {{}}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="flow_observation_type is required"):
         load_config(str(cfg_path))
 
 
@@ -181,6 +215,7 @@ calibration:
     mode: mapped_centerline
     mapped_centerline_result: mapped.vtp
     centerline: centerline.vtp
+    flow_observation_type: flow
   parameters:
     vessels: {{}}
     junctions: {{}}
@@ -211,6 +246,7 @@ calibration:
     mode: mapped_centerline
     mapped_centerline_result: mapped.vtp
     centerline: centerline.vtp
+    flow_observation_type: flow
   parameters:
     vessels: {{}}
     junctions: {{}}
@@ -219,6 +255,71 @@ calibration:
     )
 
     with pytest.raises(ValueError, match="infinite_vessel_compliance must be one of error\\|zero"):
+        load_config(str(cfg_path))
+
+
+def test_calibration_validates_observation_qc_thresholds(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: calibrate_0d_from_3d
+paths:
+  root: {tmp_path}
+  zerod_config: zerod.json
+  output_config: calibrated.json
+calibration:
+  data_source:
+    mode: mapped_centerline
+    mapped_centerline_result: mapped.vtp
+    centerline: centerline.vtp
+    flow_observation_type: flow
+  parameters:
+    vessels: {{}}
+    junctions: {{}}
+  observation_qc:
+    minimum_path_coverage: 1.1
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="minimum_path_coverage must be in \\(0, 1\\]"):
+        load_config(str(cfg_path))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("confirmation_absolute_tolerance", -1.0),
+        ("confirmation_relative_tolerance", "nan"),
+    ],
+)
+def test_calibration_validates_confirmation_tolerances(tmp_path, field, value):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: calibrate_0d_from_3d
+paths:
+  root: {tmp_path}
+  zerod_config: zerod.json
+  output_config: calibrated.json
+calibration:
+  data_source:
+    mode: mapped_centerline
+    mapped_centerline_result: mapped.vtp
+    centerline: centerline.vtp
+    flow_observation_type: flow
+  parameters:
+    vessels: {{}}
+    junctions: {{}}
+  solver:
+    {field}: {value}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="confirmation tolerances must be finite and non-negative"):
         load_config(str(cfg_path))
 
 

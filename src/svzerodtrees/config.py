@@ -161,11 +161,12 @@ class PostprocessConfig:
 class CalibrationDataSourceConfig:
     mode: str = "mapped_centerline"
     mapped_centerline_result: Optional[str] = None
+    metadata_json: Optional[str] = None
     centerline: Optional[str] = None
     pressure_array: str = "pressure"
-    flow_array: str = "velocity"
-    flow_observation_type: str = "velocity"
-    area_array: Optional[str] = "CenterlineSectionArea"
+    flow_array: str = "flow"
+    flow_observation_type: str = "flow"
+    area_array: Optional[str] = None
     branch_id_array: str = "BranchId"
     path_array: str = "Path"
 
@@ -188,11 +189,24 @@ class CalibrationSolverConfig:
     maximum_iterations: int = 100
     tolerance_gradient: float = 1e-6
     tolerance_increment: float = 1e-10
+    parameter_ratio_warning_threshold: float = 100.0
+    confirmation_absolute_tolerance: float = 1e-8
+    confirmation_relative_tolerance: float = 1e-6
 
 
 @dataclass
 class CalibrationInputNormalizationConfig:
     infinite_vessel_compliance: str = "error"
+
+
+@dataclass
+class CalibrationObservationQCConfig:
+    vessel_flow_continuity_tolerance: float = 0.10
+    junction_mass_balance_tolerance: float = 0.10
+    root_waveform_rms_tolerance: float = 0.10
+    minimum_pressure_drop_fraction: float = 0.95
+    minimum_path_coverage: float = 0.99
+    minimum_usable_samples: int = 3
 
 
 @dataclass
@@ -202,6 +216,9 @@ class CalibrationConfig:
     solver: CalibrationSolverConfig = field(default_factory=CalibrationSolverConfig)
     input_normalization: CalibrationInputNormalizationConfig = field(
         default_factory=CalibrationInputNormalizationConfig
+    )
+    observation_qc: CalibrationObservationQCConfig = field(
+        default_factory=CalibrationObservationQCConfig
     )
 
 
@@ -709,7 +726,13 @@ def _parse_calibration_parameter_selection(
 def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
     _ensure_keys(
         data,
-        ["data_source", "parameters", "solver", "input_normalization"],
+        [
+            "data_source",
+            "parameters",
+            "solver",
+            "input_normalization",
+            "observation_qc",
+        ],
         "calibration",
     )
 
@@ -721,6 +744,7 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         [
             "mode",
             "mapped_centerline_result",
+            "metadata_json",
             "centerline",
             "pressure_array",
             "flow_array",
@@ -740,14 +764,20 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         raise ValueError("calibration.data_source.mapped_centerline_result is required")
     if data_source_raw.get("centerline") in (None, ""):
         raise ValueError("calibration.data_source.centerline is required")
-    flow_observation_type = str(
-        data_source_raw.get("flow_observation_type", "velocity")
-    ).lower()
+    if "flow_observation_type" not in data_source_raw:
+        raise ValueError(
+            "calibration.data_source.flow_observation_type is required; "
+            "declare flow for svSlicer integrated flow or velocity for a true velocity field"
+        )
+    flow_observation_type = str(data_source_raw["flow_observation_type"]).lower()
     if flow_observation_type not in {"flow", "velocity"}:
         raise ValueError(
             "calibration.data_source.flow_observation_type must be one of flow|velocity"
         )
-    area_array = data_source_raw.get("area_array", "CenterlineSectionArea")
+    area_array = data_source_raw.get(
+        "area_array",
+        "CenterlineSectionArea" if flow_observation_type == "velocity" else None,
+    )
     if area_array in ("", None):
         area_array = None
     if flow_observation_type == "velocity" and area_array is None:
@@ -758,9 +788,15 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
     data_source = CalibrationDataSourceConfig(
         mode=mode,
         mapped_centerline_result=_resolve_path(root, str(data_source_raw["mapped_centerline_result"])),
+        metadata_json=_resolve_path(
+            root,
+            str(data_source_raw["metadata_json"])
+            if data_source_raw.get("metadata_json") not in (None, "")
+            else None,
+        ),
         centerline=_resolve_path(root, str(data_source_raw["centerline"])),
         pressure_array=str(data_source_raw.get("pressure_array", "pressure")),
-        flow_array=str(data_source_raw.get("flow_array", "velocity")),
+        flow_array=str(data_source_raw.get("flow_array", "flow")),
         flow_observation_type=flow_observation_type,
         area_array=str(area_array) if area_array is not None else None,
         branch_id_array=str(data_source_raw.get("branch_id_array", "BranchId")),
@@ -792,6 +828,9 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             "maximum_iterations",
             "tolerance_gradient",
             "tolerance_increment",
+            "parameter_ratio_warning_threshold",
+            "confirmation_absolute_tolerance",
+            "confirmation_relative_tolerance",
         ],
         "calibration.solver",
     )
@@ -800,7 +839,37 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         maximum_iterations=int(solver_raw.get("maximum_iterations", 100)),
         tolerance_gradient=float(solver_raw.get("tolerance_gradient", 1e-6)),
         tolerance_increment=float(solver_raw.get("tolerance_increment", 1e-10)),
+        parameter_ratio_warning_threshold=float(
+            solver_raw.get("parameter_ratio_warning_threshold", 100.0)
+        ),
+        confirmation_absolute_tolerance=float(
+            solver_raw.get("confirmation_absolute_tolerance", 1e-8)
+        ),
+        confirmation_relative_tolerance=float(
+            solver_raw.get("confirmation_relative_tolerance", 1e-6)
+        ),
     )
+    if (
+        not np.isfinite(solver.initial_damping_factor)
+        or solver.initial_damping_factor <= 0.0
+        or solver.maximum_iterations < 1
+        or not np.isfinite(solver.tolerance_gradient)
+        or solver.tolerance_gradient < 0.0
+        or not np.isfinite(solver.tolerance_increment)
+        or solver.tolerance_increment < 0.0
+        or not np.isfinite(solver.parameter_ratio_warning_threshold)
+        or solver.parameter_ratio_warning_threshold < 1.0
+        or not np.isfinite(solver.confirmation_absolute_tolerance)
+        or solver.confirmation_absolute_tolerance < 0.0
+        or not np.isfinite(solver.confirmation_relative_tolerance)
+        or solver.confirmation_relative_tolerance < 0.0
+    ):
+        raise ValueError(
+            "calibration.solver requires a positive damping factor and at least "
+            "one iteration; tolerances must be finite and non-negative; "
+            "parameter_ratio_warning_threshold must be finite and at least 1; "
+            "confirmation tolerances must be finite and non-negative"
+        )
 
     normalization_raw = data.get("input_normalization") or {}
     if not isinstance(normalization_raw, dict):
@@ -819,6 +888,65 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             "must be one of error|zero"
         )
 
+    observation_qc_raw = data.get("observation_qc") or {}
+    if not isinstance(observation_qc_raw, dict):
+        raise ValueError("calibration.observation_qc must be a mapping")
+    _ensure_keys(
+        observation_qc_raw,
+        [
+            "vessel_flow_continuity_tolerance",
+            "junction_mass_balance_tolerance",
+            "root_waveform_rms_tolerance",
+            "minimum_pressure_drop_fraction",
+            "minimum_path_coverage",
+            "minimum_usable_samples",
+        ],
+        "calibration.observation_qc",
+    )
+    observation_qc = CalibrationObservationQCConfig(
+        vessel_flow_continuity_tolerance=float(
+            observation_qc_raw.get("vessel_flow_continuity_tolerance", 0.10)
+        ),
+        junction_mass_balance_tolerance=float(
+            observation_qc_raw.get("junction_mass_balance_tolerance", 0.10)
+        ),
+        root_waveform_rms_tolerance=float(
+            observation_qc_raw.get("root_waveform_rms_tolerance", 0.10)
+        ),
+        minimum_pressure_drop_fraction=float(
+            observation_qc_raw.get("minimum_pressure_drop_fraction", 0.95)
+        ),
+        minimum_path_coverage=float(
+            observation_qc_raw.get("minimum_path_coverage", 0.99)
+        ),
+        minimum_usable_samples=int(
+            observation_qc_raw.get("minimum_usable_samples", 3)
+        ),
+    )
+    if (
+        not np.isfinite(observation_qc.vessel_flow_continuity_tolerance)
+        or observation_qc.vessel_flow_continuity_tolerance < 0.0
+        or not np.isfinite(observation_qc.junction_mass_balance_tolerance)
+        or observation_qc.junction_mass_balance_tolerance < 0.0
+        or not np.isfinite(observation_qc.root_waveform_rms_tolerance)
+        or observation_qc.root_waveform_rms_tolerance < 0.0
+    ):
+        raise ValueError(
+            "calibration.observation_qc error tolerances must be finite and non-negative"
+        )
+    if not 0.0 <= observation_qc.minimum_pressure_drop_fraction <= 1.0:
+        raise ValueError(
+            "calibration.observation_qc.minimum_pressure_drop_fraction must be between 0 and 1"
+        )
+    if not 0.0 < observation_qc.minimum_path_coverage <= 1.0:
+        raise ValueError(
+            "calibration.observation_qc.minimum_path_coverage must be in (0, 1]"
+        )
+    if observation_qc.minimum_usable_samples < 3:
+        raise ValueError(
+            "calibration.observation_qc.minimum_usable_samples must be at least 3"
+        )
+
     return CalibrationConfig(
         data_source=data_source,
         parameters=parameters,
@@ -826,6 +954,7 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         input_normalization=CalibrationInputNormalizationConfig(
             infinite_vessel_compliance=infinite_vessel_compliance
         ),
+        observation_qc=observation_qc,
     )
 
 
@@ -1133,11 +1262,12 @@ calibration:
   data_source:
     mode: mapped_centerline  # mapped_centerline
     mapped_centerline_result: path/to/result_centerline.vtp
+    metadata_json: path/to/result_centerline_metadata.json
     centerline: path/to/centerline.vtp
     pressure_array: pressure
-    flow_array: velocity
-    flow_observation_type: velocity
-    area_array: CenterlineSectionArea
+    flow_array: flow
+    flow_observation_type: flow  # flow | velocity; required
+    area_array: null
     branch_id_array: BranchId
     path_array: Path
   parameters:
@@ -1152,8 +1282,18 @@ calibration:
     maximum_iterations: 100
     tolerance_gradient: 1e-6
     tolerance_increment: 1e-10
+    parameter_ratio_warning_threshold: 100.0
+    confirmation_absolute_tolerance: 1e-8
+    confirmation_relative_tolerance: 1e-6
   input_normalization:
     infinite_vessel_compliance: error  # error | zero
+  observation_qc:
+    vessel_flow_continuity_tolerance: 0.10
+    junction_mass_balance_tolerance: 0.10
+    root_waveform_rms_tolerance: 0.10
+    minimum_pressure_drop_fraction: 0.95
+    minimum_path_coverage: 0.99
+    minimum_usable_samples: 3
 
 bcs:
   type: impedance  # impedance | rcr

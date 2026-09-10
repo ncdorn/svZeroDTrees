@@ -34,7 +34,6 @@ def test_capabilities_and_provenance_are_machine_readable(monkeypatch):
     module = _fake_solver(
         capabilities={
             "per_block_parameter_selection": True,
-            "calibration_diagnostics": True,
         }
     )
     monkeypatch.setattr(loader.importlib, "import_module", lambda _name: module)
@@ -46,7 +45,6 @@ def test_capabilities_and_provenance_are_machine_readable(monkeypatch):
     assert result["build_identity"]["source_commit"].startswith("991fa17")
     assert result["capabilities"] == {
         "per_block_parameter_selection": True,
-        "calibration_diagnostics": True,
     }
 
 
@@ -75,7 +73,6 @@ def test_calibration_dispatch_records_provenance(monkeypatch):
     module = _fake_solver(
         capabilities={
             "per_block_parameter_selection": True,
-            "calibration_diagnostics": True,
         }
     )
     monkeypatch.setattr(loader.importlib, "import_module", lambda _name: module)
@@ -88,7 +85,6 @@ def test_calibration_dispatch_records_provenance(monkeypatch):
         "build_identity": module.__build_identity__,
         "capabilities": {
             "per_block_parameter_selection": True,
-            "calibration_diagnostics": True,
         },
     }
 
@@ -97,7 +93,6 @@ def test_provenance_is_not_recorded_when_calibrate_fails(monkeypatch):
     module = _fake_solver(
         capabilities={
             "per_block_parameter_selection": True,
-            "calibration_diagnostics": True,
         }
     )
     module.calibrate = lambda _payload: (_ for _ in ()).throw(ValueError("bad input"))
