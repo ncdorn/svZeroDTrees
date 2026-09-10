@@ -32,6 +32,10 @@ def test_cli_schema_renders_config_template(monkeypatch, capsys):
     assert "workflow: pipeline" in rendered
     assert "paths:" in rendered
     assert "bcs:" in rendered
+    assert "flow_observation_type: flow" in rendered
+    assert "confirmation_absolute_tolerance: 1e-8" in rendered
+    assert "pressure_bound_multiplier: 10.0" in rendered
+    assert "cycle_stability_tolerance: 1e-3" in rendered
 
 
 def test_cli_dispatches_real_config_to_pipeline_workflow(monkeypatch, tmp_path):

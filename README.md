@@ -104,8 +104,9 @@ svzerodtrees schema
 - `adapt-benchmark`: run local reduced-PA adaptation sweeps across `M1`, `M2`,
   and `M3` from optimized preop/postop reduced RRI configs and write
   study-level JSON/CSV/PNG summaries.
-- `calibrate_0d_from_3d`: run stage-1 Levenberg-Marquardt calibration from a
-  precomputed mapped centerline result and write a calibrated 0D JSON. The
+- `calibrate_0d_from_3d`: run fixed-point-confirmed Levenberg-Marquardt
+  calibration from a precomputed mapped centerline result and write a
+  calibrated 0D JSON only after stable replay. The
   mapped input may be a single scalar pressure/flow field pair or the ordered
   final-cycle timeseries emitted by svzt-agent. Numbered timeseries require a
   metadata sidecar; `flow_0..N` is integrated volumetric flow in `cm^3/s` and
@@ -178,6 +179,15 @@ Typical outputs are written under `paths.root` and include:
   `resistance_map_systolic.vtp`, ranked CSV summaries, standardized
   `mpa_pressure_vs_time.csv`, flow-split comparison outputs, and metadata JSON
   files.
+
+The copyable calibration example is
+`examples/calibration/calibrate_svslicer_timeseries.yml`. Run it from the case
+directory containing the referenced baseline, centerline, timeseries, and
+metadata files:
+
+```bash
+svzerodtrees calibrate-0d-from-3d calibrate_svslicer_timeseries.yml
+```
 
 **Examples**
 - Tutorial scripts: `examples/tutorials/01_build_tree.py`,

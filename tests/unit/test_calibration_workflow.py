@@ -285,6 +285,126 @@ def test_assemble_calibration_payload_from_mapped_centerline(tmp_path):
     }
 
 
+def test_committed_calibration_fixture_covers_public_observation_contract(
+    fixtures_dir, tmp_path
+):
+    fixture_dir = fixtures_dir / "calibration"
+    baseline_path = fixture_dir / "finite_rigid_baseline.json"
+    mapped_path = fixture_dir / "mapped_timeseries.vtp"
+    metadata_path = fixture_dir / "mapped_timeseries_metadata.json"
+
+    calibration = CalibrationConfig(
+        data_source=CalibrationDataSourceConfig(
+            mode="mapped_centerline",
+            mapped_centerline_result=str(mapped_path),
+            metadata_json=str(metadata_path),
+            centerline=str(mapped_path),
+            flow_array="flow",
+            flow_observation_type="flow",
+        ),
+        parameters=CalibrationParametersConfig(
+            vessels=CalibrationParameterSelectionConfig(default=["R_poiseuille"]),
+            junctions=CalibrationParameterSelectionConfig(default=[]),
+        ),
+    )
+
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(baseline_path),
+        calibration=calibration,
+    )
+
+    assert assembly.observation_count == 3
+    assert assembly.variable_count == 12
+    # The fixture advertises an area of 7 for each point.  Direct integrated
+    # flow must still reach the solver unchanged.
+    assert assembly.solver_payload["y"]["flow:INFLOW:branch0_seg0"] == [
+        10.0,
+        11.0,
+        10.0,
+    ]
+    assert assembly.solver_payload["y"]["flow:J0:branch1_seg0"] == [
+        6.0,
+        6.6,
+        6.0,
+    ]
+    assert assembly.interface_sampling["branch0_seg0:upstream"] == {
+        "interface_kind": "external_upstream",
+        "quality_status": "qualified_interior",
+        "requested_path": 0.0,
+        "selected_path": 0.3333333333333333,
+        "inset_distance": 0.3333333333333333,
+        "usable_sample_count": 4,
+        "paired_observation": True,
+        "excluded_from_calibration": False,
+    }
+    assert assembly.observation_qc["status"] == "pass"
+
+    normalized, normalization = _normalize_calibrated_config(
+        assembly.solver_payload
+    )
+    assert normalized["junctions"][0]["junction_type"] == "NORMAL_JUNCTION"
+    assert normalization["junction_type_changes"] == [
+        {
+            "from": "internal_junction",
+            "junction_name": "J0",
+            "to": "NORMAL_JUNCTION",
+        }
+    ]
+
+    # The fixture also carries an unmapped two-point branch. Add that branch
+    # to a temporary copy of the finite baseline to prove explicit exclusion
+    # is the only supported way to assemble an under-resolved vessel.
+    short_baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    short_baseline["boundary_conditions"].extend(
+        [
+            {
+                "bc_name": "SHORT_IN",
+                "bc_type": "FLOW",
+                "bc_values": {"Q": [2.0], "t": [0.0]},
+            },
+            {
+                "bc_name": "SHORT_OUT",
+                "bc_type": "RESISTANCE",
+                "bc_values": {"R": 100.0},
+            },
+        ]
+    )
+    short_baseline["vessels"].append(
+        {
+            "vessel_id": 3,
+            "vessel_name": "branch3_seg0",
+            "vessel_length": 1.0,
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {"R_poiseuille": 40.0, "C": 0.0, "L": 0.04},
+            "boundary_conditions": {"inlet": "SHORT_IN", "outlet": "SHORT_OUT"},
+        }
+    )
+    short_baseline_path = tmp_path / "short_baseline.json"
+    short_baseline_path.write_text(json.dumps(short_baseline), encoding="utf-8")
+    short_calibration = CalibrationConfig(
+        data_source=calibration.data_source,
+        parameters=CalibrationParametersConfig(
+            vessels=CalibrationParameterSelectionConfig(
+                default=["R_poiseuille"], overrides={"branch3_seg0": []}
+            ),
+            junctions=CalibrationParameterSelectionConfig(default=[]),
+        ),
+    )
+
+    short_assembly = assemble_calibration_payload(
+        zerod_config_path=str(short_baseline_path),
+        calibration=short_calibration,
+    )
+
+    assert short_assembly.excluded_blocks == {
+        "branch3_seg0": "empty_vessel_parameter_override"
+    }
+    assert short_assembly.interface_sampling["branch3_seg0:upstream"][
+        "quality_status"
+    ] == "excluded_underresolved"
+    assert short_assembly.observation_qc["status"] == "pass"
+
+
 def test_endpoint_qualification_rejects_underresolved_branch(tmp_path):
     centerline = tmp_path / "centerline.vtp"
     mapped = tmp_path / "mapped.vtp"

@@ -30,14 +30,45 @@ later be orchestrated by `svzt-agent`.
   - `cycle_duration_s` or `inflow_csv`
 - a local dependency on `pysvzerod` from the sibling `svZeroDSolver` repo
 
-`svZeroDTrees` does not yet have:
+The mapped-centerline calibration path is now implemented. The remaining
+future work in this document is raw 3D preprocessing and optional orchestration
+integration; neither changes the finalized calibration contract.
 
-- a first-class workflow for 0D calibration from 3D results
-- config fields for calibration inputs and solver LM controls
+The finalized path provides:
+
+- a first-class `calibrate_0d_from_3d` workflow
+- typed config fields for calibration inputs and solver/replay controls
 - a stable contract for how mapped 3D centerline data becomes calibrator
   observations
-- a documented path for `svzt-agent` to invoke this as part of the tuning
-  pipeline
+- deterministic QC, confirmation, replay, and summary artifacts
+
+## Finalized Regression Contract
+
+The complete calibration regression is tracked by `CAL-008` in
+`plans/calibrator_workflow_debug.json`. From a case directory containing the
+referenced input files (after copying the example config), run:
+
+```bash
+svzerodtrees calibrate-0d-from-3d calibrate_svslicer_timeseries.yml
+```
+
+It requires a finite `paths.zerod_config`, `paths.output_config`, a mapped
+centerline result, its metadata sidecar for numbered final-cycle arrays, and
+explicit vessel and junction parameter selections. Integrated svSlicer flow is
+declared with `flow_observation_type: flow` and is consumed without area
+multiplication. The workflow qualifies external interfaces from interior
+samples, gates solver dispatch on observation QC, confirms selected parameters
+with a second calibrator invocation, normalizes the solver schema, and replays
+the result for finite bounded cycle-stable pressure and flow before publishing.
+
+A successful run writes the requested solver JSON plus
+`calibration_observation_qc.json`, `calibration_confirmation.json`,
+`calibration_replay.json`, and `calibration_summary.json` beside it. Failed QC,
+confirmation, schema validation, or replay leaves the solver JSON unpublished.
+Negative calibrated resistance is reportable and accepted when the fixed-point
+and replay checks pass. Small synthetic committed fixtures live under
+`tests/fixtures/calibration`; the TST-STAN-5 regression is external and opt-in
+via `SVZERODTREES_RUN_REAL_CASE=1`.
 
 ## Parameter Inventory
 
@@ -150,7 +181,8 @@ This shape is intentionally explicit. It avoids hiding the distinction between:
 
 ## Stage 1: Minimal Native Calibration Workflow
 
-Status: implemented in repo; real-case validation depends on calibrator-compatible 0D inputs
+Status: implemented in repo; the synthetic regression is hermetic and the
+TST-STAN-5 validation is opt-in and external.
 
 Goal: add the smallest stable `svZeroDTrees` workflow that can run the solver
 calibrator from a precomputed mapped centerline result.
@@ -209,10 +241,10 @@ To exercise Stage 1 meaningfully, the input data must satisfy all of:
 
 Current `TST-STAN-5` note:
 
-- the pulled `baseline_0d.json` currently contains `inf` vessel compliances
-  and therefore fails Stage-1 input validation before the solver is invoked
-- this makes the current artifact unsuitable as a calibrator test case until a
-  finite calibrator-compatible 0D baseline is supplied
+- use the finite `baseline_0d_c0.json` artifact when the local real-case
+  regression is enabled
+- the original `baseline_0d.json` remains a useful normalization input but is
+  intentionally not used as a solver test baseline
 
 ### Stage 1 Non-Goals
 
@@ -279,7 +311,7 @@ threed_simulation
 
 ## Stage 3: Parameter Selection, Reporting, and Interface Hardening
 
-Status: implemented in repo; replay and schema normalization remain Stage 4
+Status: implemented in repo, including replay and schema normalization.
 
 Goal: stabilize the public calibration contract so it is safe to consume from
 other workflows and from `svzt-agent`.

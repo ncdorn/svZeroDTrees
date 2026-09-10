@@ -11,6 +11,72 @@ from vtk.util.numpy_support import numpy_to_vtk
 from svzerodtrees.api import run_from_config_file
 
 
+def _write_fixture_calibration_config(
+    path: Path,
+    *,
+    output_path: Path,
+    baseline_path: Path,
+    mapped_path: Path,
+    metadata_path: Path,
+) -> None:
+    path.write_text(
+        f"""
+version: 1
+workflow: calibrate_0d_from_3d
+paths:
+  root: {path.parent}
+  zerod_config: {baseline_path}
+  output_config: {output_path}
+calibration:
+  data_source:
+    mode: mapped_centerline
+    mapped_centerline_result: {mapped_path}
+    metadata_json: {metadata_path}
+    centerline: {mapped_path}
+    pressure_array: pressure
+    flow_array: flow
+    flow_observation_type: flow
+  parameters:
+    vessels:
+      default: [R_poiseuille]
+    junctions:
+      default: []
+  solver:
+    confirmation_absolute_tolerance: 1.0e-8
+    confirmation_relative_tolerance: 1.0e-6
+    pressure_bound_multiplier: 10.0
+    flow_bound_multiplier: 10.0
+    cycle_stability_tolerance: 1.0e-3
+""",
+        encoding="utf-8",
+    )
+
+
+def _fixture_replay_rows(*, unstable: bool = False) -> list[dict[str, float | str]]:
+    values = {
+        "branch0_seg0": (10.0, 100.0, 90.0),
+        "branch1_seg0": (6.0, 90.0, 80.0),
+        "branch2_seg0": (4.0, 90.0, 70.0),
+    }
+    rows: list[dict[str, float | str]] = []
+    for name, (flow, pressure_in, pressure_out) in values.items():
+        for index in range(7):
+            if unstable and index >= 4:
+                flow = 12.0
+                pressure_in = 2000.0
+            rows.append(
+                {
+                    "name": name,
+                    "time": float(index),
+                    "flow_in": flow,
+                    "flow_out": flow,
+                    "pressure_in": pressure_in,
+                    "pressure_out": pressure_out,
+                }
+            )
+    return rows
+
+
 def _write_polydata(
     path: Path,
     *,
@@ -396,3 +462,98 @@ calibration:
         run_from_config_file(str(cfg_path))
 
     assert not output_path.exists()
+
+
+def test_fixture_workflow_accepts_stable_negative_resistance(monkeypatch, tmp_path):
+    fixture_dir = Path(__file__).parents[1] / "fixtures" / "calibration"
+    baseline_path = fixture_dir / "finite_rigid_baseline.json"
+    mapped_path = fixture_dir / "mapped_timeseries.vtp"
+    metadata_path = fixture_dir / "mapped_timeseries_metadata.json"
+    output_path = tmp_path / "calibrated.json"
+    config_path = tmp_path / "calibrate.yml"
+    _write_fixture_calibration_config(
+        config_path,
+        output_path=output_path,
+        baseline_path=baseline_path,
+        mapped_path=mapped_path,
+        metadata_path=metadata_path,
+    )
+
+    calls: list[dict] = []
+
+    def stable_negative_calibrate(payload):
+        calls.append(json.loads(json.dumps(payload)))
+        result = json.loads(json.dumps(payload))
+        result["vessels"][0]["zero_d_element_values"]["R_poiseuille"] = -4.2
+        return result
+
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.calibrate_pysvzerod",
+        stable_negative_calibrate,
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.simulate_pysvzerod",
+        lambda _payload: _fixture_replay_rows(),
+    )
+
+    result = run_from_config_file(str(config_path))
+
+    assert result["status"] == "ok"
+    assert result["observation_count"] == 3
+    assert result["variable_count"] == 12
+    assert len(calls) == 2
+    assert calls[0]["y"] == calls[1]["y"]
+    assert calls[0]["dy"] == calls[1]["dy"]
+    assert calls[0]["calibration_parameters"] == calls[1]["calibration_parameters"]
+    assert calls[1]["vessels"][0]["zero_d_element_values"]["R_poiseuille"] == -4.2
+
+    published = json.loads(output_path.read_text(encoding="utf-8"))
+    assert published["vessels"][0]["zero_d_element_values"]["R_poiseuille"] == -4.2
+    assert published["junctions"][0]["junction_type"] == "NORMAL_JUNCTION"
+    assert all("calibrate" not in vessel for vessel in published["vessels"])
+    assert all("calibrate" not in junction for junction in published["junctions"])
+    assert result["calibration_confirmation"]["negative_parameter_paths"] == [
+        "branch0_seg0.R_poiseuille"
+    ]
+    assert result["replay_stability"]["status"] == "pass"
+    assert json.loads(
+        (tmp_path / "calibration_observation_qc.json").read_text(encoding="utf-8")
+    ) == result["observation_qc"]
+    assert json.loads(
+        (tmp_path / "calibration_summary.json").read_text(encoding="utf-8")
+    )["status"] == "ok"
+
+
+def test_fixture_workflow_rejects_finite_but_unstable_replay(monkeypatch, tmp_path):
+    fixture_dir = Path(__file__).parents[1] / "fixtures" / "calibration"
+    baseline_path = fixture_dir / "finite_rigid_baseline.json"
+    mapped_path = fixture_dir / "mapped_timeseries.vtp"
+    metadata_path = fixture_dir / "mapped_timeseries_metadata.json"
+    output_path = tmp_path / "calibrated.json"
+    config_path = tmp_path / "calibrate.yml"
+    _write_fixture_calibration_config(
+        config_path,
+        output_path=output_path,
+        baseline_path=baseline_path,
+        mapped_path=mapped_path,
+        metadata_path=metadata_path,
+    )
+
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.calibrate_pysvzerod",
+        lambda payload: json.loads(json.dumps(payload)),
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.simulate_pysvzerod",
+        lambda _payload: _fixture_replay_rows(unstable=True),
+    )
+
+    with pytest.raises(ValueError, match="replay stability checks failed"):
+        run_from_config_file(str(config_path))
+
+    assert not output_path.exists()
+    replay = json.loads(
+        (tmp_path / "calibration_replay.json").read_text(encoding="utf-8")
+    )
+    assert replay["status"] == "fail"
+    assert not replay["checks"]["cycle_stability"]

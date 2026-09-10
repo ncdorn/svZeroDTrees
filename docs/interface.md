@@ -9,7 +9,8 @@ This document defines the YAML schema used by the CLI and Python API. The schema
 - `adapt`: run microvascular adaptation (impedance BCs).
 - `adapt_benchmark`: run local reduced-PA adaptation benchmark studies from optimized preop/postop reduced RRI configs.
 - `postprocess`: generate figures from saved tree pickles or compute standalone analysis artifacts.
-- `calibrate_0d_from_3d`: run stage-1 0D calibration from a precomputed mapped centerline result.
+- `calibrate_0d_from_3d`: run fixed-point-confirmed 0D calibration from a
+  precomputed mapped centerline result and publish it only after stable replay.
 
 **Workflow Requirements**
 
@@ -125,6 +126,22 @@ Stage-1 calibration constraints:
 - The normalized result is structurally checked and replayed through the unchanged `pysvzerod.simulate` API before publication. Replay uses a copy configured for at least two complete cycles with all time points emitted; the requested cycle settings in the published JSON are unchanged.
 - Replay requires finite, positive `pressure_bound_multiplier` and `flow_bound_multiplier` settings and a finite, non-negative `cycle_stability_tolerance`. Every pressure and flow result must be finite, remain within its configured multiple of the corresponding observation scale, and have a final-cycle normalized RMS difference below the stability tolerance.
 - The solver JSON is written with an atomic replacement only after replay passes. A negative calibrated resistance is therefore accepted when it is fixed-point confirmed and replay-stable. `calibration_replay.json` records boundedness and cycle-stability metrics, and `calibration_summary.json` combines provenance, normalization, QC, confirmation, warnings, and replay diagnostics.
+
+From a case directory containing the referenced baseline, centerline,
+timeseries, and metadata files (after copying the example config), run:
+
+```bash
+svzerodtrees calibrate-0d-from-3d calibrate_svslicer_timeseries.yml
+```
+
+The input config must provide `paths.zerod_config`, `paths.output_config`, a
+finite solver JSON, the ordered mapped centerline timeseries, its metadata
+sidecar, and explicit vessel/junction parameter selections. A successful run
+publishes the solver JSON together with `calibration_observation_qc.json`,
+`calibration_confirmation.json`, `calibration_replay.json`, and
+`calibration_summary.json` beside it. QC, fixed-point confirmation, schema
+validation, or replay failure writes its diagnostic report but does not publish
+the solver JSON.
 
 **BCs**
 ```yaml
