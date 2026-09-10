@@ -81,6 +81,9 @@ calibration:
     parameter_ratio_warning_threshold: 100.0
     confirmation_absolute_tolerance: 1e-8
     confirmation_relative_tolerance: 1e-6
+    pressure_bound_multiplier: 10.0
+    flow_bound_multiplier: 10.0
+    cycle_stability_tolerance: 1e-3
   input_normalization:
     infinite_vessel_compliance: error  # error | zero
   observation_qc:
@@ -118,6 +121,10 @@ Stage-1 calibration constraints:
 - After observation QC, the unchanged `pysvzerod.calibrate` API is invoked twice. The confirmation payload is a copy of the first payload with only vessel/junction parameter values replaced by the first result; observations, solver controls, and per-block `calibrate` selections remain unchanged.
 - A selected scalar or list parameter is fixed-point confirmed when its confirmation delta satisfies `abs(delta) <= confirmation_absolute_tolerance + confirmation_relative_tolerance * max(abs(first), abs(confirmation))`. Non-finite results, missing selected parameters, changed inactive parameters, solver exceptions, and failed confirmation deltas prevent output publication.
 - The calibrator is not required to return `calibration_diagnostics`. `parameter_ratio_warning_threshold` replaces the former hard maximum ratio, and negative selected parameters—including negative resistance—are accepted when the two-pass fixed-point check succeeds. Both passes, confirmation deltas, solver provenance, negative-parameter paths, and large-ratio paths are written to `calibration_confirmation.json`.
+- After fixed-point confirmation, the workflow removes calibration-only fields and normalizes single-outlet `internal_junction` blocks to `NORMAL_JUNCTION`. Multi-outlet junction values are retained and are not calibrated unless explicitly selected.
+- The normalized result is structurally checked and replayed through the unchanged `pysvzerod.simulate` API before publication. Replay uses a copy configured for at least two complete cycles with all time points emitted; the requested cycle settings in the published JSON are unchanged.
+- Replay requires finite, positive `pressure_bound_multiplier` and `flow_bound_multiplier` settings and a finite, non-negative `cycle_stability_tolerance`. Every pressure and flow result must be finite, remain within its configured multiple of the corresponding observation scale, and have a final-cycle normalized RMS difference below the stability tolerance.
+- The solver JSON is written with an atomic replacement only after replay passes. A negative calibrated resistance is therefore accepted when it is fixed-point confirmed and replay-stable. `calibration_replay.json` records boundedness and cycle-stability metrics, and `calibration_summary.json` combines provenance, normalization, QC, confirmation, warnings, and replay diagnostics.
 
 **BCs**
 ```yaml

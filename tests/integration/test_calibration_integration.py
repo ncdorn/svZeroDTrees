@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pandas as pd
 import pytest
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk
@@ -138,7 +139,7 @@ def test_calibrate_0d_from_3d_workflow_writes_output(monkeypatch, tmp_path):
             "density": 1.06,
             "viscosity": 0.04,
             "number_of_cardiac_cycles": 1,
-            "number_of_time_pts_per_cardiac_cycle": 1,
+            "number_of_time_pts_per_cardiac_cycle": 4,
         },
         "vessels": [
             {
@@ -228,7 +229,26 @@ calibration:
         result["vessels"][0]["zero_d_element_values"]["R_poiseuille"] = -4200.0
         return result
 
+    def fake_simulate(payload):
+        assert payload["simulation_parameters"]["number_of_cardiac_cycles"] >= 2
+        assert payload["simulation_parameters"]["output_all_cycles"] is True
+        rows = []
+        for vessel in payload["vessels"]:
+            for time in range(7):
+                rows.append(
+                    {
+                        "name": vessel["vessel_name"],
+                        "time": float(time),
+                        "flow_in": 1.0,
+                        "flow_out": 1.0,
+                        "pressure_in": 100.0,
+                        "pressure_out": 90.0,
+                    }
+                )
+        return pd.DataFrame(rows)
+
     monkeypatch.setattr("svzerodtrees.calibration.workflow.calibrate_pysvzerod", fake_calibrate)
+    monkeypatch.setattr("svzerodtrees.calibration.workflow.simulate_pysvzerod", fake_simulate)
 
     result = run_from_config_file(str(cfg_path))
 
@@ -240,6 +260,7 @@ calibration:
     assert json.loads(Path(result["observation_qc_report"]).read_text())["status"] == "pass"
     written = json.loads(output_path.read_text(encoding="utf-8"))
     assert written["vessels"][0]["zero_d_element_values"]["R_poiseuille"] == -4200.0
+    assert all("calibrate" not in vessel for vessel in written["vessels"])
     assert len(calls) == 2
     assert calls[1]["y"] == calls[0]["y"]
     assert calls[1]["dy"] == calls[0]["dy"]
@@ -254,6 +275,9 @@ calibration:
     ]
     assert "branch0_seg0.R_poiseuille" in confirmation["negative_parameter_paths"]
     assert "branch0_seg0.R_poiseuille" in confirmation["large_ratio_paths"]
+    replay = json.loads((tmp_path / "calibration_replay.json").read_text(encoding="utf-8"))
+    assert replay["status"] == "pass"
+    assert json.loads((tmp_path / "calibration_summary.json").read_text(encoding="utf-8"))["status"] == "ok"
     assert captured["payload"]["calibration_parameters"]["maximum_iterations"] == 9
     assert captured["payload"]["y"]["flow:INFLOW:branch0_seg0"] == [10.0, 11.0]
     assert captured["payload"]["vessels"][1]["calibrate"] == ["R_poiseuille"]

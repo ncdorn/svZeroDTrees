@@ -39,6 +39,9 @@ calibration:
     maximum_iterations: 100
     tolerance_gradient: 1.0e-6
     tolerance_increment: 1.0e-10
+    pressure_bound_multiplier: 10.0
+    flow_bound_multiplier: 10.0
+    cycle_stability_tolerance: 1.0e-3
   input_normalization:
     infinite_vessel_compliance: error
   observation_qc:
