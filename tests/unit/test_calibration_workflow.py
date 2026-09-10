@@ -7,17 +7,30 @@ import pytest
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk
 
-from svzerodtrees.calibration.workflow import assemble_calibration_payload
+from svzerodtrees.calibration.workflow import (
+    _normalize_calibration_input,
+    assemble_calibration_payload,
+)
 from svzerodtrees.config import (
     CalibrationConfig,
     CalibrationDataSourceConfig,
+    CalibrationInputNormalizationConfig,
     CalibrationParametersConfig,
     CalibrationParameterSelectionConfig,
     CalibrationSolverConfig,
 )
 
 
-def _write_polydata(path: Path, *, branch_ids, paths, pressure=None, flow=None) -> None:
+def _write_polydata(
+    path: Path,
+    *,
+    branch_ids,
+    paths,
+    pressure=None,
+    flow=None,
+    area=None,
+    extra_arrays: dict[str, list[float]] | None = None,
+) -> None:
     points = vtk.vtkPoints()
     for point in (
         (0.0, 0.0, 0.0),
@@ -43,11 +56,14 @@ def _write_polydata(path: Path, *, branch_ids, paths, pressure=None, flow=None) 
     arrays = {
         "BranchId": branch_ids,
         "Path": paths,
+        "CenterlineSectionArea": area if area is not None else [1.0] * len(branch_ids),
     }
     if pressure is not None:
         arrays["pressure"] = pressure
     if flow is not None:
         arrays["velocity"] = flow
+    if extra_arrays:
+        arrays.update(extra_arrays)
 
     for name, values in arrays.items():
         array = numpy_to_vtk(values, deep=True)
@@ -63,7 +79,7 @@ def _write_polydata(path: Path, *, branch_ids, paths, pressure=None, flow=None) 
 def _write_zerod_config(path: Path) -> None:
     payload = {
         "boundary_conditions": [
-            {"bc_name": "INFLOW", "bc_type": "FLOW", "bc_values": {"Q": [10.0], "t": [0.0]}},
+            {"bc_name": "INFLOW", "bc_type": "FLOW", "bc_values": {"Q": [10.0, 10.0], "t": [0.0, 1.0]}},
             {"bc_name": "OUT1", "bc_type": "RESISTANCE", "bc_values": {"R": 1.0}},
             {"bc_name": "OUT2", "bc_type": "RESISTANCE", "bc_values": {"R": 1.0}},
         ],
@@ -90,6 +106,7 @@ def _write_zerod_config(path: Path) -> None:
             {
                 "vessel_id": 0,
                 "vessel_name": "branch0_seg0",
+                "vessel_length": 1.0,
                 "zero_d_element_type": "BloodVessel",
                 "zero_d_element_values": {"R_poiseuille": 10.0, "C": 0.1, "L": 0.01, "stenosis_coefficient": 0.0},
                 "boundary_conditions": {"inlet": "INFLOW"},
@@ -97,6 +114,7 @@ def _write_zerod_config(path: Path) -> None:
             {
                 "vessel_id": 1,
                 "vessel_name": "branch1_seg0",
+                "vessel_length": 1.0,
                 "zero_d_element_type": "BloodVessel",
                 "zero_d_element_values": {"R_poiseuille": 20.0, "C": 0.2, "L": 0.02, "stenosis_coefficient": 0.0},
                 "boundary_conditions": {"outlet": "OUT1"},
@@ -104,6 +122,7 @@ def _write_zerod_config(path: Path) -> None:
             {
                 "vessel_id": 2,
                 "vessel_name": "branch2_seg0",
+                "vessel_length": 1.0,
                 "zero_d_element_type": "BloodVessel",
                 "zero_d_element_values": {"R_poiseuille": 30.0, "C": 0.3, "L": 0.03, "stenosis_coefficient": 0.0},
                 "boundary_conditions": {"outlet": "OUT2"},
@@ -135,6 +154,7 @@ def _calibration_config(tmp_path: Path) -> CalibrationConfig:
             tolerance_gradient=1e-5,
             tolerance_increment=1e-8,
         ),
+        input_normalization=CalibrationInputNormalizationConfig(),
     )
 
 
@@ -180,7 +200,274 @@ def test_assemble_calibration_payload_from_mapped_centerline(tmp_path):
     }
 
 
-def test_assemble_calibration_payload_rejects_multiple_segments_per_branch(tmp_path):
+def test_normalizes_only_positive_infinite_vessel_compliance(tmp_path):
+    zerod = tmp_path / "zerod.json"
+    _write_zerod_config(zerod)
+    source = json.loads(zerod.read_text(encoding="utf-8"))
+    source["vessels"][0]["zero_d_element_values"]["C"] = float("inf")
+    source_before = json.loads(json.dumps(source))
+
+    normalized, report = _normalize_calibration_input(
+        source,
+        infinite_vessel_compliance="zero",
+    )
+
+    assert source == source_before
+    assert normalized["vessels"][0]["zero_d_element_values"]["C"] == 0.0
+    assert report == {
+        "infinite_vessel_compliance": "zero",
+        "changed_count": 1,
+        "changed_paths": ["vessels[0].zero_d_element_values.C"],
+    }
+
+
+def test_rigid_baseline_normalization_matches_finite_reference():
+    root = Path(__file__).parents[2]
+    artifact_dir = root / "tmp/tst-stan-5-iter03-centerline-timeseries"
+    source = json.loads((artifact_dir / "baseline_0d.json").read_text(encoding="utf-8"))
+    reference = json.loads(
+        (artifact_dir / "baseline_0d_c0.json").read_text(encoding="utf-8")
+    )
+
+    normalized, report = _normalize_calibration_input(
+        source,
+        infinite_vessel_compliance="zero",
+    )
+
+    assert normalized == reference
+    assert report["changed_count"] == 38
+    assert len(report["changed_paths"]) == 38
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("-inf")])
+def test_rejects_unsupported_nonfinite_compliance(value):
+    source = {"vessels": [{"zero_d_element_values": {"C": value}}]}
+
+    with pytest.raises(ValueError, match="only positive infinity"):
+        _normalize_calibration_input(
+            source,
+            infinite_vessel_compliance="zero",
+        )
+
+
+def test_rejects_positive_infinity_outside_vessel_compliance():
+    source = {
+        "vessels": [{"zero_d_element_values": {"C": 0.1}}],
+        "simulation_parameters": {"density": float("inf")},
+    }
+
+    with pytest.raises(ValueError, match="simulation_parameters.density"):
+        _normalize_calibration_input(
+            source,
+            infinite_vessel_compliance="zero",
+        )
+
+
+def test_assemble_calibration_payload_from_mapped_centerline_timeseries(tmp_path):
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "mapped.vtp"
+    zerod = tmp_path / "zerod.json"
+
+    _write_polydata(
+        centerline,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+    )
+    _write_polydata(
+        mapped,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        extra_arrays={
+            "pressure_0": [100.0, 90.0, 90.0, 80.0, 90.0, 70.0],
+            "velocity_0": [10.0, 10.0, 6.0, 6.0, 4.0, 4.0],
+            "pressure_1": [101.0, 91.0, 91.0, 81.0, 91.0, 71.0],
+            "velocity_1": [11.0, 11.0, 7.0, 7.0, 5.0, 5.0],
+        },
+    )
+    _write_zerod_config(zerod)
+
+    calibration = _calibration_config(tmp_path)
+    calibration.data_source.pressure_array = "pressure"
+    calibration.data_source.flow_array = "velocity"
+
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(zerod),
+        calibration=calibration,
+    )
+
+    assert assembly.observation_count == 2
+    assert assembly.variable_count == 12
+    assert assembly.solver_payload["y"]["flow:INFLOW:branch0_seg0"] == [10.0, 11.0]
+    assert assembly.solver_payload["y"]["pressure:branch0_seg0:J0"] == [90.0, 91.0]
+    assert assembly.solver_payload["y"]["flow:J0:branch1_seg0"] == [6.0, 7.0]
+    assert assembly.solver_payload["y"]["pressure:branch2_seg0:OUT2"] == [70.0, 71.0]
+    assert assembly.solver_payload["dy"]["pressure:J0:branch2_seg0"] == [0.0, 0.0]
+
+
+def test_assemble_calibration_payload_converts_velocity_to_flow_with_area(tmp_path):
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "mapped.vtp"
+    zerod = tmp_path / "zerod.json"
+
+    _write_polydata(
+        centerline,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        area=[2.0, 2.0, 3.0, 3.0, 4.0, 4.0],
+    )
+    _write_polydata(
+        mapped,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        pressure=[100.0, 90.0, 90.0, 80.0, 90.0, 70.0],
+        flow=[10.0, 10.0, 6.0, 6.0, 4.0, 4.0],
+        area=[2.0, 2.0, 3.0, 3.0, 4.0, 4.0],
+    )
+    _write_zerod_config(zerod)
+
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(zerod),
+        calibration=_calibration_config(tmp_path),
+    )
+
+    assert assembly.solver_payload["y"]["flow:INFLOW:branch0_seg0"] == [20.0]
+    assert assembly.solver_payload["y"]["flow:J0:branch1_seg0"] == [18.0]
+    assert assembly.solver_payload["y"]["flow:J0:branch2_seg0"] == [16.0]
+
+
+def test_assemble_calibration_payload_supports_direct_flow_observations(tmp_path):
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "mapped.vtp"
+    zerod = tmp_path / "zerod.json"
+
+    _write_polydata(
+        centerline,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+    )
+    _write_polydata(
+        mapped,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        pressure=[100.0, 90.0, 90.0, 80.0, 90.0, 70.0],
+        extra_arrays={"flow_0": [10.0, 10.0, 6.0, 6.0, 4.0, 4.0]},
+    )
+    _write_zerod_config(zerod)
+
+    calibration = _calibration_config(tmp_path)
+    calibration.data_source.flow_array = "flow"
+    calibration.data_source.flow_observation_type = "flow"
+    calibration.data_source.area_array = None
+
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(zerod),
+        calibration=calibration,
+    )
+
+    assert assembly.solver_payload["y"]["flow:INFLOW:branch0_seg0"] == [10.0]
+    assert assembly.solver_payload["y"]["flow:J0:branch1_seg0"] == [6.0]
+    assert assembly.solver_payload["y"]["flow:J0:branch2_seg0"] == [4.0]
+
+
+def test_assemble_calibration_payload_derives_periodic_dy_for_timeseries(tmp_path):
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "mapped.vtp"
+    zerod = tmp_path / "zerod.json"
+
+    _write_polydata(
+        centerline,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+    )
+    _write_polydata(
+        mapped,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        extra_arrays={
+            "pressure_0": [100.0, 90.0, 90.0, 80.0, 90.0, 70.0],
+            "pressure_1": [100.0, 90.0, 90.0, 80.0, 90.0, 70.0],
+            "pressure_2": [100.0, 90.0, 90.0, 80.0, 90.0, 70.0],
+            "pressure_3": [100.0, 90.0, 90.0, 80.0, 90.0, 70.0],
+            "flow_0": [0.0, 0.0, 6.0, 6.0, 4.0, 4.0],
+            "flow_1": [1.0, 1.0, 6.0, 6.0, 4.0, 4.0],
+            "flow_2": [0.0, 0.0, 6.0, 6.0, 4.0, 4.0],
+            "flow_3": [-1.0, -1.0, 6.0, 6.0, 4.0, 4.0],
+        },
+    )
+
+    payload = {
+        "boundary_conditions": [
+            {
+                "bc_name": "INFLOW",
+                "bc_type": "FLOW",
+                "bc_values": {"Q": [0.0, 1.0, 0.0, -1.0, 0.0], "t": [0.0, 0.25, 0.5, 0.75, 1.0]},
+            },
+            {"bc_name": "OUT1", "bc_type": "RESISTANCE", "bc_values": {"R": 1.0}},
+            {"bc_name": "OUT2", "bc_type": "RESISTANCE", "bc_values": {"R": 1.0}},
+        ],
+        "junctions": [
+            {
+                "junction_name": "J0",
+                "junction_type": "BloodVesselJunction",
+                "inlet_vessels": [0],
+                "outlet_vessels": [1, 2],
+                "junction_values": {
+                    "R_poiseuille": [0.1, 0.2],
+                    "L": [0.01, 0.02],
+                    "stenosis_coefficient": [0.0, 0.0],
+                },
+            }
+        ],
+        "simulation_parameters": {
+            "density": 1.06,
+            "viscosity": 0.04,
+            "number_of_cardiac_cycles": 1,
+            "number_of_time_pts_per_cardiac_cycle": 4,
+        },
+        "vessels": [
+            {
+                "vessel_id": 0,
+                "vessel_name": "branch0_seg0",
+                "vessel_length": 1.0,
+                "zero_d_element_type": "BloodVessel",
+                "zero_d_element_values": {"R_poiseuille": 10.0, "C": 0.1, "L": 0.01, "stenosis_coefficient": 0.0},
+                "boundary_conditions": {"inlet": "INFLOW"},
+            },
+            {
+                "vessel_id": 1,
+                "vessel_name": "branch1_seg0",
+                "vessel_length": 1.0,
+                "zero_d_element_type": "BloodVessel",
+                "zero_d_element_values": {"R_poiseuille": 20.0, "C": 0.2, "L": 0.02, "stenosis_coefficient": 0.0},
+                "boundary_conditions": {"outlet": "OUT1"},
+            },
+            {
+                "vessel_id": 2,
+                "vessel_name": "branch2_seg0",
+                "vessel_length": 1.0,
+                "zero_d_element_type": "BloodVessel",
+                "zero_d_element_values": {"R_poiseuille": 30.0, "C": 0.3, "L": 0.03, "stenosis_coefficient": 0.0},
+                "boundary_conditions": {"outlet": "OUT2"},
+            },
+        ],
+    }
+    zerod.write_text(json.dumps(payload), encoding="utf-8")
+
+    calibration = _calibration_config(tmp_path)
+    calibration.data_source.flow_array = "flow"
+    calibration.data_source.flow_observation_type = "flow"
+    calibration.data_source.area_array = None
+
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(zerod),
+        calibration=calibration,
+    )
+
+    assert assembly.solver_payload["dy"]["flow:INFLOW:branch0_seg0"] == [4.0, 0.0, -4.0, 0.0]
+    assert assembly.solver_payload["dy"]["pressure:INFLOW:branch0_seg0"] == [0.0, 0.0, 0.0, 0.0]
+
+
+def test_assemble_calibration_payload_supports_multiple_segments_per_branch(tmp_path):
     centerline = tmp_path / "centerline.vtp"
     mapped = tmp_path / "mapped.vtp"
     zerod = tmp_path / "zerod.json"
@@ -188,13 +475,13 @@ def test_assemble_calibration_payload_rejects_multiple_segments_per_branch(tmp_p
     _write_polydata(
         centerline,
         branch_ids=[0, 0, 0, 0, 0, 0],
-        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        paths=[0.0, 0.1635, 0.3, 0.5439, 0.8, 0.9809],
     )
     _write_polydata(
         mapped,
         branch_ids=[0, 0, 0, 0, 0, 0],
-        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
-        pressure=[100.0, 90.0, 100.0, 90.0, 100.0, 90.0],
+        paths=[0.0, 0.1635, 0.3, 0.5439, 0.8, 0.9809],
+        pressure=[100.0, 98.0, 96.0, 94.0, 92.0, 90.0],
         flow=[10.0, 10.0, 10.0, 10.0, 10.0, 10.0],
     )
 
@@ -203,12 +490,26 @@ def test_assemble_calibration_payload_rejects_multiple_segments_per_branch(tmp_p
             {"bc_name": "INFLOW", "bc_type": "FLOW", "bc_values": {"Q": [1.0], "t": [0.0]}},
             {"bc_name": "OUT", "bc_type": "RESISTANCE", "bc_values": {"R": 1.0}},
         ],
-        "junctions": [],
+        "junctions": [
+            {
+                "junction_name": "J0",
+                "junction_type": "NORMAL_JUNCTION",
+                "inlet_vessels": [0],
+                "outlet_vessels": [1],
+            },
+            {
+                "junction_name": "J1",
+                "junction_type": "NORMAL_JUNCTION",
+                "inlet_vessels": [1],
+                "outlet_vessels": [2],
+            },
+        ],
         "simulation_parameters": {},
         "vessels": [
             {
                 "vessel_id": 0,
                 "vessel_name": "branch0_seg0",
+                "vessel_length": 0.1635,
                 "zero_d_element_type": "BloodVessel",
                 "zero_d_element_values": {"R_poiseuille": 1.0},
                 "boundary_conditions": {"inlet": "INFLOW"},
@@ -216,6 +517,14 @@ def test_assemble_calibration_payload_rejects_multiple_segments_per_branch(tmp_p
             {
                 "vessel_id": 1,
                 "vessel_name": "branch0_seg1",
+                "vessel_length": 0.3804,
+                "zero_d_element_type": "BloodVessel",
+                "zero_d_element_values": {"R_poiseuille": 1.0},
+            },
+            {
+                "vessel_id": 2,
+                "vessel_name": "branch0_seg2",
+                "vessel_length": 0.4370,
                 "zero_d_element_type": "BloodVessel",
                 "zero_d_element_values": {"R_poiseuille": 1.0},
                 "boundary_conditions": {"outlet": "OUT"},
@@ -224,7 +533,95 @@ def test_assemble_calibration_payload_rejects_multiple_segments_per_branch(tmp_p
     }
     zerod.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="one 0D vessel per centerline branch"):
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(zerod),
+        calibration=CalibrationConfig(
+            data_source=CalibrationDataSourceConfig(
+                mode="mapped_centerline",
+                mapped_centerline_result=str(mapped),
+                centerline=str(centerline),
+            ),
+            parameters=CalibrationParametersConfig(),
+        ),
+    )
+
+    assert assembly.observation_count == 1
+    assert assembly.solver_payload["y"]["pressure:INFLOW:branch0_seg0"] == [100.0]
+    assert assembly.solver_payload["y"]["pressure:branch0_seg0:J0"] == [98.0]
+    assert assembly.solver_payload["y"]["pressure:J0:branch0_seg1"] == [98.0]
+    assert assembly.solver_payload["y"]["pressure:branch0_seg1:J1"] == [94.0]
+    assert assembly.solver_payload["y"]["pressure:J1:branch0_seg2"] == [94.0]
+    assert assembly.solver_payload["y"]["pressure:branch0_seg2:OUT"] == [90.0]
+
+
+def test_assemble_calibration_payload_rejects_unavailable_junction_parameters(tmp_path):
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "mapped.vtp"
+    zerod = tmp_path / "zerod.json"
+
+    _write_polydata(
+        centerline,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+    )
+    _write_polydata(
+        mapped,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        pressure=[100.0, 90.0, 90.0, 80.0, 90.0, 70.0],
+        flow=[10.0, 10.0, 6.0, 6.0, 4.0, 4.0],
+    )
+
+    payload = {
+        "boundary_conditions": [
+            {"bc_name": "INFLOW", "bc_type": "FLOW", "bc_values": {"Q": [10.0, 10.0], "t": [0.0, 1.0]}},
+            {"bc_name": "OUT1", "bc_type": "RESISTANCE", "bc_values": {"R": 1.0}},
+            {"bc_name": "OUT2", "bc_type": "RESISTANCE", "bc_values": {"R": 1.0}},
+        ],
+        "junctions": [
+            {
+                "junction_name": "J0",
+                "junction_type": "BloodVesselJunction",
+                "inlet_vessels": [0],
+                "outlet_vessels": [1, 2],
+            }
+        ],
+        "simulation_parameters": {
+            "density": 1.06,
+            "viscosity": 0.04,
+            "number_of_cardiac_cycles": 1,
+            "number_of_time_pts_per_cardiac_cycle": 1,
+        },
+        "vessels": [
+            {
+                "vessel_id": 0,
+                "vessel_name": "branch0_seg0",
+                "vessel_length": 1.0,
+                "zero_d_element_type": "BloodVessel",
+                "zero_d_element_values": {"R_poiseuille": 10.0, "C": 0.1, "L": 0.01, "stenosis_coefficient": 0.0},
+                "boundary_conditions": {"inlet": "INFLOW"},
+            },
+            {
+                "vessel_id": 1,
+                "vessel_name": "branch1_seg0",
+                "vessel_length": 1.0,
+                "zero_d_element_type": "BloodVessel",
+                "zero_d_element_values": {"R_poiseuille": 20.0, "C": 0.2, "L": 0.02, "stenosis_coefficient": 0.0},
+                "boundary_conditions": {"outlet": "OUT1"},
+            },
+            {
+                "vessel_id": 2,
+                "vessel_name": "branch2_seg0",
+                "vessel_length": 1.0,
+                "zero_d_element_type": "BloodVessel",
+                "zero_d_element_values": {"R_poiseuille": 30.0, "C": 0.3, "L": 0.03, "stenosis_coefficient": 0.0},
+                "boundary_conditions": {"outlet": "OUT2"},
+            },
+        ],
+    }
+    zerod.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="selects unavailable parameters for J0"):
         assemble_calibration_payload(
             zerod_config_path=str(zerod),
             calibration=CalibrationConfig(
@@ -233,6 +630,38 @@ def test_assemble_calibration_payload_rejects_multiple_segments_per_branch(tmp_p
                     mapped_centerline_result=str(mapped),
                     centerline=str(centerline),
                 ),
-                parameters=CalibrationParametersConfig(),
+                parameters=CalibrationParametersConfig(
+                    junctions=CalibrationParameterSelectionConfig(default=["R_poiseuille"]),
+                ),
             ),
+        )
+
+
+def test_assemble_calibration_payload_rejects_nonfinite_input_parameters(tmp_path):
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "mapped.vtp"
+    zerod = tmp_path / "zerod.json"
+
+    _write_polydata(
+        centerline,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+    )
+    _write_polydata(
+        mapped,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        pressure=[100.0, 90.0, 90.0, 80.0, 90.0, 70.0],
+        flow=[10.0, 10.0, 6.0, 6.0, 4.0, 4.0],
+    )
+    _write_zerod_config(zerod)
+
+    payload = json.loads(zerod.read_text(encoding="utf-8"))
+    payload["vessels"][0]["zero_d_element_values"]["C"] = float("inf")
+    zerod.write_text(json.dumps(payload, allow_nan=True), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="contains non-finite numeric values incompatible with stage-1 calibration"):
+        assemble_calibration_payload(
+            zerod_config_path=str(zerod),
+            calibration=_calibration_config(tmp_path),
         )

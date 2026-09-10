@@ -8,12 +8,21 @@ import os
 from pathlib import Path
 import time
 
+REQUIRED_CALIBRATION_CAPABILITIES = frozenset(
+    {
+        "per_block_parameter_selection",
+        "calibration_diagnostics",
+    }
+)
+
 _INSTALL_HINT = (
     "pysvzerod is required for solver-backed svZeroDTrees workflows. "
     "Install the sibling svZeroDSolver checkout first with "
     "`python3 -m pip install -e ../svZeroDSolver` "
     "(or `python3 -m pip install -e /home/users/ndorn/svZeroDSolver` on Sherlock)."
 )
+
+_last_calibration_provenance: dict[str, object] | None = None
 
 
 @lru_cache(maxsize=1)
@@ -24,6 +33,75 @@ def require_pysvzerod():
         if exc.name != "pysvzerod":
             raise
         raise ModuleNotFoundError(_INSTALL_HINT) from exc
+
+
+def _build_identity(module) -> object:
+    identity = getattr(module, "build_identity", None)
+    if callable(identity):
+        return identity()
+    return getattr(module, "__build_identity__", None)
+
+
+def pysvzerod_provenance(module=None) -> dict[str, object]:
+    """Return the loaded solver's import location and build provenance."""
+    if module is None:
+        module = require_pysvzerod()
+    module_path = getattr(module, "__file__", None)
+    return {
+        "module_path": str(Path(module_path).resolve()) if module_path else "<unknown>",
+        "version": getattr(module, "__version__", None),
+        "build_identity": _build_identity(module),
+    }
+
+
+def require_calibration_capabilities() -> dict[str, object]:
+    """Load pysvzerod and verify the calibration API contract."""
+    module = require_pysvzerod()
+    provenance = pysvzerod_provenance(module)
+    capabilities_fn = getattr(module, "capabilities", None)
+    try:
+        capabilities = capabilities_fn() if callable(capabilities_fn) else None
+    except Exception as exc:
+        capabilities = f"<capabilities() failed: {type(exc).__name__}: {exc}>"
+
+    if not isinstance(capabilities, dict):
+        capabilities_for_error = capabilities
+        missing = sorted(REQUIRED_CALIBRATION_CAPABILITIES)
+    else:
+        missing = sorted(
+            capability
+            for capability in REQUIRED_CALIBRATION_CAPABILITIES
+            if capabilities.get(capability) is not True
+        )
+        capabilities_for_error = capabilities
+
+    if missing:
+        raise RuntimeError(
+            "Incompatible pysvzerod calibrator: missing required capability "
+            f"{', '.join(missing)}. Imported module path: "
+            f"{provenance['module_path']}; version: {provenance['version']!r}; "
+            f"build identity: {provenance['build_identity']!r}; capabilities: "
+            f"{capabilities_for_error!r}. Reinstall the pinned sibling solver "
+            "with `python3 -m pip install -e ../svZeroDSolver` "
+            "(or `python3 -m pip install -e /home/users/ndorn/svZeroDSolver` "
+            "on Sherlock)."
+        )
+
+    return {
+        **provenance,
+        "capabilities": capabilities,
+    }
+
+
+def last_calibration_provenance() -> dict[str, object] | None:
+    """Return provenance for the most recent successful calibration dispatch."""
+    return _last_calibration_provenance
+
+
+def clear_calibration_provenance() -> None:
+    """Clear the provenance cache before beginning a calibration dispatch."""
+    global _last_calibration_provenance
+    _last_calibration_provenance = None
 
 
 def _trace_destination() -> Path | None:
@@ -147,4 +225,17 @@ def simulate_pysvzerod(config):
 
 
 def calibrate_pysvzerod(config):
-    return require_pysvzerod().calibrate(config)
+    global _last_calibration_provenance
+    module = require_pysvzerod()
+    provenance = require_calibration_capabilities()
+    calibrate = getattr(module, "calibrate", None)
+    if not callable(calibrate):
+        raise RuntimeError(
+            "Incompatible pysvzerod calibrator: imported module does not expose "
+            "calibrate(). Imported module path: "
+            f"{pysvzerod_provenance(module)['module_path']}. "
+            f"{_INSTALL_HINT}"
+        )
+    result = calibrate(config)
+    _last_calibration_provenance = provenance
+    return result

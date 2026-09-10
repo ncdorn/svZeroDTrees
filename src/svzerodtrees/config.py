@@ -164,6 +164,8 @@ class CalibrationDataSourceConfig:
     centerline: Optional[str] = None
     pressure_array: str = "pressure"
     flow_array: str = "velocity"
+    flow_observation_type: str = "velocity"
+    area_array: Optional[str] = "CenterlineSectionArea"
     branch_id_array: str = "BranchId"
     path_array: str = "Path"
 
@@ -189,10 +191,18 @@ class CalibrationSolverConfig:
 
 
 @dataclass
+class CalibrationInputNormalizationConfig:
+    infinite_vessel_compliance: str = "error"
+
+
+@dataclass
 class CalibrationConfig:
     data_source: CalibrationDataSourceConfig
     parameters: CalibrationParametersConfig
     solver: CalibrationSolverConfig = field(default_factory=CalibrationSolverConfig)
+    input_normalization: CalibrationInputNormalizationConfig = field(
+        default_factory=CalibrationInputNormalizationConfig
+    )
 
 
 @dataclass
@@ -697,7 +707,11 @@ def _parse_calibration_parameter_selection(
 
 
 def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
-    _ensure_keys(data, ["data_source", "parameters", "solver"], "calibration")
+    _ensure_keys(
+        data,
+        ["data_source", "parameters", "solver", "input_normalization"],
+        "calibration",
+    )
 
     data_source_raw = data.get("data_source")
     if not isinstance(data_source_raw, dict):
@@ -710,6 +724,8 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             "centerline",
             "pressure_array",
             "flow_array",
+            "flow_observation_type",
+            "area_array",
             "branch_id_array",
             "path_array",
         ],
@@ -724,12 +740,29 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         raise ValueError("calibration.data_source.mapped_centerline_result is required")
     if data_source_raw.get("centerline") in (None, ""):
         raise ValueError("calibration.data_source.centerline is required")
+    flow_observation_type = str(
+        data_source_raw.get("flow_observation_type", "velocity")
+    ).lower()
+    if flow_observation_type not in {"flow", "velocity"}:
+        raise ValueError(
+            "calibration.data_source.flow_observation_type must be one of flow|velocity"
+        )
+    area_array = data_source_raw.get("area_array", "CenterlineSectionArea")
+    if area_array in ("", None):
+        area_array = None
+    if flow_observation_type == "velocity" and area_array is None:
+        raise ValueError(
+            "calibration.data_source.area_array is required when "
+            "calibration.data_source.flow_observation_type=velocity"
+        )
     data_source = CalibrationDataSourceConfig(
         mode=mode,
         mapped_centerline_result=_resolve_path(root, str(data_source_raw["mapped_centerline_result"])),
         centerline=_resolve_path(root, str(data_source_raw["centerline"])),
         pressure_array=str(data_source_raw.get("pressure_array", "pressure")),
         flow_array=str(data_source_raw.get("flow_array", "velocity")),
+        flow_observation_type=flow_observation_type,
+        area_array=str(area_array) if area_array is not None else None,
         branch_id_array=str(data_source_raw.get("branch_id_array", "BranchId")),
         path_array=str(data_source_raw.get("path_array", "Path")),
     )
@@ -769,10 +802,30 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         tolerance_increment=float(solver_raw.get("tolerance_increment", 1e-10)),
     )
 
+    normalization_raw = data.get("input_normalization") or {}
+    if not isinstance(normalization_raw, dict):
+        raise ValueError("calibration.input_normalization must be a mapping")
+    _ensure_keys(
+        normalization_raw,
+        ["infinite_vessel_compliance"],
+        "calibration.input_normalization",
+    )
+    infinite_vessel_compliance = str(
+        normalization_raw.get("infinite_vessel_compliance", "error")
+    ).lower()
+    if infinite_vessel_compliance not in {"error", "zero"}:
+        raise ValueError(
+            "calibration.input_normalization.infinite_vessel_compliance "
+            "must be one of error|zero"
+        )
+
     return CalibrationConfig(
         data_source=data_source,
         parameters=parameters,
         solver=solver,
+        input_normalization=CalibrationInputNormalizationConfig(
+            infinite_vessel_compliance=infinite_vessel_compliance
+        ),
     )
 
 
@@ -1083,6 +1136,8 @@ calibration:
     centerline: path/to/centerline.vtp
     pressure_array: pressure
     flow_array: velocity
+    flow_observation_type: velocity
+    area_array: CenterlineSectionArea
     branch_id_array: BranchId
     path_array: Path
   parameters:
@@ -1097,6 +1152,8 @@ calibration:
     maximum_iterations: 100
     tolerance_gradient: 1e-6
     tolerance_increment: 1e-10
+  input_normalization:
+    infinite_vessel_compliance: error  # error | zero
 
 bcs:
   type: impedance  # impedance | rcr

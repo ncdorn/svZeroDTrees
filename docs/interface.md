@@ -59,6 +59,8 @@ calibration:
     centerline: path/to/centerline.vtp
     pressure_array: pressure
     flow_array: velocity
+    flow_observation_type: velocity
+    area_array: CenterlineSectionArea
     branch_id_array: BranchId
     path_array: Path
   parameters:
@@ -75,15 +77,27 @@ calibration:
     maximum_iterations: 100
     tolerance_gradient: 1e-6
     tolerance_increment: 1e-10
+  input_normalization:
+    infinite_vessel_compliance: error  # error | zero
 ```
 
 Stage-1 calibration constraints:
 
 - `calibration.data_source.mode` must currently be `mapped_centerline`.
-- The mapped result must already contain scalar point-data arrays for pressure and flow observations.
-- Stage 1 currently supports one `branch<id>_seg0` vessel per centerline branch.
+- The mapped result must contain either scalar point-data arrays named by `pressure_array` and `flow_array`, or contiguous numbered series such as `pressure_0..N` and `velocity_0..N`.
+- `flow_observation_type: flow` means `flow_array` already stores volumetric flow.
+- `flow_observation_type: velocity` means `flow_array` stores mapped centerline velocity and stage 1 converts it to volumetric flow using `area_array`, defaulting to `CenterlineSectionArea`.
+- When numbered series are provided, stage 1 builds full time-series `y` and `dy` arrays for the solver in observation-index order.
+- For timeseries calibration, stage 1 derives `dy` from periodic finite differences across the observation cycle using the `INFLOW` boundary-condition period from `bc_values.t`.
+- Stage 1 supports multi-segment branches when each 0D vessel includes `vessel_length`, so internal segment interfaces can be placed along the branch `Path`.
 - The mapped centerline result and reference centerline must have matching point counts.
-- `dy` observations are emitted as zeros for this stage.
+- Single-snapshot calibration still emits zero `dy` observations.
+- The input 0D config must not contain non-finite numeric values such as `NaN` or `inf`.
+  The opt-in `input_normalization.infinite_vessel_compliance: zero` policy converts
+  only positive infinity at `vessels[*].zero_d_element_values.C` to `0.0`.
+  Every other non-finite value fails with its JSON path, and the source file is
+  never modified. The calibration result records the normalized paths and count.
+- Non-finite values returned by the solver are treated as calibration failure and no output JSON is written.
 
 **BCs**
 ```yaml

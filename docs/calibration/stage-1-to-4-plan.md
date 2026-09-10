@@ -112,7 +112,7 @@ paths:
 
 calibration:
   data_source:
-    mode: mapped_centerline  # mapped_centerline | threed_simulation
+    mode: mapped_centerline # mapped_centerline | threed_simulation
     mapped_centerline_result: path/to/result_centerline.vtp
     centerline: path/to/centerlines.vtp
     simulation_dir: path/to/3d-simulation
@@ -142,7 +142,7 @@ This shape is intentionally explicit. It avoids hiding the distinction between:
 
 ## Stage 1: Minimal Native Calibration Workflow
 
-Status: planned
+Status: implemented in repo; real-case validation depends on calibrator-compatible 0D inputs
 
 Goal: add the smallest stable `svZeroDTrees` workflow that can run the solver
 calibrator from a precomputed mapped centerline result.
@@ -160,6 +160,12 @@ calibrator from a precomputed mapped centerline result.
   - `y`
   - `dy`
   - `calibration_parameters`
+- Support either:
+  - a single mapped pressure/flow field pair
+  - a numbered mapped timeseries field set such as `pressure_0..N` and
+    `velocity_0..N`, assembled into full solver observation arrays
+- Support multi-segment 0D branches by sampling mapped centerline observations
+  at cumulative `vessel_length` interface locations along each branch `Path`.
 - Invoke `pysvzerod.calibrate`.
 - Write calibrated solver JSON to `paths.output_config`.
 
@@ -172,6 +178,29 @@ calibrator from a precomputed mapped centerline result.
 - at least one integration-style test for the workflow boundary with mocked
   mapping/calibration internals
 - docs/interface updates for the new workflow
+
+### Stage 1 Test-Data Requirements
+
+To exercise Stage 1 meaningfully, the input data must satisfy all of:
+
+- a valid solver JSON with finite numeric values throughout
+  - in practice this means no `NaN` or `inf` in vessel or junction parameter
+    blocks
+- a mapped centerline result with:
+  - pressure observations
+  - either direct volumetric flow observations, or velocity observations plus
+    a cross-sectional area array such as `CenterlineSectionArea`
+- matching reference `centerlines.vtp` topology and point count
+- if more than one observation snapshot is provided:
+  - the 0D `INFLOW` boundary condition must contain a time vector spanning one
+    cardiac period so Stage 1 can derive `dy`
+
+Current `TST-STAN-5` note:
+
+- the pulled `baseline_0d.json` currently contains `inf` vessel compliances
+  and therefore fails Stage-1 input validation before the solver is invoked
+- this makes the current artifact unsuitable as a calibrator test case until a
+  finite calibrator-compatible 0D baseline is supplied
 
 ### Stage 1 Non-Goals
 

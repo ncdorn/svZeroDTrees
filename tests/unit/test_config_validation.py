@@ -105,6 +105,9 @@ calibration:
     assert cfg.workflow == "calibrate_0d_from_3d"
     assert cfg.calibration is not None
     assert cfg.calibration.data_source.mapped_centerline_result == str(tmp_path / "mapped.vtp")
+    assert cfg.calibration.data_source.flow_observation_type == "velocity"
+    assert cfg.calibration.data_source.area_array == "CenterlineSectionArea"
+    assert cfg.calibration.input_normalization.infinite_vessel_compliance == "error"
     assert cfg.calibration.parameters.vessels.overrides["branch0_seg0"] == ["R_poiseuille"]
     assert cfg.calibration.solver.maximum_iterations == 12
 
@@ -131,6 +134,91 @@ calibration:
     )
 
     with pytest.raises(ValueError, match="mapped_centerline_result is required"):
+        load_config(str(cfg_path))
+
+
+def test_calibration_rejects_unknown_flow_observation_type(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: calibrate_0d_from_3d
+paths:
+  root: {tmp_path}
+  zerod_config: zerod.json
+  output_config: calibrated.json
+calibration:
+  data_source:
+    mode: mapped_centerline
+    mapped_centerline_result: mapped.vtp
+    centerline: centerline.vtp
+    flow_observation_type: bogus
+  parameters:
+    vessels: {{}}
+    junctions: {{}}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="flow_observation_type must be one of flow\\|velocity"):
+        load_config(str(cfg_path))
+
+
+def test_calibration_accepts_opt_in_infinite_compliance_normalization(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: calibrate_0d_from_3d
+paths:
+  root: {tmp_path}
+  zerod_config: zerod.json
+  output_config: calibrated.json
+calibration:
+  input_normalization:
+    infinite_vessel_compliance: zero
+  data_source:
+    mode: mapped_centerline
+    mapped_centerline_result: mapped.vtp
+    centerline: centerline.vtp
+  parameters:
+    vessels: {{}}
+    junctions: {{}}
+""",
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    assert cfg.calibration is not None
+    assert cfg.calibration.input_normalization.infinite_vessel_compliance == "zero"
+
+
+def test_calibration_rejects_unknown_infinite_compliance_normalization(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: calibrate_0d_from_3d
+paths:
+  root: {tmp_path}
+  zerod_config: zerod.json
+  output_config: calibrated.json
+calibration:
+  input_normalization:
+    infinite_vessel_compliance: nan
+  data_source:
+    mode: mapped_centerline
+    mapped_centerline_result: mapped.vtp
+    centerline: centerline.vtp
+  parameters:
+    vessels: {{}}
+    junctions: {{}}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="infinite_vessel_compliance must be one of error\\|zero"):
         load_config(str(cfg_path))
 
 

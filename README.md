@@ -105,7 +105,19 @@ svzerodtrees schema
   and `M3` from optimized preop/postop reduced RRI configs and write
   study-level JSON/CSV/PNG summaries.
 - `calibrate_0d_from_3d`: run stage-1 Levenberg-Marquardt calibration from a
-  precomputed mapped centerline result and write a calibrated 0D JSON.
+  precomputed mapped centerline result and write a calibrated 0D JSON. The
+  mapped input may be a single scalar pressure/flow field pair or a numbered
+  pressure/flow timeseries such as `pressure_0..N` and `velocity_0..N`. When
+  the mapped field is velocity, stage 1 converts it to volumetric flow with
+  `CenterlineSectionArea` before calibration, and derives `dy` from periodic
+  finite differences using the 0D inflow period. If the solver returns
+  non-finite calibrated parameters, or if the input 0D config contains
+  unsupported non-finite numeric values, the workflow raises an error instead
+  of writing an invalid JSON file. For rigid-vessel inputs that use positive
+  infinity for compliance, opt in with
+  `calibration.input_normalization.infinite_vessel_compliance: zero`; only
+  `vessels[*].zero_d_element_values.C` is converted to `0.0`, and the result
+  records the changed JSON paths.
 - `postprocess`: generate figures from saved tree pickles or compute analysis artifacts such as svSlicer-based pulmonary resistance maps or the standardized pulmonary 3D postprocess suite.
   Pulmonary resistance-map configs may optionally set `workers: auto|<int>`, and
   pulmonary 3D suite configs may optionally set `resistance_map_workers`, to

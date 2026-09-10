@@ -75,6 +75,7 @@ coverage.xml
 *.tmp
 tmp/
 *~
+plans/
 
 # === Optional: ignore your local config files ===
 # If you keep personal experiment configs
