@@ -116,6 +116,9 @@ calibration:
     assert cfg.calibration.solver.parameter_ratio_warning_threshold == 100.0
     assert cfg.calibration.solver.confirmation_absolute_tolerance == 1e-8
     assert cfg.calibration.solver.confirmation_relative_tolerance == 1e-6
+    assert cfg.calibration.solver.pressure_bound_multiplier == 10.0
+    assert cfg.calibration.solver.flow_bound_multiplier == 10.0
+    assert cfg.calibration.solver.cycle_stability_tolerance == 1e-3
 
 
 def test_calibration_requires_mapped_centerline_source_fields(tmp_path):
@@ -320,6 +323,43 @@ calibration:
     )
 
     with pytest.raises(ValueError, match="confirmation tolerances must be finite and non-negative"):
+        load_config(str(cfg_path))
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("pressure_bound_multiplier", 0.0, "bound multipliers must be finite and positive"),
+        ("flow_bound_multiplier", "inf", "bound multipliers must be finite and positive"),
+        ("cycle_stability_tolerance", -1.0, "cycle stability tolerance must be finite and non-negative"),
+    ],
+)
+def test_calibration_validates_replay_settings(tmp_path, field, value, message):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: calibrate_0d_from_3d
+paths:
+  root: {tmp_path}
+  zerod_config: zerod.json
+  output_config: calibrated.json
+calibration:
+  data_source:
+    mode: mapped_centerline
+    mapped_centerline_result: mapped.vtp
+    centerline: centerline.vtp
+    flow_observation_type: flow
+  parameters:
+    vessels: {{}}
+    junctions: {{}}
+  solver:
+    {field}: {value}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=message):
         load_config(str(cfg_path))
 
 

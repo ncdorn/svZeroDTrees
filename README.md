@@ -133,7 +133,15 @@ svzerodtrees schema
   configured with `confirmation_absolute_tolerance` and
   `confirmation_relative_tolerance`. Negative selected parameters and large
   parameter ratios are recorded as warnings, not rejected solely for their
-  sign or ratio.
+  sign or ratio. Before publication, calibration-only fields are removed,
+  single-outlet `internal_junction` blocks are normalized to
+  `NORMAL_JUNCTION`, and the result is replayed through the unchanged
+  `pysvzerod.simulate` API. Replay uses at least two complete cycles and checks
+  finite bounded pressure/flow values plus final-cycle normalized RMS stability
+  using `pressure_bound_multiplier`, `flow_bound_multiplier`, and
+  `cycle_stability_tolerance`. The solver JSON is atomically published only
+  after these checks pass, so a stable negative resistance is allowed while a
+  divergent positive-resistance result is rejected.
 - `postprocess`: generate figures from saved tree pickles or compute analysis artifacts such as svSlicer-based pulmonary resistance maps or the standardized pulmonary 3D postprocess suite.
   Pulmonary resistance-map configs may optionally set `workers: auto|<int>`, and
   pulmonary 3D suite configs may optionally set `resistance_map_workers`, to
@@ -158,6 +166,12 @@ Typical outputs are written under `paths.root` and include:
 - `calibration_confirmation.json` beside the calibration output; it records both
   black-box calibrator invocations, fixed-point deltas and tolerances, inactive
   parameter validation, solver provenance, and negative/large-ratio warnings.
+- `calibration_replay.json` beside the calibration output; it records the
+  validation-cycle settings, observation-scale bounds, finite/bounded checks,
+  and final-cycle normalized RMS stability metrics.
+- `calibration_summary.json` beside the calibration output; it combines the
+  input normalization, observation QC, output normalization, fixed-point
+  confirmation, warnings, provenance, and replay diagnostics.
 - `preop`, `postop`, `adapted` directories for pipeline/adaptation runs.
 - Figures from postprocess workflow (PNG outputs you specify).
 - Postprocess analysis artifacts such as `resistance_map_mean.vtp`,

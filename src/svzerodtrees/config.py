@@ -192,6 +192,9 @@ class CalibrationSolverConfig:
     parameter_ratio_warning_threshold: float = 100.0
     confirmation_absolute_tolerance: float = 1e-8
     confirmation_relative_tolerance: float = 1e-6
+    pressure_bound_multiplier: float = 10.0
+    flow_bound_multiplier: float = 10.0
+    cycle_stability_tolerance: float = 1e-3
 
 
 @dataclass
@@ -831,6 +834,9 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             "parameter_ratio_warning_threshold",
             "confirmation_absolute_tolerance",
             "confirmation_relative_tolerance",
+            "pressure_bound_multiplier",
+            "flow_bound_multiplier",
+            "cycle_stability_tolerance",
         ],
         "calibration.solver",
     )
@@ -848,6 +854,9 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         confirmation_relative_tolerance=float(
             solver_raw.get("confirmation_relative_tolerance", 1e-6)
         ),
+        pressure_bound_multiplier=float(solver_raw.get("pressure_bound_multiplier", 10.0)),
+        flow_bound_multiplier=float(solver_raw.get("flow_bound_multiplier", 10.0)),
+        cycle_stability_tolerance=float(solver_raw.get("cycle_stability_tolerance", 1e-3)),
     )
     if (
         not np.isfinite(solver.initial_damping_factor)
@@ -863,12 +872,20 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         or solver.confirmation_absolute_tolerance < 0.0
         or not np.isfinite(solver.confirmation_relative_tolerance)
         or solver.confirmation_relative_tolerance < 0.0
+        or not np.isfinite(solver.pressure_bound_multiplier)
+        or solver.pressure_bound_multiplier <= 0.0
+        or not np.isfinite(solver.flow_bound_multiplier)
+        or solver.flow_bound_multiplier <= 0.0
+        or not np.isfinite(solver.cycle_stability_tolerance)
+        or solver.cycle_stability_tolerance < 0.0
     ):
         raise ValueError(
             "calibration.solver requires a positive damping factor and at least "
             "one iteration; tolerances must be finite and non-negative; "
             "parameter_ratio_warning_threshold must be finite and at least 1; "
-            "confirmation tolerances must be finite and non-negative"
+            "confirmation tolerances must be finite and non-negative; pressure and "
+            "flow bound multipliers must be finite and positive; cycle stability "
+            "tolerance must be finite and non-negative"
         )
 
     normalization_raw = data.get("input_normalization") or {}
@@ -1285,6 +1302,9 @@ calibration:
     parameter_ratio_warning_threshold: 100.0
     confirmation_absolute_tolerance: 1e-8
     confirmation_relative_tolerance: 1e-6
+    pressure_bound_multiplier: 10.0
+    flow_bound_multiplier: 10.0
+    cycle_stability_tolerance: 1e-3
   input_normalization:
     infinite_vessel_compliance: error  # error | zero
   observation_qc:

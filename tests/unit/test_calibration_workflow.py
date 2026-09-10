@@ -9,6 +9,8 @@ from vtk.util.numpy_support import numpy_to_vtk
 
 from svzerodtrees.calibration.workflow import (
     CalibrationAssembly,
+    _evaluate_replay,
+    _normalize_calibrated_config,
     _normalize_calibration_input,
     assemble_calibration_payload,
     calibrate_0d_from_mapped_centerline,
@@ -456,6 +458,232 @@ def test_confirmation_failure_does_not_publish_solver_config(monkeypatch, tmp_pa
     assert calls[1]["vessels"][0]["zero_d_element_values"]["R_poiseuille"] == 1.0
     assert not output_path.exists()
     assert not (tmp_path / "calibration_confirmation.json").exists()
+
+
+def test_normalizes_calibration_output_for_simulation():
+    calibrated = {
+        "y": {},
+        "dy": {},
+        "calibration_parameters": {"maximum_iterations": 1},
+        "calibration_diagnostics": {"status": "ok"},
+        "vessels": [
+            {
+                "vessel_name": "branch0_seg0",
+                "calibrate": ["R_poiseuille"],
+                "zero_d_element_values": {"R_poiseuille": -8.0},
+            }
+        ],
+        "junctions": [
+            {
+                "junction_name": "J0",
+                "junction_type": "internal_junction",
+                "inlet_vessels": [0],
+                "outlet_vessels": [1],
+                "junction_values": {"R_poiseuille": 1.0},
+                "calibrate": [],
+            },
+            {
+                "junction_name": "J1",
+                "junction_type": "BloodVesselJunction",
+                "inlet_vessels": [2],
+                "outlet_vessels": [3, 4],
+                "junction_values": {
+                    "R_poiseuille": [1.0, 2.0],
+                    "L": [0.0, 0.0],
+                    "stenosis_coefficient": [0.0, 0.0],
+                },
+                "calibrate": [],
+            },
+        ],
+    }
+
+    normalized, report = _normalize_calibrated_config(calibrated)
+
+    assert calibrated["junctions"][0]["junction_type"] == "internal_junction"
+    assert normalized["junctions"][0]["junction_type"] == "NORMAL_JUNCTION"
+    assert "junction_values" not in normalized["junctions"][0]
+    assert normalized["junctions"][1]["junction_values"] == calibrated["junctions"][1][
+        "junction_values"
+    ]
+    assert all("calibrate" not in block for block in normalized["vessels"])
+    assert all("calibrate" not in block for block in normalized["junctions"])
+    assert set(normalized) == {"vessels", "junctions"}
+    assert report["junction_type_changes"] == [
+        {
+            "from": "internal_junction",
+            "junction_name": "J0",
+            "to": "NORMAL_JUNCTION",
+        }
+    ]
+    assert report["removed_junction_values"] == ["junctions.J0.junction_values"]
+
+
+def test_replay_evaluation_accepts_stable_negative_resistance_result():
+    payload = {
+        "y": {
+            "flow:INFLOW:branch0_seg0": [1.0, 1.0],
+            "pressure:INFLOW:branch0_seg0": [100.0, 100.0],
+        }
+    }
+    rows = []
+    for name, value in (
+        ("branch0_seg0", 1.0),
+        ("branch1_seg0", 0.5),
+    ):
+        for time in range(7):
+            rows.append(
+                {
+                    "name": name,
+                    "time": float(time),
+                    "flow_in": value,
+                    "flow_out": value,
+                    "pressure_in": 100.0,
+                    "pressure_out": 90.0,
+                }
+            )
+
+    summary = _evaluate_replay(
+        result=rows,
+        payload=payload,
+        replay_settings={
+            "pressure_bound_multiplier": 2.0,
+            "flow_bound_multiplier": 2.0,
+            "cycle_stability_tolerance": 0.0,
+        },
+        validation_settings={"number_of_time_pts_per_cardiac_cycle": 4},
+    )
+
+    assert summary["status"] == "pass"
+    assert summary["checks"] == {
+        "finite_pressure_and_flow": True,
+        "bounded_pressure": True,
+        "bounded_flow": True,
+        "cycle_stability": True,
+    }
+
+
+def test_replay_evaluation_rejects_unstable_or_unbounded_result():
+    payload = {
+        "y": {
+            "flow:INFLOW:branch0_seg0": [1.0, 1.0],
+            "pressure:INFLOW:branch0_seg0": [100.0, 100.0],
+        }
+    }
+    rows = []
+    for time in range(7):
+        value = 1.0 if time < 4 else 1.5
+        rows.append(
+            {
+                "name": "branch0_seg0",
+                "time": float(time),
+                "flow_in": value,
+                "flow_out": value,
+                "pressure_in": 100.0 if time < 4 else 1000.0,
+                "pressure_out": 90.0,
+            }
+        )
+
+    summary = _evaluate_replay(
+        result=rows,
+        payload=payload,
+        replay_settings={
+            "pressure_bound_multiplier": 2.0,
+            "flow_bound_multiplier": 2.0,
+            "cycle_stability_tolerance": 0.01,
+        },
+        validation_settings={"number_of_time_pts_per_cardiac_cycle": 4},
+    )
+
+    assert summary["status"] == "fail"
+    assert not summary["checks"]["bounded_pressure"]
+    assert not summary["checks"]["cycle_stability"]
+
+
+def test_failed_replay_does_not_publish_solver_config(monkeypatch, tmp_path):
+    output_path = tmp_path / "calibrated.json"
+    assembly = CalibrationAssembly(
+        solver_payload={
+            "boundary_conditions": [
+                {
+                    "bc_name": "IN",
+                    "bc_type": "FLOW",
+                    "bc_values": {"Q": [1.0, 1.0], "t": [0.0, 1.0]},
+                }
+            ],
+            "simulation_parameters": {
+                "number_of_cardiac_cycles": 1,
+                "number_of_time_pts_per_cardiac_cycle": 4,
+            },
+            "vessels": [
+                {
+                    "vessel_id": 0,
+                    "vessel_name": "branch0_seg0",
+                    "zero_d_element_type": "BloodVessel",
+                    "zero_d_element_values": {"R_poiseuille": -1.0},
+                    "boundary_conditions": {"inlet": "IN"},
+                    "calibrate": ["R_poiseuille"],
+                }
+            ],
+            "junctions": [],
+            "y": {
+                "flow:IN:branch0_seg0": [1.0, 1.0],
+                "pressure:IN:branch0_seg0": [100.0, 100.0],
+            },
+            "dy": {},
+            "calibration_parameters": {},
+        },
+        observation_count=2,
+        variable_count=2,
+        input_normalization={},
+        observation_qc={
+            "status": "pass",
+            "checks": {},
+            "metrics": {},
+            "thresholds": {},
+            "selected_interfaces": {},
+            "exclusions": {},
+        },
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.assemble_calibration_payload",
+        lambda **_kwargs: assembly,
+    )
+
+    def fake_calibrate(payload):
+        return json.loads(json.dumps(payload))
+
+    def unstable_simulate(_payload):
+        return [
+            {
+                "name": "branch0_seg0",
+                "time": float(index),
+                "flow_in": 1.0,
+                "flow_out": 1.0,
+                "pressure_in": 100.0 if index < 4 else 2000.0,
+                "pressure_out": 90.0,
+            }
+            for index in range(7)
+        ]
+
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.calibrate_pysvzerod", fake_calibrate
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.simulate_pysvzerod", unstable_simulate
+    )
+
+    with pytest.raises(ValueError, match="replay stability checks failed"):
+        calibrate_0d_from_mapped_centerline(
+            zerod_config_path="unused.json",
+            output_config_path=str(output_path),
+            calibration=_calibration_config(tmp_path),
+        )
+
+    assert not output_path.exists()
+    replay = json.loads(
+        (tmp_path / "calibration_replay.json").read_text(encoding="utf-8")
+    )
+    assert replay["status"] == "fail"
 
 
 def test_normalizes_only_positive_infinite_vessel_compliance(tmp_path):

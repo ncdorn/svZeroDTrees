@@ -3,8 +3,10 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass, field
 import json
+import os
 from pathlib import Path
 import re
+import tempfile
 from typing import Any, Dict, Iterable
 
 import numpy as np
@@ -15,6 +17,7 @@ from .._pysvzerod import (
     calibrate_pysvzerod,
     clear_calibration_provenance,
     last_calibration_provenance,
+    simulate_pysvzerod,
 )
 from ..config import CalibrationConfig
 
@@ -22,6 +25,17 @@ _VESSEL_NAME_RE = re.compile(r"^branch(?P<branch_id>\d+)_seg(?P<seg_id>\d+)$")
 _PATH_TOLERANCE_ABS = 1e-3
 _MIN_USABLE_INTERFACE_SAMPLES = 3
 _FLOW_EPS = 1e-8
+_REPLAY_SCALE_FLOOR = 1e-12
+_CALIBRATION_ONLY_TOP_LEVEL_KEYS = frozenset(
+    {"y", "dy", "calibrate", "calibration_parameters", "calibration_diagnostics"}
+)
+_SUPPORTED_JUNCTION_TYPES = frozenset(
+    {"NORMAL_JUNCTION", "BloodVesselJunction", "resistive_junction"}
+)
+
+
+def _is_calibration_only_top_level_key(key: str) -> bool:
+    return key in _CALIBRATION_ONLY_TOP_LEVEL_KEYS or key.startswith("calibration_")
 
 
 @dataclass
@@ -1456,6 +1470,675 @@ def _validate_confirmation_tolerances(calibration: CalibrationConfig) -> tuple[f
     return absolute_tolerance, relative_tolerance
 
 
+def _replay_settings(calibration: CalibrationConfig) -> Dict[str, float]:
+    """Resolve and validate numerical settings used only by replay validation."""
+    solver = calibration.solver
+    settings = {
+        "pressure_bound_multiplier": float(solver.pressure_bound_multiplier),
+        "flow_bound_multiplier": float(solver.flow_bound_multiplier),
+        "cycle_stability_tolerance": float(solver.cycle_stability_tolerance),
+    }
+    if (
+        not np.isfinite(settings["pressure_bound_multiplier"])
+        or settings["pressure_bound_multiplier"] <= 0.0
+        or not np.isfinite(settings["flow_bound_multiplier"])
+        or settings["flow_bound_multiplier"] <= 0.0
+        or not np.isfinite(settings["cycle_stability_tolerance"])
+        or settings["cycle_stability_tolerance"] < 0.0
+    ):
+        raise ValueError(
+            "calibration.solver pressure_bound_multiplier and "
+            "flow_bound_multiplier must be finite and positive, and "
+            "cycle_stability_tolerance must be finite and non-negative"
+        )
+    return settings
+
+
+def _junction_connection_count(junction: Dict[str, Any], key: str) -> int | None:
+    values = junction.get(key)
+    if values is None:
+        block_key = key.replace("_vessels", "_blocks")
+        values = junction.get(block_key)
+    if values is None:
+        return None
+    if not isinstance(values, list):
+        raise ValueError(f"junction {junction.get('junction_name', '<unnamed>')} {key} must be a list")
+    return len(values)
+
+
+def _normalize_calibrated_config(
+    calibrated: Dict[str, Any],
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Remove calibration fields and normalize junctions for simulation.
+
+    ``pysvzerod.calibrate`` intentionally returns its optimization payload with
+    observation and selection fields.  Those fields are useful while checking
+    the calibration but are not part of a solver input configuration.
+    """
+    if not isinstance(calibrated, dict):
+        raise ValueError("solver calibration returned a non-object result")
+
+    normalized = copy.deepcopy(calibrated)
+    removed_top_level = sorted(
+        key for key in normalized if _is_calibration_only_top_level_key(key)
+    )
+    for key in removed_top_level:
+        normalized.pop(key, None)
+
+    removed_block_selections: list[str] = []
+    for block_kind, name_key in (("vessels", "vessel_name"), ("junctions", "junction_name")):
+        blocks = normalized.get(block_kind, []) or []
+        if not isinstance(blocks, list):
+            raise ValueError(f"solver output '{block_kind}' must be a list")
+        for block in blocks:
+            if not isinstance(block, dict):
+                raise ValueError(f"solver output {block_kind} entries must be objects")
+            if "calibrate" in block:
+                block_name = str(block.get(name_key, "<unnamed>"))
+                removed_block_selections.append(f"{block_kind}.{block_name}.calibrate")
+                block.pop("calibrate", None)
+
+    junction_type_changes: list[Dict[str, str]] = []
+    removed_junction_values: list[str] = []
+    for junction in normalized.get("junctions", []) or []:
+        junction_name = str(junction.get("junction_name", "<unnamed>"))
+        junction_type = str(junction.get("junction_type", ""))
+        outlet_count = _junction_connection_count(junction, "outlet_vessels")
+
+        # ``internal_junction`` is an old svZeroDTrees spelling for a
+        # single-vessel connection.  The solver represents that topology as a
+        # parameter-free normal junction.  A multi-outlet block with values is
+        # a blood-vessel junction; without values it is a normal junction.
+        if junction_type.lower() == "internal_junction":
+            if outlet_count is None:
+                raise ValueError(
+                    f"junction {junction_name} internal_junction is missing outlet connections"
+                )
+            target_type = (
+                "BloodVesselJunction"
+                if outlet_count > 1 and junction.get("junction_values")
+                else "NORMAL_JUNCTION"
+            )
+            junction["junction_type"] = target_type
+            if target_type == "NORMAL_JUNCTION" and "junction_values" in junction:
+                junction.pop("junction_values", None)
+                removed_junction_values.append(
+                    f"junctions.{junction_name}.junction_values"
+                )
+            junction_type_changes.append(
+                {
+                    "junction_name": junction_name,
+                    "from": junction_type,
+                    "to": target_type,
+                }
+            )
+        elif junction_type == "BloodVesselJunction" and not junction.get("junction_values"):
+            # A parameter-free BloodVesselJunction cannot be reconstructed as
+            # a calibrated block.  Normal junction is its valid equivalent.
+            junction["junction_type"] = "NORMAL_JUNCTION"
+            if "junction_values" in junction:
+                junction.pop("junction_values", None)
+                removed_junction_values.append(
+                    f"junctions.{junction_name}.junction_values"
+                )
+            junction_type_changes.append(
+                {
+                    "junction_name": junction_name,
+                    "from": junction_type,
+                    "to": "NORMAL_JUNCTION",
+                }
+            )
+
+    normalization = {
+        "removed_top_level_fields": removed_top_level,
+        "removed_block_selection_fields": sorted(removed_block_selections),
+        "removed_junction_values": sorted(removed_junction_values),
+        "junction_type_changes": sorted(
+            junction_type_changes,
+            key=lambda item: item["junction_name"],
+        ),
+    }
+    return normalized, normalization
+
+
+def _validate_publishable_solver_config(config: Dict[str, Any]) -> None:
+    """Perform deterministic structural checks before the solver replay."""
+    if not isinstance(config, dict):
+        raise ValueError("normalized solver configuration must be an object")
+
+    calibration_fields = sorted(
+        key for key in config if _is_calibration_only_top_level_key(key)
+    )
+    if calibration_fields:
+        raise ValueError(
+            "normalized solver configuration retains calibration-only fields: "
+            + ", ".join(calibration_fields)
+        )
+
+    nonfinite_paths = _collect_nonfinite_paths(config)
+    if nonfinite_paths:
+        preview = ", ".join(nonfinite_paths[:5])
+        remainder = len(nonfinite_paths) - min(len(nonfinite_paths), 5)
+        suffix = f" (+{remainder} more)" if remainder > 0 else ""
+        raise ValueError(
+            "normalized solver configuration contains non-finite values: "
+            f"{preview}{suffix}"
+        )
+
+    required_lists = ("boundary_conditions", "vessels", "junctions")
+    for key in required_lists:
+        if not isinstance(config.get(key), list):
+            raise ValueError(f"normalized solver configuration '{key}' must be a list")
+    if not isinstance(config.get("simulation_parameters"), dict):
+        raise ValueError(
+            "normalized solver configuration requires a simulation_parameters object"
+        )
+
+    boundary_condition_names: set[str] = set()
+    for index, boundary_condition in enumerate(config["boundary_conditions"]):
+        if not isinstance(boundary_condition, dict):
+            raise ValueError(f"boundary_conditions[{index}] must be an object")
+        for key in ("bc_name", "bc_type", "bc_values"):
+            if key not in boundary_condition:
+                raise ValueError(
+                    f"boundary_conditions[{index}] is missing required field '{key}'"
+                )
+        if not isinstance(boundary_condition["bc_name"], str) or not isinstance(
+            boundary_condition["bc_type"], str
+        ):
+            raise ValueError(
+                f"boundary_conditions[{index}].bc_name and bc_type must be strings"
+            )
+        boundary_condition_name = str(boundary_condition["bc_name"])
+        if boundary_condition_name in boundary_condition_names:
+            raise ValueError(
+                "duplicate bc_name in normalized solver configuration: "
+                f"{boundary_condition_name}"
+            )
+        boundary_condition_names.add(boundary_condition_name)
+        if not isinstance(boundary_condition["bc_values"], dict):
+            raise ValueError(
+                f"boundary_conditions[{index}].bc_values must be an object"
+            )
+
+    simparams = config["simulation_parameters"]
+    for key in ("number_of_cardiac_cycles", "number_of_time_pts_per_cardiac_cycle"):
+        if key not in simparams:
+            raise ValueError(
+                "normalized solver configuration requires "
+                f"simulation_parameters.{key} for replay validation"
+            )
+        value = simparams[key]
+        if isinstance(value, bool):
+            raise ValueError(f"simulation_parameters.{key} must be an integer")
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"simulation_parameters.{key} must be numeric") from exc
+        if not np.isfinite(numeric_value) or numeric_value != int(numeric_value):
+            raise ValueError(f"simulation_parameters.{key} must be a finite integer")
+        minimum = 1 if key == "number_of_cardiac_cycles" else 2
+        if int(numeric_value) < minimum:
+            raise ValueError(
+                f"simulation_parameters.{key} must be at least {minimum} for replay"
+            )
+
+    vessel_ids: set[int] = set()
+    vessel_names: set[str] = set()
+    for index, vessel in enumerate(config["vessels"]):
+        if not isinstance(vessel, dict):
+            raise ValueError(f"vessels[{index}] must be an object")
+        for key in ("vessel_id", "vessel_name", "zero_d_element_type", "zero_d_element_values"):
+            if key not in vessel:
+                raise ValueError(f"vessels[{index}] is missing required field '{key}'")
+        if isinstance(vessel["vessel_id"], bool) or not isinstance(
+            vessel["vessel_id"], int
+        ):
+            raise ValueError(f"vessels[{index}].vessel_id must be an integer")
+        vessel_id = vessel["vessel_id"]
+        if not isinstance(vessel["vessel_name"], str) or not vessel["vessel_name"]:
+            raise ValueError(f"vessels[{index}].vessel_name must be a non-empty string")
+        vessel_name = vessel["vessel_name"]
+        if vessel_id in vessel_ids:
+            raise ValueError(f"duplicate vessel_id in normalized solver configuration: {vessel_id}")
+        if vessel_name in vessel_names:
+            raise ValueError(f"duplicate vessel_name in normalized solver configuration: {vessel_name}")
+        vessel_ids.add(vessel_id)
+        vessel_names.add(vessel_name)
+        if not isinstance(vessel["zero_d_element_values"], dict):
+            raise ValueError(f"vessels[{index}].zero_d_element_values must be an object")
+        if not isinstance(vessel["zero_d_element_type"], str):
+            raise ValueError(f"vessels[{index}].zero_d_element_type must be a string")
+        if "calibrate" in vessel:
+            raise ValueError(f"vessels[{index}] retains calibration-only field 'calibrate'")
+
+    junction_names: set[str] = set()
+    for index, junction in enumerate(config["junctions"]):
+        if not isinstance(junction, dict):
+            raise ValueError(f"junctions[{index}] must be an object")
+        for key in ("junction_name", "junction_type"):
+            if key not in junction:
+                raise ValueError(f"junctions[{index}] is missing required field '{key}'")
+        if not isinstance(junction["junction_name"], str) or not junction["junction_name"]:
+            raise ValueError(
+                f"junctions[{index}].junction_name must be a non-empty string"
+            )
+        junction_name = junction["junction_name"]
+        if junction_name in junction_names:
+            raise ValueError(
+                f"duplicate junction_name in normalized solver configuration: {junction_name}"
+            )
+        junction_names.add(junction_name)
+        if not isinstance(junction["junction_type"], str):
+            raise ValueError(f"junctions[{index}].junction_type must be a string")
+        junction_type = junction["junction_type"]
+        if junction_type not in _SUPPORTED_JUNCTION_TYPES:
+            raise ValueError(
+                f"unsupported junction type for {junction_name}: {junction_type}"
+            )
+        if "calibrate" in junction:
+            raise ValueError(
+                f"junctions[{index}] retains calibration-only field 'calibrate'"
+            )
+        vessel_connection_keys = ("inlet_vessels", "outlet_vessels")
+        block_connection_keys = ("inlet_blocks", "outlet_blocks")
+        has_vessel_connections = any(key in junction for key in vessel_connection_keys)
+        has_block_connections = any(key in junction for key in block_connection_keys)
+        if has_vessel_connections and has_block_connections:
+            raise ValueError(
+                f"junction {junction_name} mixes vessel and block connections"
+            )
+        if not has_vessel_connections and not has_block_connections:
+            raise ValueError(f"junction {junction_name} has no connections")
+        connection_keys = (
+            vessel_connection_keys if has_vessel_connections else block_connection_keys
+        )
+        if any(key not in junction for key in connection_keys):
+            raise ValueError(
+                f"junction {junction_name} must define both inlet and outlet connections"
+            )
+        for connection_key in connection_keys:
+            connections = junction[connection_key]
+            if not isinstance(connections, list) or not connections:
+                raise ValueError(
+                    f"junction {junction_name} {connection_key} must be a non-empty list"
+                )
+            if connection_key.endswith("_vessels"):
+                try:
+                    unknown_ids = sorted(
+                        int(vessel_id)
+                        for vessel_id in connections
+                        if int(vessel_id) not in vessel_ids
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"junction {junction_name} {connection_key} must contain integer IDs"
+                    ) from exc
+                if unknown_ids:
+                    raise ValueError(
+                        f"junction {junction_name} references unknown vessel IDs: {unknown_ids}"
+                    )
+            elif not all(isinstance(block_name, str) and block_name for block_name in connections):
+                raise ValueError(
+                    f"junction {junction_name} {connection_key} must contain block names"
+                )
+        if "junction_values" in junction and not isinstance(junction["junction_values"], dict):
+            raise ValueError(f"junction {junction_name}.junction_values must be an object")
+        if junction_type == "NORMAL_JUNCTION" and junction.get("junction_values"):
+            raise ValueError(
+                f"junction {junction_name}.NORMAL_JUNCTION cannot contain junction_values"
+            )
+        if junction_type != "NORMAL_JUNCTION" and not junction.get("junction_values"):
+            raise ValueError(
+                f"junction {junction_name}.{junction_type} requires junction_values"
+            )
+        if junction_type == "BloodVesselJunction" and "junction_values" in junction:
+            outlet_count = _junction_connection_count(junction, "outlet_vessels")
+            if outlet_count is not None:
+                for parameter, values in junction["junction_values"].items():
+                    if not isinstance(values, list) or len(values) != outlet_count:
+                        raise ValueError(
+                            f"junction {junction_name}.junction_values.{parameter} must "
+                            f"contain one value per outlet ({outlet_count})"
+                        )
+
+    try:
+        json.dumps(config, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "normalized solver configuration is not valid JSON: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+
+
+def _solver_result_table(result: Any) -> Dict[str, np.ndarray]:
+    """Convert solver pandas output or a row-oriented test double to columns."""
+    columns = getattr(result, "columns", None)
+    if columns is not None:
+        column_names = [str(column) for column in columns]
+        table: Dict[str, np.ndarray] = {}
+        for column_name, source_name in zip(column_names, columns):
+            try:
+                values = result[source_name]
+            except Exception as exc:
+                raise ValueError(f"solver replay result column '{column_name}' is unavailable") from exc
+            table[column_name] = np.asarray(values)
+        return table
+
+    if isinstance(result, list) and all(isinstance(row, dict) for row in result):
+        column_names = sorted({str(key) for row in result for key in row})
+        return {
+            column_name: np.asarray([row.get(column_name) for row in result])
+            for column_name in column_names
+        }
+
+    if isinstance(result, dict) and result:
+        if not all(isinstance(values, (list, tuple, np.ndarray)) for values in result.values()):
+            raise ValueError("solver replay result must be a table of numeric columns")
+        return {str(key): np.asarray(values) for key, values in result.items()}
+
+    raise ValueError("solver replay returned no tabular result")
+
+
+def _replay_series(
+    result: Any,
+) -> list[Dict[str, Any]]:
+    """Extract pressure and flow traces from vessel- or variable-based output."""
+    table = _solver_result_table(result)
+    if "name" not in table or "time" not in table:
+        raise ValueError("solver replay result must include name and time columns")
+    row_count = len(table["name"])
+    if len(table["time"]) != row_count:
+        raise ValueError("solver replay result name and time columns have different lengths")
+
+    try:
+        times = np.asarray(table["time"], dtype=np.float64)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("solver replay result time column must be numeric") from exc
+    if not np.isfinite(times).all():
+        raise ValueError("solver replay result contains non-finite time values")
+
+    names = table["name"]
+    candidates: list[tuple[str, str, np.ndarray]] = []
+    for column_name, values in table.items():
+        lower_name = column_name.lower()
+        if lower_name in {"name", "time", "y", "ydot"}:
+            continue
+        if lower_name.startswith("d_") or lower_name.startswith("dflow") or lower_name.startswith("dpressure"):
+            continue
+        if "flow" in lower_name:
+            candidates.append((column_name, "flow", values))
+        elif "pressure" in lower_name:
+            candidates.append((column_name, "pressure", values))
+
+    # Variable-based output stores the semantic kind in name and the numeric
+    # values in y.  It is handled separately because y is otherwise ambiguous.
+    if "y" in table:
+        variable_values = table["y"]
+        for raw_name in sorted({str(name) for name in names}):
+            name = str(raw_name)
+            kind = name.split(":", 1)[0].lower()
+            if kind in {"flow", "pressure"}:
+                candidates.append((f"variable:{name}", kind, variable_values))
+
+    if not candidates:
+        raise ValueError("solver replay result contains no pressure or flow values")
+
+    series: list[Dict[str, Any]] = []
+    for column_name, kind, raw_values in candidates:
+        try:
+            values = np.asarray(raw_values, dtype=np.float64)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"solver replay result {kind} values in '{column_name}' must be numeric"
+            ) from exc
+        if values.ndim != 1 or len(values) != row_count:
+            raise ValueError(
+                f"solver replay result {kind} values in '{column_name}' must match result rows"
+            )
+        if values.size == 0:
+            raise ValueError(
+                f"solver replay result {kind} values in '{column_name}' are empty"
+            )
+        if not np.isfinite(values).all():
+            raise ValueError(
+                f"solver replay result contains non-finite {kind} values in '{column_name}'"
+            )
+
+        groups: Dict[str, list[int]] = {}
+        if column_name.startswith("variable:"):
+            for index, raw_name in enumerate(names):
+                variable_name = str(raw_name)
+                if variable_name == column_name[len("variable:") :]:
+                    groups.setdefault(variable_name, []).append(index)
+        else:
+            for index, raw_name in enumerate(names):
+                groups.setdefault(str(raw_name), []).append(index)
+        for series_name, indices in sorted(groups.items()):
+            raw_times = times[indices]
+            if raw_times.size > 1 and np.any(np.diff(raw_times) < 0.0):
+                raise ValueError(
+                    f"solver replay times are not ordered for {kind} series '{series_name}'"
+                )
+            order = np.argsort(times[indices], kind="mergesort")
+            ordered_indices = np.asarray(indices, dtype=np.int64)[order]
+            ordered_times = times[ordered_indices]
+            ordered_values = values[ordered_indices]
+            if ordered_times.size == 0:
+                continue
+            series.append(
+                {
+                    "name": series_name,
+                    "kind": kind,
+                    "times": ordered_times,
+                    "values": ordered_values,
+                }
+            )
+    return series
+
+
+def _observation_scales(payload: Dict[str, Any]) -> Dict[str, float]:
+    scales = {"pressure": 0.0, "flow": 0.0}
+    observations = payload.get("y")
+    if not isinstance(observations, dict):
+        raise ValueError("calibration payload observations are required for replay scales")
+    for variable_name, raw_values in observations.items():
+        kind = str(variable_name).split(":", 1)[0].lower()
+        if kind not in scales:
+            continue
+        try:
+            values = np.asarray(raw_values, dtype=np.float64)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"calibration observation '{variable_name}' must be numeric") from exc
+        if values.size == 0 or not np.isfinite(values).all():
+            raise ValueError(f"calibration observation '{variable_name}' is empty or non-finite")
+        scales[kind] = max(scales[kind], float(np.max(np.abs(values))))
+    return {
+        kind: max(scale, _REPLAY_SCALE_FLOOR)
+        for kind, scale in scales.items()
+    }
+
+
+def _build_replay_payload(
+    published_config: Dict[str, Any],
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Make an all-cycles validation copy without changing the published config."""
+    replay_payload = copy.deepcopy(published_config)
+    simparams = replay_payload["simulation_parameters"]
+    requested_cycles = int(simparams["number_of_cardiac_cycles"])
+    points_per_cycle = int(simparams["number_of_time_pts_per_cardiac_cycle"])
+    if bool(simparams.get("coupled_simulation", False)):
+        raise ValueError(
+            "calibrated replay stability requires a non-coupled cardiac-cycle configuration"
+        )
+
+    replay_cycles = max(2, requested_cycles)
+    simparams["number_of_cardiac_cycles"] = replay_cycles
+    simparams["output_all_cycles"] = True
+    simparams["output_mean_only"] = False
+    simparams["output_derivative"] = False
+    simparams["output_interval"] = 1
+    return replay_payload, {
+        "requested_number_of_cardiac_cycles": requested_cycles,
+        "validation_number_of_cardiac_cycles": replay_cycles,
+        "number_of_time_pts_per_cardiac_cycle": points_per_cycle,
+        "output_all_cycles": True,
+        "output_mean_only": False,
+        "output_derivative": False,
+        "output_interval": 1,
+    }
+
+
+def _evaluate_replay(
+    *,
+    result: Any,
+    payload: Dict[str, Any],
+    replay_settings: Dict[str, float],
+    validation_settings: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Check finite/bounded solver output and final two-cycle stability."""
+    series = _replay_series(result)
+    scales = _observation_scales(payload)
+    max_abs = {"pressure": 0.0, "flow": 0.0}
+    per_series: list[Dict[str, Any]] = []
+    points_per_cycle = int(validation_settings["number_of_time_pts_per_cardiac_cycle"])
+    cycle_span = points_per_cycle - 1
+    minimum_rows = 2 * cycle_span + 1
+    if points_per_cycle < 2:
+        raise ValueError(
+            "simulation_parameters.number_of_time_pts_per_cardiac_cycle must be at least 2"
+        )
+
+    for item in series:
+        kind = item["kind"]
+        values = item["values"]
+        max_abs[kind] = max(max_abs[kind], float(np.max(np.abs(values))))
+        bound_limit = replay_settings[f"{kind}_bound_multiplier"] * scales[kind]
+        bounded = bool(np.max(np.abs(values)) <= bound_limit)
+        if values.size < minimum_rows:
+            per_series.append(
+                {
+                    "name": item["name"],
+                    "kind": kind,
+                    "sample_count": int(values.size),
+                    "bounded": bounded,
+                    "cycle_stability_relative_rms": None,
+                    "cycle_stability_passed": False,
+                    "error": (
+                        f"expected at least {minimum_rows} samples for two complete "
+                        f"cycles, received {values.size}"
+                    ),
+                }
+            )
+            continue
+
+        final_start = values.size - (cycle_span + 1)
+        preceding_start = final_start - cycle_span
+        preceding = values[preceding_start : preceding_start + points_per_cycle]
+        final = values[final_start : final_start + points_per_cycle]
+        normalized_rms = _rms(final - preceding) / max(scales[kind], _REPLAY_SCALE_FLOOR)
+        per_series.append(
+            {
+                "name": item["name"],
+                "kind": kind,
+                "sample_count": int(values.size),
+                "bounded": bounded,
+                "maximum_absolute_value": float(np.max(np.abs(values))),
+                "bound_limit": float(bound_limit),
+                "cycle_stability_relative_rms": float(normalized_rms),
+                "cycle_stability_passed": bool(
+                    normalized_rms <= replay_settings["cycle_stability_tolerance"]
+                ),
+                "final_cycle_start_time": float(item["times"][final_start]),
+                "final_cycle_end_time": float(item["times"][final_start + points_per_cycle - 1]),
+            }
+        )
+
+    pressure_series = [item for item in per_series if item["kind"] == "pressure"]
+    flow_series = [item for item in per_series if item["kind"] == "flow"]
+    bounds = {
+        kind: {
+            "observation_scale": float(scales[kind]),
+            "multiplier": float(replay_settings[f"{kind}_bound_multiplier"]),
+            "limit": float(
+                replay_settings[f"{kind}_bound_multiplier"] * scales[kind]
+            ),
+            "maximum_absolute_value": float(max_abs[kind]),
+            "passed": bool(
+                max_abs[kind]
+                <= replay_settings[f"{kind}_bound_multiplier"] * scales[kind]
+            ),
+        }
+        for kind in ("pressure", "flow")
+    }
+    stability = {
+        "tolerance": float(replay_settings["cycle_stability_tolerance"]),
+        "maximum_pressure_relative_rms": max(
+            (
+                item["cycle_stability_relative_rms"]
+                for item in pressure_series
+                if item["cycle_stability_relative_rms"] is not None
+            ),
+            default=None,
+        ),
+        "maximum_flow_relative_rms": max(
+            (
+                item["cycle_stability_relative_rms"]
+                for item in flow_series
+                if item["cycle_stability_relative_rms"] is not None
+            ),
+            default=None,
+        ),
+        "passed": bool(
+            pressure_series
+            and flow_series
+            and all(item["cycle_stability_passed"] for item in per_series)
+        ),
+    }
+    checks = {
+        "finite_pressure_and_flow": True,
+        "bounded_pressure": bounds["pressure"]["passed"],
+        "bounded_flow": bounds["flow"]["passed"],
+        "cycle_stability": stability["passed"],
+    }
+    return {
+        "status": "pass" if all(checks.values()) else "fail",
+        "checks": checks,
+        "validation_settings": validation_settings,
+        "bounds": bounds,
+        "cycle_stability": stability,
+        "series": sorted(per_series, key=lambda item: (item["kind"], item["name"])),
+    }
+
+
+def _write_json_atomically(path: Path, payload: Dict[str, Any], *, indent: int) -> None:
+    """Publish one JSON document with a same-directory temporary file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as stream:
+            temporary_path = Path(stream.name)
+            json.dump(payload, stream, indent=indent, sort_keys=True, allow_nan=False)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
 def calibrate_0d_from_mapped_centerline(
     *,
     zerod_config_path: str,
@@ -1625,17 +2308,97 @@ def calibrate_0d_from_mapped_centerline(
         "warnings": warning_records,
     }
     confirmation_path = output_path.parent / "calibration_confirmation.json"
-    confirmation_path.write_text(
-        json.dumps(confirmation_summary, indent=2, sort_keys=True, allow_nan=False)
-        + "\n",
-        encoding="utf-8",
+    _write_json_atomically(confirmation_path, confirmation_summary, indent=2)
+
+    replay_settings = _replay_settings(calibration)
+    published, output_normalization = _normalize_calibrated_config(
+        confirmation_calibrated
     )
+    _validate_publishable_solver_config(published)
+    replay_payload, validation_settings = _build_replay_payload(published)
+    replay_path = output_path.parent / "calibration_replay.json"
 
-    published = copy.deepcopy(confirmation_calibrated)
-    published.pop("calibration_diagnostics", None)
+    try:
+        replay_result = simulate_pysvzerod(replay_payload)
+    except Exception as exc:
+        replay_summary = {
+            "status": "fail",
+            "checks": {
+                "finite_pressure_and_flow": False,
+                "bounded_pressure": False,
+                "bounded_flow": False,
+                "cycle_stability": False,
+            },
+            "validation_settings": validation_settings,
+            "replay_settings": replay_settings,
+            "error": (
+                "simulate failed: "
+                f"{type(exc).__name__}: {exc}"
+            ),
+        }
+        _write_json_atomically(replay_path, replay_summary, indent=2)
+        raise ValueError(
+            "calibrated solver configuration replay failed: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
 
-    with output_path.open("w", encoding="utf-8") as stream:
-        json.dump(published, stream, indent=4, allow_nan=False)
+    try:
+        replay_summary = _evaluate_replay(
+            result=replay_result,
+            payload=assembly.solver_payload,
+            replay_settings=replay_settings,
+            validation_settings=validation_settings,
+        )
+    except ValueError as exc:
+        replay_summary = {
+            "status": "fail",
+            "checks": {
+                "finite_pressure_and_flow": False,
+                "bounded_pressure": False,
+                "bounded_flow": False,
+                "cycle_stability": False,
+            },
+            "validation_settings": validation_settings,
+            "replay_settings": replay_settings,
+            "error": str(exc),
+        }
+        _write_json_atomically(replay_path, replay_summary, indent=2)
+        raise ValueError(f"calibrated solver replay validation failed: {exc}") from exc
+
+    replay_summary["replay_settings"] = replay_settings
+    _write_json_atomically(replay_path, replay_summary, indent=2)
+    if replay_summary["status"] != "pass":
+        failed_checks = [
+            name
+            for name, passed in replay_summary.get("checks", {}).items()
+            if not passed
+        ]
+        raise ValueError(
+            "calibrated solver replay stability checks failed: "
+            + ", ".join(failed_checks)
+            + f"; report: {replay_path}"
+        )
+
+    summary = {
+        "status": "ok",
+        "output_config": str(output_path),
+        "observation_count": assembly.observation_count,
+        "variable_count": assembly.variable_count,
+        "solver_provenance": confirmation_provenance,
+        "input_normalization": assembly.input_normalization,
+        "observation_qc": assembly.observation_qc,
+        "interface_sampling": assembly.interface_sampling,
+        "exclusions": assembly.excluded_blocks,
+        "calibrated_output_normalization": output_normalization,
+        "calibration_confirmation": confirmation_summary,
+        "replay_stability": replay_summary,
+    }
+    summary_path = output_path.parent / "calibration_summary.json"
+    _write_json_atomically(summary_path, summary, indent=2)
+
+    # The only operation that publishes the solver config is the final atomic
+    # replacement.  Every validation and replay check above runs on copies.
+    _write_json_atomically(output_path, published, indent=4)
 
     return {
         "status": "ok",
@@ -1649,5 +2412,10 @@ def calibrate_0d_from_mapped_centerline(
         "observation_qc_report": str(qc_path),
         "calibration_confirmation": confirmation_summary,
         "calibration_confirmation_report": str(confirmation_path),
-        "solver_provenance": last_calibration_provenance(),
+        "calibrated_output_normalization": output_normalization,
+        "replay_stability": replay_summary,
+        "calibration_replay_report": str(replay_path),
+        "calibration_summary": summary,
+        "calibration_summary_report": str(summary_path),
+        "solver_provenance": confirmation_provenance,
     }
