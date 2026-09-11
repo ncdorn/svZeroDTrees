@@ -85,6 +85,9 @@ calibration:
     pressure_bound_multiplier: 10.0
     flow_bound_multiplier: 10.0
     cycle_stability_tolerance: 1e-3
+    replay_minimum_cycles: 3
+    replay_maximum_cycles: 10
+    required_consecutive_stable_pairs: 1
   input_normalization:
     infinite_vessel_compliance: error  # error | zero
   observation_qc:
@@ -94,6 +97,22 @@ calibration:
     minimum_pressure_drop_fraction: 0.95
     minimum_path_coverage: 0.99
     minimum_usable_samples: 3
+    enforcement: strict_network  # strict_network | target_focused
+  # Optional during the version-1 compatibility window. Required when
+  # observation_qc.enforcement is target_focused.
+  targets:
+    mpa_pressure:
+      vessel: branch0_seg0
+      interface: external_upstream
+      weight: 1.0
+      normalized_rms_tolerance: 0.05
+    rpa_flow_split:
+      rpa_vessel: branch1_seg0
+      lpa_vessel: branch2_seg0
+      interface: external_downstream
+      weight: 1.0
+      absolute_tolerance: 0.02
+    require_improvement_over_baseline: true
 ```
 
 Stage-1 calibration constraints:
@@ -109,7 +128,7 @@ Stage-1 calibration constraints:
 - External boundary interfaces are qualified from the adjacent interior mapped cross-section: the upstream endpoint uses the second usable path sample and the downstream endpoint uses the penultimate usable path sample. Automatic qualification requires at least three unique usable branch paths; no endpoint extrapolation is performed.
 - Interfaces attached to a 0D junction remain topology-derived path queries and are linearly interpolated at the requested `Path`, including interfaces between segments of one branch.
 - The calibration result records `interface_sampling` for every assembled upstream/downstream interface, including `requested_path`, `selected_path`, `inset_distance`, `usable_sample_count`, pairing status, and quality status. A vessel can be explicitly excluded from calibration with an empty `calibration.parameters.vessels.overrides` list; such exclusions are recorded in `excluded_blocks`. Under-resolved endpoints otherwise fail before solver dispatch.
-- Before solver dispatch, the workflow writes `calibration_observation_qc.json` beside the requested output config. The report contains deterministic metrics and checks for vessel continuity, junction mass balance, root inflow waveform agreement, pressure-drop direction, path coverage, and sampling resolution. Any failed check prevents the solver call and leaves the output solver JSON unwritten.
+- Before solver dispatch, the workflow writes `calibration_observation_qc.json` beside the requested output config. The report contains deterministic metrics and checks for vessel continuity, junction mass balance, root inflow waveform agreement, pressure-drop direction, path coverage, and sampling resolution. Under the legacy `strict_network` profile, any failed check prevents the solver call and leaves the output solver JSON unwritten. Under `target_focused`, data-contract, target-topology, target-sampling, and target-denominator checks remain fatal while whole-network continuity, pressure-direction, and non-target endpoint metrics are advisory and remain visible in the report.
 - The mapped centerline result and reference centerline must have matching point counts.
 - Single-snapshot calibration still emits zero `dy` observations.
 - The input 0D config must not contain non-finite numeric values such as `NaN` or `inf`.
@@ -123,9 +142,44 @@ Stage-1 calibration constraints:
 - A selected scalar or list parameter is fixed-point confirmed when its confirmation delta satisfies `abs(delta) <= confirmation_absolute_tolerance + confirmation_relative_tolerance * max(abs(first), abs(confirmation))`. Non-finite results, missing selected parameters, changed inactive parameters, solver exceptions, and failed confirmation deltas prevent output publication.
 - The calibrator is not required to return `calibration_diagnostics`. `parameter_ratio_warning_threshold` replaces the former hard maximum ratio, and negative selected parameters—including negative resistance—are accepted when the two-pass fixed-point check succeeds. Both passes, confirmation deltas, solver provenance, negative-parameter paths, and large-ratio paths are written to `calibration_confirmation.json`.
 - After fixed-point confirmation, the workflow removes calibration-only fields and normalizes single-outlet `internal_junction` blocks to `NORMAL_JUNCTION`. Multi-outlet junction values are retained and are not calibrated unless explicitly selected.
-- The normalized result is structurally checked and replayed through the unchanged `pysvzerod.simulate` API before publication. Replay uses a copy configured for at least two complete cycles with all time points emitted; the requested cycle settings in the published JSON are unchanged.
+- The normalized result is structurally checked and replayed through the unchanged `pysvzerod.simulate` API before publication. Replay uses a copy configured with `replay_minimum_cycles` (default 3), `replay_maximum_cycles`, and `required_consecutive_stable_pairs`; all time points are emitted and the requested cycle settings in the published JSON are unchanged. Bounds and target metrics are evaluated on the accepted settled cycle, while every replay cycle must remain finite.
 - Replay requires finite, positive `pressure_bound_multiplier` and `flow_bound_multiplier` settings and a finite, non-negative `cycle_stability_tolerance`. Every pressure and flow result must be finite, remain within its configured multiple of the corresponding observation scale, and have a final-cycle normalized RMS difference below the stability tolerance.
-- The solver JSON is written with an atomic replacement only after replay passes. A negative calibrated resistance is therefore accepted when it is fixed-point confirmed and replay-stable. `calibration_replay.json` records boundedness and cycle-stability metrics, and `calibration_summary.json` combines provenance, normalization, QC, confirmation, warnings, and replay diagnostics.
+- The solver JSON is written with an atomic replacement only after replay passes. A negative calibrated resistance is therefore accepted when it is fixed-point confirmed and replay-stable; its path and value are recorded as a warning, not treated as a standalone failure. `calibration_replay.json` records the settling horizon, accepted cycle, boundedness, and cycle-stability metrics. For target-focused runs, `calibration_targets.json` records explicit roles/interfaces, normalized MPA-pressure and RPA-split component errors, independent gates, the weighted composite post-calibration score, and baseline policy. `calibration_summary.json` combines provenance, normalization, QC, confirmation, target evaluation, warnings, and replay diagnostics.
+
+**Production calibration contract**
+
+During the version-1 compatibility window, omitting `calibration.targets`
+retains `strict_network` enforcement and legacy behavior. A production
+pulmonary profile explicitly selects `target_focused` and supplies both target
+blocks. MPA, LPA, and RPA are configuration roles, not inferred anatomy: all
+three vessel names must be distinct, each interface must be explicit and
+topology-valid, and `internal` is accepted only when one endpoint is
+unambiguous. The target observations require explicit pressure and
+volumetric-flow units, ordered timestamps, and `cycle_duration_s`; integrated
+flow is never area-scaled. Comparisons normalize units and align both traces
+on one periodic phase basis.
+
+The unchanged solver boundary requires only callable standard
+`pysvzerod.calibrate(config)` and `pysvzerod.simulate(config)` APIs. The
+calibrator remains the only optimizer: the MPA pressure waveform NRMSE and
+absolute RPA split error are independently gated after calibration, and their
+tolerance-normalized weighted composite is a post-calibration score rather
+than the calibrator objective. When enabled, `require_improvement_over_baseline`
+requires the candidate score not to regress from a stable baseline. A negative
+calibrated resistance is warning-only when fixed-point, replay, and target
+gates pass.
+
+All reports and the returned result share one `run_id` and content digests for
+the normalized input, observations, solver module SHA-256, and published
+output. The solver module report includes its resolved path, file metadata,
+and optional version/build identity. The stable artifact set is:
+`calibration_observation_qc.json`, `calibration_confirmation.json`,
+`calibration_replay.json`, `calibration_targets.json`, and
+`calibration_summary.json`, alongside `paths.output_config`. Invalid input,
+QC, fixed-point, replay, or target gates fail clearly and leave
+`paths.output_config` unpublished; the solver JSON is atomically published
+last. This interface documents domain behavior only and does not add SSH,
+Slurm, or other orchestration requirements.
 
 From a case directory containing the referenced baseline, centerline,
 timeseries, and metadata files (after copying the example config), run:
@@ -138,10 +192,11 @@ The input config must provide `paths.zerod_config`, `paths.output_config`, a
 finite solver JSON, the ordered mapped centerline timeseries, its metadata
 sidecar, and explicit vessel/junction parameter selections. A successful run
 publishes the solver JSON together with `calibration_observation_qc.json`,
-`calibration_confirmation.json`, `calibration_replay.json`, and
-`calibration_summary.json` beside it. QC, fixed-point confirmation, schema
-validation, or replay failure writes its diagnostic report but does not publish
-the solver JSON.
+`calibration_confirmation.json`, `calibration_replay.json`,
+`calibration_targets.json`, and `calibration_summary.json` beside it. All
+reports and the returned result share a `run_id` and content digests. QC,
+fixed-point confirmation, schema validation, replay, or target failure writes
+its diagnostic report but does not publish the solver JSON.
 
 **BCs**
 ```yaml

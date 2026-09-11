@@ -1,6 +1,6 @@
 # 0D Calibration From 3D Results Stage 1-4 Plan
 
-Last updated: 2026-06-16
+Last updated: 2026-09-11
 
 This file is an implementation plan for adding 0D calibration from 3D results
 to `svZeroDTrees`, using the Levenberg-Marquardt calibrator available through
@@ -63,12 +63,57 @@ the result for finite bounded cycle-stable pressure and flow before publishing.
 
 A successful run writes the requested solver JSON plus
 `calibration_observation_qc.json`, `calibration_confirmation.json`,
-`calibration_replay.json`, and `calibration_summary.json` beside it. Failed QC,
-confirmation, schema validation, or replay leaves the solver JSON unpublished.
-Negative calibrated resistance is reportable and accepted when the fixed-point
-and replay checks pass. Small synthetic committed fixtures live under
+`calibration_replay.json`, `calibration_targets.json`, and
+`calibration_summary.json` beside it. Failed QC, confirmation, schema
+validation, replay, or target gates leaves the solver JSON unpublished.
+Negative calibrated resistance is reportable and accepted when the fixed-point,
+replay, and target checks pass. Small synthetic committed fixtures live under
 `tests/fixtures/calibration`; the TST-STAN-5 regression is external and opt-in
 via `SVZERODTREES_RUN_REAL_CASE=1`.
+
+## Production Contract (Version 1)
+
+The version-1 migration keeps absent targets compatible: when
+`calibration.targets` is omitted, observation QC remains `strict_network` and
+the established workflow semantics apply. Production pulmonary configurations
+select `observation_qc.enforcement: target_focused` and provide both an
+`mpa_pressure` target and an `rpa_flow_split` target. These blocks explicitly
+name distinct MPA, LPA, and RPA vessel roles and a topology-validated
+interface. No role, laterality, unit, or interface is inferred from a branch
+number or geometry.
+
+The mapped-timeseries sidecar is part of the data contract. It declares
+pressure and volumetric-flow units, ordered timestamps, and `cycle_duration_s`;
+integrated flow is consumed as flow and is never multiplied by area. The
+workflow normalizes target pressure and flow units and aligns both comparisons
+on a common periodic phase basis. Missing or ambiguous metadata, target
+topology, target samples, or a zero split denominator is fatal. In
+`target_focused` mode, whole-network conservation, pressure-direction, and
+non-target diagnostics remain advisory so the configured pulmonary targets can
+be evaluated; `strict_network` continues to gate all of its checks.
+
+The unchanged `pysvzerod.calibrate(config)` call remains the only optimizer.
+After its two-pass fixed-point confirmation, the normalized model is replayed
+through the unchanged `pysvzerod.simulate(config)` call over a bounded settling
+horizon controlled by `replay_minimum_cycles` (default 3),
+`replay_maximum_cycles`, and `required_consecutive_stable_pairs`. Every cycle
+must be finite and bounded; target bounds are evaluated on the accepted settled
+cycle. MPA pressure waveform NRMSE and absolute RPA split error are independent
+component gates. Their tolerance-normalized weighted composite is a
+post-calibration score, never a `pysvzerod.calibrate` objective. If enabled,
+the baseline policy requires the candidate score not to regress from a stable
+baseline. A negative calibrated resistance is warning-only when fixed-point,
+replay, and target gates pass.
+
+The solver boundary requires only callable standard `calibrate` and `simulate`
+APIs. Provenance records the resolved module path, file metadata, optional
+version/build identity, and module SHA-256. Every report and the returned
+result carries one `run_id` plus content digests for normalized input,
+observations, solver module, and output. The solver JSON is atomically
+published last, after the reports and all checks succeed. Invalid input, QC,
+fixed-point, replay, or target gates fail clearly without publishing the
+calibrated solver JSON. This domain contract contains no SSH, Slurm, or other
+cluster orchestration instructions.
 
 ## Parameter Inventory
 

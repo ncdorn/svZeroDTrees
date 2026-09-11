@@ -36,6 +36,11 @@ def test_cli_schema_renders_config_template(monkeypatch, capsys):
     assert "confirmation_absolute_tolerance: 1e-8" in rendered
     assert "pressure_bound_multiplier: 10.0" in rendered
     assert "cycle_stability_tolerance: 1e-3" in rendered
+    assert "replay_minimum_cycles: 3" in rendered
+    assert "replay_maximum_cycles: 10" in rendered
+    assert "enforcement: strict_network  # strict_network | target_focused" in rendered
+    assert "targets:" in rendered
+    assert "normalized_rms_tolerance: 0.05" in rendered
 
 
 def test_cli_dispatches_real_config_to_pipeline_workflow(monkeypatch, tmp_path):
@@ -119,6 +124,25 @@ calibration:
       default: [R_poiseuille]
     junctions:
       default: [R_poiseuille]
+  observation_qc:
+    enforcement: target_focused
+  targets:
+    mpa_pressure:
+      vessel: branch0_seg0
+      interface: external_upstream
+      weight: 1.0
+      normalized_rms_tolerance: 0.05
+    rpa_flow_split:
+      rpa_vessel: branch1_seg0
+      lpa_vessel: branch2_seg0
+      interface: external_downstream
+      weight: 1.0
+      absolute_tolerance: 0.02
+    require_improvement_over_baseline: true
+  solver:
+    replay_minimum_cycles: 3
+    replay_maximum_cycles: 8
+    required_consecutive_stable_pairs: 2
 """,
         encoding="utf-8",
     )
@@ -131,7 +155,16 @@ calibration:
     )
 
     assert cli.main() == 0
-    assert RecordingWorkflow.seen[0].workflow == "calibrate_0d_from_3d"
+    config = RecordingWorkflow.seen[0]
+    assert config.workflow == "calibrate_0d_from_3d"
+    assert config.calibration.observation_qc.enforcement == "target_focused"
+    assert config.calibration.targets.mpa_pressure.vessel == "branch0_seg0"
+    assert config.calibration.targets.mpa_pressure.interface == "external_upstream"
+    assert config.calibration.targets.rpa_flow_split.rpa_vessel == "branch1_seg0"
+    assert config.calibration.targets.rpa_flow_split.lpa_vessel == "branch2_seg0"
+    assert config.calibration.solver.replay_minimum_cycles == 3
+    assert config.calibration.solver.replay_maximum_cycles == 8
+    assert config.calibration.solver.required_consecutive_stable_pairs == 2
 
 
 def test_cli_rejects_subcommand_workflow_mismatch(monkeypatch, tmp_path):

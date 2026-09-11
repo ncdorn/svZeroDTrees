@@ -13,10 +13,11 @@ REQUIRED_SOLVER_CALLABLES = ("calibrate", "simulate")
 
 _INSTALL_HINT = (
     "pysvzerod is required for solver-backed svZeroDTrees workflows. "
-    "Install the pinned solver with `uv sync --group solver` or install the "
-    "sibling svZeroDSolver checkout with `python3 -m pip install -e "
+    "Install the sibling svZeroDSolver checkout first with `python3 -m pip "
+    "install -e "
     "../svZeroDSolver` (or `python3 -m pip install -e "
-    "/home/users/ndorn/svZeroDSolver` on Sherlock)."
+    "/home/users/ndorn/svZeroDSolver` on Sherlock), or install the pinned "
+    "solver with `uv sync --group solver`."
 )
 
 _last_calibration_provenance: dict[str, object] | None = None
