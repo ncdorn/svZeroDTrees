@@ -12,6 +12,16 @@ from .microvasculature.compliance.olufsen import OlufsenCompliance
 
 CONFIG_VERSION = 1
 
+_CALIBRATION_TARGET_INTERFACES = {
+    "external_upstream",
+    "external_downstream",
+    "internal",
+    # These short forms are convenient in YAML and map to the corresponding
+    # interface direction during target resolution.
+    "upstream",
+    "downstream",
+}
+
 
 @dataclass
 class PathsConfig:
@@ -195,6 +205,9 @@ class CalibrationSolverConfig:
     pressure_bound_multiplier: float = 10.0
     flow_bound_multiplier: float = 10.0
     cycle_stability_tolerance: float = 1e-3
+    replay_minimum_cycles: int = 3
+    replay_maximum_cycles: int = 10
+    required_consecutive_stable_pairs: int = 1
 
 
 @dataclass
@@ -210,6 +223,31 @@ class CalibrationObservationQCConfig:
     minimum_pressure_drop_fraction: float = 0.95
     minimum_path_coverage: float = 0.99
     minimum_usable_samples: int = 3
+    enforcement: str = "strict_network"
+
+
+@dataclass
+class CalibrationMPAPressureTargetConfig:
+    vessel: str
+    interface: str
+    weight: float = 1.0
+    normalized_rms_tolerance: float = 0.05
+
+
+@dataclass
+class CalibrationRPAFlowSplitTargetConfig:
+    rpa_vessel: str
+    lpa_vessel: str
+    interface: str
+    weight: float = 1.0
+    absolute_tolerance: float = 0.02
+
+
+@dataclass
+class CalibrationTargetsConfig:
+    mpa_pressure: CalibrationMPAPressureTargetConfig
+    rpa_flow_split: CalibrationRPAFlowSplitTargetConfig
+    require_improvement_over_baseline: bool = True
 
 
 @dataclass
@@ -223,6 +261,7 @@ class CalibrationConfig:
     observation_qc: CalibrationObservationQCConfig = field(
         default_factory=CalibrationObservationQCConfig
     )
+    targets: Optional[CalibrationTargetsConfig] = None
 
 
 @dataclass
@@ -726,6 +765,132 @@ def _parse_calibration_parameter_selection(
     )
 
 
+def _finite_positive_float(value: Any, *, context: str) -> float:
+    try:
+        converted = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{context} must be finite and positive") from exc
+    if not np.isfinite(converted) or converted <= 0.0:
+        raise ValueError(f"{context} must be finite and positive")
+    return converted
+
+
+def _positive_integer(value: Any, *, context: str, minimum: int = 1) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{context} must be an integer at least {minimum}")
+    try:
+        converted = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{context} must be an integer at least {minimum}") from exc
+    if (
+        not np.isfinite(converted)
+        or converted != int(converted)
+        or int(converted) < minimum
+    ):
+        raise ValueError(f"{context} must be an integer at least {minimum}")
+    return int(converted)
+
+
+def _target_vessel_name(value: Any, *, context: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{context} must be a non-empty vessel name")
+    return value.strip()
+
+
+def _target_interface(value: Any, *, context: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(
+            f"{context} must be one of {sorted(_CALIBRATION_TARGET_INTERFACES)}"
+        )
+    interface = value.strip().lower()
+    if interface not in _CALIBRATION_TARGET_INTERFACES:
+        raise ValueError(
+            f"{context} must be one of {sorted(_CALIBRATION_TARGET_INTERFACES)}"
+        )
+    return interface
+
+
+def _parse_calibration_targets(
+    data: Optional[Dict[str, Any]],
+    *,
+    context: str = "calibration.targets",
+) -> Optional[CalibrationTargetsConfig]:
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise ValueError(f"{context} must be a mapping")
+    _ensure_keys(
+        data,
+        ["mpa_pressure", "rpa_flow_split", "require_improvement_over_baseline"],
+        context,
+    )
+
+    mpa_raw = data.get("mpa_pressure")
+    rpa_raw = data.get("rpa_flow_split")
+    if not isinstance(mpa_raw, dict) or not isinstance(rpa_raw, dict):
+        raise ValueError(
+            f"{context} requires both mpa_pressure and rpa_flow_split mappings"
+        )
+    _ensure_keys(
+        mpa_raw,
+        ["vessel", "interface", "weight", "normalized_rms_tolerance"],
+        f"{context}.mpa_pressure",
+    )
+    _ensure_keys(
+        rpa_raw,
+        ["rpa_vessel", "lpa_vessel", "interface", "weight", "absolute_tolerance"],
+        f"{context}.rpa_flow_split",
+    )
+
+    mpa = CalibrationMPAPressureTargetConfig(
+        vessel=_target_vessel_name(mpa_raw.get("vessel"), context=f"{context}.mpa_pressure.vessel"),
+        interface=_target_interface(
+            mpa_raw.get("interface"), context=f"{context}.mpa_pressure.interface"
+        ),
+        weight=_finite_positive_float(
+            mpa_raw.get("weight", 1.0), context=f"{context}.mpa_pressure.weight"
+        ),
+        normalized_rms_tolerance=_finite_positive_float(
+            mpa_raw.get("normalized_rms_tolerance", 0.05),
+            context=f"{context}.mpa_pressure.normalized_rms_tolerance",
+        ),
+    )
+    rpa = CalibrationRPAFlowSplitTargetConfig(
+        rpa_vessel=_target_vessel_name(
+            rpa_raw.get("rpa_vessel"), context=f"{context}.rpa_flow_split.rpa_vessel"
+        ),
+        lpa_vessel=_target_vessel_name(
+            rpa_raw.get("lpa_vessel"), context=f"{context}.rpa_flow_split.lpa_vessel"
+        ),
+        interface=_target_interface(
+            rpa_raw.get("interface"), context=f"{context}.rpa_flow_split.interface"
+        ),
+        weight=_finite_positive_float(
+            rpa_raw.get("weight", 1.0), context=f"{context}.rpa_flow_split.weight"
+        ),
+        absolute_tolerance=_finite_positive_float(
+            rpa_raw.get("absolute_tolerance", 0.02),
+            context=f"{context}.rpa_flow_split.absolute_tolerance",
+        ),
+    )
+    roles = {mpa.vessel, rpa.rpa_vessel, rpa.lpa_vessel}
+    if len(roles) != 3:
+        raise ValueError(
+            f"{context} requires distinct MPA, LPA, and RPA vessel roles"
+        )
+
+    require_improvement = data.get("require_improvement_over_baseline", True)
+    if not isinstance(require_improvement, bool):
+        raise ValueError(
+            f"{context}.require_improvement_over_baseline must be a boolean"
+        )
+    return CalibrationTargetsConfig(
+        mpa_pressure=mpa,
+        rpa_flow_split=rpa,
+        require_improvement_over_baseline=require_improvement,
+    )
+
+
 def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
     _ensure_keys(
         data,
@@ -735,6 +900,7 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             "solver",
             "input_normalization",
             "observation_qc",
+            "targets",
         ],
         "calibration",
     )
@@ -837,6 +1003,9 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             "pressure_bound_multiplier",
             "flow_bound_multiplier",
             "cycle_stability_tolerance",
+            "replay_minimum_cycles",
+            "replay_maximum_cycles",
+            "required_consecutive_stable_pairs",
         ],
         "calibration.solver",
     )
@@ -857,6 +1026,20 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         pressure_bound_multiplier=float(solver_raw.get("pressure_bound_multiplier", 10.0)),
         flow_bound_multiplier=float(solver_raw.get("flow_bound_multiplier", 10.0)),
         cycle_stability_tolerance=float(solver_raw.get("cycle_stability_tolerance", 1e-3)),
+        replay_minimum_cycles=_positive_integer(
+            solver_raw.get("replay_minimum_cycles", 3),
+            context="calibration.solver.replay_minimum_cycles",
+            minimum=3,
+        ),
+        replay_maximum_cycles=_positive_integer(
+            solver_raw.get("replay_maximum_cycles", 10),
+            context="calibration.solver.replay_maximum_cycles",
+            minimum=3,
+        ),
+        required_consecutive_stable_pairs=_positive_integer(
+            solver_raw.get("required_consecutive_stable_pairs", 1),
+            context="calibration.solver.required_consecutive_stable_pairs",
+        ),
     )
     if (
         not np.isfinite(solver.initial_damping_factor)
@@ -878,6 +1061,8 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         or solver.flow_bound_multiplier <= 0.0
         or not np.isfinite(solver.cycle_stability_tolerance)
         or solver.cycle_stability_tolerance < 0.0
+        or solver.replay_maximum_cycles < solver.replay_minimum_cycles
+        or solver.required_consecutive_stable_pairs > solver.replay_maximum_cycles - 1
     ):
         raise ValueError(
             "calibration.solver requires a positive damping factor and at least "
@@ -885,7 +1070,9 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             "parameter_ratio_warning_threshold must be finite and at least 1; "
             "confirmation tolerances must be finite and non-negative; pressure and "
             "flow bound multipliers must be finite and positive; cycle stability "
-            "tolerance must be finite and non-negative"
+            "tolerance must be finite and non-negative; replay_maximum_cycles must "
+            "be at least replay_minimum_cycles and leave enough cycle pairs for "
+            "required_consecutive_stable_pairs"
         )
 
     normalization_raw = data.get("input_normalization") or {}
@@ -917,6 +1104,7 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             "minimum_pressure_drop_fraction",
             "minimum_path_coverage",
             "minimum_usable_samples",
+            "enforcement",
         ],
         "calibration.observation_qc",
     )
@@ -939,6 +1127,7 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         minimum_usable_samples=int(
             observation_qc_raw.get("minimum_usable_samples", 3)
         ),
+        enforcement=str(observation_qc_raw.get("enforcement", "strict_network")).lower(),
     )
     if (
         not np.isfinite(observation_qc.vessel_flow_continuity_tolerance)
@@ -964,6 +1153,18 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             "calibration.observation_qc.minimum_usable_samples must be at least 3"
         )
 
+    if observation_qc.enforcement not in {"strict_network", "target_focused"}:
+        raise ValueError(
+            "calibration.observation_qc.enforcement must be one of "
+            "strict_network|target_focused"
+        )
+    targets = _parse_calibration_targets(data.get("targets"))
+    if observation_qc.enforcement == "target_focused" and targets is None:
+        raise ValueError(
+            "calibration.observation_qc.enforcement=target_focused requires "
+            "calibration.targets"
+        )
+
     return CalibrationConfig(
         data_source=data_source,
         parameters=parameters,
@@ -972,6 +1173,7 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             infinite_vessel_compliance=infinite_vessel_compliance
         ),
         observation_qc=observation_qc,
+        targets=targets,
     )
 
 
@@ -1305,6 +1507,9 @@ calibration:
     pressure_bound_multiplier: 10.0
     flow_bound_multiplier: 10.0
     cycle_stability_tolerance: 1e-3
+    replay_minimum_cycles: 3
+    replay_maximum_cycles: 10
+    required_consecutive_stable_pairs: 1
   input_normalization:
     infinite_vessel_compliance: error  # error | zero
   observation_qc:
@@ -1314,6 +1519,22 @@ calibration:
     minimum_pressure_drop_fraction: 0.95
     minimum_path_coverage: 0.99
     minimum_usable_samples: 3
+    enforcement: strict_network  # strict_network | target_focused
+  # Optional during the version-1 compatibility window. Required when
+  # observation_qc.enforcement is target_focused.
+  targets:
+    mpa_pressure:
+      vessel: branch0_seg0
+      interface: external_upstream
+      weight: 1.0
+      normalized_rms_tolerance: 0.05
+    rpa_flow_split:
+      rpa_vessel: branch1_seg0
+      lpa_vessel: branch2_seg0
+      interface: external_downstream
+      weight: 1.0
+      absolute_tolerance: 0.02
+    require_improvement_over_baseline: true
 
 bcs:
   type: impedance  # impedance | rcr

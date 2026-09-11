@@ -121,6 +121,241 @@ calibration:
     assert cfg.calibration.solver.cycle_stability_tolerance == 1e-3
 
 
+def _target_focused_calibration_yaml(
+    tmp_path, *, targets: str | None = None, solver: str = ""
+) -> str:
+    target_section = "" if targets is None else f"\n  targets:\n{targets}"
+    return f"""
+version: 1
+workflow: calibrate_0d_from_3d
+paths:
+  root: {tmp_path}
+  zerod_config: zerod.json
+  output_config: calibrated.json
+calibration:
+  data_source:
+    mode: mapped_centerline
+    mapped_centerline_result: mapped.vtp
+    centerline: centerline.vtp
+    flow_observation_type: flow
+  parameters:
+    vessels: {{}}
+    junctions: {{}}
+  solver:
+{solver or '    replay_minimum_cycles: 3'}
+  observation_qc:
+    enforcement: target_focused
+{target_section}
+"""
+
+
+def test_legacy_calibration_defaults_to_strict_network(tmp_path):
+    cfg_path = tmp_path / "legacy.yml"
+    cfg_path.write_text(
+        _target_focused_calibration_yaml(tmp_path, targets=None).replace(
+            "  observation_qc:\n    enforcement: target_focused\n", "  observation_qc: {}\n"
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    assert cfg.calibration is not None
+    assert cfg.calibration.targets is None
+    assert cfg.calibration.observation_qc.enforcement == "strict_network"
+    assert cfg.calibration.solver.replay_minimum_cycles == 3
+    assert cfg.calibration.solver.replay_maximum_cycles == 10
+    assert cfg.calibration.solver.required_consecutive_stable_pairs == 1
+
+
+def test_target_focused_calibration_parses_explicit_roles_and_replay_settings(tmp_path):
+    cfg_path = tmp_path / "target-focused.yml"
+    cfg_path.write_text(
+        _target_focused_calibration_yaml(
+            tmp_path,
+            solver=(
+                "    replay_minimum_cycles: 4\n"
+                "    replay_maximum_cycles: 9\n"
+                "    required_consecutive_stable_pairs: 2"
+            ),
+            targets=(
+                "    mpa_pressure:\n"
+                "      vessel: branch0_seg0\n"
+                "      interface: external_upstream\n"
+                "      weight: 1.0\n"
+                "      normalized_rms_tolerance: 0.05\n"
+                "    rpa_flow_split:\n"
+                "      rpa_vessel: branch1_seg0\n"
+                "      lpa_vessel: branch2_seg0\n"
+                "      interface: external_downstream\n"
+                "      weight: 2.0\n"
+                "      absolute_tolerance: 0.02\n"
+                "    require_improvement_over_baseline: false"
+            ),
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    assert cfg.calibration is not None
+    assert cfg.calibration.observation_qc.enforcement == "target_focused"
+    assert cfg.calibration.targets is not None
+    assert cfg.calibration.targets.mpa_pressure.vessel == "branch0_seg0"
+    assert cfg.calibration.targets.mpa_pressure.interface == "external_upstream"
+    assert cfg.calibration.targets.rpa_flow_split.rpa_vessel == "branch1_seg0"
+    assert cfg.calibration.targets.rpa_flow_split.lpa_vessel == "branch2_seg0"
+    assert cfg.calibration.targets.rpa_flow_split.weight == 2.0
+    assert cfg.calibration.targets.require_improvement_over_baseline is False
+    assert cfg.calibration.solver.replay_minimum_cycles == 4
+    assert cfg.calibration.solver.replay_maximum_cycles == 9
+    assert cfg.calibration.solver.required_consecutive_stable_pairs == 2
+
+
+def test_target_focused_requires_both_targets(tmp_path):
+    cfg_path = tmp_path / "missing-target.yml"
+    cfg_path.write_text(
+        _target_focused_calibration_yaml(tmp_path, targets="    mpa_pressure: {}"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="requires both mpa_pressure and rpa_flow_split"):
+        load_config(str(cfg_path))
+
+
+@pytest.mark.parametrize(
+    ("targets", "message"),
+    [
+        (
+            "    mpa_pressure:\n"
+            "      vessel: branch0_seg0\n"
+            "      interface: external_upstream\n"
+            "      weight: 1.0\n"
+            "      normalized_rms_tolerance: 0.05\n"
+            "      unexpected: true\n"
+            "    rpa_flow_split:\n"
+            "      rpa_vessel: branch1_seg0\n"
+            "      lpa_vessel: branch2_seg0\n"
+            "      interface: external_downstream",
+            "Unknown keys in calibration.targets.mpa_pressure",
+        ),
+        (
+            "    mpa_pressure:\n"
+            "      vessel: branch1_seg0\n"
+            "      interface: external_upstream\n"
+            "    rpa_flow_split:\n"
+            "      rpa_vessel: branch1_seg0\n"
+            "      lpa_vessel: branch2_seg0\n"
+            "      interface: external_downstream",
+            "distinct MPA, LPA, and RPA",
+        ),
+        (
+            "    mpa_pressure:\n"
+            "      vessel: branch0_seg0\n"
+            "      interface: invalid\n"
+            "    rpa_flow_split:\n"
+            "      rpa_vessel: branch1_seg0\n"
+            "      lpa_vessel: branch2_seg0\n"
+            "      interface: external_downstream",
+            "interface must be one of",
+        ),
+    ],
+)
+def test_target_focused_rejects_ambiguous_target_configuration(tmp_path, targets, message):
+    cfg_path = tmp_path / "invalid-target.yml"
+    cfg_path.write_text(
+        _target_focused_calibration_yaml(tmp_path, targets=targets),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=message):
+        load_config(str(cfg_path))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("weight", 0.0),
+        ("weight", "nan"),
+        ("normalized_rms_tolerance", -0.01),
+        ("absolute_tolerance", "inf"),
+    ],
+)
+def test_target_focused_rejects_non_positive_or_non_finite_scores(tmp_path, field, value):
+    mpa_weight = value if field in {"weight", "normalized_rms_tolerance"} else 1.0
+    mpa_tolerance = value if field == "normalized_rms_tolerance" else 0.05
+    rpa_weight = value if field == "weight" else 1.0
+    rpa_tolerance = value if field == "absolute_tolerance" else 0.02
+    cfg_path = tmp_path / "invalid-score.yml"
+    cfg_path.write_text(
+        _target_focused_calibration_yaml(
+            tmp_path,
+            targets=(
+                "    mpa_pressure:\n"
+                "      vessel: branch0_seg0\n"
+                "      interface: external_upstream\n"
+                f"      weight: {mpa_weight}\n"
+                f"      normalized_rms_tolerance: {mpa_tolerance}\n"
+                "    rpa_flow_split:\n"
+                "      rpa_vessel: branch1_seg0\n"
+                "      lpa_vessel: branch2_seg0\n"
+                "      interface: external_downstream\n"
+                f"      weight: {rpa_weight}\n"
+                f"      absolute_tolerance: {rpa_tolerance}"
+            ),
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must be finite and positive"):
+        load_config(str(cfg_path))
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("replay_minimum_cycles", 2, "replay_minimum_cycles must be an integer at least 3"),
+        ("replay_maximum_cycles", 2, "replay_maximum_cycles must be an integer at least 3"),
+        (
+            "replay_maximum_cycles",
+            3,
+            "replay_maximum_cycles must be at least replay_minimum_cycles",
+        ),
+        (
+            "required_consecutive_stable_pairs",
+            0,
+            "required_consecutive_stable_pairs must be an integer at least 1",
+        ),
+        (
+            "required_consecutive_stable_pairs",
+            10,
+            "required_consecutive_stable_pairs",
+        ),
+    ],
+)
+def test_calibration_rejects_inconsistent_replay_bounds(tmp_path, field, value, message):
+    cfg_path = tmp_path / "invalid-replay.yml"
+    cfg_path.write_text(
+        _target_focused_calibration_yaml(
+            tmp_path,
+            solver=f"    replay_minimum_cycles: 4\n    {field}: {value}",
+            targets=(
+                "    mpa_pressure:\n"
+                "      vessel: branch0_seg0\n"
+                "      interface: external_upstream\n"
+                "    rpa_flow_split:\n"
+                "      rpa_vessel: branch1_seg0\n"
+                "      lpa_vessel: branch2_seg0\n"
+                "      interface: external_downstream"
+            ),
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=message):
+        load_config(str(cfg_path))
+
+
 def test_calibration_requires_mapped_centerline_source_fields(tmp_path):
     cfg_path = tmp_path / "cfg.yml"
     cfg_path.write_text(
@@ -929,3 +1164,6 @@ def test_render_schema_includes_supported_workflows():
     assert "workflow: pipeline" in schema
     assert "construct_trees" in schema
     assert "postprocess:" in schema
+    assert "enforcement: strict_network" in schema
+    assert "normalized_rms_tolerance" in schema
+    assert "required_consecutive_stable_pairs" in schema

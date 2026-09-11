@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib
 import inspect
 from functools import lru_cache
@@ -8,17 +9,14 @@ import os
 from pathlib import Path
 import time
 
-REQUIRED_CALIBRATION_CAPABILITIES = frozenset(
-    {
-        "per_block_parameter_selection",
-    }
-)
+REQUIRED_SOLVER_CALLABLES = ("calibrate", "simulate")
 
 _INSTALL_HINT = (
     "pysvzerod is required for solver-backed svZeroDTrees workflows. "
-    "Install the sibling svZeroDSolver checkout first with "
-    "`python3 -m pip install -e ../svZeroDSolver` "
-    "(or `python3 -m pip install -e /home/users/ndorn/svZeroDSolver` on Sherlock)."
+    "Install the pinned solver with `uv sync --group solver` or install the "
+    "sibling svZeroDSolver checkout with `python3 -m pip install -e "
+    "../svZeroDSolver` (or `python3 -m pip install -e "
+    "/home/users/ndorn/svZeroDSolver` on Sherlock)."
 )
 
 _last_calibration_provenance: dict[str, object] | None = None
@@ -29,67 +27,130 @@ def require_pysvzerod():
     try:
         return importlib.import_module("pysvzerod")
     except ModuleNotFoundError as exc:
-        if exc.name != "pysvzerod":
-            raise
-        raise ModuleNotFoundError(_INSTALL_HINT) from exc
+        raise ModuleNotFoundError(
+            "Could not import pysvzerod. Resolved module state: "
+            f"<unresolved; missing {exc.name or 'import dependency'}>; "
+            "required callables: calibrate(config), "
+            f"simulate(config). {_INSTALL_HINT} Original error: {exc}"
+        ) from exc
+    except ImportError as exc:
+        raise ImportError(
+            "Could not import pysvzerod. Resolved module state: "
+            "<import failed>; required callables: calibrate(config), "
+            f"simulate(config). {_INSTALL_HINT} Original error: {exc}"
+        ) from exc
 
 
 def _build_identity(module) -> object:
     identity = getattr(module, "build_identity", None)
     if callable(identity):
-        return identity()
+        try:
+            return identity()
+        except Exception as exc:
+            return f"<build_identity() failed: {type(exc).__name__}: {exc}>"
     return getattr(module, "__build_identity__", None)
 
 
+def _module_file_provenance(module) -> tuple[str, dict[str, object], str | None]:
+    module_path = getattr(module, "__file__", None)
+    if not module_path:
+        return "<unknown>", {
+            "size": None,
+            "mtime_ns": None,
+            "mode": None,
+            "readable": False,
+        }, None
+
+    resolved_path = Path(module_path).expanduser().resolve()
+    metadata: dict[str, object] = {
+        "size": None,
+        "mtime_ns": None,
+        "mode": None,
+        "readable": False,
+    }
+    digest = None
+    try:
+        stat_result = resolved_path.stat()
+        metadata.update(
+            {
+                "size": stat_result.st_size,
+                "mtime_ns": stat_result.st_mtime_ns,
+                "mode": stat_result.st_mode,
+                "readable": os.access(resolved_path, os.R_OK),
+            }
+        )
+        if metadata["readable"] and resolved_path.is_file():
+            file_hash = hashlib.sha256()
+            with resolved_path.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    file_hash.update(chunk)
+            digest = file_hash.hexdigest()
+    except OSError:
+        # Importable extension modules can be represented by a path that is
+        # no longer readable after import. Keep the identity inspectable while
+        # making the missing digest explicit.
+        pass
+    return str(resolved_path), metadata, digest
+
+
 def pysvzerod_provenance(module=None) -> dict[str, object]:
-    """Return the loaded solver's import location and build provenance."""
+    """Return the loaded solver's import location and build provenance.
+
+    The module digest is best-effort because some import loaders expose a
+    path for an extension that cannot be read after it has been loaded. The
+    path and stat metadata remain useful diagnostics in that case.
+    """
     if module is None:
         module = require_pysvzerod()
-    module_path = getattr(module, "__file__", None)
+    module_path, file_metadata, module_sha256 = _module_file_provenance(module)
     return {
-        "module_path": str(Path(module_path).resolve()) if module_path else "<unknown>",
+        "module_path": module_path,
+        "module_sha256": module_sha256,
+        "file_metadata": file_metadata,
         "version": getattr(module, "__version__", None),
         "build_identity": _build_identity(module),
     }
 
 
-def require_calibration_capabilities() -> dict[str, object]:
-    """Load pysvzerod and verify the calibration API contract."""
+def _solver_identity_for_error(provenance: dict[str, object]) -> str:
+    return (
+        f"module path: {provenance['module_path']}; "
+        f"module SHA-256: {provenance['module_sha256']!r}; "
+        f"file metadata: {provenance['file_metadata']!r}; "
+        f"version: {provenance['version']!r}; "
+        f"build identity: {provenance['build_identity']!r}"
+    )
+
+
+def require_pysvzerod_api() -> dict[str, object]:
+    """Load pysvzerod and verify its standard calibration API contract."""
     module = require_pysvzerod()
     provenance = pysvzerod_provenance(module)
-    capabilities_fn = getattr(module, "capabilities", None)
-    try:
-        capabilities = capabilities_fn() if callable(capabilities_fn) else None
-    except Exception as exc:
-        capabilities = f"<capabilities() failed: {type(exc).__name__}: {exc}>"
 
-    if not isinstance(capabilities, dict):
-        capabilities_for_error = capabilities
-        missing = sorted(REQUIRED_CALIBRATION_CAPABILITIES)
-    else:
-        missing = sorted(
-            capability
-            for capability in REQUIRED_CALIBRATION_CAPABILITIES
-            if capabilities.get(capability) is not True
-        )
-        capabilities_for_error = capabilities
-
+    missing = [
+        name
+        for name in REQUIRED_SOLVER_CALLABLES
+        if not callable(getattr(module, name, None))
+    ]
     if missing:
+        missing_list = ", ".join(f"{name}(config)" for name in missing)
         raise RuntimeError(
-            "Incompatible pysvzerod calibrator: missing required capability "
-            f"{', '.join(missing)}. Imported module path: "
-            f"{provenance['module_path']}; version: {provenance['version']!r}; "
-            f"build identity: {provenance['build_identity']!r}; capabilities: "
-            f"{capabilities_for_error!r}. Reinstall the pinned sibling solver "
-            "with `python3 -m pip install -e ../svZeroDSolver` "
-            "(or `python3 -m pip install -e /home/users/ndorn/svZeroDSolver` "
-            "on Sherlock)."
+            "Incompatible pysvzerod module: required callable API missing: "
+            f"{missing_list}. Resolved module state: "
+            f"{_solver_identity_for_error(provenance)}. {_INSTALL_HINT}"
         )
 
-    return {
-        **provenance,
-        "capabilities": capabilities,
-    }
+    return provenance
+
+
+def require_calibration_capabilities() -> dict[str, object]:
+    """Backward-compatible name for standard solver API validation.
+
+    Calibration no longer depends on a custom ``capabilities()`` method. The
+    name remains available for callers that imported this helper before the
+    standard API contract was adopted.
+    """
+    return require_pysvzerod_api()
 
 
 def last_calibration_provenance() -> dict[str, object] | None:
@@ -200,7 +261,16 @@ def simulate_pysvzerod(config):
         }
     )
     try:
-        result = require_pysvzerod().simulate(config)
+        module = require_pysvzerod()
+        provenance = pysvzerod_provenance(module)
+        simulate = getattr(module, "simulate", None)
+        if not callable(simulate):
+            raise RuntimeError(
+                "Incompatible pysvzerod module: required callable API missing: "
+                f"simulate(config). Resolved module state: "
+                f"{_solver_identity_for_error(provenance)}. {_INSTALL_HINT}"
+            )
+        result = simulate(config)
     except Exception as exc:
         _write_trace(
             {
@@ -225,16 +295,9 @@ def simulate_pysvzerod(config):
 
 def calibrate_pysvzerod(config):
     global _last_calibration_provenance
+    provenance = require_pysvzerod_api()
     module = require_pysvzerod()
-    provenance = require_calibration_capabilities()
-    calibrate = getattr(module, "calibrate", None)
-    if not callable(calibrate):
-        raise RuntimeError(
-            "Incompatible pysvzerod calibrator: imported module does not expose "
-            "calibrate(). Imported module path: "
-            f"{pysvzerod_provenance(module)['module_path']}. "
-            f"{_INSTALL_HINT}"
-        )
+    calibrate = module.calibrate
     result = calibrate(config)
     _last_calibration_provenance = provenance
     return result

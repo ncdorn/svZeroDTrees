@@ -60,7 +60,7 @@ tests = [
     "pytest-cov",
 ]
 solver = [
-    "pysvzerod",
+    "pysvzerod; python_version >= '3.9'",
 ]
 build = [
     "twine",
@@ -72,16 +72,16 @@ package = true
 default-groups = []
 
 [tool.uv.sources]
-# pysvzerod is built from the sibling solver repo rather than fetched from PyPI.
-pysvzerod = { path = "../svZeroDSolver", editable = true }
+# Resolve a clean solver build from the revision that includes per-block
+# parameter selection; do not depend on local solver metadata extensions.
+pysvzerod = { git = "https://github.com/ncdorn/svZeroDSolver.git", rev = "80eab14a" }
 
 [tool.svzerodtrees.solver]
 # Keep the solver source revision explicit so calibration cannot silently use an
-# unrelated installed extension. The sibling checkout may contain local build
-# changes during development, but releases must update this revision.
-source = "../svZeroDSolver"
-source_commit = "991fa17cfe4d436395f649a2c6be0bbda987c23e"
-required_capabilities = ["per_block_parameter_selection"]
+# unrelated installed extension.
+source = "https://github.com/ncdorn/svZeroDSolver.git"
+source_commit = "80eab14a"
+required_callables = ["calibrate", "simulate"]
 
 [tool.hatch.build]
 only-packages = true

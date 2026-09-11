@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -6,18 +7,20 @@ import pytest
 import svzerodtrees._pysvzerod as loader
 
 
-def _fake_solver(*, capabilities=None):
+def _fake_solver(*, module_file: Path, calibrate=True, simulate=True):
     module = SimpleNamespace(
-        __file__="/tmp/pinned-svZeroDSolver/pysvzerod.so",
+        __file__=str(module_file),
         __version__="2.0",
         __build_identity__={
             "name": "svZeroDSolver",
             "version": "2.0",
-            "source_commit": "991fa17cfe4d436395f649a2c6be0bbda987c23e",
+            "source_commit": "80eab14a",
         },
-        capabilities=lambda: capabilities or {},
-        calibrate=lambda payload: payload,
     )
+    if calibrate:
+        module.calibrate = lambda payload: payload
+    if simulate:
+        module.simulate = lambda payload: payload
     return module
 
 
@@ -30,71 +33,98 @@ def clear_solver_cache():
     loader.clear_calibration_provenance()
 
 
-def test_capabilities_and_provenance_are_machine_readable(monkeypatch):
-    module = _fake_solver(
-        capabilities={
-            "per_block_parameter_selection": True,
-        }
-    )
+def test_standard_api_and_digest_provenance_are_machine_readable(
+    monkeypatch, tmp_path
+):
+    module_file = tmp_path / "pysvzerod.so"
+    module_bytes = b"pinned solver artifact"
+    module_file.write_bytes(module_bytes)
+    module = _fake_solver(module_file=module_file)
     monkeypatch.setattr(loader.importlib, "import_module", lambda _name: module)
 
-    result = loader.require_calibration_capabilities()
+    result = loader.require_pysvzerod_api()
 
-    assert result["module_path"] == str(Path(module.__file__).resolve())
+    assert result["module_path"] == str(module_file.resolve())
+    assert result["module_sha256"] == hashlib.sha256(module_bytes).hexdigest()
+    assert result["file_metadata"]["size"] == len(module_bytes)
+    assert result["file_metadata"]["readable"] is True
     assert result["version"] == "2.0"
-    assert result["build_identity"]["source_commit"].startswith("991fa17")
-    assert result["capabilities"] == {
-        "per_block_parameter_selection": True,
-    }
+    assert result["build_identity"]["source_commit"] == "80eab14a"
 
 
-def test_stale_solver_is_rejected_before_calibrate(monkeypatch):
+def test_solver_without_capabilities_is_accepted(monkeypatch, tmp_path):
+    module_file = tmp_path / "pysvzerod.so"
+    module_file.write_bytes(b"solver")
+    module = _fake_solver(module_file=module_file)
+    monkeypatch.setattr(loader.importlib, "import_module", lambda _name: module)
+
+    payload = {"vessels": []}
+    assert loader.calibrate_pysvzerod(payload) == payload
+    assert loader.last_calibration_provenance()["module_sha256"] == hashlib.sha256(
+        b"solver"
+    ).hexdigest()
+
+
+def test_missing_standard_callable_reports_resolved_identity(
+    monkeypatch, tmp_path
+):
     calibrate_called = False
+
+    module_file = tmp_path / "pysvzerod.so"
+    module_file.write_bytes(b"solver")
 
     def calibrate(_payload):
         nonlocal calibrate_called
         calibrate_called = True
 
-    module = _fake_solver()
+    module = _fake_solver(module_file=module_file, simulate=False)
     module.calibrate = calibrate
     monkeypatch.setattr(loader.importlib, "import_module", lambda _name: module)
 
-    with pytest.raises(RuntimeError, match="Incompatible pysvzerod calibrator") as exc:
-        loader.calibrate_pysvzerod({})
+    with pytest.raises(RuntimeError, match="required callable API missing") as exc:
+        loader.require_pysvzerod_api()
 
     message = str(exc.value)
-    assert module.__file__ in message
-    assert "build identity" in message
+    assert "simulate(config)" in message
+    assert str(module_file.resolve()) in message
+    assert "module SHA-256" in message
     assert "python3 -m pip install -e ../svZeroDSolver" in message
     assert not calibrate_called
 
 
-def test_calibration_dispatch_records_provenance(monkeypatch):
-    module = _fake_solver(
-        capabilities={
-            "per_block_parameter_selection": True,
-        }
-    )
+def test_missing_calibrate_reports_resolved_identity(monkeypatch, tmp_path):
+    module_file = tmp_path / "pysvzerod.so"
+    module_file.write_bytes(b"solver")
+    module = _fake_solver(module_file=module_file, calibrate=False)
     monkeypatch.setattr(loader.importlib, "import_module", lambda _name: module)
 
-    payload = {"vessels": []}
-    assert loader.calibrate_pysvzerod(payload) == payload
-    assert loader.last_calibration_provenance() == {
-        "module_path": str(Path(module.__file__).resolve()),
-        "version": "2.0",
-        "build_identity": module.__build_identity__,
-        "capabilities": {
-            "per_block_parameter_selection": True,
-        },
-    }
+    with pytest.raises(RuntimeError, match="required callable API missing") as exc:
+        loader.require_pysvzerod_api()
+
+    message = str(exc.value)
+    assert "calibrate(config)" in message
+    assert str(module_file.resolve()) in message
+    assert "module SHA-256" in message
+
+
+def test_missing_import_reports_required_api_and_install_hint(monkeypatch):
+    def missing_import(_name):
+        raise ModuleNotFoundError("No module named 'pysvzerod'", name="pysvzerod")
+
+    monkeypatch.setattr(loader.importlib, "import_module", missing_import)
+
+    with pytest.raises(ModuleNotFoundError, match="Resolved module state") as exc:
+        loader.require_pysvzerod_api()
+
+    message = str(exc.value)
+    assert "calibrate(config)" in message
+    assert "simulate(config)" in message
+    assert "python3 -m pip install -e ../svZeroDSolver" in message
 
 
 def test_provenance_is_not_recorded_when_calibrate_fails(monkeypatch):
-    module = _fake_solver(
-        capabilities={
-            "per_block_parameter_selection": True,
-        }
-    )
+    module_file = Path("/tmp/pinned-svZeroDSolver/pysvzerod.so")
+    module = _fake_solver(module_file=module_file)
     module.calibrate = lambda _payload: (_ for _ in ()).throw(ValueError("bad input"))
     monkeypatch.setattr(loader.importlib, "import_module", lambda _name: module)
 
