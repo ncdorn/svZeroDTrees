@@ -19,9 +19,13 @@ from svzerodtrees.config import (
     CalibrationConfig,
     CalibrationDataSourceConfig,
     CalibrationInputNormalizationConfig,
+    CalibrationMPAPressureTargetConfig,
+    CalibrationObservationQCConfig,
     CalibrationParametersConfig,
     CalibrationParameterSelectionConfig,
+    CalibrationRPAFlowSplitTargetConfig,
     CalibrationSolverConfig,
+    CalibrationTargetsConfig,
 )
 
 
@@ -221,6 +225,95 @@ def _calibration_config(tmp_path: Path) -> CalibrationConfig:
         ),
         input_normalization=CalibrationInputNormalizationConfig(),
     )
+
+
+def _target_focused_calibration_config(tmp_path: Path) -> CalibrationConfig:
+    calibration = _calibration_config(tmp_path)
+    calibration.observation_qc = CalibrationObservationQCConfig(
+        enforcement="target_focused"
+    )
+    calibration.targets = CalibrationTargetsConfig(
+        mpa_pressure=CalibrationMPAPressureTargetConfig(
+            vessel="branch0_seg0",
+            interface="external_upstream",
+        ),
+        rpa_flow_split=CalibrationRPAFlowSplitTargetConfig(
+            rpa_vessel="branch1_seg0",
+            lpa_vessel="branch2_seg0",
+            interface="external_downstream",
+        ),
+    )
+    return calibration
+
+
+def _write_target_qc_fixture(tmp_path: Path, *, invalid_split: bool = False) -> Path:
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "mapped.vtp"
+    zerod = tmp_path / "zerod.json"
+    _write_polydata(
+        centerline,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+    )
+    _write_polydata(
+        mapped,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        pressure=[100.0, 90.0, 90.0, 80.0, 70.0, 80.0],
+        flow=[10.0, 10.0, 6.0, 6.0, -6.0 if invalid_split else 4.0, -6.0 if invalid_split else 4.0],
+    )
+    _write_zerod_config(zerod)
+    return zerod
+
+
+def test_target_focused_qc_keeps_network_failures_advisory(tmp_path):
+    zerod = _write_target_qc_fixture(tmp_path)
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(zerod),
+        calibration=_target_focused_calibration_config(tmp_path),
+    )
+
+    assert assembly.observation_qc["status"] == "pass"
+    assert assembly.observation_qc["checks"]["pressure_drop_direction"] is False
+    assert assembly.observation_qc["severity"]["pressure_drop_direction"] == "advisory"
+    assert assembly.observation_qc["failed_advisory_checks"] == [
+        "pressure_drop_direction"
+    ]
+    assert all(
+        assembly.observation_qc["checks"][name]
+        for name in (
+            "root_waveform_agreement",
+            "target_topology",
+            "target_sampling_resolution",
+            "target_split_denominator",
+        )
+    )
+
+
+def test_target_focused_qc_rejects_zero_split_denominator(tmp_path):
+    zerod = _write_target_qc_fixture(tmp_path, invalid_split=True)
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(zerod),
+        calibration=_target_focused_calibration_config(tmp_path),
+    )
+
+    assert assembly.observation_qc["status"] == "fail"
+    assert assembly.observation_qc["checks"]["target_split_denominator"] is False
+    assert assembly.observation_qc["severity"]["target_split_denominator"] == "fatal"
+
+
+def test_strict_network_still_rejects_target_case_network_failure(tmp_path):
+    zerod = _write_target_qc_fixture(tmp_path)
+    calibration = _target_focused_calibration_config(tmp_path)
+    calibration.observation_qc.enforcement = "strict_network"
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(zerod),
+        calibration=calibration,
+    )
+
+    assert assembly.observation_qc["status"] == "fail"
+    assert assembly.observation_qc["checks"]["pressure_drop_direction"] is False
+    assert assembly.observation_qc["severity"]["pressure_drop_direction"] == "fatal"
 
 
 def test_assemble_calibration_payload_from_mapped_centerline(tmp_path):

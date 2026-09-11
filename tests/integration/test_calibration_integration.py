@@ -9,6 +9,7 @@ import vtk
 from vtk.util.numpy_support import numpy_to_vtk
 
 from svzerodtrees.api import run_from_config_file
+from svzerodtrees.calibration import workflow as calibration_workflow
 
 
 def _write_fixture_calibration_config(
@@ -18,7 +19,22 @@ def _write_fixture_calibration_config(
     baseline_path: Path,
     mapped_path: Path,
     metadata_path: Path,
+    target_focused: bool = False,
 ) -> None:
+    target_config = ""
+    if target_focused:
+        target_config = """
+  observation_qc:
+    enforcement: target_focused
+  targets:
+    mpa_pressure:
+      vessel: branch0_seg0
+      interface: external_upstream
+    rpa_flow_split:
+      rpa_vessel: branch1_seg0
+      lpa_vessel: branch2_seg0
+      interface: external_downstream
+"""
     path.write_text(
         f"""
 version: 1
@@ -47,8 +63,78 @@ calibration:
     pressure_bound_multiplier: 10.0
     flow_bound_multiplier: 10.0
     cycle_stability_tolerance: 1.0e-3
+{target_config}
 """,
         encoding="utf-8",
+    )
+
+
+def test_target_focused_workflow_dispatches_with_valid_target_contract(
+    monkeypatch, tmp_path
+):
+    fixture_dir = Path(__file__).parents[1] / "fixtures" / "calibration"
+    baseline_path = fixture_dir / "finite_rigid_baseline.json"
+    mapped_path = fixture_dir / "mapped_timeseries.vtp"
+    metadata_path = fixture_dir / "mapped_timeseries_metadata.json"
+    output_path = tmp_path / "calibrated.json"
+    config_path = tmp_path / "calibrate.yml"
+    _write_fixture_calibration_config(
+        config_path,
+        output_path=output_path,
+        baseline_path=baseline_path,
+        mapped_path=mapped_path,
+        metadata_path=metadata_path,
+        target_focused=True,
+    )
+
+    calls = []
+
+    def fake_calibrate(payload):
+        calls.append(json.loads(json.dumps(payload)))
+        return json.loads(json.dumps(payload))
+
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.calibrate_pysvzerod",
+        fake_calibrate,
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.simulate_pysvzerod",
+        lambda _payload: _fixture_replay_rows(),
+    )
+    assemble = calibration_workflow.assemble_calibration_payload
+
+    def advisory_global_failure(**kwargs):
+        assembly = assemble(**kwargs)
+        assembly.observation_qc["checks"]["pressure_drop_direction"] = False
+        assembly.observation_qc["severity"]["pressure_drop_direction"] = "advisory"
+        assembly.observation_qc["advisory_checks"]["pressure_drop_direction"] = False
+        assembly.observation_qc["failed_advisory_checks"] = [
+            "pressure_drop_direction"
+        ]
+        return assembly
+
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.assemble_calibration_payload",
+        advisory_global_failure,
+    )
+
+    result = run_from_config_file(str(config_path))
+
+    assert result["status"] == "ok"
+    assert len(calls) == 2
+    assert result["observation_qc"]["enforcement"] == "target_focused"
+    assert result["observation_qc"]["status"] == "pass"
+    assert result["observation_qc"]["failed_advisory_checks"] == [
+        "pressure_drop_direction"
+    ]
+    assert all(
+        result["observation_qc"]["checks"][name]
+        for name in (
+            "root_waveform_agreement",
+            "target_topology",
+            "target_sampling_resolution",
+            "target_split_denominator",
+        )
     )
 
 

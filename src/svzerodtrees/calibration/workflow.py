@@ -727,6 +727,248 @@ def _reference_inflow_series(
     return np.asarray(reference, dtype=np.float64), None
 
 
+def _resolve_target_interface(
+    *,
+    vessel: str,
+    interface: Any,
+    vessel_topology: Dict[str, VesselTopology],
+    upstream_names: Dict[str, str],
+    downstream_names: Dict[str, str],
+    junction_names: set[str],
+    interface_sampling: Dict[str, Dict[str, Any]],
+) -> tuple[str | None, Dict[str, Any]]:
+    """Resolve one operator-selected target interface without anatomy inference.
+
+    ``upstream`` and ``downstream`` are endpoint selectors.  The explicit
+    ``external_*`` forms additionally require the selected endpoint to be an
+    external boundary.  ``internal`` is accepted only when exactly one of the
+    two endpoints is an internal junction; accepting both would make the
+    target location ambiguous.
+    """
+    detail: Dict[str, Any] = {
+        "vessel": vessel,
+        "requested_interface": interface,
+        "resolved_endpoint": None,
+        "sampling_key": None,
+        "interface_kind": None,
+        "error": None,
+    }
+    if vessel not in vessel_topology:
+        detail["error"] = "target vessel is not present in the solver topology"
+        return None, detail
+    if not isinstance(interface, str):
+        detail["error"] = "target interface must be a string"
+        return None, detail
+    interface = interface.strip().lower()
+    if interface not in {
+        "external_upstream",
+        "external_downstream",
+        "internal",
+        "upstream",
+        "downstream",
+    }:
+        detail["error"] = f"unsupported target interface '{interface}'"
+        return None, detail
+
+    endpoint: str | None
+    if interface in {"upstream", "external_upstream"}:
+        endpoint = "upstream"
+    elif interface in {"downstream", "external_downstream"}:
+        endpoint = "downstream"
+    else:
+        candidates = []
+        if upstream_names.get(vessel) in junction_names:
+            candidates.append("upstream")
+        if downstream_names.get(vessel) in junction_names:
+            candidates.append("downstream")
+        if len(candidates) != 1:
+            detail["error"] = (
+                "internal target interface is ambiguous; exactly one endpoint "
+                "must connect to a junction"
+            )
+            return None, detail
+        endpoint = candidates[0]
+
+    connection_name = (
+        upstream_names[vessel] if endpoint == "upstream" else downstream_names[vessel]
+    )
+    actual_kind = (
+        "internal" if connection_name in junction_names else f"external_{endpoint}"
+    )
+    if interface.startswith("external_") and interface != actual_kind:
+        detail["error"] = (
+            f"target interface '{interface}' does not match the topology's "
+            f"'{actual_kind}' endpoint"
+        )
+        return None, detail
+
+    sampling_key = f"{vessel}:{endpoint}"
+    sample = interface_sampling.get(sampling_key)
+    detail.update(
+        {
+            "resolved_endpoint": endpoint,
+            "sampling_key": sampling_key,
+            "interface_kind": actual_kind,
+        }
+    )
+    if sample is None:
+        detail["error"] = "target interface has no assembled observation sample"
+        return None, detail
+    detail["sampling"] = sample
+    return endpoint, detail
+
+
+def _target_interface_series(
+    *,
+    vessel: str,
+    endpoint: str,
+    upstream_names: Dict[str, str],
+    downstream_names: Dict[str, str],
+    y: Dict[str, list[float]],
+) -> tuple[np.ndarray, np.ndarray] | None:
+    if endpoint == "upstream":
+        connection = upstream_names.get(vessel)
+        flow_key = f"flow:{connection}:{vessel}"
+        pressure_key = f"pressure:{connection}:{vessel}"
+    elif endpoint == "downstream":
+        connection = downstream_names.get(vessel)
+        flow_key = f"flow:{vessel}:{connection}"
+        pressure_key = f"pressure:{vessel}:{connection}"
+    else:
+        return None
+    if flow_key not in y or pressure_key not in y:
+        return None
+    flow = np.asarray(y[flow_key], dtype=np.float64)
+    pressure = np.asarray(y[pressure_key], dtype=np.float64)
+    if not np.isfinite(flow).all() or not np.isfinite(pressure).all():
+        return None
+    return pressure, flow
+
+
+def _build_target_observation_qc(
+    *,
+    targets: Any,
+    vessel_topology: Dict[str, VesselTopology],
+    upstream_names: Dict[str, str],
+    downstream_names: Dict[str, str],
+    junction_names: set[str],
+    interface_sampling: Dict[str, Dict[str, Any]],
+    y: Dict[str, list[float]],
+    minimum_usable_samples: int,
+) -> tuple[Dict[str, bool], Dict[str, Any], Dict[str, Dict[str, Any]]]:
+    """Validate explicit pulmonary target locations and required observations.
+
+    This deliberately stops at target-data qualification.  It does not
+    calculate MPA waveform error or an RPA split; those belong to the pure
+    target evaluator.  The split denominator check is retained here because a
+    zero denominator makes the target data contract invalid before calibration.
+    """
+    target_checks = {
+        "target_topology": False,
+        "target_sampling_resolution": False,
+        "target_split_denominator": False,
+    }
+    target_metrics: Dict[str, Any] = {}
+    target_interfaces: Dict[str, Dict[str, Any]] = {}
+    try:
+        mpa = targets.mpa_pressure
+        split = targets.rpa_flow_split
+        roles = {
+            "mpa": str(mpa.vessel),
+            "rpa": str(split.rpa_vessel),
+            "lpa": str(split.lpa_vessel),
+        }
+        target_metrics["roles"] = roles
+    except (AttributeError, TypeError) as exc:
+        target_metrics["error"] = f"target configuration is incomplete: {exc}"
+        return target_checks, target_metrics, target_interfaces
+
+    target_checks["target_topology"] = len(set(roles.values())) == 3
+    if not target_checks["target_topology"]:
+        target_metrics["topology_error"] = (
+            "MPA, LPA, and RPA target vessel roles must be distinct"
+        )
+
+    for role, vessel, interface in (
+        ("mpa", roles["mpa"], getattr(mpa, "interface", None)),
+        ("rpa", roles["rpa"], getattr(split, "interface", None)),
+        ("lpa", roles["lpa"], getattr(split, "interface", None)),
+    ):
+        endpoint, detail = _resolve_target_interface(
+            vessel=vessel,
+            interface=interface,
+            vessel_topology=vessel_topology,
+            upstream_names=upstream_names,
+            downstream_names=downstream_names,
+            junction_names=junction_names,
+            interface_sampling=interface_sampling,
+        )
+        target_interfaces[role] = detail
+        detail["role"] = role
+        if endpoint is None:
+            target_checks["target_topology"] = False
+
+    qualified = True
+    for detail in target_interfaces.values():
+        sample = detail.get("sampling")
+        if not isinstance(sample, dict):
+            qualified = False
+            continue
+        sample_count = int(sample.get("usable_sample_count", 0))
+        detail["target_sample_count"] = sample_count
+        detail["target_sample_qualified"] = bool(
+            not sample.get("excluded_from_calibration", False)
+            and sample_count >= minimum_usable_samples
+            and sample.get("quality_status")
+            in {"qualified_interior", "interpolated_internal"}
+        )
+        if not detail["target_sample_qualified"]:
+            qualified = False
+    target_checks["target_sampling_resolution"] = qualified
+
+    split_series: Dict[str, tuple[np.ndarray, np.ndarray] | None] = {}
+    for role in ("rpa", "lpa"):
+        detail = target_interfaces.get(role, {})
+        endpoint = detail.get("resolved_endpoint")
+        split_series[role] = (
+            _target_interface_series(
+                vessel=roles[role],
+                endpoint=endpoint,
+                upstream_names=upstream_names,
+                downstream_names=downstream_names,
+                y=y,
+            )
+            if endpoint is not None
+            else None
+        )
+    if all(series is not None for series in split_series.values()):
+        _rpa_pressure, rpa_flow = split_series["rpa"]  # type: ignore[misc]
+        _lpa_pressure, lpa_flow = split_series["lpa"]  # type: ignore[misc]
+        rpa_mean = float(np.mean(rpa_flow))
+        lpa_mean = float(np.mean(lpa_flow))
+        denominator = rpa_mean + lpa_mean
+        denominator_valid = bool(
+            np.isfinite(denominator) and abs(denominator) > _FLOW_EPS
+        )
+        target_metrics["rpa_flow_split_denominator"] = {
+            "rpa_mean_flow": rpa_mean,
+            "lpa_mean_flow": lpa_mean,
+            "value": denominator,
+            "nonzero": denominator_valid,
+        }
+        target_checks["target_split_denominator"] = denominator_valid
+    else:
+        target_metrics["rpa_flow_split_denominator"] = {
+            "rpa_mean_flow": None,
+            "lpa_mean_flow": None,
+            "value": None,
+            "nonzero": False,
+            "error": "RPA/LPA target flow samples are unavailable",
+        }
+
+    return target_checks, target_metrics, target_interfaces
+
+
 def _build_observation_qc(
     *,
     solver_config: Dict[str, Any],
@@ -740,6 +982,7 @@ def _build_observation_qc(
     interface_sampling: Dict[str, Dict[str, Any]],
     excluded_blocks: Dict[str, str],
     qc_config: Any,
+    targets: Any = None,
 ) -> Dict[str, Any]:
     vessel_continuity: Dict[str, float] = {}
     pressure_directions: Dict[str, Dict[str, Any]] = {}
@@ -951,10 +1194,79 @@ def _build_observation_qc(
         ),
         "sampling_resolution": not resolution_failures,
     }
+    # The target-focused profile intentionally separates data/target-contract
+    # checks from diagnostics about the complete mapped network.  The latter
+    # remain in the report so an operator can inspect the observations, but a
+    # poor non-target continuity or pressure-direction metric must not prevent
+    # the unchanged calibrator from receiving the complete state.
+    target_checks: Dict[str, bool] = {}
+    target_metrics: Dict[str, Any] = {}
+    target_interfaces: Dict[str, Dict[str, Any]] = {}
+    if targets is not None:
+        target_checks, target_metrics, target_interfaces = _build_target_observation_qc(
+            targets=targets,
+            vessel_topology=vessel_topology,
+            upstream_names=upstream_names,
+            downstream_names=downstream_names,
+            junction_names={
+                str(junction["junction_name"])
+                for junction in solver_config.get("junctions", []) or []
+            },
+            interface_sampling=interface_sampling,
+            y=y,
+            minimum_usable_samples=int(qc_config.minimum_usable_samples),
+        )
+
+    all_checks = {**checks, **target_checks}
+    enforcement = str(getattr(qc_config, "enforcement", "strict_network")).lower()
+    if enforcement == "target_focused" and targets is None:
+        target_checks = {"target_configuration": False}
+        target_metrics = {
+            "error": (
+                "target_focused observation QC requires explicit MPA, LPA, and "
+                "RPA target roles"
+            )
+        }
+        all_checks = {**checks, **target_checks}
+    if enforcement == "target_focused":
+        # Root inflow agreement is a fatal input/data-contract check in the
+        # target-focused profile.  The remaining existing checks describe
+        # whole-network consistency and therefore remain advisory.
+        fatal_checks = {
+            "root_waveform_agreement": checks["root_waveform_agreement"],
+            **target_checks,
+        }
+        advisory_checks = {
+            name: passed
+            for name, passed in checks.items()
+            if name != "root_waveform_agreement"
+        }
+    else:
+        # strict_network retains the historical all-checks gate.  When target
+        # roles are present, their contract checks are included in that gate.
+        fatal_checks = dict(all_checks)
+        advisory_checks = {}
+
+    severity = {
+        name: "fatal" if name in fatal_checks else "advisory"
+        for name in all_checks
+    }
     return {
-        "status": "pass" if all(checks.values()) else "fail",
-        "checks": checks,
+        "status": "pass" if all(fatal_checks.values()) else "fail",
+        "enforcement": enforcement,
+        "checks": all_checks,
+        "severity": severity,
+        "fatal_checks": fatal_checks,
+        "advisory_checks": advisory_checks,
+        "failed_fatal_checks": sorted(
+            name for name, passed in fatal_checks.items() if not passed
+        ),
+        "failed_advisory_checks": sorted(
+            name for name, passed in advisory_checks.items() if not passed
+        ),
         "metrics": metrics,
+        "target_metrics": target_metrics,
+        "target_interfaces": target_interfaces,
         "thresholds": thresholds,
         "selected_interfaces": selected_interfaces,
         "exclusions": {
@@ -1155,6 +1467,7 @@ def assemble_calibration_payload(
         interface_sampling=interface_sampling,
         excluded_blocks=excluded_blocks,
         qc_config=calibration.observation_qc,
+        targets=calibration.targets,
     )
 
     payload = json.loads(json.dumps(solver_config))
@@ -2158,7 +2471,7 @@ def calibrate_0d_from_mapped_centerline(
         encoding="utf-8",
     )
     if assembly.observation_qc.get("status") != "pass":
-        failed_checks = [
+        failed_checks = assembly.observation_qc.get("failed_fatal_checks") or [
             name
             for name, passed in assembly.observation_qc.get("checks", {}).items()
             if not passed
