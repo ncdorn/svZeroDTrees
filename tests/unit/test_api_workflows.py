@@ -166,6 +166,47 @@ def test_calibrate_0d_from_3d_workflow_requires_calibration_section():
         Calibrate0DFrom3DWorkflow.from_config(cfg).run()
 
 
+def test_calibrate_0d_from_3d_workflow_returns_target_quality_identity(
+    monkeypatch, tmp_path
+):
+    expected = {
+        "status": "ok",
+        "run_id": "run-001",
+        "digests": {
+            "normalized_input": "input",
+            "observations": "observations",
+            "solver_module": "solver",
+            "output": "output",
+        },
+        "target_quality": {"status": "pass"},
+    }
+    calls = {}
+
+    def fake_calibrate(**kwargs):
+        calls.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(
+        "svzerodtrees.api.calibrate_0d_from_mapped_centerline", fake_calibrate
+    )
+    cfg = SimpleNamespace(
+        paths=SimpleNamespace(
+            zerod_config=str(tmp_path / "baseline.json"),
+            output_config=str(tmp_path / "calibrated.json"),
+        ),
+        calibration=SimpleNamespace(),
+    )
+
+    result = Calibrate0DFrom3DWorkflow.from_config(cfg).run()
+
+    assert result == expected
+    assert calls == {
+        "zerod_config_path": str(tmp_path / "baseline.json"),
+        "output_config_path": str(tmp_path / "calibrated.json"),
+        "calibration": cfg.calibration,
+    }
+
+
 def test_run_from_config_file_dispatches_pipeline(monkeypatch, tmp_path):
     calls = {}
 

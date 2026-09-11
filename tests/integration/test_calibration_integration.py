@@ -122,6 +122,21 @@ def test_target_focused_workflow_dispatches_with_valid_target_contract(
 
     assert result["status"] == "ok"
     assert len(calls) == 2
+    assert result["target_quality"]["status"] == "pass"
+    assert result["run_id"]
+    assert result["calibration_targets_report"] == str(
+        tmp_path / "calibration_targets.json"
+    )
+    report_paths = [
+        result["observation_qc_report"],
+        result["calibration_confirmation_report"],
+        result["calibration_replay_report"],
+        result["calibration_targets_report"],
+        result["calibration_summary_report"],
+    ]
+    reports = [json.loads(Path(path).read_text(encoding="utf-8")) for path in report_paths]
+    assert all(report["run_id"] == result["run_id"] for report in reports)
+    assert all(report["digests"] == result["digests"] for report in reports)
     assert result["observation_qc"]["enforcement"] == "target_focused"
     assert result["observation_qc"]["status"] == "pass"
     assert result["observation_qc"]["failed_advisory_checks"] == [
@@ -138,7 +153,97 @@ def test_target_focused_workflow_dispatches_with_valid_target_contract(
     )
 
 
-def _fixture_replay_rows(*, unstable: bool = False) -> list[dict[str, float | str]]:
+def test_target_gate_failure_does_not_publish_current_run_success(
+    monkeypatch, tmp_path
+):
+    fixture_dir = Path(__file__).parents[1] / "fixtures" / "calibration"
+    baseline_path = fixture_dir / "finite_rigid_baseline.json"
+    mapped_path = fixture_dir / "mapped_timeseries.vtp"
+    metadata_path = fixture_dir / "mapped_timeseries_metadata.json"
+    output_path = tmp_path / "calibrated.json"
+    config_path = tmp_path / "calibrate.yml"
+    _write_fixture_calibration_config(
+        config_path,
+        output_path=output_path,
+        baseline_path=baseline_path,
+        mapped_path=mapped_path,
+        metadata_path=metadata_path,
+        target_focused=True,
+    )
+
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.calibrate_pysvzerod",
+        lambda payload: json.loads(json.dumps(payload)),
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.simulate_pysvzerod",
+        lambda _payload: _fixture_replay_rows(pressure_offset=10.0),
+    )
+
+    with pytest.raises(ValueError, match="pulmonary target gates failed"):
+        run_from_config_file(str(config_path))
+
+    assert not output_path.exists()
+    assert not (tmp_path / "calibration_summary.json").exists()
+    target_report = json.loads(
+        (tmp_path / "calibration_targets.json").read_text(encoding="utf-8")
+    )
+    assert target_report["status"] == "fail"
+    assert target_report["candidate"]["gate_results"]["mpa_pressure"] is False
+    assert target_report["run_id"]
+
+
+def test_baseline_policy_failure_does_not_publish_candidate(
+    monkeypatch, tmp_path
+):
+    fixture_dir = Path(__file__).parents[1] / "fixtures" / "calibration"
+    baseline_path = fixture_dir / "finite_rigid_baseline.json"
+    mapped_path = fixture_dir / "mapped_timeseries.vtp"
+    metadata_path = fixture_dir / "mapped_timeseries_metadata.json"
+    output_path = tmp_path / "calibrated.json"
+    config_path = tmp_path / "calibrate.yml"
+    _write_fixture_calibration_config(
+        config_path,
+        output_path=output_path,
+        baseline_path=baseline_path,
+        mapped_path=mapped_path,
+        metadata_path=metadata_path,
+        target_focused=True,
+    )
+
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.calibrate_pysvzerod",
+        lambda payload: json.loads(json.dumps(payload)),
+    )
+    replay_calls = 0
+
+    def baseline_then_worse(_payload):
+        nonlocal replay_calls
+        replay_calls += 1
+        return _fixture_replay_rows(pressure_offset=0.01 if replay_calls == 2 else 0.0)
+
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.simulate_pysvzerod",
+        baseline_then_worse,
+    )
+
+    with pytest.raises(ValueError, match="pulmonary target gates failed"):
+        run_from_config_file(str(config_path))
+
+    assert replay_calls == 2
+    assert not output_path.exists()
+    assert not (tmp_path / "calibration_summary.json").exists()
+    target_report = json.loads(
+        (tmp_path / "calibration_targets.json").read_text(encoding="utf-8")
+    )
+    assert target_report["status"] == "fail"
+    assert target_report["candidate"]["status"] == "pass"
+    assert target_report["baseline_policy"]["status"] == "fail"
+
+
+def _fixture_replay_rows(
+    *, unstable: bool = False, pressure_offset: float = 0.0
+) -> list[dict[str, float | str]]:
     values = {
         "branch0_seg0": (10.0, 100.0, 90.0),
         "branch1_seg0": (6.0, 90.0, 80.0),
@@ -146,7 +251,9 @@ def _fixture_replay_rows(*, unstable: bool = False) -> list[dict[str, float | st
     }
     rows: list[dict[str, float | str]] = []
     for name, (flow, pressure_in, pressure_out) in values.items():
-        for index in range(7):
+        for index in range(10):
+            phase_index = index % 3
+            phase_scale = (0.0, 0.1, 0.0)[phase_index]
             if unstable and index >= 4:
                 flow = 12.0
                 pressure_in = 2000.0
@@ -154,10 +261,14 @@ def _fixture_replay_rows(*, unstable: bool = False) -> list[dict[str, float | st
                 {
                     "name": name,
                     "time": float(index),
-                    "flow_in": flow,
-                    "flow_out": flow,
-                    "pressure_in": pressure_in,
-                    "pressure_out": pressure_out,
+                    "flow_in": flow * (1.0 + phase_scale),
+                    "flow_out": flow * (1.0 + phase_scale),
+                    "pressure_in": pressure_in
+                    + pressure_offset
+                    + (1.0 if phase_index == 1 else 0.0),
+                    "pressure_out": pressure_out
+                    + pressure_offset
+                    + (1.0 if phase_index == 1 else 0.0),
                 }
             )
     return rows
@@ -601,6 +712,14 @@ def test_fixture_workflow_accepts_stable_negative_resistance(monkeypatch, tmp_pa
     assert result["calibration_confirmation"]["negative_parameter_paths"] == [
         "branch0_seg0.R_poiseuille"
     ]
+    assert any(
+        item["path"] == "branch0_seg0.R_poiseuille"
+        and item["value"] == -4.2
+        for item in result["calibration_confirmation"]["warnings"][
+            "negative_parameters"
+        ]
+    )
+    assert result["run_id"]
     assert result["replay_stability"]["status"] == "pass"
     assert json.loads(
         (tmp_path / "calibration_observation_qc.json").read_text(encoding="utf-8")
