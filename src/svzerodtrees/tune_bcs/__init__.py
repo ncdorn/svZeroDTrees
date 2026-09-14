@@ -21,6 +21,10 @@ __all__ = [
     "construct_impedance_trees",
     "assign_rcr_bcs",
     "validate_cap_to_bc_mapping",
+    "ResolvedCapOutlet",
+    "ResolvedOutletCapRecord",
+    "ResolvedOutletCapMapping",
+    "resolve_outlet_cap_mapping",
     "ImpedanceTuner",
     "RCRTuner",
 ]
@@ -46,6 +50,22 @@ _LAZY_EXPORTS = {
     "validate_cap_to_bc_mapping": (
         "svzerodtrees.tune_bcs.assign_bcs",
         "validate_cap_to_bc_mapping",
+    ),
+    "ResolvedCapOutlet": (
+        "svzerodtrees.tune_bcs.outlet_mapping",
+        "ResolvedCapOutlet",
+    ),
+    "ResolvedOutletCapRecord": (
+        "svzerodtrees.tune_bcs.outlet_mapping",
+        "ResolvedOutletCapRecord",
+    ),
+    "ResolvedOutletCapMapping": (
+        "svzerodtrees.tune_bcs.outlet_mapping",
+        "ResolvedOutletCapMapping",
+    ),
+    "resolve_outlet_cap_mapping": (
+        "svzerodtrees.tune_bcs.outlet_mapping",
+        "resolve_outlet_cap_mapping",
     ),
     "ImpedanceTuner": (
         "svzerodtrees.tune_bcs.impedance_tuner",
