@@ -79,6 +79,7 @@ OPTIMIZED_RCR_PARAMS_FILENAME = "optimized_rcr_params.csv"
 OPTIMIZATION_LOG_FILENAME = "stree_impedance_optimization.log"
 PA_CONFIG_SNAPSHOT_FILENAME = "pa_config_tuning_snapshot.json"
 TUNED_ZEROD_CONFIG_FILENAME = "svzerod_3d_coupling_tuned.json"
+OUTLET_CAP_MAPPING_FILENAME = "outlet_cap_mapping.json"
 MMHG_TO_BARYE = 1333.2
 
 
@@ -87,6 +88,7 @@ def _clear_tuning_outputs(output_dir: Path, *, tuned_config_name: str) -> None:
         OPTIMIZED_PARAMS_FILENAME,
         OPTIMIZATION_LOG_FILENAME,
         PA_CONFIG_SNAPSHOT_FILENAME,
+        OUTLET_CAP_MAPPING_FILENAME,
         tuned_config_name,
     ):
         path = output_dir / filename
@@ -807,6 +809,134 @@ def _validate_zerod_artifact(
         )
 
 
+def _mapping_artifact_payload(
+    resolved_mapping: Any,
+    *,
+    lpa_params: TreeParameters,
+    rpa_params: TreeParameters,
+    use_mean: bool,
+    specify_diameter: bool,
+    diameter_scale: float,
+    diameter_std_cap: float | None,
+    convert_to_cm: bool,
+) -> dict[str, Any]:
+    """Build deterministic mapping provenance for a completed full_pa run.
+
+    The resolver's records contain the source geometry and cap-derived side.
+    Add the exact construction diameter here so the artifact can be replayed
+    independently of the mutable ``ConfigHandler`` used for final output.
+    """
+
+    to_dict = getattr(resolved_mapping, "to_dict", None)
+    if not callable(to_dict):
+        # This compatibility path is useful for direct callers/tests that
+        # still return the legacy mapping dict.  Full-PA iteration itself
+        # receives a ResolvedOutletCapMapping from preflight.
+        if not isinstance(resolved_mapping, Mapping):
+            raise TypeError("full_pa resolved mapping must be serializable")
+        pairs = list(resolved_mapping.items())
+        return {
+            "version": 1,
+            "strategy": "legacy",
+            "cap_order": [str(cap) for cap, _ in pairs],
+            "bc_order": [str(bc) for _, bc in pairs],
+            "pairs": [
+                {
+                    "cap_path": str(cap),
+                    "cap_stem": Path(str(cap)).stem,
+                    "bc_name": str(bc),
+                }
+                for cap, bc in pairs
+            ],
+            "provenance": {
+                "compatibility_mapping": True,
+                "convert_to_cm": bool(convert_to_cm),
+            },
+            "tree_options": {
+                "use_mean": bool(use_mean),
+                "specify_diameter": bool(specify_diameter),
+                "diameter_scale": float(diameter_scale),
+                "diameter_std_cap": diameter_std_cap,
+                "generation_mode": "shared_by_side" if use_mean else "per_outlet",
+            },
+        }
+
+    payload = to_dict()
+    if not isinstance(payload, dict) or not isinstance(payload.get("pairs"), list):
+        raise ValueError("resolved mapping serialization must contain an ordered pairs list")
+
+    records = payload["pairs"]
+    side_params = {"lpa": lpa_params, "rpa": rpa_params}
+    side_diameters: dict[str, list[float]] = {"lpa": [], "rpa": []}
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("resolved mapping serialization contains an invalid pair record")
+        side = str(record.get("side", "")).strip().lower()
+        raw_diameter = float(record["raw_diameter"])
+        if side not in side_diameters:
+            raise ValueError(f"resolved mapping contains invalid cap side {side!r}")
+        if not np.isfinite(raw_diameter) or raw_diameter <= 0.0:
+            raise ValueError("resolved mapping contains an invalid raw cap diameter")
+        side_diameters[side].append(raw_diameter)
+
+    scaled_diameters: dict[str, float] = {}
+    for side, values in side_diameters.items():
+        if not values:
+            raise ValueError(f"resolved mapping contains no {side.upper()} cap records")
+        mean_diameter = float(np.mean(values))
+        std_diameter = float(np.std(values))
+        if use_mean:
+            parameter_diameter = getattr(side_params[side], "diameter", None)
+            scaled_diameter = (
+                float(parameter_diameter)
+                if specify_diameter and parameter_diameter is not None
+                else mean_diameter
+            )
+            for record in records:
+                if str(record.get("side", "")).strip().lower() == side:
+                    scaled_diameters[str(record["cap_path"])] = scaled_diameter
+            continue
+        for record in records:
+            if str(record.get("side", "")).strip().lower() != side:
+                continue
+            cap_diameter = float(record["raw_diameter"])
+            if diameter_std_cap is not None and std_diameter > 0.0:
+                max_deviation = float(diameter_std_cap) * std_diameter
+                cap_diameter = mean_diameter + float(
+                    np.clip(
+                        cap_diameter - mean_diameter,
+                        -max_deviation,
+                        max_deviation,
+                    )
+                )
+            scaled_diameters[str(record["cap_path"])] = mean_diameter + float(
+                diameter_scale
+            ) * (cap_diameter - mean_diameter)
+
+    for record in records:
+        record["scaled_diameter"] = scaled_diameters[str(record["cap_path"])]
+
+    provenance = dict(payload.get("provenance") or {})
+    provenance.update(
+        {
+            "convert_to_cm": bool(convert_to_cm),
+            "diameter_scale": float(diameter_scale),
+            "diameter_std_cap": diameter_std_cap,
+            "use_mean": bool(use_mean),
+            "specify_diameter": bool(specify_diameter),
+        }
+    )
+    payload["provenance"] = provenance
+    payload["tree_options"] = {
+        "use_mean": bool(use_mean),
+        "specify_diameter": bool(specify_diameter),
+        "diameter_scale": float(diameter_scale),
+        "diameter_std_cap": diameter_std_cap,
+        "generation_mode": "shared_by_side" if use_mean else "per_outlet",
+    }
+    return payload
+
+
 def run_impedance_tuning_for_iteration(
     *,
     iteration_dir: str | Path,
@@ -890,6 +1020,7 @@ def run_impedance_tuning_for_iteration(
             allow_ordered_outlet_mapping=bool(
                 tuning.get("allow_ordered_outlet_mapping", False)
             ),
+            resolved_mapping=resolved_mapping,
         )
         prev_csv = str(previous_optimized_params) if previous_optimized_params is not None else None
         if prev_csv is not None and os.path.isfile(prev_csv):
@@ -978,6 +1109,24 @@ def run_impedance_tuning_for_iteration(
     tuned_config.to_json(str(tuned_zerod_config))
     _validate_impedance_artifact(tuned_zerod_config)
 
+    outlet_cap_mapping = None
+    if resolved_mapping is not None:
+        outlet_cap_mapping = output_dir / OUTLET_CAP_MAPPING_FILENAME
+        mapping_payload = _mapping_artifact_payload(
+            resolved_mapping,
+            lpa_params=lpa_params,
+            rpa_params=rpa_params,
+            use_mean=bool(tuning["use_mean"]),
+            specify_diameter=bool(tuning["specify_diameter"]),
+            diameter_scale=float(tuning["diameter_scale"]),
+            diameter_std_cap=tuning["diameter_std_cap"],
+            convert_to_cm=bool(tuning["convert_to_cm"]),
+        )
+        outlet_cap_mapping.write_text(
+            json.dumps(mapping_payload, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
     return {
         "optimized_params_csv": str(optimized_csv),
         "stree_optimization_log": str(opt_log),
@@ -985,6 +1134,9 @@ def run_impedance_tuning_for_iteration(
         "tuned_zerod_config": str(tuned_zerod_config),
         "tuning_model": tuning["tuning_model"],
         "impedance_config": tuning,
+        "outlet_cap_mapping": (
+            str(outlet_cap_mapping) if outlet_cap_mapping is not None else None
+        ),
     }
 
 
@@ -1020,6 +1172,7 @@ def run_rcr_tuning_for_iteration(
     for filename in (
         OPTIMIZED_RCR_PARAMS_FILENAME,
         PA_CONFIG_SNAPSHOT_FILENAME,
+        OUTLET_CAP_MAPPING_FILENAME,
         tuned_config_name,
     ):
         path = output_dir / filename

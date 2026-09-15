@@ -12,6 +12,7 @@ from svzerodtrees.tuning.iteration import (
     OPTIMIZATION_LOG_FILENAME,
     OPTIMIZED_PARAMS_FILENAME,
     OPTIMIZED_RCR_PARAMS_FILENAME,
+    OUTLET_CAP_MAPPING_FILENAME,
     PA_CONFIG_SNAPSHOT_FILENAME,
     _build_tune_space_from_config,
     _resolve_impedance_config,
@@ -26,6 +27,7 @@ from svzerodtrees.tuning.iteration import (
 )
 from svzerodtrees.tuning.learned_seed import prepare_reduced_rri_seed_from_learned
 from svzerodtrees.tune_bcs.assign_bcs import resolve_cap_to_bc_mapping
+from svzerodtrees.tune_bcs.outlet_mapping import resolve_outlet_cap_mapping
 
 
 def _tune_space_with_xi() -> dict[str, list[dict[str, object]]]:
@@ -906,7 +908,9 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
         bcs = {
             "INFLOW": BC("INFLOW"),
             "lpa_cap_1": BC("lpa_cap_1"),
+            "lpa_cap_2": BC("lpa_cap_2"),
             "rpa_cap_1": BC("rpa_cap_1"),
+            "rpa_cap_2": BC("rpa_cap_2"),
         }
 
         @classmethod
@@ -958,7 +962,16 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
             "mesh_path": mesh_path,
             "kwargs": kwargs,
         }
-        return {"/mesh/lpa_cap_1.vtp": "lpa_cap_1", "/mesh/rpa_cap_1.vtp": "rpa_cap_1"}
+        return resolve_outlet_cap_mapping(
+            config_handler,
+            {
+                "/mesh/lpa_cap_1.vtp": 1.0,
+                "/mesh/lpa_cap_2.vtp": 4.0,
+                "/mesh/rpa_cap_1.vtp": 1.0,
+                "/mesh/rpa_cap_2.vtp": 4.0,
+            },
+            mode="serialized_cap_order",
+        )
 
     def _fake_construct(config_handler, mesh_path, wedge_p, lpa_params, rpa_params, d_min, **kwargs):
         calls["construct"] = {
@@ -998,6 +1011,8 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
     )
 
     assert result["tuning_model"] == "full_pa"
+    assert Path(result["outlet_cap_mapping"]).name == OUTLET_CAP_MAPPING_FILENAME
+    assert Path(result["outlet_cap_mapping"]).exists()
     assert result["impedance_config"]["diameter_std_cap"] == pytest.approx(1.5)
     assert calls["nm_iter"] == 3
     assert calls["validate"]["mesh_path"] == str(mesh_surfaces)
@@ -1007,13 +1022,27 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
     assert calls["tuner_kwargs"]["tuning_model"] == "full_pa"
     assert calls["tuner_kwargs"]["diameter_scale"] == pytest.approx(0.25)
     assert calls["tuner_kwargs"]["diameter_std_cap"] == pytest.approx(1.5)
+    assert calls["tuner_kwargs"]["resolved_mapping"] is calls["construct"]["kwargs"]["resolved_mapping"]
     assert calls["construct"]["kwargs"]["use_mean"] is False
     assert calls["construct"]["kwargs"]["diameter_scale"] == pytest.approx(0.25)
     assert calls["construct"]["kwargs"]["diameter_std_cap"] == pytest.approx(1.5)
-    assert calls["construct"]["kwargs"]["resolved_mapping"] == {
-        "/mesh/lpa_cap_1.vtp": "lpa_cap_1",
-        "/mesh/rpa_cap_1.vtp": "rpa_cap_1",
-    }
+    assert calls["construct"]["kwargs"]["resolved_mapping"].pairs == (
+        ("/mesh/lpa_cap_1.vtp", "lpa_cap_1"),
+        ("/mesh/lpa_cap_2.vtp", "lpa_cap_2"),
+        ("/mesh/rpa_cap_1.vtp", "rpa_cap_1"),
+        ("/mesh/rpa_cap_2.vtp", "rpa_cap_2"),
+    )
+    mapping_payload = json.loads(Path(result["outlet_cap_mapping"]).read_text(encoding="utf-8"))
+    assert mapping_payload["version"] == 1
+    assert mapping_payload["strategy"] == "serialized_cap_order"
+    assert [pair["bc_name"] for pair in mapping_payload["pairs"]] == [
+        "lpa_cap_1",
+        "lpa_cap_2",
+        "rpa_cap_1",
+        "rpa_cap_2",
+    ]
+    assert all(pair["scaled_diameter"] is not None for pair in mapping_payload["pairs"])
+    assert mapping_payload["provenance"]["convert_to_cm"] is False
 
 
 def test_run_impedance_tuning_for_iteration_full_pa_rejects_reduced_seed_before_tuner(
@@ -1408,9 +1437,11 @@ def test_full_pa_tuner_loss_applies_trial_bcs_and_writes_csv(monkeypatch, tmp_pa
     loss = tuner.loss_fn(x0, tuner._full_pa_base_config, finalize=True)
 
     assert loss > 0.0
-    assert calls["construct"]["kwargs"]["use_mean"] is True
-    assert calls["construct"]["kwargs"]["diameter_scale"] == pytest.approx(0.0)
-    assert calls["construct"]["kwargs"]["diameter_std_cap"] is None
+    # Candidate construction must honor the same full_pa tree contract that
+    # final publication uses; it must not silently fall back to mean trees.
+    assert calls["construct"]["kwargs"]["use_mean"] is False
+    assert calls["construct"]["kwargs"]["diameter_scale"] == pytest.approx(0.5)
+    assert calls["construct"]["kwargs"]["diameter_std_cap"] == pytest.approx(2.0)
     assert (tmp_path / OPTIMIZED_PARAMS_FILENAME).exists()
     assert (tmp_path / PA_CONFIG_SNAPSHOT_FILENAME).exists()
 

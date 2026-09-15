@@ -164,7 +164,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
                  specify_diameter=True,
                  diameter_scale=0.0,
                  diameter_std_cap=None,
-                 allow_ordered_outlet_mapping=False):
+                 allow_ordered_outlet_mapping=False,
+                 resolved_mapping=None):
         super().__init__(config_handler, mesh_surfaces_path, clinical_targets)
         self.tune_space = tune_space
         self.compliance_model = (compliance_model or "").lower()
@@ -189,6 +190,10 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self.diameter_scale = float(diameter_scale)
         self.diameter_std_cap = None if diameter_std_cap is None else float(diameter_std_cap)
         self.allow_ordered_outlet_mapping = bool(allow_ordered_outlet_mapping)
+        # Full-PA iteration owns mapping resolution.  Keep the resulting
+        # immutable object on the tuner so every candidate uses the exact map
+        # that preflight and final construction consume.
+        self.resolved_mapping = resolved_mapping
 
         # grid search params
         self.grid_search_init = grid_search_init
@@ -205,16 +210,10 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self._full_pa_base_config = None
 
     def _tree_assignment_options_for_objective(self):
-        if self.tuning_model != "full_pa":
-            return {
-                "use_mean": self.use_mean,
-                "diameter_scale": self.diameter_scale,
-                "diameter_std_cap": self.diameter_std_cap,
-            }
         return {
-            "use_mean": True,
-            "diameter_scale": 0.0,
-            "diameter_std_cap": None,
+            "use_mean": self.use_mean,
+            "diameter_scale": self.diameter_scale,
+            "diameter_std_cap": self.diameter_std_cap,
         }
 
 
@@ -481,6 +480,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 diameter_scale=objective_tree_options["diameter_scale"],
                 diameter_std_cap=objective_tree_options["diameter_std_cap"],
                 allow_ordered_outlet_mapping=self.allow_ordered_outlet_mapping,
+                resolved_mapping=self.resolved_mapping,
                 verbose=False,
             )
             self._write_and_validate_snapshot(model)

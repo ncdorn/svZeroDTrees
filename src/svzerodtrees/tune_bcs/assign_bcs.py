@@ -363,7 +363,9 @@ def construct_impedance_trees(config_handler,
             outlet_names=lpa_outlet_names,
             resolved_mapping=resolved_mapping,
             mapping_records=[
-                record for record in resolved_mapping.records if record.side == "lpa"
+                record.with_scaled_diameter(lpa_mean_dia)
+                for record in resolved_mapping.records
+                if record.side == "lpa"
             ],
         )
         config_handler.tree_params[rpa_tree.name] = _attach_tree_metadata(
@@ -375,7 +377,9 @@ def construct_impedance_trees(config_handler,
             outlet_names=rpa_outlet_names,
             resolved_mapping=resolved_mapping,
             mapping_records=[
-                record for record in resolved_mapping.records if record.side == "rpa"
+                record.with_scaled_diameter(rpa_mean_dia)
+                for record in resolved_mapping.records
+                if record.side == "rpa"
             ],
         )
             
@@ -440,7 +444,7 @@ def construct_impedance_trees(config_handler,
                 bc_names=[bc_name],
                 outlet_names=[cap_name],
                 resolved_mapping=resolved_mapping,
-                mapping_records=[record],
+                mapping_records=[record.with_scaled_diameter(scaled_d)],
             )
 
 
