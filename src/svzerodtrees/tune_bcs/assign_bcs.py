@@ -168,7 +168,12 @@ def validate_cap_to_bc_mapping(
         cap_info,
         bc_prefix=bc_prefix,
         allow_ordered_outlet_mapping=allow_ordered_outlet_mapping,
-        allow_serialized_fallback=allow_ordered_outlet_mapping,
+        # Supplying the new mode selects the full mapping contract.  In that
+        # contract ``auto`` includes serialized order as its final fallback;
+        # the legacy direct-caller path remains opt-in via the old boolean.
+        allow_serialized_fallback=(
+            allow_ordered_outlet_mapping or outlet_mapping_mode is not None
+        ),
     )
 
 def construct_impedance_trees(config_handler,

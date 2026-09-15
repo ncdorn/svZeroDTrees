@@ -241,6 +241,7 @@ def _full_pa_multi_outlet_payload() -> dict[str, object]:
 
 def _full_pa_impedance_snapshot_payload() -> dict[str, object]:
     payload = _full_pa_multi_outlet_payload()
+    payload["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"] = 3
     for bc in payload["boundary_conditions"]:
         if bc["bc_name"] == "INFLOW":
             continue
@@ -891,7 +892,7 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
     targets = tmp_path / "clinical_targets.csv"
     inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
     iteration_dir = tmp_path / "iter-01"
-    seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
+    seed.write_text(json.dumps(_full_pa_multi_outlet_payload()), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
     targets.write_text("target,value\n", encoding="utf-8")
 
@@ -946,12 +947,7 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
                 encoding="utf-8",
             )
             (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
-                json.dumps(_impedance_artifact_payload(
-                    bc_values={"z": [1.0, 0.5], "Pd": 12.0},
-                    coupled=False,
-                    number_of_time_pts_per_cardiac_cycle=3,
-                    inflow_q=[6.0, 6.0],
-                )),
+                json.dumps(_full_pa_impedance_snapshot_payload()),
                 encoding="utf-8",
             )
             Path(str(calls["tuner_kwargs"]["log_file"])).write_text("log", encoding="utf-8")
@@ -1005,13 +1001,66 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
     assert result["impedance_config"]["diameter_std_cap"] == pytest.approx(1.5)
     assert calls["nm_iter"] == 3
     assert calls["validate"]["mesh_path"] == str(mesh_surfaces)
-    assert calls["validate"]["kwargs"]["allow_ordered_outlet_mapping"] is True
+    assert calls["validate"]["kwargs"]["outlet_mapping_mode"] == "serialized_cap_order"
+    assert calls["validate"]["kwargs"]["outlet_mapping"] is None
+    assert calls["validate"]["kwargs"]["allow_ordered_outlet_mapping"] is False
     assert calls["tuner_kwargs"]["tuning_model"] == "full_pa"
     assert calls["tuner_kwargs"]["diameter_scale"] == pytest.approx(0.25)
     assert calls["tuner_kwargs"]["diameter_std_cap"] == pytest.approx(1.5)
     assert calls["construct"]["kwargs"]["use_mean"] is False
     assert calls["construct"]["kwargs"]["diameter_scale"] == pytest.approx(0.25)
     assert calls["construct"]["kwargs"]["diameter_std_cap"] == pytest.approx(1.5)
+    assert calls["construct"]["kwargs"]["resolved_mapping"] == {
+        "/mesh/lpa_cap_1.vtp": "lpa_cap_1",
+        "/mesh/rpa_cap_1.vtp": "rpa_cap_1",
+    }
+
+
+def test_run_impedance_tuning_for_iteration_full_pa_rejects_reduced_seed_before_tuner(
+    monkeypatch, tmp_path: Path
+):
+    seed = tmp_path / "reduced_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
+    iteration_dir = tmp_path / "iter-01"
+    seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+
+    class DummyConfigHandler:
+        bcs = {"INFLOW": SimpleNamespace(name="INFLOW")}
+
+        @classmethod
+        def from_json(cls, _path: str, is_pulmonary: bool = False):
+            return cls()
+
+    class DummyClinicalTargets:
+        wedge_p = 12.0
+
+        @classmethod
+        def from_csv(cls, _path: str):
+            return cls()
+
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration.ImpedanceTuner",
+        lambda *_args, **_kwargs: pytest.fail("full_pa preflight must run before tuner creation"),
+    )
+
+    with pytest.raises(ValueError, match="requires a full seed with more than two"):
+        run_impedance_tuning_for_iteration(
+            iteration_dir=iteration_dir,
+            seed_config=seed,
+            mesh_surfaces=mesh_surfaces,
+            clinical_targets=targets,
+            inflow_path=inflow_path,
+            impedance_config={
+                "tuning_model": "full_pa",
+                "tune_space": _tune_space_with_xi(),
+            },
+        )
 
 
 def test_run_impedance_tuning_for_iteration_full_pa_rejects_reduced_snapshot(
@@ -2154,6 +2203,85 @@ def test_resolve_impedance_config_supports_tuning_model_and_diameter_std_cap():
     )
     assert cfg["tuning_model"] == "full_pa"
     assert cfg["diameter_std_cap"] == pytest.approx(1.25)
+
+
+def test_resolve_impedance_config_full_pa_defaults_are_opt_in_and_rri_defaults_unchanged():
+    full_pa = _resolve_impedance_config(
+        {"tuning_model": "full_pa", "tune_space": _tune_space_with_xi()}
+    )
+    assert full_pa["use_mean"] is False
+    assert full_pa["diameter_scale"] == pytest.approx(1.0)
+    assert full_pa["outlet_mapping_mode"] == "auto"
+    assert full_pa["outlet_mapping"] is None
+    assert "allow_ordered_outlet_mapping" not in full_pa
+
+    rri = _resolve_impedance_config({"tune_space": _tune_space_with_xi()})
+    assert rri["use_mean"] is True
+    assert rri["diameter_scale"] == pytest.approx(0.0)
+    assert rri["allow_ordered_outlet_mapping"] is False
+    assert "outlet_mapping_mode" not in rri
+
+
+def test_resolve_impedance_config_full_pa_preserves_explicit_compatibility_controls():
+    cfg = _resolve_impedance_config(
+        {
+            "tuning_model": "full_pa",
+            "use_mean": True,
+            "diameter_scale": 0.0,
+            "tune_space": _tune_space_with_xi(),
+        }
+    )
+    assert cfg["use_mean"] is True
+    assert cfg["diameter_scale"] == pytest.approx(0.0)
+
+
+def test_resolve_impedance_config_migrates_legacy_ordered_mapping_flag():
+    with pytest.warns(
+        DeprecationWarning,
+        match="allow_ordered_outlet_mapping is deprecated",
+    ):
+        cfg = _resolve_impedance_config(
+            {
+                "tuning_model": "full_pa",
+                "allow_ordered_outlet_mapping": True,
+                "tune_space": _tune_space_with_xi(),
+            }
+        )
+    assert cfg["outlet_mapping_mode"] == "serialized_cap_order"
+    assert cfg["outlet_mapping"] is None
+    assert "allow_ordered_outlet_mapping" not in cfg
+
+
+def test_resolve_impedance_config_rejects_legacy_and_new_mapping_settings():
+    with pytest.raises(ValueError, match="cannot be combined"):
+        _resolve_impedance_config(
+            {
+                "tuning_model": "full_pa",
+                "outlet_mapping_mode": "auto",
+                "allow_ordered_outlet_mapping": False,
+                "tune_space": _tune_space_with_xi(),
+            }
+        )
+
+
+def test_resolve_impedance_config_requires_explicit_mapping_for_explicit_mode():
+    with pytest.raises(ValueError, match="requires outlet_mapping"):
+        _resolve_impedance_config(
+            {
+                "tuning_model": "full_pa",
+                "outlet_mapping_mode": "explicit",
+                "tune_space": _tune_space_with_xi(),
+            }
+        )
+
+    with pytest.raises(ValueError, match="requires outlet_mapping_mode='explicit'"):
+        _resolve_impedance_config(
+            {
+                "tuning_model": "full_pa",
+                "outlet_mapping": {"lpa_cap": "OUT_LPA"},
+                "tune_space": _tune_space_with_xi(),
+            }
+        )
 
 
 def test_resolve_impedance_config_nonzero_diameter_scale_disables_mean_tree_assignment():

@@ -60,6 +60,54 @@ That path calls `construct_impedance_trees(...)`, which:
 
 The YAML reference for this lives in [docs/interface.md](interface.md).
 
+## Path 3: Full Pulmonary Iteration Tuning
+
+For a full pulmonary seed with more than two outlet BCs, select `full_pa`
+explicitly.  This copyable Python example uses the deterministic mapping
+resolver and leaves the per-cap defaults visible:
+
+```python
+from svzerodtrees.tuning.iteration import run_impedance_tuning_for_iteration
+
+result = run_impedance_tuning_for_iteration(
+    iteration_dir="iter-01",
+    seed_config="full_pa_zerod.json",       # must contain the full vessel topology
+    mesh_surfaces="mesh-complete/mesh-surfaces",
+    clinical_targets="clinical_targets.csv",
+    inflow_path="inflow.csv",
+    impedance_config={
+        "tuning_model": "full_pa",
+        "outlet_mapping_mode": "auto",
+        "use_mean": False,
+        "diameter_scale": 1.0,
+        "tune_space": {
+            "free": [
+                {"name": "lpa.alpha", "init": 0.9, "lb": 0.7, "ub": 0.99},
+                {"name": "rpa.alpha", "init": 0.9, "lb": 0.7, "ub": 0.99},
+            ],
+            "fixed": [{"name": "d_min", "value": 0.01}],
+            "tied": [],
+        },
+    },
+)
+```
+
+Use `"outlet_mapping_mode": "explicit"` with an `"outlet_mapping"` object
+when cap names do not match the serialized BC layout:
+
+```python
+"outlet_mapping": {
+    "lpa_cap_01": "OUTLET_07",
+    "rpa_cap_01": "OUTLET_12",
+}
+```
+
+The preflight rejects a reduced two-outlet seed and validates one cap for every
+non-inflow outlet before constructing the tuner.  The RRI workflow and its
+reduced-seed expansion path are unchanged.  Diameters are derived from mesh
+areas using the existing CGS contract; no additional unit conversion is
+introduced by full-PA tuning.
+
 ## Why The Repo Needs Both Paths
 
 The direct Python path is ideal for learning and unit-level reasoning.

@@ -223,6 +223,60 @@ Supported transforms for `tune_space`:
 - `to_native`: `identity|positive|unit_interval`
 - `from_native`: `identity|log`
 
+**Full-PA Iteration Tuning**
+
+`run_impedance_tuning_for_iteration` accepts an `impedance_config` mapping for
+an explicitly selected full pulmonary seed.  The full-PA contract is opt-in;
+an RRI configuration keeps the historical `use_mean: true` and
+`diameter_scale: 0.0` defaults.
+
+```yaml
+impedance_config:
+  tuning_model: full_pa
+  # auto tries persisted metadata, cap-name matching, then serialized order.
+  outlet_mapping_mode: auto  # auto | metadata | cap_name | serialized_cap_order | explicit
+  # Required only for outlet_mapping_mode: explicit.  Keys may be cap paths or stems.
+  # outlet_mapping:
+  #   lpa_cap_01: OUTLET_07
+  #   rpa_cap_01: OUTLET_12
+  use_mean: false             # full_pa default
+  diameter_scale: 1.0         # full_pa default; 0.0 is an explicit compatibility control
+  diameter_std_cap: null
+  tune_space:
+    free:
+      - name: lpa.alpha
+        init: 0.9
+        lb: 0.7
+        ub: 0.99
+      - name: rpa.alpha
+        init: 0.9
+        lb: 0.7
+        ub: 0.99
+    fixed:
+      - name: d_min
+        value: 0.01
+    tied: []
+```
+
+The resolver preserves the serialized boundary-condition order and records a
+complete one-to-one cap/BC pairing before the tuner is created.  A full-PA
+seed must contain more than two non-inflow outlet BCs and one mapped cap per
+outlet; reduced seeds are rejected rather than upgraded.  `metadata`,
+`cap_name`, and `serialized_cap_order` are strict single strategies, while
+`auto` applies those strategies in the order shown above.
+
+The legacy `allow_ordered_outlet_mapping: true` setting is accepted only
+during migration when no new mapping mode is supplied.  It emits a
+deprecation warning and resolves to `outlet_mapping_mode:
+serialized_cap_order`; supplying both settings fails fast.  An explicit map
+must be complete and bijective, and its schema is `cap-or-stem: outlet-BC-name`
+(or an equivalent list of `[cap, outlet_BC]` pairs).
+
+Mesh areas and diameters retain the existing CGS computation contract.
+`convert_to_cm` controls the existing geometry conversion; it does not change
+the solver's CGS values.  Wedge pressure inputs continue to be converted from
+the documented mmHg input to barye at construction time.
+
 **Trees**
 ```yaml
 trees:

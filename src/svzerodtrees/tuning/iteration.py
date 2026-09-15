@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 import json
 import os
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -59,6 +60,13 @@ DEFAULT_IMPEDANCE_TUNING_CONFIG: dict[str, Any] = {
     "allow_ordered_outlet_mapping": False,
     "tuning_model": "rri",
 }
+
+# ``outlet_mapping_mode`` and ``outlet_mapping`` are full_pa controls.  They
+# are resolved below rather than added to the shared defaults so that an RRI
+# configuration retains its historical shape and behavior.
+FULL_PA_DEFAULT_USE_MEAN = False
+FULL_PA_DEFAULT_DIAMETER_SCALE = 1.0
+FULL_PA_DEFAULT_OUTLET_MAPPING_MODE = "auto"
 DEFAULT_RCR_TUNING_CONFIG: dict[str, Any] = {
     "solver": "Nelder-Mead",
     "n_procs": 24,
@@ -237,6 +245,83 @@ def _assert_full_pa_snapshot_preserves_topology(
             )
 
 
+def _validate_full_pa_preflight(
+    *,
+    seed_payload: Mapping[str, Any],
+    config_handler: ConfigHandler,
+    mesh_surfaces: Path,
+    convert_to_cm: bool,
+    outlet_mapping_mode: str,
+    outlet_mapping: Any,
+) -> Any:
+    """Validate full-PA topology and freeze its cap-to-BC mapping.
+
+    Full-PA tuning is intentionally never upgraded from a reduced seed.  The
+    serialized seed remains the source of truth for outlet coverage; the
+    mapping resolver then validates that every one of those outlets has one
+    pulmonary cap and returns the immutable mapping consumed by later stages.
+    """
+
+    seed_outlets = _outlet_bc_names(seed_payload)
+    if len(seed_outlets) <= 2:
+        raise ValueError(
+            "tuning_model='full_pa' requires a full seed with more than two "
+            "non-inflow outlet boundary conditions"
+        )
+
+    vessels = seed_payload.get("vessels")
+    if not isinstance(vessels, list) or not vessels:
+        raise ValueError(
+            "tuning_model='full_pa' requires a full seed config with vessels"
+        )
+
+    attached_outlets: list[str] = []
+    for vessel in vessels:
+        if not isinstance(vessel, Mapping):
+            continue
+        vessel_bcs = vessel.get("boundary_conditions")
+        if not isinstance(vessel_bcs, Mapping):
+            continue
+        outlet = vessel_bcs.get("outlet")
+        if outlet is not None and str(outlet) in seed_outlets:
+            attached_outlets.append(str(outlet))
+    if attached_outlets:
+        attached_set = set(attached_outlets)
+        if len(attached_outlets) != len(attached_set) or attached_set != seed_outlets:
+            missing = sorted(seed_outlets - attached_set)
+            duplicate = sorted(
+                {name for name in attached_outlets if attached_outlets.count(name) > 1}
+            )
+            details = []
+            if missing:
+                details.append("missing=" + ", ".join(missing))
+            if duplicate:
+                details.append("duplicate=" + ", ".join(duplicate))
+            raise ValueError(
+                "full_pa seed topology does not provide exactly one vessel outlet "
+                + ("(" + "; ".join(details) + ")" if details else "")
+            )
+
+    resolved_mapping = validate_cap_to_bc_mapping(
+        config_handler,
+        str(mesh_surfaces),
+        convert_to_cm=convert_to_cm,
+        is_pulmonary=True,
+        outlet_mapping_mode=outlet_mapping_mode,
+        outlet_mapping=outlet_mapping,
+        # The new mode is the migration boundary.  Passing the legacy boolean
+        # here would make the resolver see two competing contracts.
+        allow_ordered_outlet_mapping=False,
+    )
+    records = getattr(resolved_mapping, "records", None)
+    if records is not None and len(records) != len(seed_outlets):
+        raise ValueError(
+            "full_pa cap mapping does not cover every seed outlet: "
+            f"mapping={len(records)}, outlets={len(seed_outlets)}"
+        )
+    return resolved_mapping
+
+
 @contextmanager
 def _pushd(path: Path):
     previous = Path.cwd()
@@ -250,20 +335,99 @@ def _pushd(path: Path):
 def _resolve_impedance_config(
     config: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
+    if config is not None and not isinstance(config, Mapping):
+        raise ValueError("impedance tuning config must be a mapping")
     if config is None or config.get("tune_space") is None:
         raise ValueError(
             "impedance tuning config must include explicit tune_space with keys "
             "free, fixed, and tied"
         )
 
+    raw_config = config
+    tuning_model = str(raw_config.get("tuning_model", "rri") or "rri").strip().lower()
+    if tuning_model not in {"rri", "full_pa"}:
+        raise ValueError("impedance tuning tuning_model must be one of rri|full_pa")
+
+    # The legacy flag is intentionally detected before merging defaults.  A
+    # default ``False`` value is not a user-supplied migration input, while an
+    # explicitly supplied flag alongside a new mode is ambiguous and must be
+    # rejected rather than silently choosing one contract.
+    legacy_mapping_supplied = "allow_ordered_outlet_mapping" in raw_config
+    new_mapping_mode_supplied = (
+        "outlet_mapping_mode" in raw_config
+        and raw_config.get("outlet_mapping_mode") is not None
+    )
+    if tuning_model == "full_pa" and legacy_mapping_supplied and new_mapping_mode_supplied:
+        raise ValueError(
+            "allow_ordered_outlet_mapping cannot be combined with "
+            "outlet_mapping_mode; remove the deprecated legacy setting"
+        )
+
     merged = dict(DEFAULT_IMPEDANCE_TUNING_CONFIG)
-    for key, value in config.items():
+    for key, value in raw_config.items():
         if value is None:
             continue
         if key == "tune_space":
             merged["tune_space"] = value
         else:
             merged[key] = value
+
+    if tuning_model == "full_pa":
+        # Full PA is deliberately opt-in.  Its defaults are applied per field
+        # so explicit compatibility controls (use_mean=True or
+        # diameter_scale=0) remain valid and inspectable.
+        if raw_config.get("use_mean") is None or "use_mean" not in raw_config:
+            merged["use_mean"] = FULL_PA_DEFAULT_USE_MEAN
+        if raw_config.get("diameter_scale") is None or "diameter_scale" not in raw_config:
+            merged["diameter_scale"] = FULL_PA_DEFAULT_DIAMETER_SCALE
+
+        if legacy_mapping_supplied:
+            legacy_value = bool(raw_config.get("allow_ordered_outlet_mapping"))
+            if legacy_value:
+                warnings.warn(
+                    "allow_ordered_outlet_mapping is deprecated; use "
+                    "outlet_mapping_mode='serialized_cap_order' instead",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                merged["outlet_mapping_mode"] = "serialized_cap_order"
+            else:
+                merged["outlet_mapping_mode"] = FULL_PA_DEFAULT_OUTLET_MAPPING_MODE
+            # Do not carry the deprecated key into the resolved full_pa
+            # contract.  This also prevents a second resolution pass from
+            # treating an already migrated config as contradictory.
+            merged.pop("allow_ordered_outlet_mapping", None)
+        else:
+            requested_mode = raw_config.get("outlet_mapping_mode")
+            if requested_mode is None:
+                requested_mode = FULL_PA_DEFAULT_OUTLET_MAPPING_MODE
+            merged["outlet_mapping_mode"] = str(requested_mode).strip().lower()
+
+        merged["outlet_mapping"] = raw_config.get("outlet_mapping")
+        if merged["outlet_mapping_mode"] not in {
+            "auto",
+            "metadata",
+            "cap_name",
+            "serialized_cap_order",
+            "explicit",
+        }:
+            raise ValueError(
+                "impedance tuning outlet_mapping_mode must be one of "
+                "auto|metadata|cap_name|serialized_cap_order|explicit"
+            )
+        if merged["outlet_mapping"] is not None and merged["outlet_mapping_mode"] != "explicit":
+            raise ValueError(
+                "impedance tuning outlet_mapping requires "
+                "outlet_mapping_mode='explicit'"
+            )
+        if merged["outlet_mapping_mode"] == "explicit" and merged["outlet_mapping"] is None:
+            raise ValueError(
+                "impedance tuning outlet_mapping_mode='explicit' requires outlet_mapping"
+            )
+    elif "outlet_mapping_mode" in raw_config or "outlet_mapping" in raw_config:
+        raise ValueError(
+            "outlet_mapping_mode and outlet_mapping are supported only for tuning_model='full_pa'"
+        )
 
     solver = str(merged.get("solver", "")).strip()
     if not solver:
@@ -282,7 +446,12 @@ def _resolve_impedance_config(
     merged["diameter_scale"] = float(merged["diameter_scale"])
     if merged["diameter_std_cap"] is not None:
         merged["diameter_std_cap"] = float(merged["diameter_std_cap"])
-    merged["allow_ordered_outlet_mapping"] = bool(merged["allow_ordered_outlet_mapping"])
+    if merged["tuning_model"] == "rri":
+        merged["allow_ordered_outlet_mapping"] = bool(
+            merged.get("allow_ordered_outlet_mapping", False)
+        )
+    else:
+        merged.pop("allow_ordered_outlet_mapping", None)
     merged["tuning_model"] = str(merged["tuning_model"]).strip().lower()
     merged["tune_space"] = _normalize_tune_space_config(merged.get("tune_space"))
 
@@ -300,7 +469,16 @@ def _resolve_impedance_config(
         raise ValueError("impedance tuning diameter_std_cap must be >= 0")
     if merged["tuning_model"] not in {"rri", "full_pa"}:
         raise ValueError("impedance tuning tuning_model must be one of rri|full_pa")
-    if merged["diameter_scale"] > 0.0:
+    # Preserve the historical RRI coupling.  For full_pa, only an omitted
+    # use_mean may be forced off by a positive diameter spread; an explicit
+    # use_mean=True is an intentional compatibility override.
+    if merged["tuning_model"] == "rri" and merged["diameter_scale"] > 0.0:
+        merged["use_mean"] = False
+    elif (
+        merged["tuning_model"] == "full_pa"
+        and merged["diameter_scale"] > 0.0
+        and ("use_mean" not in raw_config or raw_config.get("use_mean") is None)
+    ):
         merged["use_mean"] = False
 
     return merged
@@ -674,14 +852,21 @@ def run_impedance_tuning_for_iteration(
 
     opt_log = output_dir / OPTIMIZATION_LOG_FILENAME
     with _pushd(output_dir):
+        seed_payload = _load_json_payload(seed_config_path)
         reduced_config = ConfigHandler.from_json(str(seed_config_path), is_pulmonary=True)
-        if tuning["tuning_model"] == "full_pa" and getattr(reduced_config, "bcs", None) is not None:
-            validate_cap_to_bc_mapping(
-                reduced_config,
-                str(mesh_surfaces_path),
+        resolved_mapping = None
+        if tuning["tuning_model"] == "full_pa":
+            if getattr(reduced_config, "bcs", None) is None:
+                raise ValueError(
+                    "tuning_model='full_pa' requires a config handler with outlet BCs"
+                )
+            resolved_mapping = _validate_full_pa_preflight(
+                seed_payload=seed_payload,
+                config_handler=reduced_config,
+                mesh_surfaces=mesh_surfaces_path,
                 convert_to_cm=bool(tuning["convert_to_cm"]),
-                is_pulmonary=True,
-                allow_ordered_outlet_mapping=bool(tuning["allow_ordered_outlet_mapping"]),
+                outlet_mapping_mode=str(tuning["outlet_mapping_mode"]),
+                outlet_mapping=tuning["outlet_mapping"],
             )
         tuner = ImpedanceTuner(
             reduced_config,
@@ -702,7 +887,9 @@ def run_impedance_tuning_for_iteration(
             specify_diameter=bool(tuning["specify_diameter"]),
             diameter_scale=float(tuning["diameter_scale"]),
             diameter_std_cap=tuning["diameter_std_cap"],
-            allow_ordered_outlet_mapping=bool(tuning["allow_ordered_outlet_mapping"]),
+            allow_ordered_outlet_mapping=bool(
+                tuning.get("allow_ordered_outlet_mapping", False)
+            ),
         )
         prev_csv = str(previous_optimized_params) if previous_optimized_params is not None else None
         if prev_csv is not None and os.path.isfile(prev_csv):
@@ -752,8 +939,14 @@ def run_impedance_tuning_for_iteration(
         "specify_diameter": bool(tuning["specify_diameter"]),
         "diameter_scale": float(tuning["diameter_scale"]),
         "diameter_std_cap": tuning["diameter_std_cap"],
-        "allow_ordered_outlet_mapping": bool(tuning["allow_ordered_outlet_mapping"]),
+        "allow_ordered_outlet_mapping": bool(
+            tuning.get("allow_ordered_outlet_mapping", False)
+        ),
     }
+    if resolved_mapping is not None:
+        # Full-PA construction consumes the preflight result instead of
+        # reconstructing a mapping from mutable ConfigHandler state.
+        construct_kwargs["resolved_mapping"] = resolved_mapping
     try:
         construct_impedance_trees(
             tuned_config,
