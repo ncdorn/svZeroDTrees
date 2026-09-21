@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from svzerodtrees.config import ImpedanceConfig
 from svzerodtrees.api import (
     AdaptationWorkflow,
     Calibrate0DFrom3DWorkflow,
@@ -15,6 +16,7 @@ from svzerodtrees.api import (
     run_from_config_file,
 )
 from svzerodtrees.adaptation.workflow import _mean_resistances
+from svzerodtrees.tune_bcs.tune_space import FreeParam, TuneSpace
 
 
 def test_tune_bcs_workflow_requires_bcs_section():
@@ -270,6 +272,276 @@ def test_pipeline_workflow_maps_defaults_when_sections_omitted(monkeypatch, tmp_
         "run_threed": True,
         "adapt": True,
     }
+
+
+def _full_pa_impedance_config():
+    return ImpedanceConfig(
+        tuning_model="full_pa",
+        tune_space=TuneSpace(
+            free=[FreeParam("lpa.alpha", init=0.9, lb=0.7, ub=0.99)],
+            fixed=[],
+            tied=[],
+        ),
+        outlet_mapping_mode="auto",
+    )
+
+
+def test_tune_bcs_full_pa_dispatches_canonical_iteration_service(monkeypatch, tmp_path):
+    calls = {}
+    expected = {
+        "optimized_params_csv": str(tmp_path / "optimized_params.csv"),
+        "pa_config_snapshot": str(tmp_path / "pa_config_tuning_snapshot.json"),
+        "tuned_zerod_config": str(tmp_path / "svzerod_3d_coupling_tuned.json"),
+        "outlet_cap_mapping": str(tmp_path / "outlet_cap_mapping.json"),
+    }
+
+    def fake_run(**kwargs):
+        calls.update(kwargs)
+        return expected
+
+    monkeypatch.setattr("svzerodtrees.api.run_impedance_tuning_for_iteration", fake_run)
+    cfg = SimpleNamespace(
+        paths=SimpleNamespace(
+            root=str(tmp_path),
+            zerod_config=str(tmp_path / "full_pa_seed.json"),
+            clinical_targets=str(tmp_path / "targets.csv"),
+            mesh_surfaces=str(tmp_path / "mesh-surfaces"),
+            inflow=str(tmp_path / "inflow.csv"),
+        ),
+        bcs=SimpleNamespace(type="impedance", impedance=_full_pa_impedance_config()),
+        threed=None,
+    )
+
+    result = TuneBCsWorkflow.from_config(cfg).run()
+
+    assert result == {"status": "ok", **expected}
+    assert calls["iteration_dir"] == str(tmp_path)
+    assert calls["seed_config"] == str(tmp_path / "full_pa_seed.json")
+    assert calls["mesh_surfaces"] == str(tmp_path / "mesh-surfaces")
+    assert calls["clinical_targets"] == str(tmp_path / "targets.csv")
+    assert calls["inflow_path"] == str(tmp_path / "inflow.csv")
+    assert calls["results_dir"] == str(tmp_path)
+    assert calls["impedance_config"]["tuning_model"] == "full_pa"
+    assert "tune_space" in calls["impedance_config"]
+
+
+def test_tune_bcs_learned_full_pa_forwards_seed_and_reports_provenance(
+    monkeypatch, tmp_path
+):
+    calls = {}
+    learned_seed = tmp_path / "generated" / "learned_full_pa_seed.json"
+    learned_metadata = tmp_path / "generated" / "learned_seed_metadata.json"
+
+    monkeypatch.setattr(
+        "svzerodtrees.api.generate_full_pa_learned_seed",
+        lambda config: SimpleNamespace(
+            seed_path=learned_seed, metadata_path=learned_metadata
+        ),
+    )
+
+    def fake_run(**kwargs):
+        calls.update(kwargs)
+        return {"tuned_zerod_config": str(tmp_path / "tuned.json")}
+
+    monkeypatch.setattr("svzerodtrees.api.run_impedance_tuning_for_iteration", fake_run)
+    cfg = SimpleNamespace(
+        paths=SimpleNamespace(
+            root=str(tmp_path),
+            zerod_config=None,
+            clinical_targets=str(tmp_path / "targets.csv"),
+            mesh_surfaces=str(tmp_path / "mesh-surfaces"),
+            inflow=None,
+        ),
+        seed_generation=SimpleNamespace(),
+        bcs=SimpleNamespace(type="impedance", impedance=_full_pa_impedance_config()),
+        threed=None,
+    )
+
+    result = TuneBCsWorkflow.from_config(cfg).run()
+
+    assert calls["seed_config"] == str(learned_seed)
+    assert result["learned_seed"] == str(learned_seed)
+    assert result["learned_seed_metadata"] == str(learned_metadata)
+
+
+@pytest.mark.parametrize(
+    ("missing_path", "expected_message"),
+    [
+        ("clinical_targets", "paths.clinical_targets is required"),
+        ("mesh_surfaces", "paths.mesh_surfaces is required"),
+    ],
+)
+def test_tune_bcs_validates_paths_before_learned_seed_generation(
+    monkeypatch, tmp_path, missing_path, expected_message
+):
+    calls = []
+    generated_dir = tmp_path / "generated"
+    learned_seed = generated_dir / "learned_full_pa_seed.json"
+    learned_metadata = generated_dir / "learned_seed_metadata.json"
+
+    def fake_generate(config):
+        calls.append(config)
+        generated_dir.mkdir()
+        learned_seed.write_text("{}", encoding="utf-8")
+        learned_metadata.write_text("{}", encoding="utf-8")
+        return SimpleNamespace(seed_path=learned_seed, metadata_path=learned_metadata)
+
+    monkeypatch.setattr(
+        "svzerodtrees.api.generate_full_pa_learned_seed", fake_generate
+    )
+    paths = SimpleNamespace(
+        root=str(tmp_path),
+        zerod_config=None,
+        clinical_targets=str(tmp_path / "targets.csv"),
+        mesh_surfaces=str(tmp_path / "mesh-surfaces"),
+        inflow=None,
+    )
+    setattr(paths, missing_path, None)
+    cfg = SimpleNamespace(
+        paths=paths,
+        seed_generation=SimpleNamespace(),
+        bcs=SimpleNamespace(type="impedance", impedance=_full_pa_impedance_config()),
+        threed=None,
+    )
+
+    with pytest.raises(ValueError, match=expected_message):
+        TuneBCsWorkflow.from_config(cfg).run()
+
+    assert calls == []
+    assert not learned_seed.exists()
+    assert not learned_metadata.exists()
+
+
+def test_pipeline_passes_typed_full_pa_impedance_contract_to_simulation(
+    monkeypatch, tmp_path
+):
+    calls = {}
+
+    class DummySimulation:
+        def __init__(self, **kwargs):
+            calls["init"] = kwargs
+
+        def run_pipeline(self, **kwargs):
+            calls["run"] = kwargs
+            return {
+                "tuned_zerod_config": str(tmp_path / "tuned.json"),
+                "outlet_cap_mapping": str(tmp_path / "mapping.json"),
+            }
+
+    monkeypatch.setattr("svzerodtrees.api.Simulation", DummySimulation)
+    cfg = SimpleNamespace(
+        paths=SimpleNamespace(
+            root=str(tmp_path),
+            zerod_config=str(tmp_path / "full_pa_seed.json"),
+            clinical_targets=str(tmp_path / "targets.csv"),
+            mesh_surfaces=str(tmp_path / "mesh-surfaces"),
+            preop_dir=str(tmp_path / "preop"),
+            postop_dir=str(tmp_path / "postop"),
+            adapted_dir=str(tmp_path / "adapted"),
+            inflow=str(tmp_path / "inflow.csv"),
+        ),
+        bcs=SimpleNamespace(type="impedance", impedance=_full_pa_impedance_config()),
+        adaptation=None,
+        pipeline=SimpleNamespace(
+            run_steady=False, optimize_bcs=True, run_threed=False, adapt=False
+        ),
+        threed=None,
+    )
+
+    result = PipelineWorkflow.from_config(cfg).run()
+
+    assert result["status"] == "ok"
+    assert result["tuned_zerod_config"].endswith("tuned.json")
+    assert calls["init"]["zerod_config"] == str(tmp_path / "full_pa_seed.json")
+    assert calls["init"]["impedance_config"]["tuning_model"] == "full_pa"
+    assert calls["init"]["impedance_config"]["outlet_mapping_mode"] == "auto"
+    assert calls["run"]["optimize_bcs"] is True
+
+
+def test_pipeline_learned_full_pa_forwards_absolute_seed_and_reports_provenance(
+    monkeypatch, tmp_path
+):
+    calls = {}
+    learned_seed = tmp_path / "generated" / "learned_full_pa_seed.json"
+    learned_metadata = tmp_path / "generated" / "learned_seed_metadata.json"
+
+    monkeypatch.setattr(
+        "svzerodtrees.api.generate_full_pa_learned_seed",
+        lambda config: SimpleNamespace(
+            seed_path=learned_seed, metadata_path=learned_metadata
+        ),
+    )
+
+    class DummySimulation:
+        def __init__(self, **kwargs):
+            calls["init"] = kwargs
+
+        def run_pipeline(self, **kwargs):
+            return {"learned_seed": "simulation-owned", "tuned": True}
+
+    monkeypatch.setattr("svzerodtrees.api.Simulation", DummySimulation)
+    cfg = SimpleNamespace(
+        paths=SimpleNamespace(
+            root=str(tmp_path),
+            zerod_config=None,
+            clinical_targets=None,
+            preop_dir=None,
+            postop_dir=None,
+            adapted_dir=None,
+            inflow=None,
+        ),
+        seed_generation=SimpleNamespace(),
+        bcs=SimpleNamespace(type="impedance", impedance=_full_pa_impedance_config()),
+        adaptation=None,
+        pipeline=SimpleNamespace(
+            run_steady=False, optimize_bcs=True, run_threed=False, adapt=False
+        ),
+        threed=None,
+    )
+
+    result = PipelineWorkflow.from_config(cfg).run()
+
+    assert calls["init"]["zerod_config"] == str(learned_seed)
+    assert result["learned_seed"] == "simulation-owned"
+    assert result["learned_seed_metadata"] == str(learned_metadata)
+    assert result["tuned"] is True
+
+
+def test_learned_seed_generation_failure_prevents_downstream_dispatch(
+    monkeypatch, tmp_path
+):
+    calls = {"simulation": 0}
+
+    def fail_generation(config):
+        raise RuntimeError("learned generation failed")
+
+    monkeypatch.setattr("svzerodtrees.api.generate_full_pa_learned_seed", fail_generation)
+
+    class DummySimulation:
+        def __init__(self, **kwargs):
+            calls["simulation"] += 1
+
+    monkeypatch.setattr("svzerodtrees.api.Simulation", DummySimulation)
+    cfg = SimpleNamespace(
+        paths=SimpleNamespace(
+            root=str(tmp_path),
+            zerod_config=None,
+            clinical_targets=None,
+            preop_dir=None,
+            postop_dir=None,
+            adapted_dir=None,
+            inflow=None,
+        ),
+        seed_generation=SimpleNamespace(),
+        bcs=SimpleNamespace(type="impedance", impedance=_full_pa_impedance_config()),
+        adaptation=None,
+        pipeline=None,
+        threed=None,
+    )
+
+    with pytest.raises(RuntimeError, match="learned generation failed"):
+        PipelineWorkflow.from_config(cfg).run()
+    assert calls["simulation"] == 0
 
 
 def test_postprocess_workflow_dispatches_analysis(monkeypatch, tmp_path):

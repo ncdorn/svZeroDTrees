@@ -67,7 +67,7 @@ calibration:
     rpa_flow_split:
       rpa_vessel: branch1_seg0
       lpa_vessel: branch5_seg0
-      interface: external_downstream
+      interface: upstream
       weight: 1.0
       absolute_tolerance: 0.02
     require_improvement_over_baseline: true

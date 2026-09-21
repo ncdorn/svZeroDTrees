@@ -2,6 +2,9 @@
 
 This document defines the YAML schema used by the CLI and Python API. The schema is strict: unknown keys raise errors.
 
+For the end-to-end scientific contract and ownership boundary, see the
+[full-PA tuning and calibration guide](full_pa_calibration.md).
+
 **Workflows**
 - `pipeline`: end-to-end run using `Simulation.run_pipeline`.
 - `tune_bcs`: tune boundary conditions only.
@@ -10,7 +13,8 @@ This document defines the YAML schema used by the CLI and Python API. The schema
 - `adapt_benchmark`: run local reduced-PA adaptation benchmark studies from optimized preop/postop reduced RRI configs.
 - `postprocess`: generate figures from saved tree pickles or compute standalone analysis artifacts.
 - `calibrate_0d_from_3d`: run fixed-point-confirmed 0D calibration from a
-  precomputed mapped centerline result and publish it only after stable replay.
+  precomputed mapped centerline result or a validated pulmonary postprocess
+  suite descriptor, and publish it only after stable replay.
 
 **Workflow Requirements**
 
@@ -55,16 +59,20 @@ For `calibrate_0d_from_3d`, `paths.zerod_config` and `paths.output_config` are r
 ```yaml
 calibration:
   data_source:
-    mode: mapped_centerline
-    mapped_centerline_result: path/to/result_centerline.vtp
-    metadata_json: path/to/result_centerline_metadata.json
-    centerline: path/to/centerline.vtp
-    pressure_array: pressure
-    flow_array: flow
-    flow_observation_type: flow  # required: flow | velocity
-    area_array: null
-    branch_id_array: BranchId
-    path_array: Path
+    # Choose one mode. postprocess_suite owns paths, arrays, units, and
+    # digests; mapped_centerline keeps the explicit manual contract.
+    mode: postprocess_suite  # postprocess_suite | mapped_centerline
+    postprocess_metadata_json: path/to/postprocess_suite_metadata.json
+    # For mode: mapped_centerline, replace the field above with:
+    # mapped_centerline_result: path/to/result_centerline.vtp
+    # metadata_json: path/to/result_centerline_metadata.json
+    # centerline: path/to/centerline.vtp
+    # pressure_array: pressure
+    # flow_array: flow
+    # flow_observation_type: flow  # required: flow | velocity
+    # area_array: null
+    # branch_id_array: BranchId
+    # path_array: Path
   parameters:
     vessels:
       default: [R_poiseuille, C, L]
@@ -115,7 +123,23 @@ calibration:
     require_improvement_over_baseline: true
 ```
 
-Stage-1 calibration constraints:
+Calibration data-source constraints:
+
+- `postprocess_suite` requires exactly `postprocess_metadata_json`. The
+  descriptor resolves its VTP, sidecar, and reference-centerline paths
+  relative to the descriptor, validates their digests and geometry, and
+  supplies the numbered `pressure_i`/`flow_i` arrays and units. Do not combine
+  descriptor mode with manual mapped-centerline fields; mixed fields fail
+  before solver dispatch. The descriptor must declare lineage for the tuned
+  full 0D input, which must match `paths.zerod_config`.
+- The descriptor schema is independently versioned (`schema_version: "1.0"`)
+  and identifies `centerline_timeseries_last_cycle`. A descriptor never
+  guesses a filename; `resistance_map_mean.vtp` is a summary map, not a
+  calibration timeseries source.
+- The pulmonary suite publishes the descriptor from the same selected last
+  cycle used for resistance maps, before removing intermediate mapped frames.
+
+For `mapped_centerline`, the stage-1 calibration constraints are:
 
 - `calibration.data_source.mode` must currently be `mapped_centerline`.
 - `flow_observation_type` is required; an omitted value is rejected because mapped flow names are otherwise ambiguous.
@@ -189,8 +213,9 @@ svzerodtrees calibrate-0d-from-3d calibrate_svslicer_timeseries.yml
 ```
 
 The input config must provide `paths.zerod_config`, `paths.output_config`, a
-finite solver JSON, the ordered mapped centerline timeseries, its metadata
-sidecar, and explicit vessel/junction parameter selections. A successful run
+finite solver JSON, either a validated `postprocess_suite` descriptor or the
+explicit `mapped_centerline` paths, and explicit vessel/junction parameter
+selections. A successful run
 publishes the solver JSON together with `calibration_observation_qc.json`,
 `calibration_confirmation.json`, `calibration_replay.json`,
 `calibration_targets.json`, and `calibration_summary.json` beside it. All
@@ -233,7 +258,8 @@ an RRI configuration keeps the historical `use_mean: true` and
 ```yaml
 impedance_config:
   tuning_model: full_pa
-  # auto tries persisted metadata, cap-name matching, then serialized order.
+  # auto tries persisted metadata, then cap-name matching. Select
+  # serialized_cap_order explicitly when serialized order is intended.
   outlet_mapping_mode: auto  # auto | metadata | cap_name | serialized_cap_order | explicit
   # Required only for outlet_mapping_mode: explicit.  Keys may be cap paths or stems.
   # outlet_mapping:
@@ -262,8 +288,10 @@ The resolver preserves the serialized boundary-condition order and records a
 complete one-to-one cap/BC pairing before the tuner is created.  A full-PA
 seed must contain more than two non-inflow outlet BCs and one mapped cap per
 outlet; reduced seeds are rejected rather than upgraded.  `metadata`,
-`cap_name`, and `serialized_cap_order` are strict single strategies, while
-`auto` applies those strategies in the order shown above.
+`cap_name`, and `serialized_cap_order` are strict single strategies. `auto`
+tries `metadata` and then `cap_name`; it does not select serialized order
+implicitly, so choose `outlet_mapping_mode: serialized_cap_order` when order is
+the intended contract.
 
 The legacy `allow_ordered_outlet_mapping: true` setting is accepted only
 during migration when no new mapping mode is supplied.  It emits a

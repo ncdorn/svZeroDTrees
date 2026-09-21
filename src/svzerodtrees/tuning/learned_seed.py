@@ -1,25 +1,430 @@
-"""Helpers for preparing reduced seeds from learned full 0D references."""
+"""Helpers for preparing reduced seeds and generating learned full-PA seeds."""
 
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from hashlib import sha256
+from importlib import metadata as importlib_metadata
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 import json
 import math
 from numbers import Real
+import os
+import shutil
+import subprocess
+import tempfile
+import time
 
 import numpy as np
 from scipy.optimize import Bounds, minimize
 
 from ..io.blocks import BoundaryCondition
 from ..io.config_handler import ConfigHandler
+from ..config import LearnedSeedGenerationConfig
+from ..numerics import trapezoid
 from ..tune_bcs.clinical_targets import ClinicalTargets
 from ..tune_bcs.pa_config import PAConfig
 
 MMHG_TO_BARYE = 1333.2
 DEFAULT_SIDE_BC_RESISTANCE = 1000.0
 DEFAULT_SIDE_BC_PD = 0.0
+
+
+@dataclass(frozen=True)
+class LearnedSeedResult:
+    """Paths and provenance for a successfully generated full-PA seed."""
+
+    seed_path: Path
+    metadata_path: Path
+    metadata: dict[str, Any]
+
+    @property
+    def generated_seed_path(self) -> Path:
+        """Alias used by callers that prefer an explicit generated-path name."""
+
+        return self.seed_path
+
+    def __getitem__(self, key: str) -> Any:
+        """Provide a small mapping-compatible surface for workflow adapters."""
+
+        if key in {"seed_path", "generated_seed_path", "seed"}:
+            return self.seed_path
+        if key in {"metadata_path", "learned_seed_metadata"}:
+            return self.metadata_path
+        if key == "metadata":
+            return self.metadata
+        raise KeyError(key)
+
+
+def _absolute_file(path: str | os.PathLike[str], *, label: str, executable: bool = False) -> Path:
+    resolved = Path(path).expanduser().resolve()
+    if not resolved.is_file():
+        raise FileNotFoundError(f"{label} not found or is not a file: {resolved}")
+    if not os.access(resolved, os.R_OK):
+        raise PermissionError(f"{label} is not readable: {resolved}")
+    if executable and not os.access(resolved, os.X_OK):
+        raise PermissionError(f"{label} is not executable: {resolved}")
+    return resolved
+
+
+def _resolve_executable(value: str | os.PathLike[str], *, label: str) -> Path:
+    """Resolve a path or PATH command and require an executable file."""
+
+    text = os.fspath(value)
+    path_like = os.path.isabs(text) or os.path.dirname(text)
+    if path_like:
+        return _absolute_file(text, label=label, executable=True)
+
+    resolved = shutil.which(text)
+    if resolved is None:
+        raise FileNotFoundError(
+            f"{label} '{text}' is not available as an executable on PATH"
+        )
+    return _absolute_file(resolved, label=label, executable=True)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _learned_zerod_version() -> str | None:
+    """Return package metadata when installed, without importing learnedZeroD."""
+
+    for distribution in ("learnedzerod", "learned-zerod", "learnedZeroD"):
+        try:
+            return importlib_metadata.version(distribution)
+        except importlib_metadata.PackageNotFoundError:
+            continue
+    return None
+
+
+def _full_pa_outlet_names(payload: Mapping[str, Any]) -> tuple[list[str], list[Mapping[str, Any]]]:
+    boundary_conditions = payload.get("boundary_conditions")
+    if not isinstance(boundary_conditions, list):
+        raise ValueError(
+            "learned full-PA seed must contain a boundary_conditions list"
+        )
+
+    outlet_bcs: list[Mapping[str, Any]] = []
+    names: list[str] = []
+    for bc in boundary_conditions:
+        if not isinstance(bc, Mapping):
+            raise ValueError("learned full-PA boundary conditions must be mappings")
+        name = bc.get("bc_name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(
+                "learned full-PA boundary conditions require non-empty bc_name values"
+            )
+        normalized_name = name.strip()
+        bc_type = str(bc.get("bc_type", "")).strip().upper()
+        if normalized_name.upper() == "INFLOW" or bc_type == "FLOW":
+            continue
+        names.append(normalized_name)
+        outlet_bcs.append(bc)
+
+    if len(names) <= 2:
+        raise ValueError(
+            "learned full-PA seed requires more than two non-inflow outlet "
+            f"boundary conditions; found {len(names)}"
+        )
+    if len(names) != len(set(names)):
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        raise ValueError(
+            "learned full-PA seed has duplicate outlet boundary-condition names: "
+            + ", ".join(duplicates)
+        )
+    return names, outlet_bcs
+
+
+def _validate_full_pa_seed_payload(payload: Any) -> None:
+    if not isinstance(payload, Mapping):
+        raise ValueError("learned full-PA seed JSON must contain an object at the top level")
+
+    vessels = payload.get("vessels")
+    if not isinstance(vessels, list) or not vessels:
+        raise ValueError("learned full-PA seed JSON must contain a non-empty vessels list")
+    if any(not isinstance(vessel, Mapping) for vessel in vessels):
+        raise ValueError("learned full-PA seed vessels must be mappings")
+
+    outlet_names, _ = _full_pa_outlet_names(payload)
+    outlet_set = set(outlet_names)
+    attached: list[str] = []
+    for vessel in vessels:
+        vessel_bcs = vessel.get("boundary_conditions")
+        if not isinstance(vessel_bcs, Mapping):
+            continue
+        outlet = vessel_bcs.get("outlet")
+        if outlet is None:
+            continue
+        if not isinstance(outlet, str) or not outlet.strip():
+            raise ValueError(
+                "learned full-PA seed vessel outlet attachments must be non-empty strings"
+            )
+        attached.append(outlet.strip())
+
+    unknown = sorted(set(attached) - outlet_set)
+    if unknown:
+        raise ValueError(
+            "learned full-PA seed has vessel outlet attachments without matching "
+            "boundary conditions: " + ", ".join(unknown)
+        )
+    attached_set = set(attached)
+    missing = sorted(outlet_set - attached_set)
+    duplicates = sorted({name for name in attached if attached.count(name) > 1})
+    if missing or duplicates or len(attached) != len(outlet_names):
+        details = []
+        if missing:
+            details.append("missing=" + ", ".join(missing))
+        if duplicates:
+            details.append("duplicate=" + ", ".join(duplicates))
+        raise ValueError(
+            "learned full-PA seed must provide exactly one vessel outlet attachment "
+            + ("(" + "; ".join(details) + ")" if details else "")
+        )
+
+
+def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
+    """Write JSON to a sibling temporary file and atomically publish it."""
+
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+    except Exception:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+
+def _subprocess_failure(
+    *,
+    command: list[str],
+    error: BaseException,
+    stdout: str = "",
+    stderr: str = "",
+) -> RuntimeError:
+    command_text = " ".join(command)
+    details = [f"learned-zerod failed for command: {command_text}"]
+    if isinstance(error, subprocess.CalledProcessError):
+        details.append(f"exit status: {error.returncode}")
+        stdout = str(error.stdout or stdout or "")
+        stderr = str(error.stderr or stderr or "")
+    else:
+        details.append(str(error))
+    if stdout.strip():
+        details.append("stdout: " + stdout.strip())
+    if stderr.strip():
+        details.append("stderr: " + stderr.strip())
+    return RuntimeError("; ".join(details))
+
+
+def generate_full_pa_learned_seed(
+    config: LearnedSeedGenerationConfig,
+) -> LearnedSeedResult:
+    """Generate and publish a validated learned full pulmonary 0D seed.
+
+    learnedZeroD is intentionally treated as an external executable.  The
+    generated JSON is validated before it is moved into the configured output
+    directory, and the source artifacts are only read for validation/digests.
+    """
+
+    if not isinstance(config, LearnedSeedGenerationConfig):
+        raise TypeError(
+            "generate_full_pa_learned_seed requires a LearnedSeedGenerationConfig"
+        )
+    if config.method != "learned_zerod":
+        raise ValueError("seed_generation.method must be 'learned_zerod'")
+    if config.anatomy != "pulmonary":
+        raise ValueError("seed_generation.anatomy must be 'pulmonary'")
+
+    input_path = _absolute_file(config.input_zerod_config, label="input 0D JSON")
+    centerline_path = _absolute_file(config.centerline, label="centerline VTP")
+    solver_path = _resolve_executable(config.svzerodsolver, label="svZeroDSolver")
+    learned_executable = _resolve_executable(
+        config.learned_zerod_executable, label="learned-zerod"
+    )
+
+    input_bytes = input_path.read_bytes()
+    try:
+        json.loads(input_bytes)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"input 0D JSON is not valid JSON: {input_path}") from exc
+    # Reading the centerline here makes unreadable/special input fail before
+    # the external process is invoked, while leaving it otherwise opaque.
+    centerline_path.read_bytes()
+    input_digest = _sha256_file(input_path)
+    centerline_digest = _sha256_file(centerline_path)
+    solver_digest = _sha256_file(solver_path)
+
+    output_dir = Path(config.output_dir).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_filename = str(config.output_filename).strip()
+    if (
+        not output_filename
+        or Path(output_filename).name != output_filename
+        or output_filename in {".", ".."}
+    ):
+        raise ValueError(
+            "seed_generation.output_filename must be a simple filename, not a path"
+        )
+    final_seed_path = output_dir / output_filename
+    metadata_path = output_dir / "learned_seed_metadata.json"
+
+    staging_path = Path(tempfile.mkdtemp(prefix=".learned_seed-", dir=str(output_dir)))
+    command: list[str] = []
+    started_at = _timestamp()
+    started_clock = time.perf_counter()
+    published_seed = False
+    published_metadata = False
+    try:
+        command = [
+            str(learned_executable),
+            "--anatomy",
+            "pulmonary",
+            "--zerod-json",
+            str(input_path),
+            "--centerline-vtp",
+            str(centerline_path),
+            "--svzerod",
+            str(solver_path),
+            "--output-dir",
+            str(staging_path),
+            "--output-filename",
+            output_filename,
+        ]
+
+        # A stable manifest must never describe an earlier successful run if
+        # this attempted run fails after process invocation begins.
+        metadata_path.unlink(missing_ok=True)
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=True,
+                shell=False,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise _subprocess_failure(command=command, error=exc) from exc
+
+        return_code = getattr(completed, "returncode", 0)
+        if return_code not in (None, 0):
+            raise _subprocess_failure(
+                command=command,
+                error=subprocess.CalledProcessError(
+                    return_code,
+                    command,
+                    output=getattr(completed, "stdout", ""),
+                    stderr=getattr(completed, "stderr", ""),
+                ),
+            )
+
+        staged_seed_path = staging_path / output_filename
+        if not staged_seed_path.is_file():
+            raise RuntimeError(
+                "learned-zerod completed successfully but did not produce the "
+                f"requested output: {staged_seed_path}"
+            )
+        try:
+            generated_payload = json.loads(staged_seed_path.read_bytes())
+        except (OSError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"learned-zerod output is not valid JSON: {staged_seed_path}"
+            ) from exc
+        _validate_full_pa_seed_payload(generated_payload)
+
+        generated_digest = _sha256_file(staged_seed_path)
+        # os.replace is atomic when source and destination share output_dir's
+        # filesystem; the staging directory is deliberately created there.
+        os.replace(staged_seed_path, final_seed_path)
+        published_seed = True
+        finished_at = _timestamp()
+        duration_seconds = time.perf_counter() - started_clock
+        paths = {
+            "input_zerod_config": str(input_path),
+            "centerline": str(centerline_path),
+            "svzerodsolver": str(solver_path),
+            "seed": str(final_seed_path),
+            "metadata": str(metadata_path),
+        }
+        digests = {
+            "input_zerod_config": input_digest,
+            "input_json": input_digest,
+            "centerline": centerline_digest,
+            "svzerodsolver": solver_digest,
+            "solver": solver_digest,
+            "generated_seed": generated_digest,
+            "generated_json": generated_digest,
+        }
+        metadata: dict[str, Any] = {
+            "schema": "svzerodtrees.learned_seed_metadata",
+            "schema_version": 1,
+            "version": 1,
+            "method": "learned_zerod",
+            "status": "success",
+            "success": True,
+            "anatomy": "pulmonary",
+            "paths": paths,
+            "source_paths": {
+                "input_zerod_config": str(input_path),
+                "centerline": str(centerline_path),
+                "svzerodsolver": str(solver_path),
+            },
+            "output_paths": {
+                "seed": str(final_seed_path),
+                "metadata": str(metadata_path),
+            },
+            "digests": digests,
+            "sha256": digests,
+            "input_json_sha256": input_digest,
+            "centerline_sha256": centerline_digest,
+            "generated_json_sha256": generated_digest,
+            "solver_sha256": solver_digest,
+            "command": {
+                "argv": command,
+                "executable": str(learned_executable),
+                "identity": str(learned_executable),
+            },
+            "learned_zerod_version": _learned_zerod_version(),
+            "command_argv": command,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "duration_seconds": duration_seconds,
+        }
+        _atomic_write_json(metadata_path, metadata)
+        published_metadata = True
+        return LearnedSeedResult(
+            seed_path=final_seed_path,
+            metadata_path=metadata_path,
+            metadata=metadata,
+        )
+    except Exception:
+        # The seed is published only immediately before its metadata.  If
+        # metadata publication fails, remove that just-published seed so
+        # callers cannot mistake an un-described artifact for a success.
+        if published_seed and not published_metadata:
+            final_seed_path.unlink(missing_ok=True)
+        raise
+    finally:
+        if not bool(config.keep_tmp):
+            shutil.rmtree(staging_path, ignore_errors=True)
 
 
 def _json_safe(value: Any) -> Any:
@@ -142,7 +547,7 @@ def _series(frame, preferred: str, fallback: str) -> np.ndarray:
 
 def _integral_or_mean(values: np.ndarray, time: np.ndarray | None) -> float:
     if time is not None and time.size == values.size and values.size >= 2:
-        return float(np.trapz(values, time))
+        return float(trapezoid(values, time))
     return float(np.mean(values))
 
 

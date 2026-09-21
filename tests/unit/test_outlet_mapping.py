@@ -81,13 +81,18 @@ def test_cap_name_mode_matches_normalized_stems():
     assert resolved["RPA-cap.vtp"] == "RPA-cap"
 
 
-def test_auto_uses_serialized_order_for_generic_full_model_names():
+def test_auto_rejects_serialized_order_for_generic_full_model_names():
     config = _config(["RESISTANCE_0", "RESISTANCE_1"])
+    caps = {"/mesh/rpa_dist.vtp": 1.0, "/mesh/lpa_dist.vtp": 1.0}
+
+    with pytest.raises(ValueError, match="serialized_cap_order"):
+        resolve_outlet_cap_mapping(config, caps)
+
     resolved = resolve_outlet_cap_mapping(
         config,
-        {"/mesh/rpa_dist.vtp": 1.0, "/mesh/lpa_dist.vtp": 1.0},
+        caps,
+        mode="serialized_cap_order",
     )
-
     assert resolved.strategy == "serialized_cap_order"
     assert resolved.pairs == (
         ("/mesh/rpa_dist.vtp", "RESISTANCE_0"),

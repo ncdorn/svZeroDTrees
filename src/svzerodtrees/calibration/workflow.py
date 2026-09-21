@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import tempfile
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Mapping
 import uuid
 
 import numpy as np
@@ -20,6 +20,10 @@ from .._pysvzerod import (
     clear_calibration_provenance,
     last_calibration_provenance,
     simulate_pysvzerod,
+)
+from ..config import CalibrationDataSourceConfig
+from ..post_processing.centerline_timeseries import (
+    validate_centerline_timeseries_descriptor,
 )
 from ..config import CalibrationConfig
 from .replay import build_replay_payload as build_settled_replay_payload
@@ -70,6 +74,10 @@ class CalibrationAssembly:
     target_observations: Dict[str, Any] = field(default_factory=dict)
     target_units: Dict[str, str] = field(default_factory=dict)
     target_phases: list[float] = field(default_factory=list)
+    # A machine-readable record of the exact observation source consumed by
+    # calibration.  It is intentionally empty for callers that construct an
+    # assembly directly in tests or for legacy mapped-centerline inputs.
+    data_source: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -310,6 +318,331 @@ def _require_finite_series(values: Iterable[float], *, label: str) -> list[float
     if any(not np.isfinite(value) for value in resolved):
         raise ValueError(f"{label} contains non-finite values")
     return resolved
+
+
+_LINEAGE_DIGEST_KEY_TERMS = (
+    "zerod",
+    "zero_d",
+    "input",
+    "model",
+    "seed",
+    "tuned",
+    "config",
+    "calibration",
+)
+_LINEAGE_CONTAINER_KEYS = {"lineage", "provenance", "source", "input"}
+_LINEAGE_DIGEST_KEYS = {
+    "digest",
+    "sha256",
+    "sha_256",
+    "hash",
+    "config_digest",
+    "model_digest",
+    "input_digest",
+    "source_digest",
+}
+_LINEAGE_PATH_KEYS = {"path", "file", "filename", "config_path", "model_path"}
+
+
+def _collect_descriptor_lineage(
+    value: Any,
+    *,
+    key_context: str = "",
+    lineage_context: bool = False,
+    digests: set[str] | None = None,
+    paths: list[str] | None = None,
+) -> tuple[set[str], list[str]]:
+    """Collect explicit tuned-0D lineage values without guessing filenames.
+
+    The producer descriptor is intentionally independently versioned.  Agent
+    integrations may therefore spell the input identity as e.g.
+    ``tuned_zerod_config_sha256`` or nest it below ``lineage``.  Only keys that
+    explicitly identify a 0D/input/config/model value are accepted; VTP and
+    sidecar digests are never treated as model lineage.
+    """
+
+    collected_digests = digests if digests is not None else set()
+    collected_paths = paths if paths is not None else []
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            normalized_key = str(key).lower().replace("-", "_")
+            context = f"{key_context}.{normalized_key}" if key_context else normalized_key
+            key_has_lineage_term = any(
+                term in normalized_key for term in _LINEAGE_DIGEST_KEY_TERMS
+            )
+            child_is_lineage = lineage_context or normalized_key in _LINEAGE_CONTAINER_KEYS
+            if isinstance(child, str):
+                is_digest_key = (
+                    normalized_key in _LINEAGE_DIGEST_KEYS
+                    or (
+                        key_has_lineage_term
+                        and ("digest" in normalized_key or "sha256" in normalized_key)
+                    )
+                )
+                is_path_key = (
+                    normalized_key in _LINEAGE_PATH_KEYS
+                    or (
+                        key_has_lineage_term
+                        and normalized_key.endswith("_path")
+                    )
+                )
+                if is_digest_key and (lineage_context or key_has_lineage_term):
+                    collected_digests.add(child)
+                if is_path_key and (lineage_context or key_has_lineage_term):
+                    collected_paths.append(child)
+            _collect_descriptor_lineage(
+                child,
+                key_context=context,
+                lineage_context=child_is_lineage,
+                digests=collected_digests,
+                paths=collected_paths,
+            )
+    return collected_digests, collected_paths
+
+
+def _config_lineage_digests(
+    zerod_config_path: str,
+    solver_config: Mapping[str, Any],
+) -> set[str]:
+    """Return accepted identities for the exact tuned 0D input.
+
+    Remote orchestration historically records either a byte digest or a
+    canonical JSON digest.  Supporting both preserves identity while still
+    rejecting a descriptor from a different model.
+    """
+
+    digests: set[str] = set()
+    raw_digest = _path_digest(zerod_config_path)
+    if raw_digest is not None:
+        digests.add(raw_digest)
+    try:
+        digests.add(_json_digest(solver_config))
+    except (TypeError, ValueError):
+        # Input normalization handles non-finite values and reports a useful
+        # error later; it must not make lineage validation silently succeed.
+        pass
+    return digests
+
+
+def _resolve_postprocess_suite_data_source(
+    *,
+    data_source: CalibrationDataSourceConfig,
+    zerod_config_path: str,
+    solver_config: Mapping[str, Any],
+) -> tuple[CalibrationDataSourceConfig, Dict[str, Any]]:
+    """Validate and resolve a suite descriptor into mapped-centerline inputs.
+
+    This is the only adapter between the versioned postprocess artifact and
+    the established numbered-array observation assembly.  It performs all
+    descriptor checks before the solver is invoked and never derives paths
+    from artifact filenames.
+    """
+
+    descriptor_value = data_source.postprocess_metadata_json
+    if descriptor_value in (None, ""):
+        raise ValueError(
+            "calibration.data_source.postprocess_metadata_json is required "
+            "when mode=postprocess_suite"
+        )
+    mixed_manual_fields = {
+        name: getattr(data_source, name, None)
+        for name in (
+            "mapped_centerline_result",
+            "metadata_json",
+            "centerline",
+            "area_array",
+        )
+        if getattr(data_source, name, None) not in (None, "")
+    }
+    if mixed_manual_fields:
+        raise ValueError(
+            "calibration.data_source.mode=postprocess_suite cannot be combined "
+            "with mapped-centerline fields: "
+            + ", ".join(sorted(mixed_manual_fields))
+        )
+    descriptor_path = Path(str(descriptor_value)).expanduser().resolve()
+    validated = validate_centerline_timeseries_descriptor(descriptor_path)
+    descriptor = validated["descriptor"]
+    artifact = validated["artifact"]
+
+    # Calibration consumes the pulmonary-suite envelope, not a standalone
+    # centerline artifact.  The suite publishes the centerline before its
+    # later diagnostics, so the terminal envelope is the source of truth for
+    # whether the complete 3D result is safe to calibrate.  Reject incomplete
+    # or internally inconsistent envelopes before observation assembly.
+    if descriptor.get("kind") != "pulmonary_threed_suite":
+        raise ValueError(
+            "postprocess suite descriptor kind must be 'pulmonary_threed_suite'"
+        )
+    if descriptor.get("status") != "completed":
+        raise ValueError(
+            "postprocess suite descriptor must have completed terminal status"
+        )
+    steps = descriptor.get("steps")
+    if not isinstance(steps, Mapping):
+        raise ValueError(
+            "postprocess suite descriptor must declare suite steps"
+        )
+    centerline_step = steps.get("centerline_timeseries")
+    if not isinstance(centerline_step, Mapping) or centerline_step.get("status") != "completed":
+        raise ValueError(
+            "postprocess suite descriptor centerline_timeseries step must be completed"
+        )
+    incomplete_steps = [
+        str(name)
+        for name, step in steps.items()
+        if not isinstance(step, Mapping) or step.get("status") != "completed"
+    ]
+    if incomplete_steps:
+        raise ValueError(
+            "postprocess suite descriptor contains incomplete steps: "
+            + ", ".join(incomplete_steps)
+        )
+
+    # The upstream validator checks array semantics, matching geometry, all
+    # file digests, and basic ordering.  Keep these identity checks at the
+    # calibration boundary as defense in depth so malformed descriptors fail
+    # before observation assembly or solver dispatch.
+    if artifact.get("kind") != "centerline_timeseries_last_cycle":
+        raise ValueError("postprocess suite descriptor has an invalid artifact kind")
+    if artifact.get("schema_version") != "1.0":
+        raise ValueError(
+            "unsupported postprocess suite descriptor artifact schema version: "
+            f"{artifact.get('schema_version')!r}"
+        )
+    try:
+        frame_count = int(artifact["frame_count"])
+        point_count = int(artifact["point_count"])
+        cell_count = int(artifact["cell_count"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "postprocess suite descriptor frame/geometry counts must be integers"
+        ) from exc
+    if frame_count < 1 or point_count < 1 or cell_count < 0:
+        raise ValueError(
+            "postprocess suite descriptor frame and point counts must be positive"
+        )
+    frame_indices = artifact.get("frame_indices")
+    timestamps = artifact.get("timestamps_s")
+    if frame_indices != list(range(frame_count)):
+        raise ValueError(
+            "postprocess suite descriptor frame_indices must be contiguous from zero"
+        )
+    if not isinstance(timestamps, list) or len(timestamps) != frame_count:
+        raise ValueError(
+            "postprocess suite descriptor timestamps_s must match frame_count"
+        )
+    try:
+        timestamp_values = [float(value) for value in timestamps]
+        cycle_duration = float(artifact["cycle_duration_s"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "postprocess suite descriptor timestamps and cycle duration must be numeric"
+        ) from exc
+    if (
+        not np.isfinite(timestamp_values).all()
+        or any(left >= right for left, right in zip(timestamp_values, timestamp_values[1:]))
+        or not np.isfinite(cycle_duration)
+        or cycle_duration <= 0.0
+        or timestamp_values[-1] - timestamp_values[0] >= cycle_duration
+    ):
+        raise ValueError(
+            "postprocess suite descriptor timing must be finite, strictly increasing, "
+            "and contained within a positive cycle duration"
+        )
+
+    data_contract = artifact.get("data_contract")
+    if not isinstance(data_contract, Mapping):
+        raise ValueError("postprocess suite descriptor data_contract is required")
+    pressure_contract = data_contract.get("pressure")
+    flow_contract = data_contract.get("flow")
+    if not isinstance(pressure_contract, Mapping) or pressure_contract.get("units") != "mmHg":
+        raise ValueError(
+            "postprocess suite descriptor pressure units must be mmHg"
+        )
+    if (
+        not isinstance(flow_contract, Mapping)
+        or flow_contract.get("quantity") != "volumetric_flow"
+        or flow_contract.get("units") != "cm^3/s"
+    ):
+        raise ValueError(
+            "postprocess suite descriptor flow must be volumetric_flow in cm^3/s"
+        )
+
+    lineage = descriptor.get("lineage")
+    if not isinstance(lineage, Mapping):
+        raise ValueError(
+            "postprocess suite descriptor must declare tuned full 0D input lineage"
+        )
+    lineage_digest = lineage.get("tuned_zerod_config_sha256")
+    lineage_path_value = lineage.get("tuned_zerod_config_path")
+    if not isinstance(lineage_digest, str) or not isinstance(lineage_path_value, str):
+        raise ValueError(
+            "postprocess suite descriptor lineage must declare "
+            "tuned_zerod_config_path and tuned_zerod_config_sha256"
+        )
+    expected_digest = _path_digest(zerod_config_path)
+    if expected_digest is None or lineage_digest != expected_digest:
+        raise ValueError(
+            "postprocess suite descriptor lineage does not match tuned full 0D input"
+        )
+    if Path(lineage_path_value).is_absolute():
+        raise ValueError(
+            "postprocess suite descriptor tuned full 0D config path must be relative"
+        )
+    descriptor_dir = descriptor_path.parent
+    expected_config = Path(zerod_config_path).expanduser().resolve()
+    lineage_path = (descriptor_dir / lineage_path_value).resolve()
+    if lineage_path != expected_config:
+        raise ValueError(
+            "postprocess suite descriptor lineage path does not match "
+            "the tuned full 0D input"
+        )
+
+    lineage_status = "matched"
+    descriptor_digest = _path_digest(descriptor_path)
+    if descriptor_digest is None:
+        raise ValueError("postprocess suite descriptor digest could not be computed")
+    provenance: Dict[str, Any] = {
+        "mode": "postprocess_suite",
+        "postprocess_metadata_json": str(descriptor_path),
+        "descriptor_sha256": descriptor_digest,
+        "schema_version": descriptor.get("schema_version"),
+        "artifact": {
+            "vtp": validated["vtp_path"],
+            "metadata": validated["metadata_path"],
+            "reference_centerline": validated["reference_centerline"],
+            "vtp_sha256": artifact.get("vtp_sha256"),
+            "metadata_sha256": artifact.get("metadata_sha256"),
+            "reference_centerline_sha256": artifact.get(
+                "reference_centerline_sha256"
+            ),
+        },
+        "lineage": {
+            "status": lineage_status,
+            "provided_digests": [lineage_digest],
+            "provided_paths": [lineage_path_value],
+        },
+    }
+    # Keep aliases useful to downstream report consumers without exposing the
+    # full descriptor JSON in every calibration report.
+    provenance["consumed_artifacts"] = dict(provenance["artifact"])
+
+    resolved = replace(
+        data_source,
+        mode="mapped_centerline",
+        postprocess_metadata_json=str(descriptor_path),
+        mapped_centerline_result=validated["vtp_path"],
+        metadata_json=validated["metadata_path"],
+        centerline=validated["reference_centerline"],
+        pressure_array="pressure",
+        flow_array="flow",
+        flow_observation_type="flow",
+        area_array=None,
+        branch_id_array="BranchId",
+        path_array="Path",
+    )
+    return resolved, provenance
 
 
 def _branch_series_from_mapped_centerline(
@@ -1472,16 +1805,37 @@ def assemble_calibration_payload(
         ),
     )
 
+    source_config = calibration.data_source
+    if source_config.mode == "postprocess_suite":
+        source_config, data_source_provenance = _resolve_postprocess_suite_data_source(
+            data_source=source_config,
+            zerod_config_path=zerod_config_path,
+            solver_config=solver_config,
+        )
+    elif source_config.mode == "mapped_centerline":
+        data_source_provenance = {
+            "mode": "mapped_centerline",
+            "mapped_centerline_result": source_config.mapped_centerline_result,
+            "metadata_json": source_config.metadata_json,
+            "centerline": source_config.centerline,
+            "metadata_sha256": _path_digest(source_config.metadata_json),
+        }
+    else:
+        raise ValueError(
+            "calibration.data_source.mode must be one of "
+            "mapped_centerline|postprocess_suite"
+        )
+
     branch_series_by_id, observation_count, observation_timing = _branch_series_from_mapped_centerline(
-        centerline_path=calibration.data_source.centerline or "",
-        mapped_centerline_path=calibration.data_source.mapped_centerline_result or "",
-        metadata_json=calibration.data_source.metadata_json,
-        pressure_array=calibration.data_source.pressure_array,
-        flow_array=calibration.data_source.flow_array,
-        flow_observation_type=calibration.data_source.flow_observation_type,
-        area_array=calibration.data_source.area_array,
-        branch_id_array=calibration.data_source.branch_id_array,
-        path_array=calibration.data_source.path_array,
+        centerline_path=source_config.centerline or "",
+        mapped_centerline_path=source_config.mapped_centerline_result or "",
+        metadata_json=source_config.metadata_json,
+        pressure_array=source_config.pressure_array,
+        flow_array=source_config.flow_array,
+        flow_observation_type=source_config.flow_observation_type,
+        area_array=source_config.area_array,
+        branch_id_array=source_config.branch_id_array,
+        path_array=source_config.path_array,
     )
     vessel_topology, upstream_names, downstream_names = _network_topology(solver_config)
     vessel_parameters = _selected_parameters(
@@ -1624,6 +1978,7 @@ def assemble_calibration_payload(
         target_observations=target_observations,
         target_units=target_units,
         target_phases=target_phases,
+        data_source=data_source_provenance,
     )
 
 
@@ -2614,7 +2969,9 @@ def _run_identity(
     calibration: CalibrationConfig | None,
 ) -> Dict[str, Any]:
     metadata_path = (
-        calibration.data_source.metadata_json if calibration is not None else None
+        assembly.data_source.get("metadata_json")
+        if assembly.data_source
+        else (calibration.data_source.metadata_json if calibration is not None else None)
     )
     observations = {
         "y": assembly.solver_payload.get("y"),
@@ -2623,10 +2980,12 @@ def _run_identity(
         "target_phases": assembly.target_phases,
         "target_units": assembly.target_units,
         "metadata_digest": _path_digest(metadata_path),
+        "data_source": assembly.data_source,
     }
     digests = {
         "normalized_input": _json_digest(normalized_input),
         "observations": _json_digest(observations),
+        "data_source": _json_digest(assembly.data_source),
         "observation_metadata": observations["metadata_digest"],
         "solver_module": None,
         "output": None,
@@ -2641,6 +3000,8 @@ def _run_identity(
         "observation_digest": digests["observations"],
         "observation_metadata_digest": digests["observation_metadata"],
         "metadata_digest": digests["observation_metadata"],
+        "data_source": assembly.data_source,
+        "data_source_digest": digests["data_source"],
         "solver_module_digest": digests["solver_module"],
         "solver_digest": digests["solver_module"],
         "solver_module_sha256": digests["solver_module"],
@@ -2716,7 +3077,10 @@ def _replay_target_observations(
         return {
             "phases": [float(value) for value in local_phases],
             "values": [float(value) for value in values],
-            "units": "mmHg" if kind == "pressure" else "cm^3/s",
+            # pysvzerod reports pressure in its native CGS unit (dyn/cm^2).
+            # Keep that unit on the replay series so target scoring performs
+            # the explicit conversion alongside the 3D pressure contract.
+            "units": "dyn/cm^2" if kind == "pressure" else "cm^3/s",
             "orientation": "away_from_mpa",
         }
 
@@ -3260,6 +3624,8 @@ def calibrate_0d_from_mapped_centerline(
         "output_config": str(output_path),
         "observation_count": assembly.observation_count,
         "variable_count": assembly.variable_count,
+        "data_source": assembly.data_source,
+        "data_source_provenance": assembly.data_source,
         "solver_provenance": confirmation_provenance,
         "input_normalization": assembly.input_normalization,
         "observation_qc": assembly.observation_qc,
@@ -3284,6 +3650,8 @@ def calibrate_0d_from_mapped_centerline(
         "output_config": str(output_path),
         "observation_count": assembly.observation_count,
         "variable_count": assembly.variable_count,
+        "data_source": assembly.data_source,
+        "data_source_provenance": assembly.data_source,
         "input_normalization": assembly.input_normalization,
         "interface_sampling": assembly.interface_sampling,
         "excluded_blocks": assembly.excluded_blocks,

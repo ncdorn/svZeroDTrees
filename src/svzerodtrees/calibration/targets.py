@@ -16,6 +16,8 @@ from typing import Any
 
 import numpy as np
 
+from ..numerics import trapezoid
+
 
 _MMHG_TO_PA = 133.32236842105263
 _MMHG_TO_BARYE = 1333.2236842105263
@@ -485,7 +487,7 @@ def _periodic_integral(series: TargetSeries, *, label: str) -> float:
     oriented = values * _orientation_sign(series.orientation)
     extended_phases = np.concatenate((phases, [phases[0] + 1.0]))
     extended_values = np.concatenate((oriented, [oriented[0]]))
-    return float(np.trapz(extended_values, extended_phases))
+    return float(trapezoid(extended_values, extended_phases))
 
 
 def _target_block(targets: Any, name: str) -> Any:

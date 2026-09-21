@@ -108,17 +108,26 @@ def resolve_cap_to_bc_mapping(
     callers that need provenance should use ``resolve_outlet_cap_mapping``.
     """
 
+    requested_mode = outlet_mapping_mode if outlet_mapping_mode is not None else mode
+    requested_mode = requested_mode or "auto"
+    if allow_ordered_outlet_mapping:
+        if str(requested_mode).strip().lower() not in {
+            "auto",
+            "serialized_cap_order",
+        }:
+            raise ValueError("allow_ordered_outlet_mapping conflicts with mode")
+        # Translate the deprecated direct-caller flag at this boundary.  The
+        # canonical resolver receives only outlet_mapping_mode.
+        requested_mode = "serialized_cap_order"
+
     try:
         resolved = resolve_outlet_cap_mapping(
             config_handler,
             cap_info,
             bc_prefix=bc_prefix,
-            mode=mode or "auto",
-            outlet_mapping_mode=outlet_mapping_mode,
+            outlet_mapping_mode=requested_mode,
             outlet_mapping=outlet_mapping,
             explicit_mapping=explicit_mapping,
-            allow_ordered_outlet_mapping=allow_ordered_outlet_mapping,
-            allow_serialized_fallback=allow_ordered_outlet_mapping,
         )
     except ValueError as exc:
         raise ValueError(
@@ -131,15 +140,28 @@ def validate_cap_to_bc_mapping(
     config_handler,
     mesh_surfaces_path,
     *,
-    convert_to_cm=False,
-    is_pulmonary=True,
-    bc_prefix="IMPEDANCE",
-    allow_ordered_outlet_mapping=False,
-    resolved_mapping=None,
-    mapping=None,
+    outlet_mapping_mode="auto",
     outlet_mapping=None,
-    cap_to_bc_mapping=None,
+    resolved_mapping=None,
+    convert_to_cm=False,
+    is_pulmonary=False,
+    bc_prefix=None,
 ):
+    """Validate and resolve one cap-to-outlet mapping for a mesh.
+
+    ``outlet_mapping_mode`` and ``outlet_mapping`` are the canonical inputs.
+    A pre-resolved mapping may be supplied when a caller has already frozen
+    the identity for the remainder of an iteration, but it cannot be mixed
+    with a second mapping request.  Legacy ordered mapping is translated by
+    configuration/direct-call adapters before reaching this validator.
+    """
+
+    if outlet_mapping is not None and resolved_mapping is not None:
+        raise ValueError(
+            "outlet_mapping and resolved_mapping conflict and are mutually exclusive; "
+            "provide only one mapping input"
+        )
+
     if is_pulmonary:
         rpa_info, lpa_info, _ = vtp_info(
             mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=True
@@ -147,33 +169,21 @@ def validate_cap_to_bc_mapping(
         cap_info = dict(sorted((lpa_info | rpa_info).items(), key=lambda item: str(item[0])))
     else:
         cap_info = vtp_info(mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=False)
-    supplied_mapping = (
-        resolved_mapping
-        if resolved_mapping is not None
-        else mapping
-        if mapping is not None
-        else outlet_mapping
-        if outlet_mapping is not None
-        else cap_to_bc_mapping
-    )
-    if supplied_mapping is not None:
+
+    if resolved_mapping is not None:
         return coerce_resolved_mapping(
-            supplied_mapping,
+            resolved_mapping,
             config_handler,
             cap_info,
             bc_prefix=bc_prefix,
         )
+
     return resolve_outlet_cap_mapping(
         config_handler,
         cap_info,
         bc_prefix=bc_prefix,
-        allow_ordered_outlet_mapping=allow_ordered_outlet_mapping,
-        # Supplying the new mode selects the full mapping contract.  In that
-        # contract ``auto`` includes serialized order as its final fallback;
-        # the legacy direct-caller path remains opt-in via the old boolean.
-        allow_serialized_fallback=(
-            allow_ordered_outlet_mapping or outlet_mapping_mode is not None
-        ),
+        outlet_mapping_mode=outlet_mapping_mode,
+        outlet_mapping=outlet_mapping,
     )
 
 def construct_impedance_trees(config_handler,
@@ -191,6 +201,7 @@ def construct_impedance_trees(config_handler,
                               diameter_std_cap=None,
                               allow_ordered_outlet_mapping=False,
                               verbose=True,
+                              plot_stiffness=True,
                               resolved_mapping=None,
                               mapping=None,
                               outlet_mapping=None,
@@ -202,7 +213,8 @@ def construct_impedance_trees(config_handler,
     :param k3: stiffness parameter 3
     :param use_mean: when True, build only two trees (LPA/RPA) and reuse for all outlets
     :param diameter_scale: for unique trees, shrink diameter spread toward the mean (0=all mean, 1=full spread)
-    :param diameter_std_cap: optional cap in std deviations on diameter deviation before scaling'''
+    :param diameter_std_cap: optional cap in std deviations on diameter deviation before scaling
+    :param plot_stiffness: write LPA/RPA stiffness plots when using shared trees'''
 
     # svZeroDSolver's steady-initial pass uses a fixed 10-step cycle. That is
     # incompatible with reconstructed IMPEDANCE kernels unless the production
@@ -242,12 +254,16 @@ def construct_impedance_trees(config_handler,
         else cap_to_bc_mapping
     )
     if supplied_mapping is None:
+        mapping_mode = (
+            "serialized_cap_order"
+            if allow_ordered_outlet_mapping
+            else "auto"
+        )
         resolved_mapping = resolve_outlet_cap_mapping(
             config_handler,
             cap_info,
             bc_prefix="IMPEDANCE",
-            allow_ordered_outlet_mapping=allow_ordered_outlet_mapping,
-            allow_serialized_fallback=allow_ordered_outlet_mapping,
+            outlet_mapping_mode=mapping_mode,
         )
     else:
         resolved_mapping = coerce_resolved_mapping(
@@ -299,7 +315,8 @@ def construct_impedance_trees(config_handler,
             eta_sym=lpa_params.eta_sym,
         )
         lpa_tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
-        lpa_tree.plot_stiffness(path='lpa_stiffness_plot.png')
+        if plot_stiffness:
+            lpa_tree.plot_stiffness(path='lpa_stiffness_plot.png')
 
         rpa_tree = StructuredTree(name='RPA', time=time_array, simparams=config_handler.simparams, compliance_model=rpa_params.compliance_model)
         print(f'building RPA tree with rpa parameters: {rpa_params.summary()}')
@@ -314,7 +331,8 @@ def construct_impedance_trees(config_handler,
             eta_sym=rpa_params.eta_sym,
         )
         rpa_tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
-        rpa_tree.plot_stiffness(path='rpa_stiffness_plot.png')
+        if plot_stiffness:
+            rpa_tree.plot_stiffness(path='rpa_stiffness_plot.png')
 
         lpa_bc_names = []
         lpa_outlet_names = []

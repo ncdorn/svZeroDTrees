@@ -84,6 +84,25 @@ def test_pressure_unit_alias_and_phase_grid_are_invariant():
     assert result.passed
 
 
+def test_dyn_per_cm2_pressure_is_normalized_for_both_sources():
+    observations, settled = _inputs()
+    observations["mpa_pressure"] = _series(
+        observations["mpa_pressure"]["phases"],
+        np.asarray(observations["mpa_pressure"]["values"]) * 1333.2236842105263,
+        "dyn/cm^2",
+    )
+    settled["mpa_pressure"] = _series(
+        settled["mpa_pressure"]["phases"],
+        np.asarray(settled["mpa_pressure"]["values"]) * 1333.2236842105263,
+        "dyn/cm^2",
+    )
+
+    result = evaluate_pulmonary_targets(observations, settled, TARGETS)
+
+    assert result.pressure_nrmse == pytest.approx(0.0, abs=1e-12)
+    assert result.passed
+
+
 def test_periodic_interpolation_handles_a_phase_grid_without_zero():
     observations, settled = _inputs()
     observations["mpa_pressure"]["values"] = [50.0, 55.0, 50.0, 45.0]

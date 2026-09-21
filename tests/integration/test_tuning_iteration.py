@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 import pandas as pd
@@ -26,6 +28,9 @@ from svzerodtrees.tuning.iteration import (
     write_iteration_metrics,
 )
 from svzerodtrees.tuning.learned_seed import prepare_reduced_rri_seed_from_learned
+from svzerodtrees.config import LearnedSeedGenerationConfig
+from svzerodtrees.tuning import generate_full_pa_learned_seed
+from svzerodtrees.tuning.learned_seed import LearnedSeedResult
 from svzerodtrees.tune_bcs.assign_bcs import resolve_cap_to_bc_mapping
 from svzerodtrees.tune_bcs.outlet_mapping import resolve_outlet_cap_mapping
 
@@ -310,6 +315,98 @@ def _write_constant_inflow_csv(tmp_path: Path, mean_flow: float) -> Path:
         encoding="utf-8",
     )
     return inflow_path
+
+
+def _learned_generation_config(tmp_path: Path) -> tuple[LearnedSeedGenerationConfig, bytes]:
+    input_path = tmp_path / "source.json"
+    input_bytes = json.dumps(_seed_config_payload(), indent=2).encode("utf-8")
+    input_path.write_bytes(input_bytes)
+    centerline = tmp_path / "centerline.vtp"
+    centerline.write_bytes(b"centerline fixture")
+    solver = tmp_path / "svzerodsolver"
+    solver.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    solver.chmod(0o755)
+    learned = tmp_path / "learned-zerod"
+    learned.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    learned.chmod(0o755)
+    config = LearnedSeedGenerationConfig(
+        method="learned_zerod",
+        anatomy="pulmonary",
+        input_zerod_config=str(input_path),
+        centerline=str(centerline),
+        svzerodsolver=str(solver),
+        output_dir=str(tmp_path / "generated"),
+        learned_zerod_executable=str(learned),
+        output_filename="learned_full_pa_seed.json",
+    )
+    return config, input_bytes
+
+
+def test_generate_full_pa_learned_seed_uses_fixed_argv_and_publishes_provenance(
+    monkeypatch, tmp_path: Path
+):
+    config, input_bytes = _learned_generation_config(tmp_path)
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def _fake_run(argv, **kwargs):
+        calls.append((list(argv), dict(kwargs)))
+        output_dir = Path(argv[argv.index("--output-dir") + 1])
+        filename = argv[argv.index("--output-filename") + 1]
+        output_dir.joinpath(filename).write_text(
+            json.dumps(_full_pa_multi_outlet_payload()), encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(argv, 0, stdout="generated", stderr="")
+
+    monkeypatch.setattr("svzerodtrees.tuning.learned_seed.subprocess.run", _fake_run)
+    result = generate_full_pa_learned_seed(config)
+
+    assert isinstance(result, LearnedSeedResult)
+    assert result.seed_path == tmp_path / "generated" / "learned_full_pa_seed.json"
+    assert result.metadata_path == tmp_path / "generated" / "learned_seed_metadata.json"
+    assert result.seed_path.exists()
+    assert result.metadata_path.exists()
+    assert config.input_zerod_config and Path(config.input_zerod_config).read_bytes() == input_bytes
+
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert kwargs == {"capture_output": True, "text": True, "check": True, "shell": False}
+    assert argv[0] == str(tmp_path / "learned-zerod")
+    assert argv[argv.index("--anatomy") + 1] == "pulmonary"
+    assert Path(argv[argv.index("--zerod-json") + 1]).is_absolute()
+    assert Path(argv[argv.index("--centerline-vtp") + 1]).is_absolute()
+    assert Path(argv[argv.index("--svzerod") + 1]).is_absolute()
+    assert Path(argv[argv.index("--output-dir") + 1]).is_absolute()
+    assert argv[-1] == "learned_full_pa_seed.json"
+
+    metadata = json.loads(result.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["schema_version"] == 1
+    assert metadata["status"] == "success"
+    assert metadata["paths"]["seed"] == str(result.seed_path)
+    assert metadata["digests"]["input_zerod_config"] == hashlib.sha256(input_bytes).hexdigest()
+    assert metadata["digests"]["centerline"] == hashlib.sha256(b"centerline fixture").hexdigest()
+    assert metadata["digests"]["generated_seed"] == hashlib.sha256(result.seed_path.read_bytes()).hexdigest()
+    assert not list((tmp_path / "generated").glob(".learned_seed-*"))
+
+
+def test_generate_full_pa_learned_seed_rejects_invalid_output_without_manifest(
+    monkeypatch, tmp_path: Path
+):
+    config, _ = _learned_generation_config(tmp_path)
+
+    def _fake_run(argv, **kwargs):
+        output_dir = Path(argv[argv.index("--output-dir") + 1])
+        output_dir.joinpath(argv[argv.index("--output-filename") + 1]).write_text(
+            json.dumps({"vessels": []}), encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("svzerodtrees.tuning.learned_seed.subprocess.run", _fake_run)
+    with pytest.raises(ValueError, match="vessels"):
+        generate_full_pa_learned_seed(config)
+
+    generated_dir = tmp_path / "generated"
+    assert not (generated_dir / "learned_full_pa_seed.json").exists()
+    assert not (generated_dir / "learned_seed_metadata.json").exists()
 
 
 def test_compute_centerline_metrics_from_values():
@@ -956,23 +1053,6 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
             )
             Path(str(calls["tuner_kwargs"]["log_file"])).write_text("log", encoding="utf-8")
 
-    def _fake_validate(config_handler, mesh_path, **kwargs):
-        calls["validate"] = {
-            "config_handler": config_handler,
-            "mesh_path": mesh_path,
-            "kwargs": kwargs,
-        }
-        return resolve_outlet_cap_mapping(
-            config_handler,
-            {
-                "/mesh/lpa_cap_1.vtp": 1.0,
-                "/mesh/lpa_cap_2.vtp": 4.0,
-                "/mesh/rpa_cap_1.vtp": 1.0,
-                "/mesh/rpa_cap_2.vtp": 4.0,
-            },
-            mode="serialized_cap_order",
-        )
-
     def _fake_construct(config_handler, mesh_path, wedge_p, lpa_params, rpa_params, d_min, **kwargs):
         calls["construct"] = {
             "mesh_path": mesh_path,
@@ -984,7 +1064,16 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
-    monkeypatch.setattr("svzerodtrees.tuning.iteration.validate_cap_to_bc_mapping", _fake_validate)
+    # Keep the full-PA preflight and validator real.  Only the geometry reader
+    # is replaced because this synthetic fixture has no VTP files on disk.
+    monkeypatch.setattr(
+        "svzerodtrees.tune_bcs.assign_bcs.vtp_info",
+        lambda *_args, **_kwargs: (
+            {"/mesh/rpa_cap_1.vtp": 1.0, "/mesh/rpa_cap_2.vtp": 4.0},
+            {"/mesh/lpa_cap_1.vtp": 1.0, "/mesh/lpa_cap_2.vtp": 4.0},
+            {},
+        ),
+    )
     monkeypatch.setattr("svzerodtrees.tuning.iteration.construct_impedance_trees", _fake_construct)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.get_pa_outlet_scale", lambda *_args, **_kwargs: 2.0)
     monkeypatch.setattr(
@@ -1015,10 +1104,6 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
     assert Path(result["outlet_cap_mapping"]).exists()
     assert result["impedance_config"]["diameter_std_cap"] == pytest.approx(1.5)
     assert calls["nm_iter"] == 3
-    assert calls["validate"]["mesh_path"] == str(mesh_surfaces)
-    assert calls["validate"]["kwargs"]["outlet_mapping_mode"] == "serialized_cap_order"
-    assert calls["validate"]["kwargs"]["outlet_mapping"] is None
-    assert calls["validate"]["kwargs"]["allow_ordered_outlet_mapping"] is False
     assert calls["tuner_kwargs"]["tuning_model"] == "full_pa"
     assert calls["tuner_kwargs"]["diameter_scale"] == pytest.approx(0.25)
     assert calls["tuner_kwargs"]["diameter_std_cap"] == pytest.approx(1.5)

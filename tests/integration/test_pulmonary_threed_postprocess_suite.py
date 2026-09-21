@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pyvista as pv
 import pytest
+import vtk
+from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
 
 from svzerodtrees.post_processing.pulmonary_threed_suite import (
     _select_systolic_frame_from_artifacts,
@@ -15,22 +19,34 @@ from svzerodtrees.post_processing.pulmonary_threed_suite import (
     run_pulmonary_threed_postprocess_suite,
     write_mpa_pressure_timeseries_csv,
 )
+from svzerodtrees.calibration import workflow as calibration_workflow
+from svzerodtrees.config import CalibrationDataSourceConfig
 
 
 def _write_centerline(path: Path) -> None:
-    points = np.array(
-        [
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [2.0, 0.0, 0.0],
-            [3.0, 0.0, 0.0],
-            [2.0, 1.0, 0.0],
-        ],
-        dtype=float,
-    )
-    poly = pv.PolyData(points)
-    poly.lines = np.array([3, 0, 1, 2, 3, 2, 3, 4], dtype=np.int64)
-    poly.save(path)
+    points = vtk.vtkPoints()
+    for point in (
+        (0.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+        (2.0, 0.0, 0.0),
+        (3.0, 0.0, 0.0),
+        (2.0, 1.0, 0.0),
+    ):
+        points.InsertNextPoint(*point)
+    lines = vtk.vtkCellArray()
+    for point_ids in ((0, 1, 2), (2, 3, 4)):
+        line = vtk.vtkPolyLine()
+        line.GetPointIds().SetNumberOfIds(len(point_ids))
+        for index, point_id in enumerate(point_ids):
+            line.GetPointIds().SetId(index, point_id)
+        lines.InsertNextCell(line)
+    poly = vtk.vtkPolyData()
+    poly.SetPoints(points)
+    poly.SetLines(lines)
+    writer = vtk.vtkXMLPolyDataWriter()
+    writer.SetFileName(str(path))
+    writer.SetInputData(poly)
+    assert writer.Write() == 1
 
 
 def _make_point_dataset(tag: str):
@@ -39,6 +55,47 @@ def _make_point_dataset(tag: str):
             self.name = name
 
     return DummyMesh(tag)
+
+
+def _write_mapped_frame(path: Path, centerline_path: Path, *, pressure_base: float = 1.0) -> None:
+    reader = vtk.vtkXMLPolyDataReader()
+    reader.SetFileName(str(centerline_path))
+    reader.Update()
+    vtk_poly = vtk.vtkPolyData()
+    vtk_poly.DeepCopy(reader.GetOutput())
+    for name, values in {
+        "pressure": np.full(vtk_poly.GetNumberOfPoints(), pressure_base, dtype=float),
+        "velocity": np.full(vtk_poly.GetNumberOfPoints(), 2.0, dtype=float),
+    }.items():
+        array = numpy_to_vtk(values, deep=True)
+        array.SetName(name)
+        vtk_poly.GetPointData().AddArray(array)
+    writer = vtk.vtkXMLPolyDataWriter()
+    writer.SetFileName(str(path))
+    writer.SetInputData(vtk_poly)
+    assert writer.Write() == 1
+
+
+def _read_vtp_as_test_pyvista(path: str | Path):
+    """Adapt a real VTP fixture to the repository's lightweight pyvista shim."""
+    reader = vtk.vtkXMLPolyDataReader()
+    reader.SetFileName(str(path))
+    reader.Update()
+    vtk_poly = reader.GetOutput()
+    poly = pv.PolyData(vtk_to_numpy(vtk_poly.GetPoints().GetData()))
+    lines = vtk_poly.GetLines()
+    lines.InitTraversal()
+    ids = vtk.vtkIdList()
+    line_values: list[int] = []
+    while lines.GetNextCell(ids):
+        line_values.append(ids.GetNumberOfIds())
+        line_values.extend(int(ids.GetId(index)) for index in range(ids.GetNumberOfIds()))
+    poly.lines = np.asarray(line_values, dtype=np.int64)
+    for index in range(vtk_poly.GetPointData().GetNumberOfArrays()):
+        array = vtk_poly.GetPointData().GetArray(index)
+        if array is not None and array.GetName() is not None:
+            poly.point_data[array.GetName()] = vtk_to_numpy(array)
+    return poly
 
 
 def test_write_mpa_pressure_timeseries_csv_matches_expected_contract(monkeypatch, tmp_path: Path):
@@ -53,12 +110,10 @@ def test_write_mpa_pressure_timeseries_csv_matches_expected_contract(monkeypatch
     for name in ("result_0001.vtu", "result_0002.vtu"):
         (sim_dir / name).write_text("dummy", encoding="utf-8")
 
-    real_read = pv.read
-
     def fake_read(path: str):
         path_obj = Path(path)
         if path_obj.suffix == ".vtp":
-            return real_read(path)
+            return _read_vtp_as_test_pyvista(path)
         return _make_point_dataset(path_obj.stem)
 
     def fake_sample(centerline, mesh, pressure_field, already_mmhg):
@@ -260,13 +315,15 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
     )
     for name in ("result_0001.vtu", "result_0002.vtu", "result_0003.vtu"):
         (sim_dir / name).write_text("dummy", encoding="utf-8")
-
-    real_read = pv.read
+    tuned_config = tmp_path / "tuned" / "svzerod_3d_coupling_tuned.json"
+    tuned_config.parent.mkdir()
+    tuned_config.write_bytes(b'{"model": "exact tuned bytes"}\n')
+    fail_systolic = False
 
     def fake_read(path: str):
         path_obj = Path(path)
         if path_obj.suffix == ".vtp":
-            return real_read(path)
+            return _read_vtp_as_test_pyvista(path)
         return _make_point_dataset(path_obj.stem)
 
     def fake_sample(centerline, mesh, pressure_field, already_mmhg):
@@ -299,19 +356,21 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
         intermediate_dir = resistance_dir / "intermediate_centerlines"
         intermediate_dir.mkdir(parents=True, exist_ok=True)
         mapped_frame = intermediate_dir / "0000_result_0002_centerline.vtp"
-        mapped_frame.write_text("<vtk/>", encoding="utf-8")
+        _write_mapped_frame(mapped_frame, centerline_path)
         pd.DataFrame([{"branch_id": 1, "resistance_mean": 3.0}]).to_csv(summary, index=False)
         pd.DataFrame([{"branch_id": 1, "rank": 1}]).to_csv(ranked, index=False)
         pv.Line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)).save(vtp)
         metadata.write_text(
             json.dumps(
                 {
+                    "cycle_duration_s": kwargs["cycle_duration_s"],
                     "selected_frames": [
-                        {
-                            "timestep_id": 2,
-                            "source_frame_path": str(sim_dir / "result_0002.vtu"),
-                            "path": str(mapped_frame),
-                        }
+                    {
+                        "timestep_id": 2,
+                        "time_s": 0.2,
+                        "source_frame_path": str(sim_dir / "result_0002.vtu"),
+                        "path": str(mapped_frame),
+                    }
                     ],
                     "keep_intermediate_centerlines": True,
                     "intermediate_dir": str(intermediate_dir),
@@ -329,6 +388,8 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
 
     def fake_compute_selected_frames(**kwargs):
         assert kwargs["metric_suffix"] == "systolic"
+        if fail_systolic:
+            raise RuntimeError("forced systolic failure")
         assert kwargs["selection_policy"] == "max_mpa_pressure_last_cycle"
         assert kwargs["selected_frames"]["timestep_id"].tolist() == [2]
         assert kwargs["selected_frames"]["source_frame_path"].tolist() == [str(sim_dir / "result_0002.vtu")]
@@ -406,6 +467,7 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
         resistance_map_workers="auto",
         camera_offset_dir=[0.25, -0.5, 0.75],
         camera_view_up=[0.0, 0.0, 1.0],
+        tuned_zerod_config_path=tuned_config,
     )
 
     assert (output_dir / "mpa_pressure_vs_time.csv").exists()
@@ -421,7 +483,27 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
     assert (output_dir / "branch_resistance_summary_systolic.csv").exists()
     assert (output_dir / "ranked_stent_candidates_systolic.csv").exists()
     assert (output_dir / "resistance_map_systolic.png").exists()
+    assert (output_dir / "centerline_timeseries_last_cycle.vtp").exists()
+    assert (output_dir / "centerline_timeseries_last_cycle_metadata.json").exists()
     assert Path(result["metadata_json"]).exists()
+    assert result["steps"]["centerline_timeseries"]["status"] == "completed"
+    descriptor = json.loads(
+        (output_dir / "postprocess_suite_metadata.json").read_text(encoding="utf-8")
+    )
+    artifact = descriptor["artifacts"]["centerline_timeseries"]
+    assert descriptor["schema_version"] == "1.0"
+    assert descriptor["status"] == "completed"
+    assert descriptor["lineage"] == {
+        "tuned_zerod_config_path": "../../tuned/svzerod_3d_coupling_tuned.json",
+        "tuned_zerod_config_sha256": hashlib.sha256(tuned_config.read_bytes()).hexdigest(),
+    }
+    assert artifact["vtp"] == "centerline_timeseries_last_cycle.vtp"
+    assert artifact["metadata"] == "centerline_timeseries_last_cycle_metadata.json"
+    assert artifact["frame_indices"] == [0]
+    assert artifact["timestamps_s"] == [pytest.approx(0.2)]
+    assert artifact["reference_centerline"] == os.path.relpath(
+        centerline_path, output_dir
+    ).replace(os.sep, "/")
     assert result["steps"]["resistance_map_systolic"]["status"] == "completed"
     assert "resistance_map_systolic" in result
     assert result["resistance_map"]["intermediate_dir"] is None
@@ -453,6 +535,39 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
     flow_split = pd.read_csv(output_dir / "flow_split_comparison.csv")
     assert flow_split["vessel"].tolist() == ["lpa", "rpa"]
     assert flow_split["simulated_split"].tolist() == pytest.approx([0.4, 0.6])
+
+    # A failure after the centerline publication leaves a diagnostic suite
+    # descriptor, but it must not claim that the suite completed.
+    fail_systolic = True
+    with pytest.raises(RuntimeError, match="forced systolic failure"):
+        run_pulmonary_threed_postprocess_suite(
+            simulation_dir=sim_dir,
+            output_dir=output_dir,
+            centerline=centerline_path,
+            stage="preop",
+            svslicer_path="/tmp/svslicer",
+            clinical_targets={"mpa_p": [20.0, 10.0, 15.0], "rpa_split": 0.6},
+            cycle_duration_s=0.4,
+            resistance_map_workers="auto",
+            tuned_zerod_config_path=tuned_config,
+        )
+    failed_descriptor = json.loads(
+        (output_dir / "postprocess_suite_metadata.json").read_text(encoding="utf-8")
+    )
+    assert failed_descriptor["status"] == "failed"
+    assert failed_descriptor["steps"]["resistance_map_systolic"]["status"] == "failed"
+    assert failed_descriptor["lineage"] == descriptor["lineage"]
+    with pytest.raises(ValueError, match="completed terminal status"):
+        calibration_workflow._resolve_postprocess_suite_data_source(
+            data_source=CalibrationDataSourceConfig(
+                mode="postprocess_suite",
+                postprocess_metadata_json=str(
+                    output_dir / "postprocess_suite_metadata.json"
+                ),
+            ),
+            zerod_config_path=str(tuned_config),
+            solver_config={},
+        )
 
 
 def test_clinical_targets_mapping_accepts_mpa_pressure_alias():
@@ -498,12 +613,10 @@ def test_run_pulmonary_threed_postprocess_suite_tolerates_invalid_overlay_target
     for name in ("result_0001.vtu", "result_0002.vtu", "result_0003.vtu"):
         (sim_dir / name).write_text("dummy", encoding="utf-8")
 
-    real_read = pv.read
-
     def fake_read(path: str):
         path_obj = Path(path)
         if path_obj.suffix == ".vtp":
-            return real_read(path)
+            return _read_vtp_as_test_pyvista(path)
         return _make_point_dataset(path_obj.stem)
 
     def fake_sample(centerline, mesh, pressure_field, already_mmhg):
@@ -528,15 +641,37 @@ def test_run_pulmonary_threed_postprocess_suite_tolerates_invalid_overlay_target
         ranked = resistance_dir / "ranked_stent_candidates.csv"
         vtp = resistance_dir / "resistance_map_mean.vtp"
         metadata = resistance_dir / "resistance_map_metadata.json"
+        intermediate_dir = resistance_dir / "intermediate_centerlines"
+        intermediate_dir.mkdir(parents=True, exist_ok=True)
+        mapped_frame = intermediate_dir / "0000_result_0002_centerline.vtp"
+        _write_mapped_frame(mapped_frame, centerline_path)
         pd.DataFrame([{"branch_id": 2, "resistance_mean": 4.0}]).to_csv(summary, index=False)
         pd.DataFrame([{"branch_id": 2, "rank": 1}]).to_csv(ranked, index=False)
         pv.Line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)).save(vtp)
-        metadata.write_text(json.dumps({"selected_frames": []}), encoding="utf-8")
+        metadata.write_text(
+            json.dumps(
+                {
+                    "cycle_duration_s": kwargs["cycle_duration_s"],
+                    "selected_frames": [
+                        {
+                            "timestep_id": 2,
+                            "time_s": 0.2,
+                            "source_frame_path": str(sim_dir / "result_0002.vtu"),
+                            "path": str(mapped_frame),
+                        }
+                    ],
+                    "keep_intermediate_centerlines": True,
+                    "intermediate_dir": str(intermediate_dir),
+                }
+            ),
+            encoding="utf-8",
+        )
         return {
             "resistance_map": str(vtp),
             "summary_csv": str(summary),
             "ranked_csv": str(ranked),
             "metadata_json": str(metadata),
+            "intermediate_dir": str(intermediate_dir),
         }
 
     def fake_compute_selected_frames(**kwargs):

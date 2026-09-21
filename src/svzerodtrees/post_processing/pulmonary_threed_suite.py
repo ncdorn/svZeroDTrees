@@ -18,6 +18,11 @@ import pyvista as pv
 
 from ..simulation.simulation_directory import SimulationDirectory
 from ..tune_bcs.clinical_targets import ClinicalTargets
+from .centerline_timeseries import (
+    CENTERLINE_TIMESERIES_SCHEMA_VERSION,
+    _atomic_write_json,
+    publish_centerline_timeseries,
+)
 from .resistance_map import (
     _compute_pulmonary_resistance_map_for_selected_frames,
     _load_frames_csv,
@@ -757,6 +762,7 @@ def run_pulmonary_threed_postprocess_suite(
     resistance_map_workers: int | Literal["auto"] | None = None,
     camera_offset_dir: Sequence[float] | None = None,
     camera_view_up: Sequence[float] | None = None,
+    tuned_zerod_config_path: str | Path | None = None,
 ) -> dict[str, Any]:
     if cycle_duration_s is None:
         if inflow_csv is None:
@@ -791,6 +797,10 @@ def run_pulmonary_threed_postprocess_suite(
     ranked_candidates_systolic_csv = output_path / "ranked_stent_candidates_systolic.csv"
     resistance_systolic_metadata_json = output_path / "resistance_map_systolic_metadata.json"
     resistance_systolic_png = output_path / "resistance_map_systolic.png"
+    centerline_timeseries_vtp = output_path / "centerline_timeseries_last_cycle.vtp"
+    centerline_timeseries_metadata_json = (
+        output_path / "centerline_timeseries_last_cycle_metadata.json"
+    )
     outputs = {
         "mpa_pressure_csv": str(pressure_csv),
         "mpa_pressure_png": str(pressure_png),
@@ -807,16 +817,20 @@ def run_pulmonary_threed_postprocess_suite(
         "branch_resistance_summary_systolic_csv": str(branch_summary_systolic_csv),
         "ranked_stent_candidates_systolic_csv": str(ranked_candidates_systolic_csv),
         "resistance_map_systolic_metadata_json": str(resistance_systolic_metadata_json),
+        "centerline_timeseries_last_cycle_vtp": str(centerline_timeseries_vtp),
+        "centerline_timeseries_last_cycle_metadata_json": str(centerline_timeseries_metadata_json),
     }
     steps: dict[str, dict[str, Any]] = {
         "pressure": {"status": "pending"},
         "flow_split": {"status": "pending"},
         "frames": {"status": "pending"},
         "resistance_map": {"status": "pending"},
+        "centerline_timeseries": {"status": "pending"},
         "resistance_map_systolic": {"status": "pending"},
     }
     metadata: dict[str, Any] = {
         "kind": "pulmonary_threed_suite",
+        "schema_version": CENTERLINE_TIMESERIES_SCHEMA_VERSION,
         "status": "running",
         "stage": stage,
         "simulation_dir": str(Path(simulation_dir).resolve()),
@@ -890,6 +904,25 @@ def run_pulmonary_threed_postprocess_suite(
         steps["resistance_map"] = {"status": "completed", "result": resistance_result}
         metadata["resistance_map"] = resistance_result
 
+        active_step = "centerline_timeseries"
+        centerline_timeseries_result = publish_centerline_timeseries(
+            resistance_map_metadata_json=resistance_result["metadata_json"],
+            output_dir=output_path,
+            reference_centerline=centerline,
+            suite_metadata_path=metadata_path,
+            tuned_zerod_config_path=tuned_zerod_config_path,
+        )
+        steps["centerline_timeseries"] = {
+            "status": "completed",
+            "result": centerline_timeseries_result,
+        }
+        metadata["centerline_timeseries"] = centerline_timeseries_result
+        metadata.setdefault("artifacts", {})["centerline_timeseries"] = (
+            centerline_timeseries_result["artifact"]
+        )
+        if centerline_timeseries_result.get("lineage") is not None:
+            metadata["lineage"] = centerline_timeseries_result["lineage"]
+
         active_step = "resistance_map_systolic"
         systolic_frames, systolic_selection = _select_systolic_frame_from_artifacts(
             pressure_csv=pressure_csv,
@@ -954,7 +987,7 @@ def run_pulmonary_threed_postprocess_suite(
             )
 
         metadata["status"] = "completed"
-        metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+        _atomic_write_json(metadata_path, metadata)
         return metadata
     except Exception as exc:
         metadata["status"] = "failed"
@@ -973,4 +1006,4 @@ def run_pulmonary_threed_postprocess_suite(
             }
         raise
     finally:
-        metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+        _atomic_write_json(metadata_path, metadata)

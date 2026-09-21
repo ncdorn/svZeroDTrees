@@ -6,17 +6,24 @@ from importlib import import_module
 
 __all__ = [
     "compute_pulmonary_resistance_map",
+    "publish_centerline_timeseries",
     "render_resistance_map_png",
     "run_pulmonary_threed_postprocess_suite",
     "write_flow_split_comparison_artifacts",
     "write_frames_csv_for_simulation",
     "write_mpa_pressure_timeseries_csv",
+    "write_centerline_timeseries",
+    "validate_centerline_timeseries_descriptor",
 ]
 
 _LAZY_EXPORTS = {
     "compute_pulmonary_resistance_map": (
         "svzerodtrees.post_processing.resistance_map",
         "compute_pulmonary_resistance_map",
+    ),
+    "publish_centerline_timeseries": (
+        "svzerodtrees.post_processing.centerline_timeseries",
+        "publish_centerline_timeseries",
     ),
     "render_resistance_map_png": (
         "svzerodtrees.post_processing.pulmonary_threed_suite",
@@ -37,6 +44,14 @@ _LAZY_EXPORTS = {
     "write_mpa_pressure_timeseries_csv": (
         "svzerodtrees.post_processing.pulmonary_threed_suite",
         "write_mpa_pressure_timeseries_csv",
+    ),
+    "write_centerline_timeseries": (
+        "svzerodtrees.post_processing.centerline_timeseries",
+        "write_centerline_timeseries",
+    ),
+    "validate_centerline_timeseries_descriptor": (
+        "svzerodtrees.post_processing.centerline_timeseries",
+        "validate_centerline_timeseries_descriptor",
     ),
 }
 

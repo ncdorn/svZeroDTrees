@@ -15,6 +15,7 @@ import pandas as pd
 from svzerodtrees.io import ConfigHandler
 from svzerodtrees._pysvzerod import simulate_pysvzerod
 from svzerodtrees.io.inflow_handler import mean_flow_from_path
+from svzerodtrees.numerics import trapezoid
 from svzerodtrees.io.blocks.boundary_condition import (
     _resolve_flow_mean_config,
     validate_boundary_condition_configs,
@@ -311,9 +312,6 @@ def _validate_full_pa_preflight(
         is_pulmonary=True,
         outlet_mapping_mode=outlet_mapping_mode,
         outlet_mapping=outlet_mapping,
-        # The new mode is the migration boundary.  Passing the legacy boolean
-        # here would make the resolver see two competing contracts.
-        allow_ordered_outlet_mapping=False,
     )
     records = getattr(resolved_mapping, "records", None)
     if records is not None and len(records) != len(seed_outlets):
@@ -1343,7 +1341,7 @@ def _slice_rows_last_cycle(rows: pd.DataFrame, cycle_duration: float | None) -> 
 
 def _integral_or_mean(values: np.ndarray, time: np.ndarray | None) -> float:
     if time is not None and time.size == values.size and time.size >= 2:
-        return float(np.trapz(values, time))
+        return float(trapezoid(values, time))
     return float(np.mean(values))
 
 

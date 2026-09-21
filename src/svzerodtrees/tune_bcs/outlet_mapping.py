@@ -592,7 +592,7 @@ def resolve_outlet_cap_mapping(
     explicit_map: Any = None,
     outlet_mapping: Any = None,
     allow_ordered_outlet_mapping: bool = False,
-    allow_serialized_fallback: bool = True,
+    allow_serialized_fallback: bool = False,
 ) -> ResolvedOutletCapMapping:
     """Resolve and validate one complete cap-to-outlet mapping.
 
@@ -618,10 +618,31 @@ def resolve_outlet_cap_mapping(
             raise ValueError("allow_ordered_outlet_mapping conflicts with mode")
         if selected == "auto":
             selected = "serialized_cap_order"
+    supplied_mapping_inputs = [
+        name
+        for name, value in (
+            ("explicit_mapping", explicit_mapping),
+            ("explicit_map", explicit_map),
+            ("outlet_mapping", outlet_mapping),
+        )
+        if value is not None
+    ]
+    if len(supplied_mapping_inputs) > 1:
+        raise ValueError(
+            "conflicting outlet mapping inputs: "
+            + ", ".join(supplied_mapping_inputs)
+            + "; provide only one"
+        )
     if explicit_mapping is None:
         explicit_mapping = outlet_mapping
     if explicit_mapping is None:
         explicit_mapping = explicit_map
+
+    if explicit_mapping is not None and selected != "explicit":
+        raise ValueError(
+            "outlet_mapping requires outlet_mapping_mode='explicit'; "
+            "select explicit mode before supplying a mapping"
+        )
 
     caps = _normalise_cap_info(cap_info)
     outlets = serialized_outlet_names(config_handler)
@@ -669,6 +690,12 @@ def resolve_outlet_cap_mapping(
             errors.append(f"{strategy}: {exc}")
 
     detail = "; ".join(errors)
+    if selected == "auto" and not allow_serialized_fallback:
+        detail += (
+            "; auto mapping does not use serialized_cap_order; select "
+            "outlet_mapping_mode='serialized_cap_order' explicitly when order "
+            "is the intended contract"
+        )
     raise ValueError("could not deterministically resolve outlet-cap mapping: " + detail)
 
 
