@@ -69,6 +69,7 @@ class Simulation:
                  adapted_dir='adapted',
                  steady_dir='steady',
                  bc_type='impedance',
+                 impedance_config=None,
                  adaptation_config = {
                      "method": "cwss",
                      "location": "uniform",
@@ -110,6 +111,11 @@ class Simulation:
         # zerod configs
         self.zerod_config_path = os.path.join(self.path, zerod_config)
         self.simplified_zerod_config = os.path.join(self.path, 'simplified_nonlinear_zerod.json')
+        self.clinical_targets_path = (
+            os.path.abspath(clinical_targets)
+            if isinstance(clinical_targets, (str, os.PathLike))
+            else None
+        )
 
         self.preop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, preop_dir), zerod_config=self.zerod_config_path, convert_to_cm=convert_to_cm, mesh_scale_factor=mesh_scale_factor)
         self.postop_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, postop_dir), zerod_config=self.zerod_config_path, convert_to_cm=convert_to_cm, mesh_scale_factor=mesh_scale_factor)
@@ -117,6 +123,13 @@ class Simulation:
             self.adapted_dir = SimulationDirectory.from_directory(path=os.path.join(self.path, adapted_dir), mesh_complete=self.postop_dir.mesh_complete.path, convert_to_cm=convert_to_cm, mesh_scale_factor=mesh_scale_factor)
 
         self.tune_space = tune_space
+
+        if impedance_config is None:
+            self.impedance_config = None
+        elif isinstance(impedance_config, dict):
+            self.impedance_config = dict(impedance_config)
+        else:
+            self.impedance_config = dict(vars(impedance_config))
 
         available_bc_types = ['impedance', 'rcr']
         if bc_type not in available_bc_types:
@@ -223,8 +236,22 @@ class Simulation:
         # reload inflow if inflow.csv changed between runs
         self._maybe_refresh_inflow_from_file()
         self._set_derived_inflows()
+
+        full_pa = (
+            self.bc_type == 'impedance'
+            and isinstance(self.impedance_config, dict)
+            and str(self.impedance_config.get('tuning_model', 'rri')).lower() == 'full_pa'
+        )
+        iteration_result = None
         
-        if run_steady:
+        if full_pa:
+            # Full-PA tuning uses the supplied full model as its immutable
+            # seed.  Steady runs remain available for callers that request
+            # them, but they must never produce the reduced RRI seed.
+            if run_steady:
+                self.run_steady_sims()
+            reduced_config = ConfigHandler.from_json(self.zerod_config_path, is_pulmonary=True)
+        elif run_steady:
             # run the steady simulations
             self.run_steady_sims()
             # generate the simplified zerod config
@@ -241,40 +268,70 @@ class Simulation:
             config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
             self._sync_config_inflow(config, self.simplified_zerod_config, inflow=self.inflow_0d)
 
-        reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
+        if not full_pa:
+            reduced_config = ConfigHandler.from_json(self.simplified_zerod_config, is_pulmonary=True)
         rcr_params = None
         
         if optimize_bcs:
             if self.bc_type == 'impedance':
+                if full_pa:
+                    if self.clinical_targets_path is None:
+                        raise ValueError(
+                            "full_pa pipeline requires a clinical_targets path"
+                        )
+                    from ..tuning.iteration import run_impedance_tuning_for_iteration
+
+                    iteration_result = run_impedance_tuning_for_iteration(
+                        iteration_dir=self.path,
+                        seed_config=self.zerod_config_path,
+                        mesh_surfaces=self.preop_dir.mesh_complete.mesh_surfaces_dir,
+                        clinical_targets=self.clinical_targets_path,
+                        inflow_path=self.inflow_path,
+                        impedance_config=self.impedance_config,
+                        results_dir=self.path,
+                    )
+                    tuned_config_path = iteration_result.get("tuned_zerod_config")
+                    if not tuned_config_path:
+                        raise ValueError(
+                            "full_pa tuning did not return tuned_zerod_config"
+                        )
+                    # The canonical service publishes the tuned model and its
+                    # tree/mapping artifacts.  Use that model for coupling;
+                    # never regenerate a reduced seed or remap outlets here.
+                    self.zerod_config_path = str(tuned_config_path)
+                    reduced_config = ConfigHandler.from_json(
+                        self.zerod_config_path, is_pulmonary=True
+                    )
+                else:
                 # OLD METHOD, in tune_bcs.py
                 # optimize_impedance_bcs(reduced_config, self.preop_dir.mesh_complete.mesh_surfaces_dir, self.clinical_targets, rescale_inflow=run_steady, d_min=0.01, convert_to_cm=self.convert_to_cm, n_procs=24)
-                if continue_optimization:
-                    print("Continuing optimization from previous run...")
-                    # load the previous optimization results
-                    opt_params = pd.read_csv(os.path.join(self.path, 'optimized_params.csv'))
-                    lpa_params = TreeParameters.from_row(opt_params[opt_params.pa == 'lpa'])
-                    rpa_params = TreeParameters.from_row(opt_params[opt_params.pa == 'rpa'])
-                    reduced_config = ConfigHandler.from_json(os.path.join(self.path, "pa_config_test_tuning.json"), is_pulmonary=True)
-                else:
-                    initial_guess = None
+                    if continue_optimization:
+                        print("Continuing optimization from previous run...")
+                        # load the previous optimization results
+                        opt_params = pd.read_csv(os.path.join(self.path, 'optimized_params.csv'))
+                        lpa_params = TreeParameters.from_row(opt_params[opt_params.pa == 'lpa'])
+                        rpa_params = TreeParameters.from_row(opt_params[opt_params.pa == 'rpa'])
+                        reduced_config = ConfigHandler.from_json(os.path.join(self.path, "pa_config_test_tuning.json"), is_pulmonary=True)
+                    else:
+                        initial_guess = None
 
-                print("Optimizing impedance boundary conditions... with tune space:")
-                for freeparam in self.tune_space.free:
-                    print(f" - {freeparam.name}: init={freeparam.init}, lb={freeparam.lb}, ub={freeparam.ub}")
+                    print("Optimizing impedance boundary conditions... with tune space:")
+                    for freeparam in self.tune_space.free:
+                        print(f" - {freeparam.name}: init={freeparam.init}, lb={freeparam.lb}, ub={freeparam.ub}")
 
-                impedance_tuner = ImpedanceTuner(reduced_config, 
-                                                 self.preop_dir.mesh_complete.mesh_surfaces_dir, 
-                                                 self.clinical_targets, 
-                                                 self.tune_space,
-                                                 rescale_inflow=run_steady, 
-                                                 convert_to_cm=self.convert_to_cm, 
-                                                 compliance_model=self.compliance_model,
-                                                 solver='Nelder-Mead',
-                                                 grid_search_init=True,
-                                                 log_file=os.path.join(self.path, 'stree_impedance_optimization.log'),
-                                                 n_procs=24,
-                                                 inflow_path=self.inflow_path)
-                impedance_tuner.tune(nm_iter=5)
+                    impedance_tuner = ImpedanceTuner(reduced_config,
+                                                     self.preop_dir.mesh_complete.mesh_surfaces_dir,
+                                                     self.clinical_targets,
+                                                     self.tune_space,
+                                                     rescale_inflow=run_steady,
+                                                     convert_to_cm=self.convert_to_cm,
+                                                     compliance_model=self.compliance_model,
+                                                     solver='Nelder-Mead',
+                                                     grid_search_init=True,
+                                                     log_file=os.path.join(self.path, 'stree_impedance_optimization.log'),
+                                                     n_procs=24,
+                                                     inflow_path=self.inflow_path)
+                    impedance_tuner.tune(nm_iter=5)
             # need to create coupling config and add to preop/postop directories
             # build trees for LPA/RPA
             elif self.bc_type == 'rcr':
@@ -283,7 +340,7 @@ class Simulation:
                 rcr_params = result.x.tolist()
                 write_rcr_params_csv(rcr_params, os.path.join(self.path, "optimized_rcr_params.csv"))
 
-        if self.bc_type == 'impedance':
+        if self.bc_type == 'impedance' and not full_pa:
             # construct trees
             opt_params = pd.read_csv(os.path.join(self.path, 'optimized_params.csv'))
             # tree_params = {
@@ -307,7 +364,7 @@ class Simulation:
 
         if run_threed:
             # create the trees
-            if self.bc_type == 'impedance':
+            if self.bc_type == 'impedance' and not full_pa:
                 construct_impedance_trees(self.zerod_config, 
                                           self.preop_dir.mesh_complete.mesh_surfaces_dir, 
                                           self.clinical_targets.wedge_p, 
@@ -386,6 +443,15 @@ class Simulation:
             self.adapted_dir.write_files(simname='Adapted Simulation', user_input=False, sim_config=self.threed_sim_config)
 
             # postprocess results
+
+        if iteration_result is not None:
+            iteration_result = dict(iteration_result)
+            if run_threed:
+                iteration_result["coupling_config"] = os.path.join(
+                    self.preop_dir.path, "svzerod_3Dcoupling.json"
+                )
+            return iteration_result
+        return None
 
     @staticmethod
     def _extract_step_id(path):

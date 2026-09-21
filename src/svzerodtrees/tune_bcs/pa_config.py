@@ -19,6 +19,7 @@ from ..microvasculature.structured_tree.structuredtree import StructuredTree
 from ..microvasculature.treeparams import TreeParameters
 from ..io.blocks import Junction
 from ..io.utils import get_branch_result
+from ..numerics import trapezoid
 from ..microvasculature.compliance import *
 class PAConfig():
     '''
@@ -484,7 +485,7 @@ class PAConfig():
         # rpa flow, for flow split optimization
         self.Q_rpa = get_branch_result(self.result, 'flow_in', 3, steady=True)
 
-        self.Q_rpa = np.trapz(get_branch_result(self.result, 'flow_in', 3, steady=False), self.result['time'])
+        self.Q_rpa = trapezoid(get_branch_result(self.result, 'flow_in', 3, steady=False), self.result['time'])
 
         # mpa pressure
         P_mpa = [p / 1333.2 for p in get_branch_result(self.result, 'pressure_in', 0, steady=False)]
@@ -533,7 +534,7 @@ class PAConfig():
         # rpa flow, for flow split optimization
         self.Q_rpa = get_branch_result(self.result, 'flow_in', 3, steady=True)
 
-        self.Q_rpa = np.trapz(get_branch_result(self.result, 'flow_in', 3, steady=False), self.result['time'])
+        self.Q_rpa = trapezoid(get_branch_result(self.result, 'flow_in', 3, steady=False), self.result['time'])
 
         # mpa pressure
         P_mpa = [p / 1333.2 for p in get_branch_result(self.result, 'pressure_in', 0, steady=False)]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 
@@ -14,13 +15,30 @@ from svzerodtrees.calibration.workflow import (
 from svzerodtrees.config import (
     CalibrationConfig,
     CalibrationDataSourceConfig,
+    CalibrationMPAPressureTargetConfig,
+    CalibrationObservationQCConfig,
     CalibrationParameterSelectionConfig,
     CalibrationParametersConfig,
+    CalibrationRPAFlowSplitTargetConfig,
+    CalibrationTargetsConfig,
 )
 
 
+def _real_case_opted_in() -> bool:
+    return os.environ.get("SVZERODTREES_RUN_REAL_CASE") == "1"
+
+
+def _artifact_unavailable(message: str) -> None:
+    if _real_case_opted_in():
+        pytest.fail(
+            "SVZERODTREES_RUN_REAL_CASE=1 was requested, but the external "
+            f"tst-stan-5 regression cannot run: {message}"
+        )
+    pytest.skip(message)
+
+
 def _require_tst_stan_5_artifacts() -> dict[str, Path]:
-    if os.environ.get("SVZERODTREES_RUN_REAL_CASE") != "1":
+    if not _real_case_opted_in():
         pytest.skip(
             "opt-in real-case regression; set SVZERODTREES_RUN_REAL_CASE=1 to run"
         )
@@ -36,17 +54,100 @@ def _require_tst_stan_5_artifacts() -> dict[str, Path]:
     }
     missing = [str(path) for path in paths.values() if not path.exists()]
     if missing:
-        pytest.skip(
-            "local tst-stan-5 calibration artifacts are absent: " + ", ".join(missing)
+        _artifact_unavailable(
+            "required artifacts are absent: " + ", ".join(missing)
         )
 
     metadata = json.loads(paths["metadata"].read_text(encoding="utf-8"))
     if not metadata.get("frame_indices") or not metadata.get("timestamps_s"):
-        pytest.skip(
+        _artifact_unavailable(
             "local tst-stan-5 metadata predates the timeseries contract; "
             "regenerate centerline_timeseries_last_cycle_metadata.json"
         )
     return paths
+
+
+def _required_case_setting(environment_name: str) -> str:
+    value = os.environ.get(environment_name, "").strip()
+    if not value:
+        pytest.fail(
+            "SVZERODTREES_RUN_REAL_CASE=1 requires the case owner to provide "
+            f"{environment_name}; do not infer tst-stan-5 anatomy or use an "
+            "unapproved default"
+        )
+    return value
+
+
+def _required_positive_float(environment_name: str) -> float:
+    raw_value = _required_case_setting(environment_name)
+    try:
+        value = float(raw_value)
+    except ValueError as exc:
+        pytest.fail(f"{environment_name} must be a finite positive number: {exc}")
+    if not math.isfinite(value) or value <= 0.0:
+        pytest.fail(f"{environment_name} must be a finite positive number")
+    return value
+
+
+def _tst_stan_5_targets() -> CalibrationTargetsConfig:
+    """Read case-owner target roles and tolerances without guessing them."""
+    mpa_vessel = _required_case_setting("SVZERODTREES_TST_STAN_5_MPA_VESSEL")
+    rpa_vessel = _required_case_setting("SVZERODTREES_TST_STAN_5_RPA_VESSEL")
+    lpa_vessel = _required_case_setting("SVZERODTREES_TST_STAN_5_LPA_VESSEL")
+    if len({mpa_vessel, rpa_vessel, lpa_vessel}) != 3:
+        pytest.fail(
+            "SVZERODTREES_TST_STAN_5_MPA_VESSEL, _RPA_VESSEL, and _LPA_VESSEL "
+            "must identify three distinct explicit roles"
+        )
+
+    mpa_interface = _required_case_setting(
+        "SVZERODTREES_TST_STAN_5_MPA_INTERFACE"
+    ).lower()
+    rpa_interface = _required_case_setting(
+        "SVZERODTREES_TST_STAN_5_RPA_INTERFACE"
+    ).lower()
+    valid_interfaces = {
+        "external_upstream",
+        "external_downstream",
+        "internal",
+        "upstream",
+        "downstream",
+    }
+    if mpa_interface not in valid_interfaces or rpa_interface not in valid_interfaces:
+        pytest.fail(
+            "SVZERODTREES_TST_STAN_5_MPA_INTERFACE and _RPA_INTERFACE must be "
+            f"one of {sorted(valid_interfaces)}"
+        )
+
+    improvement_setting = _required_case_setting(
+        "SVZERODTREES_TST_STAN_5_REQUIRE_IMPROVEMENT_OVER_BASELINE"
+    ).lower()
+    if improvement_setting not in {"true", "false"}:
+        pytest.fail(
+            "SVZERODTREES_TST_STAN_5_REQUIRE_IMPROVEMENT_OVER_BASELINE must be "
+            "explicitly true or false"
+        )
+
+    return CalibrationTargetsConfig(
+        mpa_pressure=CalibrationMPAPressureTargetConfig(
+            vessel=mpa_vessel,
+            interface=mpa_interface,
+            weight=_required_positive_float("SVZERODTREES_TST_STAN_5_MPA_WEIGHT"),
+            normalized_rms_tolerance=_required_positive_float(
+                "SVZERODTREES_TST_STAN_5_MPA_NRMSE_TOLERANCE"
+            ),
+        ),
+        rpa_flow_split=CalibrationRPAFlowSplitTargetConfig(
+            rpa_vessel=rpa_vessel,
+            lpa_vessel=lpa_vessel,
+            interface=rpa_interface,
+            weight=_required_positive_float("SVZERODTREES_TST_STAN_5_RPA_WEIGHT"),
+            absolute_tolerance=_required_positive_float(
+                "SVZERODTREES_TST_STAN_5_RPA_SPLIT_TOLERANCE"
+            ),
+        ),
+        require_improvement_over_baseline=improvement_setting == "true",
+    )
 
 
 def _tst_stan_5_calibration(paths: dict[str, Path]) -> CalibrationConfig:
@@ -71,6 +172,8 @@ def _tst_stan_5_calibration(paths: dict[str, Path]) -> CalibrationConfig:
             ),
             junctions=CalibrationParameterSelectionConfig(default=[]),
         ),
+        observation_qc=CalibrationObservationQCConfig(enforcement="target_focused"),
+        targets=_tst_stan_5_targets(),
     )
 
 
@@ -101,8 +204,14 @@ def test_tst_stan_5_calibration_end_to_end(tmp_path):
     paths = _require_tst_stan_5_artifacts()
     try:
         require_calibration_capabilities()
-    except (ImportError, RuntimeError) as exc:
-        pytest.skip(f"compatible pysvzerod is unavailable for the real-case check: {exc}")
+    except Exception as exc:
+        message = f"compatible pysvzerod is unavailable for the real-case check: {exc}"
+        if _real_case_opted_in():
+            pytest.fail(
+                "SVZERODTREES_RUN_REAL_CASE=1 was requested, but the configured "
+                f"solver is unavailable or incompatible: {message}"
+            )
+        pytest.skip(message)
 
     calibration = _tst_stan_5_calibration(paths)
     assembly = assemble_calibration_payload(
@@ -121,6 +230,13 @@ def test_tst_stan_5_calibration_end_to_end(tmp_path):
     assert calibration.data_source.area_array is None
     assert assembly.solver_payload["vessels"][0]["calibrate"] == ["R_poiseuille"]
     assert "branch27_seg0" in assembly.excluded_blocks
+    assert assembly.observation_qc["enforcement"] == "target_focused"
+    assert assembly.observation_qc["status"] == "pass"
+    assert all(assembly.observation_qc["fatal_checks"].values())
+    assert all(
+        assembly.observation_qc["severity"][name] == "advisory"
+        for name in assembly.observation_qc["advisory_checks"]
+    )
 
     output_path = tmp_path / "calibrated_0d.json"
     result = calibrate_0d_from_mapped_centerline(
@@ -135,7 +251,61 @@ def test_tst_stan_5_calibration_end_to_end(tmp_path):
     )
     assert summary["observation_count"] == 100
     assert summary["calibration_confirmation"]["converged"] is True
+    assert summary["calibration_confirmation"]["inactive_parameters_preserved"] is True
     assert summary["replay_stability"]["status"] == "pass"
+    replay = summary["replay_stability"]
+    accepted_cycle = replay["accepted_final_cycle"]["cycle"]
+    assert accepted_cycle >= replay["validation_settings"]["replay_minimum_cycles"]
+    assert accepted_cycle <= replay["validation_settings"]["replay_maximum_cycles"]
+    assert replay["validation_settings"]["replay_maximum_cycles"] == (
+        calibration.solver.replay_maximum_cycles
+    )
+    assert summary["observation_qc"]["enforcement"] == "target_focused"
+    assert summary["observation_qc"]["status"] == "pass"
+    assert all(summary["observation_qc"]["fatal_checks"].values())
+    assert all(
+        summary["observation_qc"]["severity"][name] == "advisory"
+        for name in summary["observation_qc"]["advisory_checks"]
+    )
+    target_quality = summary["calibration_targets"]
+    assert target_quality["status"] == "pass"
+    assert target_quality["candidate"]["status"] == "pass"
+    assert math.isfinite(target_quality["candidate"]["pressure_nrmse"])
+    assert math.isfinite(target_quality["candidate"]["absolute_split_error"])
+    assert target_quality["candidate"]["gate_results"] == {
+        "mpa_pressure": True,
+        "rpa_flow_split": True,
+    }
+    target_configuration = target_quality["configuration"]
+    assert (
+        target_configuration["mpa_pressure"]["vessel"]
+        == calibration.targets.mpa_pressure.vessel
+    )
+    assert (
+        target_configuration["rpa_flow_split"]["rpa_vessel"]
+        == calibration.targets.rpa_flow_split.rpa_vessel
+    )
+    assert (
+        target_configuration["rpa_flow_split"]["lpa_vessel"]
+        == calibration.targets.rpa_flow_split.lpa_vessel
+    )
+    assert (
+        target_configuration["require_improvement_over_baseline"]
+        is calibration.targets.require_improvement_over_baseline
+    )
+    report_paths = [
+        tmp_path / "calibration_observation_qc.json",
+        tmp_path / "calibration_confirmation.json",
+        tmp_path / "calibration_replay.json",
+        tmp_path / "calibration_targets.json",
+        tmp_path / "calibration_summary.json",
+    ]
+    reports = [
+        json.loads(path.read_text(encoding="utf-8")) for path in report_paths
+    ]
+    assert all(report["run_id"] == result["run_id"] for report in reports)
+    assert all(report["digests"] == result["digests"] for report in reports)
+    assert result["output_config_digest"] == result["digests"]["output"]
     published = json.loads(output_path.read_text(encoding="utf-8"))
     assert all("calibrate" not in vessel for vessel in published["vessels"])
     assert all(

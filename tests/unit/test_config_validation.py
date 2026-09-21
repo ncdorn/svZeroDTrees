@@ -2,7 +2,13 @@ import os
 
 import pytest
 
-from svzerodtrees.config import load_config, render_schema
+from svzerodtrees.config import (
+    ImpedanceConfig,
+    LearnedSeedGenerationConfig,
+    impedance_config_to_mapping,
+    load_config,
+    render_schema,
+)
 
 
 def test_load_valid_pipeline_config(tmp_path):
@@ -33,6 +39,303 @@ pipeline:
     cfg = load_config(str(cfg_path))
     assert cfg.workflow == "pipeline"
     assert cfg.paths.preop_dir is not None
+
+
+def _full_pa_pipeline_yaml(tmp_path, impedance_fields=""):
+    return f"""
+version: 1
+workflow: pipeline
+paths:
+  root: {tmp_path}
+  zerod_config: seed.json
+  clinical_targets: targets.csv
+  mesh_surfaces: mesh-surfaces
+  inflow: inflow.csv
+bcs:
+  type: impedance
+  impedance:
+    tuning_model: full_pa
+    outlet_mapping_mode: auto
+    tune_space:
+      free:
+        - name: lpa.alpha
+          init: 0.9
+          lb: 0.7
+          ub: 0.99
+      fixed: []
+      tied: []
+{impedance_fields}
+pipeline:
+  optimize_bcs: true
+  run_threed: false
+  adapt: false
+"""
+
+
+def _learned_seed_pipeline_yaml(
+    tmp_path,
+    *,
+    missing_seed_field=None,
+    seed_extra="",
+    static_seed=False,
+    bcs_type="impedance",
+    is_pulmonary=True,
+    tuning_model="full_pa",
+    mapping_mode="serialized_cap_order",
+    pipeline_extra="",
+):
+    seed_fields = [
+        ("method", "learned_zerod"),
+        ("anatomy", "pulmonary"),
+        ("input_zerod_config", "inputs/source.json"),
+        ("centerline", "inputs/centerline.vtp"),
+        ("svzerodsolver", "tools/svzerodsolver"),
+        ("output_dir", "generated/learned"),
+    ]
+    seed_fields = [
+        (key, value) for key, value in seed_fields if key != missing_seed_field
+    ]
+    static_line = "  zerod_config: inputs/static.json\n" if static_seed else ""
+    impedance_block = "" if bcs_type == "rcr" else f"""  impedance:
+    tuning_model: {tuning_model}
+    outlet_mapping_mode: {mapping_mode}
+"""
+    return f"""
+version: 1
+workflow: pipeline
+paths:
+  root: {tmp_path}
+{static_line}  clinical_targets: inputs/targets.csv
+  mesh_surfaces: inputs/mesh-surfaces
+seed_generation:
+""" + "".join(f"  {key}: {value}\n" for key, value in seed_fields) + f"""{seed_extra}
+bcs:
+  type: {bcs_type}
+  is_pulmonary: {str(is_pulmonary).lower()}
+{impedance_block}pipeline:
+pipeline:
+  optimize_bcs: true
+{pipeline_extra}
+"""
+
+
+def test_learned_seed_generation_parses_typed_root_relative_paths(tmp_path):
+    cfg_path = tmp_path / "learned.yml"
+    cfg_path.write_text(
+        _learned_seed_pipeline_yaml(tmp_path),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    assert isinstance(cfg.seed_generation, LearnedSeedGenerationConfig)
+    assert cfg.paths.zerod_config is None
+    assert cfg.seed_generation.method == "learned_zerod"
+    assert cfg.seed_generation.anatomy == "pulmonary"
+    assert cfg.seed_generation.input_zerod_config == str(tmp_path / "inputs/source.json")
+    assert cfg.seed_generation.centerline == str(tmp_path / "inputs/centerline.vtp")
+    assert cfg.seed_generation.svzerodsolver == str(tmp_path / "tools/svzerodsolver")
+    assert cfg.seed_generation.output_dir == str(tmp_path / "generated/learned")
+    assert cfg.seed_generation.learned_zerod_executable == "learned-zerod"
+    assert cfg.seed_generation.output_filename == "learned_full_pa_seed.json"
+    assert cfg.seed_generation.keep_tmp is False
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"seed_extra": "  unexpected: true\n"}, "Unknown keys in seed_generation"),
+        ({"missing_seed_field": "centerline"}, "seed_generation.centerline is required"),
+        ({"static_seed": True}, "mutually exclusive"),
+        ({"tuning_model": "rri", "mapping_mode": ""}, "tuning_model='full_pa'"),
+        ({"bcs_type": "rcr", "mapping_mode": ""}, "bcs.type='impedance'"),
+        ({"is_pulmonary": False}, "is_pulmonary=true"),
+        ({"mapping_mode": "auto"}, "serialized_cap_order.*explicit"),
+    ],
+)
+def test_learned_seed_generation_rejects_invalid_contract(tmp_path, kwargs, message):
+    cfg_path = tmp_path / "invalid-learned.yml"
+    cfg_path.write_text(
+        _learned_seed_pipeline_yaml(tmp_path, **kwargs),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=message):
+        load_config(str(cfg_path))
+
+
+def test_tuning_pipeline_requires_one_seed_source(tmp_path):
+    cfg_path = tmp_path / "missing-seed.yml"
+    cfg_path.write_text(
+        """
+version: 1
+workflow: pipeline
+paths:
+  root: .
+  clinical_targets: targets.csv
+  mesh_surfaces: mesh-surfaces
+bcs:
+  type: impedance
+  impedance:
+    tuning_model: full_pa
+    outlet_mapping_mode: serialized_cap_order
+pipeline:
+  optimize_bcs: true
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="exactly one of paths.zerod_config or seed_generation"):
+        load_config(str(cfg_path))
+
+
+def test_full_pa_impedance_block_parses_and_round_trips_to_service_mapping(tmp_path):
+    cfg_path = tmp_path / "full-pa.yml"
+    cfg_path.write_text(
+        _full_pa_pipeline_yaml(
+            tmp_path,
+            impedance_fields=(
+                "    solver: Nelder-Mead\n"
+                "    nm_iter: 7\n"
+                "    n_procs: 3\n"
+                "    diameter_scale: 0.5\n"
+                "    outlet_mapping_mode: explicit\n"
+                "    outlet_mapping:\n"
+                "      lpa_cap.vtp: LPA_OUTLET\n"
+                "      rpa_cap.vtp: RPA_OUTLET"
+            ),
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    assert cfg.bcs is not None
+    assert isinstance(cfg.bcs.impedance, ImpedanceConfig)
+    assert cfg.bcs.type == "impedance"
+    assert cfg.bcs.impedance.tuning_model == "full_pa"
+    assert cfg.bcs.impedance.nm_iter == 7
+    assert cfg.bcs.impedance.use_mean is False
+    assert cfg.bcs.impedance.diameter_scale == 0.5
+    assert cfg.bcs.impedance.outlet_mapping == {
+        "lpa_cap.vtp": "LPA_OUTLET",
+        "rpa_cap.vtp": "RPA_OUTLET",
+    }
+    mapped = impedance_config_to_mapping(cfg.bcs.impedance)
+    assert mapped["tuning_model"] == "full_pa"
+    assert mapped["outlet_mapping_mode"] == "explicit"
+    assert mapped["tune_space"]["free"][0]["name"] == "lpa.alpha"
+
+
+def test_legacy_flat_impedance_fields_adapt_once_with_deprecation_warning(tmp_path):
+    cfg_path = tmp_path / "legacy.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: tune_bcs
+paths:
+  root: {tmp_path}
+  zerod_config: seed.json
+  clinical_targets: targets.csv
+  mesh_surfaces: mesh-surfaces
+bcs:
+  type: impedance
+  compliance_model: constant
+  allow_ordered_outlet_mapping: false
+  tune_space:
+    free:
+      - name: lpa.alpha
+        init: 0.9
+        lb: 0.7
+        ub: 0.99
+    fixed: []
+    tied: []
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.warns(DeprecationWarning, match="flat bcs impedance fields"):
+        cfg = load_config(str(cfg_path))
+
+    assert cfg.bcs is not None
+    assert cfg.bcs.impedance is not None
+    assert cfg.bcs.impedance.compliance_model == "constant"
+    assert cfg.bcs.impedance.tune_space is not None
+
+
+@pytest.mark.parametrize(
+    ("extra", "message"),
+    [
+        (
+            "    outlet_mapping: {cap.vtp: OUTLET}\n",
+            "requires outlet_mapping_mode='explicit'",
+        ),
+        ("    unexpected: true\n", "Unknown keys in bcs.impedance"),
+        (
+            "    outlet_mapping_mode: explicit\n",
+            "requires outlet_mapping",
+        ),
+    ],
+)
+def test_full_pa_impedance_block_rejects_ambiguous_or_unknown_controls(
+    tmp_path, extra, message
+):
+    cfg_path = tmp_path / "invalid.yml"
+    cfg_path.write_text(
+        _full_pa_pipeline_yaml(tmp_path, impedance_fields=extra),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=message):
+        load_config(str(cfg_path))
+
+
+def test_nested_impedance_rejects_legacy_flat_duplicate(tmp_path):
+    cfg_path = tmp_path / "contradictory.yml"
+    cfg_path.write_text(
+        _full_pa_pipeline_yaml(
+            tmp_path,
+            impedance_fields="  compliance_model: constant\n",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="cannot be combined with legacy flat"):
+        load_config(str(cfg_path))
+
+
+def test_existing_rri_yaml_remains_supported_without_full_pa_controls(tmp_path):
+    cfg_path = tmp_path / "rri.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: tune_bcs
+paths:
+  root: {tmp_path}
+  zerod_config: reduced.json
+  clinical_targets: targets.csv
+  mesh_surfaces: mesh-surfaces
+bcs:
+  type: impedance
+  tune_space:
+    free:
+      - name: lpa.alpha
+        init: 0.9
+        lb: 0.7
+        ub: 0.99
+    fixed: []
+    tied: []
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.warns(DeprecationWarning):
+        cfg = load_config(str(cfg_path))
+    assert cfg.bcs is not None
+    assert cfg.bcs.type == "impedance"
+    assert cfg.bcs.impedance is not None
+    assert cfg.bcs.impedance.tuning_model == "rri"
+    assert cfg.bcs.impedance.outlet_mapping_mode is None
 
 
 def test_unknown_key_raises(tmp_path):
@@ -119,6 +422,241 @@ calibration:
     assert cfg.calibration.solver.pressure_bound_multiplier == 10.0
     assert cfg.calibration.solver.flow_bound_multiplier == 10.0
     assert cfg.calibration.solver.cycle_stability_tolerance == 1e-3
+
+
+def _target_focused_calibration_yaml(
+    tmp_path, *, targets: str | None = None, solver: str = ""
+) -> str:
+    target_section = "" if targets is None else f"\n  targets:\n{targets}"
+    return f"""
+version: 1
+workflow: calibrate_0d_from_3d
+paths:
+  root: {tmp_path}
+  zerod_config: zerod.json
+  output_config: calibrated.json
+calibration:
+  data_source:
+    mode: mapped_centerline
+    mapped_centerline_result: mapped.vtp
+    centerline: centerline.vtp
+    flow_observation_type: flow
+  parameters:
+    vessels: {{}}
+    junctions: {{}}
+  solver:
+{solver or '    replay_minimum_cycles: 3'}
+  observation_qc:
+    enforcement: target_focused
+{target_section}
+"""
+
+
+def test_legacy_calibration_defaults_to_strict_network(tmp_path):
+    cfg_path = tmp_path / "legacy.yml"
+    cfg_path.write_text(
+        _target_focused_calibration_yaml(tmp_path, targets=None).replace(
+            "  observation_qc:\n    enforcement: target_focused\n", "  observation_qc: {}\n"
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    assert cfg.calibration is not None
+    assert cfg.calibration.targets is None
+    assert cfg.calibration.observation_qc.enforcement == "strict_network"
+    assert cfg.calibration.solver.replay_minimum_cycles == 3
+    assert cfg.calibration.solver.replay_maximum_cycles == 10
+    assert cfg.calibration.solver.required_consecutive_stable_pairs == 1
+
+
+def test_target_focused_calibration_parses_explicit_roles_and_replay_settings(tmp_path):
+    cfg_path = tmp_path / "target-focused.yml"
+    cfg_path.write_text(
+        _target_focused_calibration_yaml(
+            tmp_path,
+            solver=(
+                "    replay_minimum_cycles: 4\n"
+                "    replay_maximum_cycles: 9\n"
+                "    required_consecutive_stable_pairs: 2"
+            ),
+            targets=(
+                "    mpa_pressure:\n"
+                "      vessel: branch0_seg0\n"
+                "      interface: external_upstream\n"
+                "      weight: 1.0\n"
+                "      normalized_rms_tolerance: 0.05\n"
+                "    rpa_flow_split:\n"
+                "      rpa_vessel: branch1_seg0\n"
+                "      lpa_vessel: branch2_seg0\n"
+                "      interface: external_downstream\n"
+                "      weight: 2.0\n"
+                "      absolute_tolerance: 0.02\n"
+                "    require_improvement_over_baseline: false"
+            ),
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    assert cfg.calibration is not None
+    assert cfg.calibration.observation_qc.enforcement == "target_focused"
+    assert cfg.calibration.targets is not None
+    assert cfg.calibration.targets.mpa_pressure.vessel == "branch0_seg0"
+    assert cfg.calibration.targets.mpa_pressure.interface == "external_upstream"
+    assert cfg.calibration.targets.rpa_flow_split.rpa_vessel == "branch1_seg0"
+    assert cfg.calibration.targets.rpa_flow_split.lpa_vessel == "branch2_seg0"
+    assert cfg.calibration.targets.rpa_flow_split.weight == 2.0
+    assert cfg.calibration.targets.require_improvement_over_baseline is False
+    assert cfg.calibration.solver.replay_minimum_cycles == 4
+    assert cfg.calibration.solver.replay_maximum_cycles == 9
+    assert cfg.calibration.solver.required_consecutive_stable_pairs == 2
+
+
+def test_target_focused_requires_both_targets(tmp_path):
+    cfg_path = tmp_path / "missing-target.yml"
+    cfg_path.write_text(
+        _target_focused_calibration_yaml(tmp_path, targets="    mpa_pressure: {}"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="requires both mpa_pressure and rpa_flow_split"):
+        load_config(str(cfg_path))
+
+
+@pytest.mark.parametrize(
+    ("targets", "message"),
+    [
+        (
+            "    mpa_pressure:\n"
+            "      vessel: branch0_seg0\n"
+            "      interface: external_upstream\n"
+            "      weight: 1.0\n"
+            "      normalized_rms_tolerance: 0.05\n"
+            "      unexpected: true\n"
+            "    rpa_flow_split:\n"
+            "      rpa_vessel: branch1_seg0\n"
+            "      lpa_vessel: branch2_seg0\n"
+            "      interface: external_downstream",
+            "Unknown keys in calibration.targets.mpa_pressure",
+        ),
+        (
+            "    mpa_pressure:\n"
+            "      vessel: branch1_seg0\n"
+            "      interface: external_upstream\n"
+            "    rpa_flow_split:\n"
+            "      rpa_vessel: branch1_seg0\n"
+            "      lpa_vessel: branch2_seg0\n"
+            "      interface: external_downstream",
+            "distinct MPA, LPA, and RPA",
+        ),
+        (
+            "    mpa_pressure:\n"
+            "      vessel: branch0_seg0\n"
+            "      interface: invalid\n"
+            "    rpa_flow_split:\n"
+            "      rpa_vessel: branch1_seg0\n"
+            "      lpa_vessel: branch2_seg0\n"
+            "      interface: external_downstream",
+            "interface must be one of",
+        ),
+    ],
+)
+def test_target_focused_rejects_ambiguous_target_configuration(tmp_path, targets, message):
+    cfg_path = tmp_path / "invalid-target.yml"
+    cfg_path.write_text(
+        _target_focused_calibration_yaml(tmp_path, targets=targets),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=message):
+        load_config(str(cfg_path))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("weight", 0.0),
+        ("weight", "nan"),
+        ("normalized_rms_tolerance", -0.01),
+        ("absolute_tolerance", "inf"),
+    ],
+)
+def test_target_focused_rejects_non_positive_or_non_finite_scores(tmp_path, field, value):
+    mpa_weight = value if field in {"weight", "normalized_rms_tolerance"} else 1.0
+    mpa_tolerance = value if field == "normalized_rms_tolerance" else 0.05
+    rpa_weight = value if field == "weight" else 1.0
+    rpa_tolerance = value if field == "absolute_tolerance" else 0.02
+    cfg_path = tmp_path / "invalid-score.yml"
+    cfg_path.write_text(
+        _target_focused_calibration_yaml(
+            tmp_path,
+            targets=(
+                "    mpa_pressure:\n"
+                "      vessel: branch0_seg0\n"
+                "      interface: external_upstream\n"
+                f"      weight: {mpa_weight}\n"
+                f"      normalized_rms_tolerance: {mpa_tolerance}\n"
+                "    rpa_flow_split:\n"
+                "      rpa_vessel: branch1_seg0\n"
+                "      lpa_vessel: branch2_seg0\n"
+                "      interface: external_downstream\n"
+                f"      weight: {rpa_weight}\n"
+                f"      absolute_tolerance: {rpa_tolerance}"
+            ),
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must be finite and positive"):
+        load_config(str(cfg_path))
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("replay_minimum_cycles", 2, "replay_minimum_cycles must be an integer at least 3"),
+        ("replay_maximum_cycles", 2, "replay_maximum_cycles must be an integer at least 3"),
+        (
+            "replay_maximum_cycles",
+            3,
+            "replay_maximum_cycles must be at least replay_minimum_cycles",
+        ),
+        (
+            "required_consecutive_stable_pairs",
+            0,
+            "required_consecutive_stable_pairs must be an integer at least 1",
+        ),
+        (
+            "required_consecutive_stable_pairs",
+            10,
+            "required_consecutive_stable_pairs",
+        ),
+    ],
+)
+def test_calibration_rejects_inconsistent_replay_bounds(tmp_path, field, value, message):
+    cfg_path = tmp_path / "invalid-replay.yml"
+    cfg_path.write_text(
+        _target_focused_calibration_yaml(
+            tmp_path,
+            solver=f"    replay_minimum_cycles: 4\n    {field}: {value}",
+            targets=(
+                "    mpa_pressure:\n"
+                "      vessel: branch0_seg0\n"
+                "      interface: external_upstream\n"
+                "    rpa_flow_split:\n"
+                "      rpa_vessel: branch1_seg0\n"
+                "      lpa_vessel: branch2_seg0\n"
+                "      interface: external_downstream"
+            ),
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=message):
+        load_config(str(cfg_path))
 
 
 def test_calibration_requires_mapped_centerline_source_fields(tmp_path):
@@ -929,3 +1467,6 @@ def test_render_schema_includes_supported_workflows():
     assert "workflow: pipeline" in schema
     assert "construct_trees" in schema
     assert "postprocess:" in schema
+    assert "enforcement: strict_network" in schema
+    assert "normalized_rms_tolerance" in schema
+    assert "required_consecutive_stable_pairs" in schema

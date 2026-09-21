@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import tempfile
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Mapping
+import uuid
 
 import numpy as np
 import vtk
@@ -19,7 +21,14 @@ from .._pysvzerod import (
     last_calibration_provenance,
     simulate_pysvzerod,
 )
+from ..config import CalibrationDataSourceConfig
+from ..post_processing.centerline_timeseries import (
+    validate_centerline_timeseries_descriptor,
+)
 from ..config import CalibrationConfig
+from .replay import build_replay_payload as build_settled_replay_payload
+from .replay import validate_replay as validate_settled_replay
+from .targets import evaluate_pulmonary_targets
 
 _VESSEL_NAME_RE = re.compile(r"^branch(?P<branch_id>\d+)_seg(?P<seg_id>\d+)$")
 _PATH_TOLERANCE_ABS = 1e-3
@@ -62,12 +71,21 @@ class CalibrationAssembly:
     interface_sampling: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     excluded_blocks: Dict[str, str] = field(default_factory=dict)
     observation_qc: Dict[str, Any] = field(default_factory=dict)
+    target_observations: Dict[str, Any] = field(default_factory=dict)
+    target_units: Dict[str, str] = field(default_factory=dict)
+    target_phases: list[float] = field(default_factory=list)
+    # A machine-readable record of the exact observation source consumed by
+    # calibration.  It is intentionally empty for callers that construct an
+    # assembly directly in tests or for legacy mapped-centerline inputs.
+    data_source: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class ObservationTiming:
     timestamps_s: np.ndarray | None
     cycle_duration_s: float | None
+    pressure_units: str | None = None
+    flow_units: str | None = None
 
 
 def _read_polydata(path: str | Path) -> vtk.vtkPolyData:
@@ -239,8 +257,15 @@ def _load_timeseries_metadata(
             raise ValueError(
                 "timeseries metadata must declare flow quantity=volumetric_flow and units=cm^3/s"
             )
+        resolved_flow_units = str(flow_contract["units"])
     elif flow_contract.get("quantity") != "velocity" or not flow_contract.get("units"):
         raise ValueError("velocity timeseries metadata must declare quantity=velocity and units")
+    else:
+        # Branch flow is converted to volumetric flow below when the source
+        # arrays contain velocity.  Keep the target evaluator's unit contract
+        # explicit rather than relabeling the external metadata.
+        resolved_flow_units = "cm^3/s"
+    resolved_pressure_units = str(pressure_contract["units"])
 
     for series_name, series in (
         ("pressure", pressure_series),
@@ -253,7 +278,12 @@ def _load_timeseries_metadata(
                 )
 
     if len(timestamps_array) <= 1:
-        return ObservationTiming(timestamps_array, None)
+        return ObservationTiming(
+            timestamps_array,
+            None,
+            pressure_units=resolved_pressure_units,
+            flow_units=resolved_flow_units,
+        )
     cycle_duration = metadata.get("cycle_duration_s")
     if cycle_duration is None:
         raise ValueError(
@@ -275,7 +305,12 @@ def _load_timeseries_metadata(
         raise ValueError(
             "nonuniform timeseries timing is unsupported; recorded timestamps must be uniformly spaced"
         )
-    return ObservationTiming(timestamps_array, cycle_duration)
+    return ObservationTiming(
+        timestamps_array,
+        cycle_duration,
+        pressure_units=resolved_pressure_units,
+        flow_units=resolved_flow_units,
+    )
 
 
 def _require_finite_series(values: Iterable[float], *, label: str) -> list[float]:
@@ -283,6 +318,331 @@ def _require_finite_series(values: Iterable[float], *, label: str) -> list[float
     if any(not np.isfinite(value) for value in resolved):
         raise ValueError(f"{label} contains non-finite values")
     return resolved
+
+
+_LINEAGE_DIGEST_KEY_TERMS = (
+    "zerod",
+    "zero_d",
+    "input",
+    "model",
+    "seed",
+    "tuned",
+    "config",
+    "calibration",
+)
+_LINEAGE_CONTAINER_KEYS = {"lineage", "provenance", "source", "input"}
+_LINEAGE_DIGEST_KEYS = {
+    "digest",
+    "sha256",
+    "sha_256",
+    "hash",
+    "config_digest",
+    "model_digest",
+    "input_digest",
+    "source_digest",
+}
+_LINEAGE_PATH_KEYS = {"path", "file", "filename", "config_path", "model_path"}
+
+
+def _collect_descriptor_lineage(
+    value: Any,
+    *,
+    key_context: str = "",
+    lineage_context: bool = False,
+    digests: set[str] | None = None,
+    paths: list[str] | None = None,
+) -> tuple[set[str], list[str]]:
+    """Collect explicit tuned-0D lineage values without guessing filenames.
+
+    The producer descriptor is intentionally independently versioned.  Agent
+    integrations may therefore spell the input identity as e.g.
+    ``tuned_zerod_config_sha256`` or nest it below ``lineage``.  Only keys that
+    explicitly identify a 0D/input/config/model value are accepted; VTP and
+    sidecar digests are never treated as model lineage.
+    """
+
+    collected_digests = digests if digests is not None else set()
+    collected_paths = paths if paths is not None else []
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            normalized_key = str(key).lower().replace("-", "_")
+            context = f"{key_context}.{normalized_key}" if key_context else normalized_key
+            key_has_lineage_term = any(
+                term in normalized_key for term in _LINEAGE_DIGEST_KEY_TERMS
+            )
+            child_is_lineage = lineage_context or normalized_key in _LINEAGE_CONTAINER_KEYS
+            if isinstance(child, str):
+                is_digest_key = (
+                    normalized_key in _LINEAGE_DIGEST_KEYS
+                    or (
+                        key_has_lineage_term
+                        and ("digest" in normalized_key or "sha256" in normalized_key)
+                    )
+                )
+                is_path_key = (
+                    normalized_key in _LINEAGE_PATH_KEYS
+                    or (
+                        key_has_lineage_term
+                        and normalized_key.endswith("_path")
+                    )
+                )
+                if is_digest_key and (lineage_context or key_has_lineage_term):
+                    collected_digests.add(child)
+                if is_path_key and (lineage_context or key_has_lineage_term):
+                    collected_paths.append(child)
+            _collect_descriptor_lineage(
+                child,
+                key_context=context,
+                lineage_context=child_is_lineage,
+                digests=collected_digests,
+                paths=collected_paths,
+            )
+    return collected_digests, collected_paths
+
+
+def _config_lineage_digests(
+    zerod_config_path: str,
+    solver_config: Mapping[str, Any],
+) -> set[str]:
+    """Return accepted identities for the exact tuned 0D input.
+
+    Remote orchestration historically records either a byte digest or a
+    canonical JSON digest.  Supporting both preserves identity while still
+    rejecting a descriptor from a different model.
+    """
+
+    digests: set[str] = set()
+    raw_digest = _path_digest(zerod_config_path)
+    if raw_digest is not None:
+        digests.add(raw_digest)
+    try:
+        digests.add(_json_digest(solver_config))
+    except (TypeError, ValueError):
+        # Input normalization handles non-finite values and reports a useful
+        # error later; it must not make lineage validation silently succeed.
+        pass
+    return digests
+
+
+def _resolve_postprocess_suite_data_source(
+    *,
+    data_source: CalibrationDataSourceConfig,
+    zerod_config_path: str,
+    solver_config: Mapping[str, Any],
+) -> tuple[CalibrationDataSourceConfig, Dict[str, Any]]:
+    """Validate and resolve a suite descriptor into mapped-centerline inputs.
+
+    This is the only adapter between the versioned postprocess artifact and
+    the established numbered-array observation assembly.  It performs all
+    descriptor checks before the solver is invoked and never derives paths
+    from artifact filenames.
+    """
+
+    descriptor_value = data_source.postprocess_metadata_json
+    if descriptor_value in (None, ""):
+        raise ValueError(
+            "calibration.data_source.postprocess_metadata_json is required "
+            "when mode=postprocess_suite"
+        )
+    mixed_manual_fields = {
+        name: getattr(data_source, name, None)
+        for name in (
+            "mapped_centerline_result",
+            "metadata_json",
+            "centerline",
+            "area_array",
+        )
+        if getattr(data_source, name, None) not in (None, "")
+    }
+    if mixed_manual_fields:
+        raise ValueError(
+            "calibration.data_source.mode=postprocess_suite cannot be combined "
+            "with mapped-centerline fields: "
+            + ", ".join(sorted(mixed_manual_fields))
+        )
+    descriptor_path = Path(str(descriptor_value)).expanduser().resolve()
+    validated = validate_centerline_timeseries_descriptor(descriptor_path)
+    descriptor = validated["descriptor"]
+    artifact = validated["artifact"]
+
+    # Calibration consumes the pulmonary-suite envelope, not a standalone
+    # centerline artifact.  The suite publishes the centerline before its
+    # later diagnostics, so the terminal envelope is the source of truth for
+    # whether the complete 3D result is safe to calibrate.  Reject incomplete
+    # or internally inconsistent envelopes before observation assembly.
+    if descriptor.get("kind") != "pulmonary_threed_suite":
+        raise ValueError(
+            "postprocess suite descriptor kind must be 'pulmonary_threed_suite'"
+        )
+    if descriptor.get("status") != "completed":
+        raise ValueError(
+            "postprocess suite descriptor must have completed terminal status"
+        )
+    steps = descriptor.get("steps")
+    if not isinstance(steps, Mapping):
+        raise ValueError(
+            "postprocess suite descriptor must declare suite steps"
+        )
+    centerline_step = steps.get("centerline_timeseries")
+    if not isinstance(centerline_step, Mapping) or centerline_step.get("status") != "completed":
+        raise ValueError(
+            "postprocess suite descriptor centerline_timeseries step must be completed"
+        )
+    incomplete_steps = [
+        str(name)
+        for name, step in steps.items()
+        if not isinstance(step, Mapping) or step.get("status") != "completed"
+    ]
+    if incomplete_steps:
+        raise ValueError(
+            "postprocess suite descriptor contains incomplete steps: "
+            + ", ".join(incomplete_steps)
+        )
+
+    # The upstream validator checks array semantics, matching geometry, all
+    # file digests, and basic ordering.  Keep these identity checks at the
+    # calibration boundary as defense in depth so malformed descriptors fail
+    # before observation assembly or solver dispatch.
+    if artifact.get("kind") != "centerline_timeseries_last_cycle":
+        raise ValueError("postprocess suite descriptor has an invalid artifact kind")
+    if artifact.get("schema_version") != "1.0":
+        raise ValueError(
+            "unsupported postprocess suite descriptor artifact schema version: "
+            f"{artifact.get('schema_version')!r}"
+        )
+    try:
+        frame_count = int(artifact["frame_count"])
+        point_count = int(artifact["point_count"])
+        cell_count = int(artifact["cell_count"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "postprocess suite descriptor frame/geometry counts must be integers"
+        ) from exc
+    if frame_count < 1 or point_count < 1 or cell_count < 0:
+        raise ValueError(
+            "postprocess suite descriptor frame and point counts must be positive"
+        )
+    frame_indices = artifact.get("frame_indices")
+    timestamps = artifact.get("timestamps_s")
+    if frame_indices != list(range(frame_count)):
+        raise ValueError(
+            "postprocess suite descriptor frame_indices must be contiguous from zero"
+        )
+    if not isinstance(timestamps, list) or len(timestamps) != frame_count:
+        raise ValueError(
+            "postprocess suite descriptor timestamps_s must match frame_count"
+        )
+    try:
+        timestamp_values = [float(value) for value in timestamps]
+        cycle_duration = float(artifact["cycle_duration_s"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "postprocess suite descriptor timestamps and cycle duration must be numeric"
+        ) from exc
+    if (
+        not np.isfinite(timestamp_values).all()
+        or any(left >= right for left, right in zip(timestamp_values, timestamp_values[1:]))
+        or not np.isfinite(cycle_duration)
+        or cycle_duration <= 0.0
+        or timestamp_values[-1] - timestamp_values[0] >= cycle_duration
+    ):
+        raise ValueError(
+            "postprocess suite descriptor timing must be finite, strictly increasing, "
+            "and contained within a positive cycle duration"
+        )
+
+    data_contract = artifact.get("data_contract")
+    if not isinstance(data_contract, Mapping):
+        raise ValueError("postprocess suite descriptor data_contract is required")
+    pressure_contract = data_contract.get("pressure")
+    flow_contract = data_contract.get("flow")
+    if not isinstance(pressure_contract, Mapping) or pressure_contract.get("units") != "mmHg":
+        raise ValueError(
+            "postprocess suite descriptor pressure units must be mmHg"
+        )
+    if (
+        not isinstance(flow_contract, Mapping)
+        or flow_contract.get("quantity") != "volumetric_flow"
+        or flow_contract.get("units") != "cm^3/s"
+    ):
+        raise ValueError(
+            "postprocess suite descriptor flow must be volumetric_flow in cm^3/s"
+        )
+
+    lineage = descriptor.get("lineage")
+    if not isinstance(lineage, Mapping):
+        raise ValueError(
+            "postprocess suite descriptor must declare tuned full 0D input lineage"
+        )
+    lineage_digest = lineage.get("tuned_zerod_config_sha256")
+    lineage_path_value = lineage.get("tuned_zerod_config_path")
+    if not isinstance(lineage_digest, str) or not isinstance(lineage_path_value, str):
+        raise ValueError(
+            "postprocess suite descriptor lineage must declare "
+            "tuned_zerod_config_path and tuned_zerod_config_sha256"
+        )
+    expected_digest = _path_digest(zerod_config_path)
+    if expected_digest is None or lineage_digest != expected_digest:
+        raise ValueError(
+            "postprocess suite descriptor lineage does not match tuned full 0D input"
+        )
+    if Path(lineage_path_value).is_absolute():
+        raise ValueError(
+            "postprocess suite descriptor tuned full 0D config path must be relative"
+        )
+    descriptor_dir = descriptor_path.parent
+    expected_config = Path(zerod_config_path).expanduser().resolve()
+    lineage_path = (descriptor_dir / lineage_path_value).resolve()
+    if lineage_path != expected_config:
+        raise ValueError(
+            "postprocess suite descriptor lineage path does not match "
+            "the tuned full 0D input"
+        )
+
+    lineage_status = "matched"
+    descriptor_digest = _path_digest(descriptor_path)
+    if descriptor_digest is None:
+        raise ValueError("postprocess suite descriptor digest could not be computed")
+    provenance: Dict[str, Any] = {
+        "mode": "postprocess_suite",
+        "postprocess_metadata_json": str(descriptor_path),
+        "descriptor_sha256": descriptor_digest,
+        "schema_version": descriptor.get("schema_version"),
+        "artifact": {
+            "vtp": validated["vtp_path"],
+            "metadata": validated["metadata_path"],
+            "reference_centerline": validated["reference_centerline"],
+            "vtp_sha256": artifact.get("vtp_sha256"),
+            "metadata_sha256": artifact.get("metadata_sha256"),
+            "reference_centerline_sha256": artifact.get(
+                "reference_centerline_sha256"
+            ),
+        },
+        "lineage": {
+            "status": lineage_status,
+            "provided_digests": [lineage_digest],
+            "provided_paths": [lineage_path_value],
+        },
+    }
+    # Keep aliases useful to downstream report consumers without exposing the
+    # full descriptor JSON in every calibration report.
+    provenance["consumed_artifacts"] = dict(provenance["artifact"])
+
+    resolved = replace(
+        data_source,
+        mode="mapped_centerline",
+        postprocess_metadata_json=str(descriptor_path),
+        mapped_centerline_result=validated["vtp_path"],
+        metadata_json=validated["metadata_path"],
+        centerline=validated["reference_centerline"],
+        pressure_array="pressure",
+        flow_array="flow",
+        flow_observation_type="flow",
+        area_array=None,
+        branch_id_array="BranchId",
+        path_array="Path",
+    )
+    return resolved, provenance
 
 
 def _branch_series_from_mapped_centerline(
@@ -727,6 +1087,339 @@ def _reference_inflow_series(
     return np.asarray(reference, dtype=np.float64), None
 
 
+def _resolve_target_interface(
+    *,
+    vessel: str,
+    interface: Any,
+    vessel_topology: Dict[str, VesselTopology],
+    upstream_names: Dict[str, str],
+    downstream_names: Dict[str, str],
+    junction_names: set[str],
+    interface_sampling: Dict[str, Dict[str, Any]],
+) -> tuple[str | None, Dict[str, Any]]:
+    """Resolve one operator-selected target interface without anatomy inference.
+
+    ``upstream`` and ``downstream`` are endpoint selectors.  The explicit
+    ``external_*`` forms additionally require the selected endpoint to be an
+    external boundary.  ``internal`` is accepted only when exactly one of the
+    two endpoints is an internal junction; accepting both would make the
+    target location ambiguous.
+    """
+    detail: Dict[str, Any] = {
+        "vessel": vessel,
+        "requested_interface": interface,
+        "resolved_endpoint": None,
+        "sampling_key": None,
+        "interface_kind": None,
+        "error": None,
+    }
+    if vessel not in vessel_topology:
+        detail["error"] = "target vessel is not present in the solver topology"
+        return None, detail
+    if not isinstance(interface, str):
+        detail["error"] = "target interface must be a string"
+        return None, detail
+    interface = interface.strip().lower()
+    if interface not in {
+        "external_upstream",
+        "external_downstream",
+        "internal",
+        "upstream",
+        "downstream",
+    }:
+        detail["error"] = f"unsupported target interface '{interface}'"
+        return None, detail
+
+    endpoint: str | None
+    if interface in {"upstream", "external_upstream"}:
+        endpoint = "upstream"
+    elif interface in {"downstream", "external_downstream"}:
+        endpoint = "downstream"
+    else:
+        candidates = []
+        if upstream_names.get(vessel) in junction_names:
+            candidates.append("upstream")
+        if downstream_names.get(vessel) in junction_names:
+            candidates.append("downstream")
+        if len(candidates) != 1:
+            detail["error"] = (
+                "internal target interface is ambiguous; exactly one endpoint "
+                "must connect to a junction"
+            )
+            return None, detail
+        endpoint = candidates[0]
+
+    connection_name = (
+        upstream_names[vessel] if endpoint == "upstream" else downstream_names[vessel]
+    )
+    actual_kind = (
+        "internal" if connection_name in junction_names else f"external_{endpoint}"
+    )
+    if interface.startswith("external_") and interface != actual_kind:
+        detail["error"] = (
+            f"target interface '{interface}' does not match the topology's "
+            f"'{actual_kind}' endpoint"
+        )
+        return None, detail
+
+    sampling_key = f"{vessel}:{endpoint}"
+    sample = interface_sampling.get(sampling_key)
+    detail.update(
+        {
+            "resolved_endpoint": endpoint,
+            "sampling_key": sampling_key,
+            "interface_kind": actual_kind,
+        }
+    )
+    if sample is None:
+        detail["error"] = "target interface has no assembled observation sample"
+        return None, detail
+    detail["sampling"] = sample
+    return endpoint, detail
+
+
+def _target_interface_series(
+    *,
+    vessel: str,
+    endpoint: str,
+    upstream_names: Dict[str, str],
+    downstream_names: Dict[str, str],
+    y: Dict[str, list[float]],
+) -> tuple[np.ndarray, np.ndarray] | None:
+    if endpoint == "upstream":
+        connection = upstream_names.get(vessel)
+        flow_key = f"flow:{connection}:{vessel}"
+        pressure_key = f"pressure:{connection}:{vessel}"
+    elif endpoint == "downstream":
+        connection = downstream_names.get(vessel)
+        flow_key = f"flow:{vessel}:{connection}"
+        pressure_key = f"pressure:{vessel}:{connection}"
+    else:
+        return None
+    if flow_key not in y or pressure_key not in y:
+        return None
+    flow = np.asarray(y[flow_key], dtype=np.float64)
+    pressure = np.asarray(y[pressure_key], dtype=np.float64)
+    if not np.isfinite(flow).all() or not np.isfinite(pressure).all():
+        return None
+    return pressure, flow
+
+
+def _assemble_target_observations(
+    *,
+    targets: Any,
+    observation_qc: Dict[str, Any],
+    y: Dict[str, list[float]],
+    observation_timing: ObservationTiming,
+    upstream_names: Dict[str, str],
+    downstream_names: Dict[str, str],
+) -> tuple[Dict[str, Any], Dict[str, str], list[float]]:
+    """Capture explicitly configured pulmonary target traces from ``y``.
+
+    Target scoring consumes the same interface samples sent to the solver.  A
+    target-focused run therefore needs the resolved endpoint and the metadata
+    phase grid retained alongside the assembled payload; it must not recreate
+    target traces from vessel numbers or replay output later.
+    """
+    if targets is None:
+        return {}, {}, []
+    timing = observation_timing
+    if timing.timestamps_s is None or timing.cycle_duration_s is None:
+        # The QC-only unit fixtures intentionally omit the optional metadata
+        # sidecar.  Target scoring will fail clearly later if such a payload is
+        # used for a target-aware solver run, but observation assembly remains
+        # responsible for reporting topology and sampling diagnostics first.
+        return {}, {}, []
+    if not timing.pressure_units or not timing.flow_units:
+        raise ValueError(
+            "target-focused calibration requires explicit pressure and volumetric-flow units"
+        )
+    timestamps = np.asarray(timing.timestamps_s, dtype=np.float64)
+    phases = (timestamps - float(timestamps[0])) / float(timing.cycle_duration_s)
+    if not np.isfinite(phases).all() or phases.size < 2:
+        raise ValueError("target-focused calibration requires at least two finite phases")
+
+    target_interfaces = observation_qc.get("target_interfaces") or {}
+    mpa = targets.mpa_pressure
+    split = targets.rpa_flow_split
+    role_specs = {
+        "mpa_pressure": (str(mpa.vessel), "pressure"),
+        "rpa_flow": (str(split.rpa_vessel), "flow"),
+        "lpa_flow": (str(split.lpa_vessel), "flow"),
+    }
+    observations: Dict[str, Any] = {}
+    units: Dict[str, str] = {}
+    for role, (vessel, quantity) in role_specs.items():
+        detail = target_interfaces.get(role.split("_", 1)[0], {})
+        endpoint = detail.get("resolved_endpoint")
+        if endpoint not in {"upstream", "downstream"}:
+            raise ValueError(
+                f"target interface for {role} was not resolved against solver topology"
+            )
+        series = _target_interface_series(
+            vessel=vessel,
+            endpoint=endpoint,
+            upstream_names=upstream_names,
+            downstream_names=downstream_names,
+            y=y,
+        )
+        if series is None:
+            raise ValueError(f"target {role} does not have an assembled observation")
+        pressure, flow = series
+        if quantity == "pressure":
+            values = pressure
+            connection = upstream_names[vessel] if endpoint == "upstream" else downstream_names[vessel]
+            variable_name = (
+                f"pressure:{connection}:{vessel}"
+                if endpoint == "upstream"
+                else f"pressure:{vessel}:{connection}"
+            )
+        else:
+            values = flow
+            connection = upstream_names[vessel] if endpoint == "upstream" else downstream_names[vessel]
+            variable_name = (
+                f"flow:{connection}:{vessel}"
+                if endpoint == "upstream"
+                else f"flow:{vessel}:{connection}"
+            )
+        observations[role] = {
+            "phases": [float(value) for value in phases],
+            "values": [float(value) for value in values],
+            "units": timing.pressure_units if quantity == "pressure" else timing.flow_units,
+            "orientation": "away_from_mpa",
+            "vessel": vessel,
+            "interface": detail.get("requested_interface"),
+            "endpoint": endpoint,
+            "variable": variable_name,
+        }
+        units[role] = timing.pressure_units if quantity == "pressure" else timing.flow_units
+    return observations, units, [float(value) for value in phases]
+
+
+def _build_target_observation_qc(
+    *,
+    targets: Any,
+    vessel_topology: Dict[str, VesselTopology],
+    upstream_names: Dict[str, str],
+    downstream_names: Dict[str, str],
+    junction_names: set[str],
+    interface_sampling: Dict[str, Dict[str, Any]],
+    y: Dict[str, list[float]],
+    minimum_usable_samples: int,
+) -> tuple[Dict[str, bool], Dict[str, Any], Dict[str, Dict[str, Any]]]:
+    """Validate explicit pulmonary target locations and required observations.
+
+    This deliberately stops at target-data qualification.  It does not
+    calculate MPA waveform error or an RPA split; those belong to the pure
+    target evaluator.  The split denominator check is retained here because a
+    zero denominator makes the target data contract invalid before calibration.
+    """
+    target_checks = {
+        "target_topology": False,
+        "target_sampling_resolution": False,
+        "target_split_denominator": False,
+    }
+    target_metrics: Dict[str, Any] = {}
+    target_interfaces: Dict[str, Dict[str, Any]] = {}
+    try:
+        mpa = targets.mpa_pressure
+        split = targets.rpa_flow_split
+        roles = {
+            "mpa": str(mpa.vessel),
+            "rpa": str(split.rpa_vessel),
+            "lpa": str(split.lpa_vessel),
+        }
+        target_metrics["roles"] = roles
+    except (AttributeError, TypeError) as exc:
+        target_metrics["error"] = f"target configuration is incomplete: {exc}"
+        return target_checks, target_metrics, target_interfaces
+
+    target_checks["target_topology"] = len(set(roles.values())) == 3
+    if not target_checks["target_topology"]:
+        target_metrics["topology_error"] = (
+            "MPA, LPA, and RPA target vessel roles must be distinct"
+        )
+
+    for role, vessel, interface in (
+        ("mpa", roles["mpa"], getattr(mpa, "interface", None)),
+        ("rpa", roles["rpa"], getattr(split, "interface", None)),
+        ("lpa", roles["lpa"], getattr(split, "interface", None)),
+    ):
+        endpoint, detail = _resolve_target_interface(
+            vessel=vessel,
+            interface=interface,
+            vessel_topology=vessel_topology,
+            upstream_names=upstream_names,
+            downstream_names=downstream_names,
+            junction_names=junction_names,
+            interface_sampling=interface_sampling,
+        )
+        target_interfaces[role] = detail
+        detail["role"] = role
+        if endpoint is None:
+            target_checks["target_topology"] = False
+
+    qualified = True
+    for detail in target_interfaces.values():
+        sample = detail.get("sampling")
+        if not isinstance(sample, dict):
+            qualified = False
+            continue
+        sample_count = int(sample.get("usable_sample_count", 0))
+        detail["target_sample_count"] = sample_count
+        detail["target_sample_qualified"] = bool(
+            not sample.get("excluded_from_calibration", False)
+            and sample_count >= minimum_usable_samples
+            and sample.get("quality_status")
+            in {"qualified_interior", "interpolated_internal"}
+        )
+        if not detail["target_sample_qualified"]:
+            qualified = False
+    target_checks["target_sampling_resolution"] = qualified
+
+    split_series: Dict[str, tuple[np.ndarray, np.ndarray] | None] = {}
+    for role in ("rpa", "lpa"):
+        detail = target_interfaces.get(role, {})
+        endpoint = detail.get("resolved_endpoint")
+        split_series[role] = (
+            _target_interface_series(
+                vessel=roles[role],
+                endpoint=endpoint,
+                upstream_names=upstream_names,
+                downstream_names=downstream_names,
+                y=y,
+            )
+            if endpoint is not None
+            else None
+        )
+    if all(series is not None for series in split_series.values()):
+        _rpa_pressure, rpa_flow = split_series["rpa"]  # type: ignore[misc]
+        _lpa_pressure, lpa_flow = split_series["lpa"]  # type: ignore[misc]
+        rpa_mean = float(np.mean(rpa_flow))
+        lpa_mean = float(np.mean(lpa_flow))
+        denominator = rpa_mean + lpa_mean
+        denominator_valid = bool(
+            np.isfinite(denominator) and abs(denominator) > _FLOW_EPS
+        )
+        target_metrics["rpa_flow_split_denominator"] = {
+            "rpa_mean_flow": rpa_mean,
+            "lpa_mean_flow": lpa_mean,
+            "value": denominator,
+            "nonzero": denominator_valid,
+        }
+        target_checks["target_split_denominator"] = denominator_valid
+    else:
+        target_metrics["rpa_flow_split_denominator"] = {
+            "rpa_mean_flow": None,
+            "lpa_mean_flow": None,
+            "value": None,
+            "nonzero": False,
+            "error": "RPA/LPA target flow samples are unavailable",
+        }
+
+    return target_checks, target_metrics, target_interfaces
+
+
 def _build_observation_qc(
     *,
     solver_config: Dict[str, Any],
@@ -740,6 +1433,7 @@ def _build_observation_qc(
     interface_sampling: Dict[str, Dict[str, Any]],
     excluded_blocks: Dict[str, str],
     qc_config: Any,
+    targets: Any = None,
 ) -> Dict[str, Any]:
     vessel_continuity: Dict[str, float] = {}
     pressure_directions: Dict[str, Dict[str, Any]] = {}
@@ -951,10 +1645,79 @@ def _build_observation_qc(
         ),
         "sampling_resolution": not resolution_failures,
     }
+    # The target-focused profile intentionally separates data/target-contract
+    # checks from diagnostics about the complete mapped network.  The latter
+    # remain in the report so an operator can inspect the observations, but a
+    # poor non-target continuity or pressure-direction metric must not prevent
+    # the unchanged calibrator from receiving the complete state.
+    target_checks: Dict[str, bool] = {}
+    target_metrics: Dict[str, Any] = {}
+    target_interfaces: Dict[str, Dict[str, Any]] = {}
+    if targets is not None:
+        target_checks, target_metrics, target_interfaces = _build_target_observation_qc(
+            targets=targets,
+            vessel_topology=vessel_topology,
+            upstream_names=upstream_names,
+            downstream_names=downstream_names,
+            junction_names={
+                str(junction["junction_name"])
+                for junction in solver_config.get("junctions", []) or []
+            },
+            interface_sampling=interface_sampling,
+            y=y,
+            minimum_usable_samples=int(qc_config.minimum_usable_samples),
+        )
+
+    all_checks = {**checks, **target_checks}
+    enforcement = str(getattr(qc_config, "enforcement", "strict_network")).lower()
+    if enforcement == "target_focused" and targets is None:
+        target_checks = {"target_configuration": False}
+        target_metrics = {
+            "error": (
+                "target_focused observation QC requires explicit MPA, LPA, and "
+                "RPA target roles"
+            )
+        }
+        all_checks = {**checks, **target_checks}
+    if enforcement == "target_focused":
+        # Root inflow agreement is a fatal input/data-contract check in the
+        # target-focused profile.  The remaining existing checks describe
+        # whole-network consistency and therefore remain advisory.
+        fatal_checks = {
+            "root_waveform_agreement": checks["root_waveform_agreement"],
+            **target_checks,
+        }
+        advisory_checks = {
+            name: passed
+            for name, passed in checks.items()
+            if name != "root_waveform_agreement"
+        }
+    else:
+        # strict_network retains the historical all-checks gate.  When target
+        # roles are present, their contract checks are included in that gate.
+        fatal_checks = dict(all_checks)
+        advisory_checks = {}
+
+    severity = {
+        name: "fatal" if name in fatal_checks else "advisory"
+        for name in all_checks
+    }
     return {
-        "status": "pass" if all(checks.values()) else "fail",
-        "checks": checks,
+        "status": "pass" if all(fatal_checks.values()) else "fail",
+        "enforcement": enforcement,
+        "checks": all_checks,
+        "severity": severity,
+        "fatal_checks": fatal_checks,
+        "advisory_checks": advisory_checks,
+        "failed_fatal_checks": sorted(
+            name for name, passed in fatal_checks.items() if not passed
+        ),
+        "failed_advisory_checks": sorted(
+            name for name, passed in advisory_checks.items() if not passed
+        ),
         "metrics": metrics,
+        "target_metrics": target_metrics,
+        "target_interfaces": target_interfaces,
         "thresholds": thresholds,
         "selected_interfaces": selected_interfaces,
         "exclusions": {
@@ -1042,16 +1805,37 @@ def assemble_calibration_payload(
         ),
     )
 
+    source_config = calibration.data_source
+    if source_config.mode == "postprocess_suite":
+        source_config, data_source_provenance = _resolve_postprocess_suite_data_source(
+            data_source=source_config,
+            zerod_config_path=zerod_config_path,
+            solver_config=solver_config,
+        )
+    elif source_config.mode == "mapped_centerline":
+        data_source_provenance = {
+            "mode": "mapped_centerline",
+            "mapped_centerline_result": source_config.mapped_centerline_result,
+            "metadata_json": source_config.metadata_json,
+            "centerline": source_config.centerline,
+            "metadata_sha256": _path_digest(source_config.metadata_json),
+        }
+    else:
+        raise ValueError(
+            "calibration.data_source.mode must be one of "
+            "mapped_centerline|postprocess_suite"
+        )
+
     branch_series_by_id, observation_count, observation_timing = _branch_series_from_mapped_centerline(
-        centerline_path=calibration.data_source.centerline or "",
-        mapped_centerline_path=calibration.data_source.mapped_centerline_result or "",
-        metadata_json=calibration.data_source.metadata_json,
-        pressure_array=calibration.data_source.pressure_array,
-        flow_array=calibration.data_source.flow_array,
-        flow_observation_type=calibration.data_source.flow_observation_type,
-        area_array=calibration.data_source.area_array,
-        branch_id_array=calibration.data_source.branch_id_array,
-        path_array=calibration.data_source.path_array,
+        centerline_path=source_config.centerline or "",
+        mapped_centerline_path=source_config.mapped_centerline_result or "",
+        metadata_json=source_config.metadata_json,
+        pressure_array=source_config.pressure_array,
+        flow_array=source_config.flow_array,
+        flow_observation_type=source_config.flow_observation_type,
+        area_array=source_config.area_array,
+        branch_id_array=source_config.branch_id_array,
+        path_array=source_config.path_array,
     )
     vessel_topology, upstream_names, downstream_names = _network_topology(solver_config)
     vessel_parameters = _selected_parameters(
@@ -1155,6 +1939,15 @@ def assemble_calibration_payload(
         interface_sampling=interface_sampling,
         excluded_blocks=excluded_blocks,
         qc_config=calibration.observation_qc,
+        targets=calibration.targets,
+    )
+    target_observations, target_units, target_phases = _assemble_target_observations(
+        targets=calibration.targets,
+        observation_qc=observation_qc,
+        y=y,
+        observation_timing=observation_timing,
+        upstream_names=upstream_names,
+        downstream_names=downstream_names,
     )
 
     payload = json.loads(json.dumps(solver_config))
@@ -1182,6 +1975,10 @@ def assemble_calibration_payload(
         interface_sampling=interface_sampling,
         excluded_blocks=excluded_blocks,
         observation_qc=observation_qc,
+        target_observations=target_observations,
+        target_units=target_units,
+        target_phases=target_phases,
+        data_source=data_source_provenance,
     )
 
 
@@ -2139,26 +2936,282 @@ def _write_json_atomically(path: Path, payload: Dict[str, Any], *, indent: int) 
                 pass
 
 
+def _json_digest(value: Any) -> str:
+    """Hash a JSON-compatible value using one canonical representation."""
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _path_digest(path: str | Path | None) -> str | None:
+    if path is None:
+        return None
+    try:
+        digest = hashlib.sha256()
+        with Path(path).open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def _run_identity(
+    *,
+    run_id: str,
+    normalized_input: Dict[str, Any],
+    assembly: CalibrationAssembly,
+    calibration: CalibrationConfig | None,
+) -> Dict[str, Any]:
+    metadata_path = (
+        assembly.data_source.get("metadata_json")
+        if assembly.data_source
+        else (calibration.data_source.metadata_json if calibration is not None else None)
+    )
+    observations = {
+        "y": assembly.solver_payload.get("y"),
+        "dy": assembly.solver_payload.get("dy"),
+        "targets": assembly.target_observations,
+        "target_phases": assembly.target_phases,
+        "target_units": assembly.target_units,
+        "metadata_digest": _path_digest(metadata_path),
+        "data_source": assembly.data_source,
+    }
+    digests = {
+        "normalized_input": _json_digest(normalized_input),
+        "observations": _json_digest(observations),
+        "data_source": _json_digest(assembly.data_source),
+        "observation_metadata": observations["metadata_digest"],
+        "solver_module": None,
+        "output": None,
+    }
+    return {
+        "run_id": run_id,
+        "digests": digests,
+        # Keep flat aliases for consumers that do not want to know the report
+        # envelope shape.  All reports receive the exact same mapping.
+        "normalized_input_digest": digests["normalized_input"],
+        "input_digest": digests["normalized_input"],
+        "observation_digest": digests["observations"],
+        "observation_metadata_digest": digests["observation_metadata"],
+        "metadata_digest": digests["observation_metadata"],
+        "data_source": assembly.data_source,
+        "data_source_digest": digests["data_source"],
+        "solver_module_digest": digests["solver_module"],
+        "solver_digest": digests["solver_module"],
+        "solver_module_sha256": digests["solver_module"],
+        "output_digest": digests["output"],
+        "output_config_digest": digests["output"],
+    }
+
+
+def _set_solver_digest(run_identity: Dict[str, Any], provenance: Any) -> None:
+    if not isinstance(provenance, dict):
+        return
+    digest = provenance.get("module_sha256")
+    if digest is None:
+        return
+    digests = run_identity["digests"]
+    digests["solver_module"] = str(digest)
+    run_identity["solver_module_digest"] = str(digest)
+    run_identity["solver_digest"] = str(digest)
+    run_identity["solver_module_sha256"] = str(digest)
+
+
+def _replay_target_observations(
+    replay_summary: Dict[str, Any],
+    targets: Any,
+    target_observations_3d: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Map an accepted replay cycle to explicit MPA/LPA/RPA target series."""
+    accepted = replay_summary.get("accepted_final_cycle")
+    if not isinstance(accepted, dict):
+        raise ValueError("settled replay did not provide an accepted final cycle")
+    series = accepted.get("series")
+    if not isinstance(series, list):
+        raise ValueError("settled replay accepted cycle has no series")
+    start = float(accepted.get("start_time"))
+    end = float(accepted.get("end_time"))
+    duration = end - start
+    if not np.isfinite(duration) or duration <= 0.0:
+        raise ValueError("settled replay accepted cycle has invalid period")
+    def pick(vessel: str, endpoint: str, kind: str) -> Dict[str, Any]:
+        expected_column = f"{kind}_{'in' if endpoint == 'upstream' else 'out'}"
+        role = (
+            "mpa_pressure"
+            if kind == "pressure"
+            else ("rpa_flow" if vessel == str(targets.rpa_flow_split.rpa_vessel) else "lpa_flow")
+        )
+        expected_variable = (target_observations_3d or {}).get(role, {}).get("variable")
+        candidates = [
+            item
+            for item in series
+            if str(item.get("kind")) == kind
+            and (
+                str(item.get("name")) == vessel
+                or str(item.get("name")) == str(expected_variable)
+                or str(item.get("name", "")).endswith(f":{vessel}")
+            )
+        ]
+        selected = next(
+            (item for item in candidates if str(item.get("column")) == expected_column),
+            None,
+        )
+        if selected is None and len(candidates) == 1:
+            selected = candidates[0]
+        if not isinstance(selected, dict):
+            raise ValueError(
+                f"settled replay has no {kind} series for target vessel {vessel!r} "
+                f"at {endpoint} endpoint"
+            )
+        times = np.asarray(selected.get("times"), dtype=np.float64)
+        values = np.asarray(selected.get("values"), dtype=np.float64)
+        if times.ndim != 1 or values.ndim != 1 or times.size != values.size:
+            raise ValueError(f"settled replay target series for {vessel!r} is malformed")
+        local_phases = (times - start) / duration
+        return {
+            "phases": [float(value) for value in local_phases],
+            "values": [float(value) for value in values],
+            # pysvzerod reports pressure in its native CGS unit (dyn/cm^2).
+            # Keep that unit on the replay series so target scoring performs
+            # the explicit conversion alongside the 3D pressure contract.
+            "units": "dyn/cm^2" if kind == "pressure" else "cm^3/s",
+            "orientation": "away_from_mpa",
+        }
+
+    mpa = targets.mpa_pressure
+    split = targets.rpa_flow_split
+    # Endpoint resolution is retained in the 3D target records.  For replay,
+    # topology has already been validated and the configured interface remains
+    # the authoritative selector.
+    def endpoint(value: Any, role: str) -> str:
+        interface = str(value).lower()
+        if interface in {"upstream", "external_upstream"}:
+            return "upstream"
+        if interface in {"downstream", "external_downstream"}:
+            return "downstream"
+        resolved = (target_observations_3d or {}).get(role, {}).get("endpoint")
+        if resolved in {"upstream", "downstream"}:
+            return str(resolved)
+        raise ValueError(
+            "settled replay target extraction requires an explicit upstream or downstream interface"
+        )
+
+    return {
+        "mpa_pressure": pick(str(mpa.vessel), endpoint(mpa.interface, "mpa_pressure"), "pressure"),
+        "rpa_flow": pick(str(split.rpa_vessel), endpoint(split.interface, "rpa_flow"), "flow"),
+        "lpa_flow": pick(str(split.lpa_vessel), endpoint(split.interface, "lpa_flow"), "flow"),
+    }
+
+
+def _evaluate_target_replay(
+    *,
+    replay_summary: Dict[str, Any],
+    assembly: CalibrationAssembly,
+    calibration: CalibrationConfig,
+) -> Dict[str, Any]:
+    if calibration.targets is None:
+        return {"status": "skipped", "reason": "calibration.targets is not configured"}
+    if replay_summary.get("status") != "pass":
+        return {
+            "status": "fail",
+            "reason": "settled replay did not pass",
+            "replay_status": replay_summary.get("status"),
+        }
+    candidate = _replay_target_observations(
+        replay_summary,
+        calibration.targets,
+        assembly.target_observations,
+    )
+    evaluation = evaluate_pulmonary_targets(
+        assembly.target_observations,
+        candidate,
+        calibration.targets,
+    )
+    return {"status": "pass" if evaluation.passed else "fail", **evaluation.as_dict()}
+
+
+def _run_settled_replay(
+    *,
+    config: Dict[str, Any],
+    payload: Dict[str, Any],
+    calibration: CalibrationConfig,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Simulate one validation copy and return its settled replay report."""
+    solver = calibration.solver
+    replay_payload, validation_settings = build_settled_replay_payload(
+        config,
+        minimum_cycles=solver.replay_minimum_cycles,
+        maximum_cycles=solver.replay_maximum_cycles,
+        required_consecutive_stable_pairs=solver.required_consecutive_stable_pairs,
+    )
+    replay_settings = _replay_settings(calibration)
+    combined_settings = {**validation_settings, **replay_settings}
+    try:
+        simulated = simulate_pysvzerod(replay_payload)
+    except Exception as exc:
+        return (
+            {
+                "status": "fail",
+                "checks": {
+                    "finite_pressure_and_flow": False,
+                    "cycle_boundaries": False,
+                    "cycle_count": False,
+                    "bounded_pressure": False,
+                    "bounded_flow": False,
+                    "cycle_stability": False,
+                },
+                "validation_settings": combined_settings,
+                "error": f"simulate failed: {type(exc).__name__}: {exc}",
+            },
+            validation_settings,
+        )
+    replay_summary = validate_settled_replay(
+        simulated,
+        payload=payload,
+        validation_settings=combined_settings,
+    )
+    replay_summary["replay_settings"] = replay_settings
+    return replay_summary, validation_settings
+
+
 def calibrate_0d_from_mapped_centerline(
     *,
     zerod_config_path: str,
     output_config_path: str,
     calibration: CalibrationConfig,
 ) -> Dict[str, Any]:
+    run_id = uuid.uuid4().hex
     assembly = assemble_calibration_payload(
         zerod_config_path=zerod_config_path,
         calibration=calibration,
     )
     output_path = Path(output_config_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    qc_path = output_path.parent / "calibration_observation_qc.json"
-    qc_path.write_text(
-        json.dumps(assembly.observation_qc, indent=2, sort_keys=True, allow_nan=False)
-        + "\n",
-        encoding="utf-8",
+    try:
+        normalized_input, _input_report = _normalize_calibrated_config(
+            assembly.solver_payload
+        )
+    except (TypeError, ValueError):
+        # QC failures must still leave a useful run identity even when the
+        # mocked or incomplete payload cannot be normalized for simulation.
+        normalized_input = assembly.solver_payload
+    run_identity = _run_identity(
+        run_id=run_id,
+        normalized_input=normalized_input,
+        assembly=assembly,
+        calibration=calibration,
     )
+    assembly.observation_qc.update(run_identity)
+    qc_path = output_path.parent / "calibration_observation_qc.json"
+    _write_json_atomically(qc_path, assembly.observation_qc, indent=2)
     if assembly.observation_qc.get("status") != "pass":
-        failed_checks = [
+        failed_checks = assembly.observation_qc.get("failed_fatal_checks") or [
             name
             for name, passed in assembly.observation_qc.get("checks", {}).items()
             if not passed
@@ -2167,6 +3220,59 @@ def calibrate_0d_from_mapped_centerline(
             "calibration observation QC failed before solver dispatch: "
             f"{', '.join(failed_checks)}; report: {qc_path}"
         )
+    if calibration.targets is not None and not assembly.target_observations:
+        target_path = output_path.parent / "calibration_targets.json"
+        _write_json_atomically(
+            target_path,
+            {
+                **run_identity,
+                "status": "fail",
+                "reason": (
+                    "target-focused calibration requires periodic target observations "
+                    "with explicit metadata units and cycle timing"
+                ),
+            },
+            indent=2,
+        )
+        raise ValueError(
+            "target-focused calibration requires periodic target observations; "
+            f"report: {target_path}"
+        )
+
+    # Baseline evaluation is deliberately simulation-only.  It never feeds
+    # values back into either calibrator invocation and an unstable baseline
+    # simply disables the relative policy for the candidate.
+    baseline_summary: Dict[str, Any] = {
+        "status": "skipped",
+        "reason": "calibration.targets is not configured",
+    }
+    baseline_config: Dict[str, Any] | None = None
+    if calibration.targets is not None:
+        try:
+            baseline_config, _baseline_normalization = _normalize_calibrated_config(
+                assembly.solver_payload
+            )
+            baseline_replay, _baseline_validation = _run_settled_replay(
+                config=baseline_config,
+                payload=assembly.solver_payload,
+                calibration=calibration,
+            )
+            baseline_summary = {
+                "status": baseline_replay.get("status", "fail"),
+                "replay": baseline_replay,
+            }
+            baseline_summary["targets"] = _evaluate_target_replay(
+                replay_summary=baseline_replay,
+                assembly=assembly,
+                calibration=calibration,
+            )
+        except (TypeError, ValueError) as exc:
+            baseline_summary["status"] = "fail"
+            baseline_summary["reason"] = f"baseline evaluation failed: {exc}"
+            baseline_summary["targets"] = {
+                "status": "fail",
+                "reason": f"baseline evaluation failed: {exc}",
+            }
 
     absolute_tolerance, relative_tolerance = _validate_confirmation_tolerances(calibration)
     clear_calibration_provenance()
@@ -2186,6 +3292,7 @@ def calibrate_0d_from_mapped_centerline(
         pass_name="first",
     )
     first_provenance = last_calibration_provenance()
+    _set_solver_digest(run_identity, first_provenance)
 
     confirmation_payload = _replace_parameter_values(
         assembly.solver_payload,
@@ -2207,6 +3314,7 @@ def calibrate_0d_from_mapped_centerline(
         pass_name="confirmation",
     )
     confirmation_provenance = last_calibration_provenance()
+    _set_solver_digest(run_identity, confirmation_provenance)
 
     deltas = _confirmation_parameter_deltas(
         initial_payload=assembly.solver_payload,
@@ -2263,6 +3371,7 @@ def calibrate_0d_from_mapped_centerline(
     )
 
     confirmation_summary = {
+        **run_identity,
         "status": "converged",
         "converged": True,
         "termination_reason": "confirmed_fixed_point",
@@ -2310,62 +3419,56 @@ def calibrate_0d_from_mapped_centerline(
     confirmation_path = output_path.parent / "calibration_confirmation.json"
     _write_json_atomically(confirmation_path, confirmation_summary, indent=2)
 
-    replay_settings = _replay_settings(calibration)
     published, output_normalization = _normalize_calibrated_config(
         confirmation_calibrated
     )
     _validate_publishable_solver_config(published)
-    replay_payload, validation_settings = _build_replay_payload(published)
     replay_path = output_path.parent / "calibration_replay.json"
-
-    try:
-        replay_result = simulate_pysvzerod(replay_payload)
-    except Exception as exc:
-        replay_summary = {
-            "status": "fail",
-            "checks": {
-                "finite_pressure_and_flow": False,
-                "bounded_pressure": False,
-                "bounded_flow": False,
-                "cycle_stability": False,
-            },
-            "validation_settings": validation_settings,
-            "replay_settings": replay_settings,
-            "error": (
-                "simulate failed: "
-                f"{type(exc).__name__}: {exc}"
-            ),
-        }
-        _write_json_atomically(replay_path, replay_summary, indent=2)
-        raise ValueError(
-            "calibrated solver configuration replay failed: "
-            f"{type(exc).__name__}: {exc}"
-        ) from exc
-
-    try:
-        replay_summary = _evaluate_replay(
-            result=replay_result,
-            payload=assembly.solver_payload,
-            replay_settings=replay_settings,
-            validation_settings=validation_settings,
-        )
-    except ValueError as exc:
-        replay_summary = {
-            "status": "fail",
-            "checks": {
-                "finite_pressure_and_flow": False,
-                "bounded_pressure": False,
-                "bounded_flow": False,
-                "cycle_stability": False,
-            },
-            "validation_settings": validation_settings,
-            "replay_settings": replay_settings,
-            "error": str(exc),
-        }
-        _write_json_atomically(replay_path, replay_summary, indent=2)
-        raise ValueError(f"calibrated solver replay validation failed: {exc}") from exc
-
-    replay_summary["replay_settings"] = replay_settings
+    if calibration.targets is not None:
+        try:
+            replay_summary, _validation_settings = _run_settled_replay(
+                config=published,
+                payload=assembly.solver_payload,
+                calibration=calibration,
+            )
+        except (TypeError, ValueError) as exc:
+            replay_summary = {
+                "status": "fail",
+                "checks": {
+                    "finite_pressure_and_flow": False,
+                    "cycle_boundaries": False,
+                    "cycle_count": False,
+                    "bounded_pressure": False,
+                    "bounded_flow": False,
+                    "cycle_stability": False,
+                },
+                "error": f"replay setup failed: {exc}",
+            }
+    else:
+        replay_settings = _replay_settings(calibration)
+        replay_payload, validation_settings = _build_replay_payload(published)
+        try:
+            replay_result = simulate_pysvzerod(replay_payload)
+            replay_summary = _evaluate_replay(
+                result=replay_result,
+                payload=assembly.solver_payload,
+                replay_settings=replay_settings,
+                validation_settings=validation_settings,
+            )
+        except ValueError as exc:
+            replay_summary = {
+                "status": "fail",
+                "checks": {
+                    "finite_pressure_and_flow": False,
+                    "bounded_pressure": False,
+                    "bounded_flow": False,
+                    "cycle_stability": False,
+                },
+                "validation_settings": validation_settings,
+                "replay_settings": replay_settings,
+                "error": str(exc),
+            }
+    replay_summary = {**run_identity, **replay_summary}
     _write_json_atomically(replay_path, replay_summary, indent=2)
     if replay_summary["status"] != "pass":
         failed_checks = [
@@ -2373,17 +3476,156 @@ def calibrate_0d_from_mapped_centerline(
             for name, passed in replay_summary.get("checks", {}).items()
             if not passed
         ]
+        if calibration.targets is not None:
+            _write_json_atomically(
+                output_path.parent / "calibration_targets.json",
+                {
+                    **run_identity,
+                    "status": "fail",
+                    "reason": "settled replay failed before target evaluation",
+                    "baseline": baseline_summary,
+                },
+                indent=2,
+            )
         raise ValueError(
             "calibrated solver replay stability checks failed: "
             + ", ".join(failed_checks)
             + f"; report: {replay_path}"
         )
 
+    target_summary: Dict[str, Any] = {
+        **run_identity,
+        "status": "skipped",
+        "reason": "calibration.targets is not configured",
+        "baseline": baseline_summary,
+    }
+    if calibration.targets is not None:
+        target_summary["configuration"] = {
+            "mpa_pressure": {
+                "vessel": calibration.targets.mpa_pressure.vessel,
+                "interface": calibration.targets.mpa_pressure.interface,
+                "weight": float(calibration.targets.mpa_pressure.weight),
+                "normalized_rms_tolerance": float(
+                    calibration.targets.mpa_pressure.normalized_rms_tolerance
+                ),
+            },
+            "rpa_flow_split": {
+                "rpa_vessel": calibration.targets.rpa_flow_split.rpa_vessel,
+                "lpa_vessel": calibration.targets.rpa_flow_split.lpa_vessel,
+                "interface": calibration.targets.rpa_flow_split.interface,
+                "weight": float(calibration.targets.rpa_flow_split.weight),
+                "absolute_tolerance": float(
+                    calibration.targets.rpa_flow_split.absolute_tolerance
+                ),
+            },
+            "require_improvement_over_baseline": bool(
+                calibration.targets.require_improvement_over_baseline
+            ),
+        }
+        target_summary["observations_3d"] = assembly.target_observations
+        target_summary["target_phases"] = assembly.target_phases
+        target_summary["target_units"] = assembly.target_units
+        try:
+            candidate_targets = _evaluate_target_replay(
+                replay_summary=replay_summary,
+                assembly=assembly,
+                calibration=calibration,
+            )
+        except (TypeError, ValueError) as exc:
+            candidate_targets = {
+                "status": "fail",
+                "reason": f"target evaluation failed: {exc}",
+            }
+        baseline_targets = baseline_summary.get("targets") or {}
+        baseline_replay_passed = baseline_summary.get("replay", {}).get("status") == "pass"
+        baseline_score = baseline_targets.get("composite_score")
+        candidate_score = candidate_targets.get("composite_score")
+        require_improvement = bool(
+            calibration.targets.require_improvement_over_baseline
+        )
+        if not baseline_replay_passed or not isinstance(baseline_score, (int, float)):
+            baseline_policy = {
+                "required": require_improvement,
+                "status": "not_applied",
+                "reason": "baseline replay/target score was unavailable",
+                "passed": True,
+            }
+        elif not require_improvement:
+            baseline_policy = {
+                "required": False,
+                "status": "disabled",
+                "baseline_composite_score": float(baseline_score),
+                "candidate_composite_score": candidate_score,
+                "passed": True,
+            }
+        else:
+            policy_passed = isinstance(candidate_score, (int, float)) and bool(
+                float(candidate_score) <= float(baseline_score)
+            )
+            baseline_policy = {
+                "required": True,
+                "status": "pass" if policy_passed else "fail",
+                "baseline_composite_score": float(baseline_score),
+                "candidate_composite_score": candidate_score,
+                "passed": policy_passed,
+            }
+        target_summary.update(
+            {
+                "status": "pass"
+                if candidate_targets.get("status") == "pass"
+                and baseline_policy["passed"]
+                else "fail",
+                "baseline": baseline_summary,
+                "candidate": candidate_targets,
+                "baseline_policy": baseline_policy,
+                "component_gates": candidate_targets.get("gate_results", {}),
+            }
+        )
+        target_path = output_path.parent / "calibration_targets.json"
+        _write_json_atomically(target_path, target_summary, indent=2)
+        if target_summary["status"] != "pass":
+            raise ValueError(
+                "calibrated pulmonary target gates failed; report: "
+                f"{target_path}"
+            )
+
+    # A target report is part of the stable artifact set even for legacy
+    # configurations where target scoring is intentionally disabled.
+    target_path = output_path.parent / "calibration_targets.json"
+    baseline_summary.update(run_identity)
+    if isinstance(baseline_summary.get("replay"), dict):
+        baseline_summary["replay"].update(run_identity)
+    if isinstance(baseline_summary.get("targets"), dict):
+        baseline_summary["targets"].update(run_identity)
+    if not target_path.exists():
+        _write_json_atomically(target_path, target_summary, indent=2)
+
+    run_identity["digests"]["output"] = _json_digest(published)
+    run_identity["output_digest"] = run_identity["digests"]["output"]
+    run_identity["output_config_digest"] = run_identity["digests"]["output"]
+    baseline_summary.update(run_identity)
+    if isinstance(baseline_summary.get("replay"), dict):
+        baseline_summary["replay"].update(run_identity)
+    if isinstance(baseline_summary.get("targets"), dict):
+        baseline_summary["targets"].update(run_identity)
+    assembly.observation_qc.update(run_identity)
+    confirmation_summary.update(run_identity)
+    replay_summary.update(run_identity)
+    _write_json_atomically(qc_path, assembly.observation_qc, indent=2)
+    _write_json_atomically(confirmation_path, confirmation_summary, indent=2)
+    _write_json_atomically(replay_path, replay_summary, indent=2)
+    target_summary.update(run_identity)
+    target_summary["baseline"] = baseline_summary
+    _write_json_atomically(target_path, target_summary, indent=2)
+
     summary = {
+        **run_identity,
         "status": "ok",
         "output_config": str(output_path),
         "observation_count": assembly.observation_count,
         "variable_count": assembly.variable_count,
+        "data_source": assembly.data_source,
+        "data_source_provenance": assembly.data_source,
         "solver_provenance": confirmation_provenance,
         "input_normalization": assembly.input_normalization,
         "observation_qc": assembly.observation_qc,
@@ -2392,6 +3634,8 @@ def calibrate_0d_from_mapped_centerline(
         "calibrated_output_normalization": output_normalization,
         "calibration_confirmation": confirmation_summary,
         "replay_stability": replay_summary,
+        "calibration_targets": target_summary,
+        "target_quality": target_summary,
     }
     summary_path = output_path.parent / "calibration_summary.json"
     _write_json_atomically(summary_path, summary, indent=2)
@@ -2401,10 +3645,13 @@ def calibrate_0d_from_mapped_centerline(
     _write_json_atomically(output_path, published, indent=4)
 
     return {
+        **run_identity,
         "status": "ok",
         "output_config": str(output_path),
         "observation_count": assembly.observation_count,
         "variable_count": assembly.variable_count,
+        "data_source": assembly.data_source,
+        "data_source_provenance": assembly.data_source,
         "input_normalization": assembly.input_normalization,
         "interface_sampling": assembly.interface_sampling,
         "excluded_blocks": assembly.excluded_blocks,
@@ -2415,6 +3662,9 @@ def calibrate_0d_from_mapped_centerline(
         "calibrated_output_normalization": output_normalization,
         "replay_stability": replay_summary,
         "calibration_replay_report": str(replay_path),
+        "calibration_targets": target_summary,
+        "calibration_targets_report": str(target_path),
+        "target_quality": target_summary,
         "calibration_summary": summary,
         "calibration_summary_report": str(summary_path),
         "solver_provenance": confirmation_provenance,

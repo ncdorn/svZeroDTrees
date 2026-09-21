@@ -9,7 +9,9 @@ __all__ = [
     "compute_centerline_mpa_metrics",
     "compute_flow_split_metrics",
     "evaluate_iteration_gate",
+    "generate_full_pa_learned_seed",
     "generate_reduced_pa_from_iteration",
+    "LearnedSeedResult",
     "prepare_reduced_rri_seed_from_learned",
     "run_impedance_tuning_for_iteration",
     "run_rcr_tuning_for_iteration",
@@ -35,9 +37,17 @@ _LAZY_EXPORTS = {
         "svzerodtrees.tuning.iteration",
         "evaluate_iteration_gate",
     ),
+    "generate_full_pa_learned_seed": (
+        "svzerodtrees.tuning.learned_seed",
+        "generate_full_pa_learned_seed",
+    ),
     "generate_reduced_pa_from_iteration": (
         "svzerodtrees.tuning.iteration",
         "generate_reduced_pa_from_iteration",
+    ),
+    "LearnedSeedResult": (
+        "svzerodtrees.tuning.learned_seed",
+        "LearnedSeedResult",
     ),
     "prepare_reduced_rri_seed_from_learned": (
         "svzerodtrees.tuning.learned_seed",

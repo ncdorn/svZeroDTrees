@@ -337,9 +337,12 @@ def test_construct_impedance_trees_disables_steady_initial_for_full_pa(monkeypat
                     }
                 ),
             }
+            self.inflows = {"INFLOW": self.bcs["INFLOW"]}
             self.tree_params = {}
 
     class FakeStructuredTree:
+        plot_calls = []
+
         def __init__(self, name, time, simparams=None, compliance_model=None):
             self.name = name
             self.time = time
@@ -352,6 +355,9 @@ def test_construct_impedance_trees_disables_steady_initial_for_full_pa(monkeypat
 
         def compute_olufsen_impedance(self, n_procs=1, tsteps=None):
             self.Z_t = [42.0] * int(tsteps)
+
+        def plot_stiffness(self, path):
+            self.plot_calls.append(path)
 
         def create_impedance_bc(self, name, _outlet_id, Pd=0.0, verbose=True):
             return BoundaryCondition.from_config(
@@ -390,14 +396,16 @@ def test_construct_impedance_trees_disables_steady_initial_for_full_pa(monkeypat
         rpa_params=params,
         d_min=0.01,
         n_procs=1,
-        use_mean=False,
+        use_mean=True,
         allow_ordered_outlet_mapping=True,
+        plot_stiffness=False,
     )
 
     assert config.simparams.steady_initial is False
     assert config.bcs["LPA_OUT"].type == "IMPEDANCE"
     assert config.bcs["RPA_OUT"].type == "IMPEDANCE"
     assert len(config.bcs["LPA_OUT"].Z) == 2
+    assert FakeStructuredTree.plot_calls == []
 
 
 def test_construct_impedance_trees_uses_per_outlet_diameters_when_not_mean(monkeypatch):

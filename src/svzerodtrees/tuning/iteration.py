@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 import json
 import os
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -14,6 +15,7 @@ import pandas as pd
 from svzerodtrees.io import ConfigHandler
 from svzerodtrees._pysvzerod import simulate_pysvzerod
 from svzerodtrees.io.inflow_handler import mean_flow_from_path
+from svzerodtrees.numerics import trapezoid
 from svzerodtrees.io.blocks.boundary_condition import (
     _resolve_flow_mean_config,
     validate_boundary_condition_configs,
@@ -59,6 +61,13 @@ DEFAULT_IMPEDANCE_TUNING_CONFIG: dict[str, Any] = {
     "allow_ordered_outlet_mapping": False,
     "tuning_model": "rri",
 }
+
+# ``outlet_mapping_mode`` and ``outlet_mapping`` are full_pa controls.  They
+# are resolved below rather than added to the shared defaults so that an RRI
+# configuration retains its historical shape and behavior.
+FULL_PA_DEFAULT_USE_MEAN = False
+FULL_PA_DEFAULT_DIAMETER_SCALE = 1.0
+FULL_PA_DEFAULT_OUTLET_MAPPING_MODE = "auto"
 DEFAULT_RCR_TUNING_CONFIG: dict[str, Any] = {
     "solver": "Nelder-Mead",
     "n_procs": 24,
@@ -71,6 +80,7 @@ OPTIMIZED_RCR_PARAMS_FILENAME = "optimized_rcr_params.csv"
 OPTIMIZATION_LOG_FILENAME = "stree_impedance_optimization.log"
 PA_CONFIG_SNAPSHOT_FILENAME = "pa_config_tuning_snapshot.json"
 TUNED_ZEROD_CONFIG_FILENAME = "svzerod_3d_coupling_tuned.json"
+OUTLET_CAP_MAPPING_FILENAME = "outlet_cap_mapping.json"
 MMHG_TO_BARYE = 1333.2
 
 
@@ -79,6 +89,7 @@ def _clear_tuning_outputs(output_dir: Path, *, tuned_config_name: str) -> None:
         OPTIMIZED_PARAMS_FILENAME,
         OPTIMIZATION_LOG_FILENAME,
         PA_CONFIG_SNAPSHOT_FILENAME,
+        OUTLET_CAP_MAPPING_FILENAME,
         tuned_config_name,
     ):
         path = output_dir / filename
@@ -237,6 +248,80 @@ def _assert_full_pa_snapshot_preserves_topology(
             )
 
 
+def _validate_full_pa_preflight(
+    *,
+    seed_payload: Mapping[str, Any],
+    config_handler: ConfigHandler,
+    mesh_surfaces: Path,
+    convert_to_cm: bool,
+    outlet_mapping_mode: str,
+    outlet_mapping: Any,
+) -> Any:
+    """Validate full-PA topology and freeze its cap-to-BC mapping.
+
+    Full-PA tuning is intentionally never upgraded from a reduced seed.  The
+    serialized seed remains the source of truth for outlet coverage; the
+    mapping resolver then validates that every one of those outlets has one
+    pulmonary cap and returns the immutable mapping consumed by later stages.
+    """
+
+    seed_outlets = _outlet_bc_names(seed_payload)
+    if len(seed_outlets) <= 2:
+        raise ValueError(
+            "tuning_model='full_pa' requires a full seed with more than two "
+            "non-inflow outlet boundary conditions"
+        )
+
+    vessels = seed_payload.get("vessels")
+    if not isinstance(vessels, list) or not vessels:
+        raise ValueError(
+            "tuning_model='full_pa' requires a full seed config with vessels"
+        )
+
+    attached_outlets: list[str] = []
+    for vessel in vessels:
+        if not isinstance(vessel, Mapping):
+            continue
+        vessel_bcs = vessel.get("boundary_conditions")
+        if not isinstance(vessel_bcs, Mapping):
+            continue
+        outlet = vessel_bcs.get("outlet")
+        if outlet is not None and str(outlet) in seed_outlets:
+            attached_outlets.append(str(outlet))
+    if attached_outlets:
+        attached_set = set(attached_outlets)
+        if len(attached_outlets) != len(attached_set) or attached_set != seed_outlets:
+            missing = sorted(seed_outlets - attached_set)
+            duplicate = sorted(
+                {name for name in attached_outlets if attached_outlets.count(name) > 1}
+            )
+            details = []
+            if missing:
+                details.append("missing=" + ", ".join(missing))
+            if duplicate:
+                details.append("duplicate=" + ", ".join(duplicate))
+            raise ValueError(
+                "full_pa seed topology does not provide exactly one vessel outlet "
+                + ("(" + "; ".join(details) + ")" if details else "")
+            )
+
+    resolved_mapping = validate_cap_to_bc_mapping(
+        config_handler,
+        str(mesh_surfaces),
+        convert_to_cm=convert_to_cm,
+        is_pulmonary=True,
+        outlet_mapping_mode=outlet_mapping_mode,
+        outlet_mapping=outlet_mapping,
+    )
+    records = getattr(resolved_mapping, "records", None)
+    if records is not None and len(records) != len(seed_outlets):
+        raise ValueError(
+            "full_pa cap mapping does not cover every seed outlet: "
+            f"mapping={len(records)}, outlets={len(seed_outlets)}"
+        )
+    return resolved_mapping
+
+
 @contextmanager
 def _pushd(path: Path):
     previous = Path.cwd()
@@ -250,20 +335,99 @@ def _pushd(path: Path):
 def _resolve_impedance_config(
     config: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
+    if config is not None and not isinstance(config, Mapping):
+        raise ValueError("impedance tuning config must be a mapping")
     if config is None or config.get("tune_space") is None:
         raise ValueError(
             "impedance tuning config must include explicit tune_space with keys "
             "free, fixed, and tied"
         )
 
+    raw_config = config
+    tuning_model = str(raw_config.get("tuning_model", "rri") or "rri").strip().lower()
+    if tuning_model not in {"rri", "full_pa"}:
+        raise ValueError("impedance tuning tuning_model must be one of rri|full_pa")
+
+    # The legacy flag is intentionally detected before merging defaults.  A
+    # default ``False`` value is not a user-supplied migration input, while an
+    # explicitly supplied flag alongside a new mode is ambiguous and must be
+    # rejected rather than silently choosing one contract.
+    legacy_mapping_supplied = "allow_ordered_outlet_mapping" in raw_config
+    new_mapping_mode_supplied = (
+        "outlet_mapping_mode" in raw_config
+        and raw_config.get("outlet_mapping_mode") is not None
+    )
+    if tuning_model == "full_pa" and legacy_mapping_supplied and new_mapping_mode_supplied:
+        raise ValueError(
+            "allow_ordered_outlet_mapping cannot be combined with "
+            "outlet_mapping_mode; remove the deprecated legacy setting"
+        )
+
     merged = dict(DEFAULT_IMPEDANCE_TUNING_CONFIG)
-    for key, value in config.items():
+    for key, value in raw_config.items():
         if value is None:
             continue
         if key == "tune_space":
             merged["tune_space"] = value
         else:
             merged[key] = value
+
+    if tuning_model == "full_pa":
+        # Full PA is deliberately opt-in.  Its defaults are applied per field
+        # so explicit compatibility controls (use_mean=True or
+        # diameter_scale=0) remain valid and inspectable.
+        if raw_config.get("use_mean") is None or "use_mean" not in raw_config:
+            merged["use_mean"] = FULL_PA_DEFAULT_USE_MEAN
+        if raw_config.get("diameter_scale") is None or "diameter_scale" not in raw_config:
+            merged["diameter_scale"] = FULL_PA_DEFAULT_DIAMETER_SCALE
+
+        if legacy_mapping_supplied:
+            legacy_value = bool(raw_config.get("allow_ordered_outlet_mapping"))
+            if legacy_value:
+                warnings.warn(
+                    "allow_ordered_outlet_mapping is deprecated; use "
+                    "outlet_mapping_mode='serialized_cap_order' instead",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                merged["outlet_mapping_mode"] = "serialized_cap_order"
+            else:
+                merged["outlet_mapping_mode"] = FULL_PA_DEFAULT_OUTLET_MAPPING_MODE
+            # Do not carry the deprecated key into the resolved full_pa
+            # contract.  This also prevents a second resolution pass from
+            # treating an already migrated config as contradictory.
+            merged.pop("allow_ordered_outlet_mapping", None)
+        else:
+            requested_mode = raw_config.get("outlet_mapping_mode")
+            if requested_mode is None:
+                requested_mode = FULL_PA_DEFAULT_OUTLET_MAPPING_MODE
+            merged["outlet_mapping_mode"] = str(requested_mode).strip().lower()
+
+        merged["outlet_mapping"] = raw_config.get("outlet_mapping")
+        if merged["outlet_mapping_mode"] not in {
+            "auto",
+            "metadata",
+            "cap_name",
+            "serialized_cap_order",
+            "explicit",
+        }:
+            raise ValueError(
+                "impedance tuning outlet_mapping_mode must be one of "
+                "auto|metadata|cap_name|serialized_cap_order|explicit"
+            )
+        if merged["outlet_mapping"] is not None and merged["outlet_mapping_mode"] != "explicit":
+            raise ValueError(
+                "impedance tuning outlet_mapping requires "
+                "outlet_mapping_mode='explicit'"
+            )
+        if merged["outlet_mapping_mode"] == "explicit" and merged["outlet_mapping"] is None:
+            raise ValueError(
+                "impedance tuning outlet_mapping_mode='explicit' requires outlet_mapping"
+            )
+    elif "outlet_mapping_mode" in raw_config or "outlet_mapping" in raw_config:
+        raise ValueError(
+            "outlet_mapping_mode and outlet_mapping are supported only for tuning_model='full_pa'"
+        )
 
     solver = str(merged.get("solver", "")).strip()
     if not solver:
@@ -282,7 +446,12 @@ def _resolve_impedance_config(
     merged["diameter_scale"] = float(merged["diameter_scale"])
     if merged["diameter_std_cap"] is not None:
         merged["diameter_std_cap"] = float(merged["diameter_std_cap"])
-    merged["allow_ordered_outlet_mapping"] = bool(merged["allow_ordered_outlet_mapping"])
+    if merged["tuning_model"] == "rri":
+        merged["allow_ordered_outlet_mapping"] = bool(
+            merged.get("allow_ordered_outlet_mapping", False)
+        )
+    else:
+        merged.pop("allow_ordered_outlet_mapping", None)
     merged["tuning_model"] = str(merged["tuning_model"]).strip().lower()
     merged["tune_space"] = _normalize_tune_space_config(merged.get("tune_space"))
 
@@ -300,7 +469,16 @@ def _resolve_impedance_config(
         raise ValueError("impedance tuning diameter_std_cap must be >= 0")
     if merged["tuning_model"] not in {"rri", "full_pa"}:
         raise ValueError("impedance tuning tuning_model must be one of rri|full_pa")
-    if merged["diameter_scale"] > 0.0:
+    # Preserve the historical RRI coupling.  For full_pa, only an omitted
+    # use_mean may be forced off by a positive diameter spread; an explicit
+    # use_mean=True is an intentional compatibility override.
+    if merged["tuning_model"] == "rri" and merged["diameter_scale"] > 0.0:
+        merged["use_mean"] = False
+    elif (
+        merged["tuning_model"] == "full_pa"
+        and merged["diameter_scale"] > 0.0
+        and ("use_mean" not in raw_config or raw_config.get("use_mean") is None)
+    ):
         merged["use_mean"] = False
 
     return merged
@@ -629,6 +807,134 @@ def _validate_zerod_artifact(
         )
 
 
+def _mapping_artifact_payload(
+    resolved_mapping: Any,
+    *,
+    lpa_params: TreeParameters,
+    rpa_params: TreeParameters,
+    use_mean: bool,
+    specify_diameter: bool,
+    diameter_scale: float,
+    diameter_std_cap: float | None,
+    convert_to_cm: bool,
+) -> dict[str, Any]:
+    """Build deterministic mapping provenance for a completed full_pa run.
+
+    The resolver's records contain the source geometry and cap-derived side.
+    Add the exact construction diameter here so the artifact can be replayed
+    independently of the mutable ``ConfigHandler`` used for final output.
+    """
+
+    to_dict = getattr(resolved_mapping, "to_dict", None)
+    if not callable(to_dict):
+        # This compatibility path is useful for direct callers/tests that
+        # still return the legacy mapping dict.  Full-PA iteration itself
+        # receives a ResolvedOutletCapMapping from preflight.
+        if not isinstance(resolved_mapping, Mapping):
+            raise TypeError("full_pa resolved mapping must be serializable")
+        pairs = list(resolved_mapping.items())
+        return {
+            "version": 1,
+            "strategy": "legacy",
+            "cap_order": [str(cap) for cap, _ in pairs],
+            "bc_order": [str(bc) for _, bc in pairs],
+            "pairs": [
+                {
+                    "cap_path": str(cap),
+                    "cap_stem": Path(str(cap)).stem,
+                    "bc_name": str(bc),
+                }
+                for cap, bc in pairs
+            ],
+            "provenance": {
+                "compatibility_mapping": True,
+                "convert_to_cm": bool(convert_to_cm),
+            },
+            "tree_options": {
+                "use_mean": bool(use_mean),
+                "specify_diameter": bool(specify_diameter),
+                "diameter_scale": float(diameter_scale),
+                "diameter_std_cap": diameter_std_cap,
+                "generation_mode": "shared_by_side" if use_mean else "per_outlet",
+            },
+        }
+
+    payload = to_dict()
+    if not isinstance(payload, dict) or not isinstance(payload.get("pairs"), list):
+        raise ValueError("resolved mapping serialization must contain an ordered pairs list")
+
+    records = payload["pairs"]
+    side_params = {"lpa": lpa_params, "rpa": rpa_params}
+    side_diameters: dict[str, list[float]] = {"lpa": [], "rpa": []}
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("resolved mapping serialization contains an invalid pair record")
+        side = str(record.get("side", "")).strip().lower()
+        raw_diameter = float(record["raw_diameter"])
+        if side not in side_diameters:
+            raise ValueError(f"resolved mapping contains invalid cap side {side!r}")
+        if not np.isfinite(raw_diameter) or raw_diameter <= 0.0:
+            raise ValueError("resolved mapping contains an invalid raw cap diameter")
+        side_diameters[side].append(raw_diameter)
+
+    scaled_diameters: dict[str, float] = {}
+    for side, values in side_diameters.items():
+        if not values:
+            raise ValueError(f"resolved mapping contains no {side.upper()} cap records")
+        mean_diameter = float(np.mean(values))
+        std_diameter = float(np.std(values))
+        if use_mean:
+            parameter_diameter = getattr(side_params[side], "diameter", None)
+            scaled_diameter = (
+                float(parameter_diameter)
+                if specify_diameter and parameter_diameter is not None
+                else mean_diameter
+            )
+            for record in records:
+                if str(record.get("side", "")).strip().lower() == side:
+                    scaled_diameters[str(record["cap_path"])] = scaled_diameter
+            continue
+        for record in records:
+            if str(record.get("side", "")).strip().lower() != side:
+                continue
+            cap_diameter = float(record["raw_diameter"])
+            if diameter_std_cap is not None and std_diameter > 0.0:
+                max_deviation = float(diameter_std_cap) * std_diameter
+                cap_diameter = mean_diameter + float(
+                    np.clip(
+                        cap_diameter - mean_diameter,
+                        -max_deviation,
+                        max_deviation,
+                    )
+                )
+            scaled_diameters[str(record["cap_path"])] = mean_diameter + float(
+                diameter_scale
+            ) * (cap_diameter - mean_diameter)
+
+    for record in records:
+        record["scaled_diameter"] = scaled_diameters[str(record["cap_path"])]
+
+    provenance = dict(payload.get("provenance") or {})
+    provenance.update(
+        {
+            "convert_to_cm": bool(convert_to_cm),
+            "diameter_scale": float(diameter_scale),
+            "diameter_std_cap": diameter_std_cap,
+            "use_mean": bool(use_mean),
+            "specify_diameter": bool(specify_diameter),
+        }
+    )
+    payload["provenance"] = provenance
+    payload["tree_options"] = {
+        "use_mean": bool(use_mean),
+        "specify_diameter": bool(specify_diameter),
+        "diameter_scale": float(diameter_scale),
+        "diameter_std_cap": diameter_std_cap,
+        "generation_mode": "shared_by_side" if use_mean else "per_outlet",
+    }
+    return payload
+
+
 def run_impedance_tuning_for_iteration(
     *,
     iteration_dir: str | Path,
@@ -674,14 +980,21 @@ def run_impedance_tuning_for_iteration(
 
     opt_log = output_dir / OPTIMIZATION_LOG_FILENAME
     with _pushd(output_dir):
+        seed_payload = _load_json_payload(seed_config_path)
         reduced_config = ConfigHandler.from_json(str(seed_config_path), is_pulmonary=True)
-        if tuning["tuning_model"] == "full_pa" and getattr(reduced_config, "bcs", None) is not None:
-            validate_cap_to_bc_mapping(
-                reduced_config,
-                str(mesh_surfaces_path),
+        resolved_mapping = None
+        if tuning["tuning_model"] == "full_pa":
+            if getattr(reduced_config, "bcs", None) is None:
+                raise ValueError(
+                    "tuning_model='full_pa' requires a config handler with outlet BCs"
+                )
+            resolved_mapping = _validate_full_pa_preflight(
+                seed_payload=seed_payload,
+                config_handler=reduced_config,
+                mesh_surfaces=mesh_surfaces_path,
                 convert_to_cm=bool(tuning["convert_to_cm"]),
-                is_pulmonary=True,
-                allow_ordered_outlet_mapping=bool(tuning["allow_ordered_outlet_mapping"]),
+                outlet_mapping_mode=str(tuning["outlet_mapping_mode"]),
+                outlet_mapping=tuning["outlet_mapping"],
             )
         tuner = ImpedanceTuner(
             reduced_config,
@@ -702,7 +1015,10 @@ def run_impedance_tuning_for_iteration(
             specify_diameter=bool(tuning["specify_diameter"]),
             diameter_scale=float(tuning["diameter_scale"]),
             diameter_std_cap=tuning["diameter_std_cap"],
-            allow_ordered_outlet_mapping=bool(tuning["allow_ordered_outlet_mapping"]),
+            allow_ordered_outlet_mapping=bool(
+                tuning.get("allow_ordered_outlet_mapping", False)
+            ),
+            resolved_mapping=resolved_mapping,
         )
         prev_csv = str(previous_optimized_params) if previous_optimized_params is not None else None
         if prev_csv is not None and os.path.isfile(prev_csv):
@@ -752,8 +1068,14 @@ def run_impedance_tuning_for_iteration(
         "specify_diameter": bool(tuning["specify_diameter"]),
         "diameter_scale": float(tuning["diameter_scale"]),
         "diameter_std_cap": tuning["diameter_std_cap"],
-        "allow_ordered_outlet_mapping": bool(tuning["allow_ordered_outlet_mapping"]),
+        "allow_ordered_outlet_mapping": bool(
+            tuning.get("allow_ordered_outlet_mapping", False)
+        ),
     }
+    if resolved_mapping is not None:
+        # Full-PA construction consumes the preflight result instead of
+        # reconstructing a mapping from mutable ConfigHandler state.
+        construct_kwargs["resolved_mapping"] = resolved_mapping
     try:
         construct_impedance_trees(
             tuned_config,
@@ -785,6 +1107,24 @@ def run_impedance_tuning_for_iteration(
     tuned_config.to_json(str(tuned_zerod_config))
     _validate_impedance_artifact(tuned_zerod_config)
 
+    outlet_cap_mapping = None
+    if resolved_mapping is not None:
+        outlet_cap_mapping = output_dir / OUTLET_CAP_MAPPING_FILENAME
+        mapping_payload = _mapping_artifact_payload(
+            resolved_mapping,
+            lpa_params=lpa_params,
+            rpa_params=rpa_params,
+            use_mean=bool(tuning["use_mean"]),
+            specify_diameter=bool(tuning["specify_diameter"]),
+            diameter_scale=float(tuning["diameter_scale"]),
+            diameter_std_cap=tuning["diameter_std_cap"],
+            convert_to_cm=bool(tuning["convert_to_cm"]),
+        )
+        outlet_cap_mapping.write_text(
+            json.dumps(mapping_payload, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
     return {
         "optimized_params_csv": str(optimized_csv),
         "stree_optimization_log": str(opt_log),
@@ -792,6 +1132,9 @@ def run_impedance_tuning_for_iteration(
         "tuned_zerod_config": str(tuned_zerod_config),
         "tuning_model": tuning["tuning_model"],
         "impedance_config": tuning,
+        "outlet_cap_mapping": (
+            str(outlet_cap_mapping) if outlet_cap_mapping is not None else None
+        ),
     }
 
 
@@ -827,6 +1170,7 @@ def run_rcr_tuning_for_iteration(
     for filename in (
         OPTIMIZED_RCR_PARAMS_FILENAME,
         PA_CONFIG_SNAPSHOT_FILENAME,
+        OUTLET_CAP_MAPPING_FILENAME,
         tuned_config_name,
     ):
         path = output_dir / filename
@@ -997,7 +1341,7 @@ def _slice_rows_last_cycle(rows: pd.DataFrame, cycle_duration: float | None) -> 
 
 def _integral_or_mean(values: np.ndarray, time: np.ndarray | None) -> float:
     if time is not None and time.size == values.size and time.size >= 2:
-        return float(np.trapz(values, time))
+        return float(trapezoid(values, time))
     return float(np.mean(values))
 
 

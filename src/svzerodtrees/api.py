@@ -3,8 +3,18 @@ from typing import Any, Dict
 import os
 import pandas as pd
 
-from .config import BaseConfig, PathsConfig, BCSConfig, TreesConfig, AdaptationConfig, PipelineConfig, ThreeDConfig
-from .config import load_config
+from .config import (
+    AdaptationConfig,
+    BCSConfig,
+    BaseConfig,
+    ImpedanceConfig,
+    PathsConfig,
+    PipelineConfig,
+    ThreeDConfig,
+    TreesConfig,
+    impedance_config_to_mapping,
+    load_config,
+)
 from .simulation.simulation import Simulation
 from .io import ConfigHandler
 from .tune_bcs.assign_bcs import assign_rcr_bcs, construct_impedance_trees
@@ -17,6 +27,8 @@ from .adaptation.benchmark import run_adaptation_benchmark_study
 from .adaptation.workflow import run_structured_tree_adaptation
 from .calibration import calibrate_0d_from_mapped_centerline
 from .simulation.simulation_directory import SimulationDirectory
+from .tuning.iteration import run_impedance_tuning_for_iteration
+from .tuning import generate_full_pa_learned_seed
 import pickle
 
 
@@ -70,6 +82,85 @@ def _resolve_rcr_params(paths: PathsConfig, bcs: BCSConfig) -> list[float]:
     )
 
 
+def _impedance_config_mapping(bcs: BCSConfig) -> Dict[str, Any]:
+    """Return one serializable impedance contract for workflow dispatch."""
+
+    impedance = getattr(bcs, "impedance", None)
+    if isinstance(impedance, ImpedanceConfig) or impedance is not None:
+        return impedance_config_to_mapping(impedance)
+
+    # SimpleNamespace-based callers and older programmatic clients may still
+    # construct BCSConfig-shaped objects without the new nested block.  Keep
+    # that boundary compatible while making the service input explicit.
+    tune_space = getattr(bcs, "tune_space", None)
+    payload: Dict[str, Any] = {
+        "tuning_model": "rri",
+        "compliance_model": getattr(bcs, "compliance_model", "constant"),
+        "tune_space": None,
+    }
+    if tune_space is not None:
+        payload["tune_space"] = {
+            "free": [
+                {
+                    "name": item.name,
+                    "init": float(item.init),
+                    "lb": float(item.lb),
+                    "ub": float(item.ub),
+                    "to_native": getattr(item.to_native, "__name__", "identity"),
+                    "from_native": getattr(item.from_native, "__name__", "identity"),
+                }
+                for item in tune_space.free
+            ],
+            "fixed": [
+                {"name": item.name, "value": float(item.value)}
+                for item in tune_space.fixed
+            ],
+            "tied": [
+                {
+                    "name": item.name,
+                    "other": item.other,
+                    "fn": getattr(item.fn, "__name__", "identity"),
+                }
+                for item in tune_space.tied
+            ],
+        }
+    return payload
+
+
+def _resolve_seed_source(config: BaseConfig) -> tuple[Any, Dict[str, Any]]:
+    """Resolve the static or generated seed used by a workflow.
+
+    Static seed paths retain their existing value.  Learned generation is
+    deliberately resolved once at the API boundary so a failed generation
+    cannot reach Simulation or the full-PA tuning service.
+    """
+
+    paths = config.paths
+    seed_generation = getattr(config, "seed_generation", None)
+    if seed_generation is None:
+        return paths.zerod_config, {}
+
+    generated = generate_full_pa_learned_seed(seed_generation)
+    seed_path = getattr(generated, "seed_path", None)
+    if seed_path is None:
+        seed_path = getattr(generated, "generated_seed_path", None)
+    metadata_path = getattr(generated, "metadata_path", None)
+    if isinstance(generated, dict):
+        seed_path = generated.get("seed_path", generated.get("generated_seed_path"))
+        metadata_path = generated.get("metadata_path")
+    if seed_path is None or metadata_path is None:
+        raise TypeError(
+            "generate_full_pa_learned_seed must return seed_path and metadata_path"
+        )
+
+    # Simulation and the tuning service have historically received strings.
+    # Do not resolve, basename, or otherwise rewrite the generated path.
+    return os.fspath(seed_path), {
+        "learned_seed": os.fspath(seed_path),
+        "learned_seed_metadata": os.fspath(metadata_path),
+    }
+
+
 class PipelineWorkflow:
     def __init__(self, config: BaseConfig):
         self.config = config
@@ -81,6 +172,7 @@ class PipelineWorkflow:
     def run(self) -> Dict[str, Any]:
         cfg = self.config
         paths = cfg.paths
+        seed_config, seed_provenance = _resolve_seed_source(cfg)
         bcs = cfg.bcs
         adaptation = cfg.adaptation
         pipeline = cfg.pipeline
@@ -91,7 +183,7 @@ class PipelineWorkflow:
             "clinical_targets": paths.clinical_targets,
             "preop_dir": os.path.basename(paths.preop_dir) if paths.preop_dir else "preop",
             "postop_dir": os.path.basename(paths.postop_dir) if paths.postop_dir else "postop",
-            "zerod_config": os.path.basename(paths.zerod_config) if paths.zerod_config else "zerod_config.json",
+            "zerod_config": os.path.basename(seed_config) if seed_config else "zerod_config.json",
         }
         if pipeline is not None and not pipeline.adapt:
             # Avoid initializing adapted simulation directories when adaptation is disabled.
@@ -102,10 +194,44 @@ class PipelineWorkflow:
             )
 
         if bcs is not None:
-            sim_kwargs["bc_type"] = bcs.type
-            sim_kwargs["compliance_model"] = bcs.compliance_model
-            if bcs.tune_space is not None:
-                sim_kwargs["tune_space"] = bcs.tune_space
+            bcs_type = getattr(bcs, "type", None)
+            if bcs_type is None and getattr(bcs, "impedance", None) is not None:
+                bcs_type = "impedance"
+            sim_kwargs["bc_type"] = bcs_type
+            impedance = getattr(bcs, "impedance", None)
+            if impedance is not None:
+                # Nested impedance is canonical.  Pass its legacy RRI
+                # controls through to Simulation as objects where that
+                # implementation still expects them; full_pa consumes the
+                # serialized contract below.
+                sim_kwargs["compliance_model"] = (
+                    impedance.get("compliance_model", "constant")
+                    if isinstance(impedance, dict)
+                    else getattr(impedance, "compliance_model", "constant")
+                )
+                nested_tune_space = (
+                    impedance.get("tune_space")
+                    if isinstance(impedance, dict)
+                    else getattr(impedance, "tune_space", None)
+                )
+                if nested_tune_space is not None:
+                    sim_kwargs["tune_space"] = nested_tune_space
+            else:
+                sim_kwargs["compliance_model"] = getattr(
+                    bcs, "compliance_model", "constant"
+                )
+                if getattr(bcs, "tune_space", None) is not None:
+                    sim_kwargs["tune_space"] = bcs.tune_space
+            if str(bcs_type).lower() == "impedance":
+                sim_kwargs["impedance_config"] = _impedance_config_mapping(bcs)
+                if (
+                    sim_kwargs["impedance_config"].get("tuning_model") == "full_pa"
+                    and seed_config is not None
+                ):
+                    # Preserve a seed nested below paths.root.  The legacy
+                    # Simulation path mapping used only basenames, which
+                    # would silently point full_pa at the wrong seed.
+                    sim_kwargs["zerod_config"] = seed_config
 
         if adaptation is not None:
             if is_dataclass(adaptation):
@@ -141,17 +267,22 @@ class PipelineWorkflow:
             sim_kwargs["inflow_path"] = paths.inflow
 
         sim = Simulation(**sim_kwargs)
-        sim.run_pipeline(
+        pipeline_result = sim.run_pipeline(
             run_steady=pipeline.run_steady if pipeline else True,
             optimize_bcs=pipeline.optimize_bcs if pipeline else True,
             run_threed=pipeline.run_threed if pipeline else True,
             adapt=pipeline.adapt if pipeline else True,
         )
 
-        return {
+        result = {
             "status": "ok",
             "root": paths.root,
         }
+        if isinstance(pipeline_result, dict):
+            result.update(pipeline_result)
+        for key, value in seed_provenance.items():
+            result.setdefault(key, value)
+        return result
 
 
 class TuneBCsWorkflow:
@@ -170,29 +301,68 @@ class TuneBCsWorkflow:
 
         if bcs is None:
             raise ValueError("bcs section is required for tune_bcs workflow")
-        if paths.zerod_config is None:
+        if paths.zerod_config is None and getattr(cfg, "seed_generation", None) is None:
             raise ValueError("paths.zerod_config is required for tune_bcs workflow")
         if paths.clinical_targets is None:
             raise ValueError("paths.clinical_targets is required for tune_bcs workflow")
         if paths.mesh_surfaces is None:
             raise ValueError("paths.mesh_surfaces is required for tune_bcs workflow")
+        seed_config, seed_provenance = _resolve_seed_source(cfg)
+        if seed_config is None:
+            raise ValueError(
+                "paths.zerod_config or seed_generation is required for tune_bcs workflow"
+            )
 
         convert_to_cm = threed.convert_to_cm if threed else False
 
-        reduced_config = ConfigHandler.from_json(paths.zerod_config, is_pulmonary=bcs.is_pulmonary)
-        targets = ClinicalTargets.from_csv(paths.clinical_targets)
+        bcs_type = getattr(bcs, "type", None)
+        if bcs_type is None and getattr(bcs, "impedance", None) is not None:
+            bcs_type = "impedance"
 
-        if bcs.type == "impedance":
-            if bcs.tune_space is None:
+        if bcs_type == "impedance":
+            impedance_config = _impedance_config_mapping(bcs)
+            if impedance_config.get("tuning_model") == "full_pa":
+                result = run_impedance_tuning_for_iteration(
+                    iteration_dir=paths.root,
+                    seed_config=seed_config,
+                    mesh_surfaces=paths.mesh_surfaces,
+                    clinical_targets=paths.clinical_targets,
+                    inflow_path=paths.inflow,
+                    impedance_config=impedance_config,
+                    results_dir=paths.root,
+                )
+                workflow_result = {"status": "ok", **result}
+                for key, value in seed_provenance.items():
+                    workflow_result.setdefault(key, value)
+                return workflow_result
+            reduced_config = ConfigHandler.from_json(
+                seed_config, is_pulmonary=getattr(bcs, "is_pulmonary", True)
+            )
+            targets = ClinicalTargets.from_csv(paths.clinical_targets)
+            impedance = getattr(bcs, "impedance", None)
+            tune_space = getattr(bcs, "tune_space", None)
+            compliance_model = getattr(bcs, "compliance_model", "constant")
+            if impedance is not None:
+                if isinstance(impedance, dict):
+                    tune_space = impedance.get("tune_space", tune_space)
+                    compliance_model = impedance.get(
+                        "compliance_model", compliance_model
+                    )
+                else:
+                    tune_space = getattr(impedance, "tune_space", tune_space)
+                    compliance_model = getattr(
+                        impedance, "compliance_model", compliance_model
+                    )
+            if tune_space is None:
                 raise ValueError("bcs.tune_space is required for impedance tuning")
             tuner = ImpedanceTuner(
                 reduced_config,
                 paths.mesh_surfaces,
                 targets,
-                bcs.tune_space,
+                tune_space,
                 rescale_inflow=True,
                 convert_to_cm=convert_to_cm,
-                compliance_model=bcs.compliance_model,
+                compliance_model=compliance_model,
                 solver="Nelder-Mead",
                 grid_search_init=True,
                 log_file=os.path.join(paths.root, "stree_impedance_optimization.log"),
@@ -201,7 +371,11 @@ class TuneBCsWorkflow:
             )
             tuner.tune(nm_iter=5)
             output_csv = os.path.join(paths.root, "optimized_params.csv")
-        elif bcs.type == "rcr":
+        elif bcs_type == "rcr":
+            reduced_config = ConfigHandler.from_json(
+                seed_config, is_pulmonary=getattr(bcs, "is_pulmonary", True)
+            )
+            targets = ClinicalTargets.from_csv(paths.clinical_targets)
             tuner = RCRTuner(
                 reduced_config,
                 paths.mesh_surfaces,

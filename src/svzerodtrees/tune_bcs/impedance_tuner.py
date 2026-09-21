@@ -9,6 +9,7 @@ from ..microvasculature import TreeParameters, compliance as comp_mod
 from ..microvasculature.structured_tree.asymmetry import resolve_branch_scaling
 from ..tune_bcs.tune_space import TuneSpace
 from ..io.inflow_handler import mean_flow_from_path
+from ..numerics import trapezoid
 from ..io.blocks.boundary_condition import (
     validate_boundary_condition_configs,
     validate_flow_cardiac_output_config,
@@ -25,6 +26,7 @@ _CSV_PER_PA_COLUMNS: dict[str, str] = {
     "eta_sym": "{pa}.eta_sym",
     "inductance": "{pa}.inductance",
     "k2": "comp.{pa}.k2",
+    "k3": "comp.{pa}.k3",
     "diameter": "{pa}.diameter",
 }
 # These columns are shared across both PA sides; read from the lpa row.
@@ -164,7 +166,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
                  specify_diameter=True,
                  diameter_scale=0.0,
                  diameter_std_cap=None,
-                 allow_ordered_outlet_mapping=False):
+                 allow_ordered_outlet_mapping=False,
+                 resolved_mapping=None):
         super().__init__(config_handler, mesh_surfaces_path, clinical_targets)
         self.tune_space = tune_space
         self.compliance_model = (compliance_model or "").lower()
@@ -189,6 +192,10 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self.diameter_scale = float(diameter_scale)
         self.diameter_std_cap = None if diameter_std_cap is None else float(diameter_std_cap)
         self.allow_ordered_outlet_mapping = bool(allow_ordered_outlet_mapping)
+        # Full-PA iteration owns mapping resolution.  Keep the resulting
+        # immutable object on the tuner so every candidate uses the exact map
+        # that preflight and final construction consume.
+        self.resolved_mapping = resolved_mapping
 
         # grid search params
         self.grid_search_init = grid_search_init
@@ -205,16 +212,10 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self._full_pa_base_config = None
 
     def _tree_assignment_options_for_objective(self):
-        if self.tuning_model != "full_pa":
-            return {
-                "use_mean": self.use_mean,
-                "diameter_scale": self.diameter_scale,
-                "diameter_std_cap": self.diameter_std_cap,
-            }
         return {
-            "use_mean": True,
-            "diameter_scale": 0.0,
-            "diameter_std_cap": None,
+            "use_mean": self.use_mean,
+            "diameter_scale": self.diameter_scale,
+            "diameter_std_cap": self.diameter_std_cap,
         }
 
 
@@ -301,7 +302,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
         if self.compliance_model == "olufsen":
             k1 = 19992500.0
             k2 = params[f"comp.{side}.k2"]
-            k3 = 0.0
+            k3 = params.get(f"comp.{side}.k3", 0.0)
             return comp_mod.OlufsenCompliance(k1=k1, k2=k2, k3=k3)
         else:
             cval = params[f"comp.{side}.C"]
@@ -416,8 +417,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
         rpa_time = np.asarray(rpa_result.time, dtype=float)
 
         if mpa_time.size >= 2 and rpa_time.size >= 2:
-            total_flow = float(np.trapz(mpa_flow, mpa_time))
-            rpa_total = float(np.trapz(rpa_flow, rpa_time))
+            total_flow = float(trapezoid(mpa_flow, mpa_time))
+            rpa_total = float(trapezoid(rpa_flow, rpa_time))
         else:
             total_flow = float(np.mean(mpa_flow))
             rpa_total = float(np.mean(rpa_flow))
@@ -481,7 +482,9 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 diameter_scale=objective_tree_options["diameter_scale"],
                 diameter_std_cap=objective_tree_options["diameter_std_cap"],
                 allow_ordered_outlet_mapping=self.allow_ordered_outlet_mapping,
+                resolved_mapping=self.resolved_mapping,
                 verbose=False,
+                plot_stiffness=False,
             )
             self._write_and_validate_snapshot(model)
             if not self._impedance_bcs_are_finite(model):

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,7 @@ from svzerodtrees.calibration.workflow import (
     _evaluate_replay,
     _normalize_calibrated_config,
     _normalize_calibration_input,
+    _replay_target_observations,
     assemble_calibration_payload,
     calibrate_0d_from_mapped_centerline,
 )
@@ -19,9 +22,13 @@ from svzerodtrees.config import (
     CalibrationConfig,
     CalibrationDataSourceConfig,
     CalibrationInputNormalizationConfig,
+    CalibrationMPAPressureTargetConfig,
+    CalibrationObservationQCConfig,
     CalibrationParametersConfig,
     CalibrationParameterSelectionConfig,
+    CalibrationRPAFlowSplitTargetConfig,
     CalibrationSolverConfig,
+    CalibrationTargetsConfig,
 )
 
 
@@ -223,6 +230,143 @@ def _calibration_config(tmp_path: Path) -> CalibrationConfig:
     )
 
 
+def _target_focused_calibration_config(tmp_path: Path) -> CalibrationConfig:
+    calibration = _calibration_config(tmp_path)
+    calibration.observation_qc = CalibrationObservationQCConfig(
+        enforcement="target_focused"
+    )
+    calibration.targets = CalibrationTargetsConfig(
+        mpa_pressure=CalibrationMPAPressureTargetConfig(
+            vessel="branch0_seg0",
+            interface="external_upstream",
+        ),
+        rpa_flow_split=CalibrationRPAFlowSplitTargetConfig(
+            rpa_vessel="branch1_seg0",
+            lpa_vessel="branch2_seg0",
+            interface="external_downstream",
+        ),
+    )
+    return calibration
+
+
+def test_replay_target_pressure_is_labeled_as_solver_native_cgs() -> None:
+    targets = CalibrationTargetsConfig(
+        mpa_pressure=CalibrationMPAPressureTargetConfig(
+            vessel="branch0_seg0",
+            interface="external_upstream",
+        ),
+        rpa_flow_split=CalibrationRPAFlowSplitTargetConfig(
+            rpa_vessel="branch1_seg0",
+            lpa_vessel="branch2_seg0",
+            interface="external_downstream",
+        ),
+    )
+    replay_summary = {
+        "accepted_final_cycle": {
+            "start_time": 0.0,
+            "end_time": 1.0,
+            "series": [
+                {
+                    "kind": "pressure",
+                    "name": "branch0_seg0",
+                    "column": "pressure_in",
+                    "times": [0.0, 0.5, 1.0],
+                    "values": [1333.2236842105263, 2666.4473684210527, 1333.2236842105263],
+                },
+                {
+                    "kind": "flow",
+                    "name": "branch1_seg0",
+                    "column": "flow_out",
+                    "times": [0.0, 0.5, 1.0],
+                    "values": [1.0, 1.0, 1.0],
+                },
+                {
+                    "kind": "flow",
+                    "name": "branch2_seg0",
+                    "column": "flow_out",
+                    "times": [0.0, 0.5, 1.0],
+                    "values": [1.0, 1.0, 1.0],
+                },
+            ],
+        }
+    }
+
+    replay_targets = _replay_target_observations(replay_summary, targets)
+
+    assert replay_targets["mpa_pressure"]["units"] == "dyn/cm^2"
+    assert replay_targets["rpa_flow"]["units"] == "cm^3/s"
+
+
+def _write_target_qc_fixture(tmp_path: Path, *, invalid_split: bool = False) -> Path:
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "mapped.vtp"
+    zerod = tmp_path / "zerod.json"
+    _write_polydata(
+        centerline,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+    )
+    _write_polydata(
+        mapped,
+        branch_ids=[0, 0, 1, 1, 2, 2],
+        paths=[0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        pressure=[100.0, 90.0, 90.0, 80.0, 70.0, 80.0],
+        flow=[10.0, 10.0, 6.0, 6.0, -6.0 if invalid_split else 4.0, -6.0 if invalid_split else 4.0],
+    )
+    _write_zerod_config(zerod)
+    return zerod
+
+
+def test_target_focused_qc_keeps_network_failures_advisory(tmp_path):
+    zerod = _write_target_qc_fixture(tmp_path)
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(zerod),
+        calibration=_target_focused_calibration_config(tmp_path),
+    )
+
+    assert assembly.observation_qc["status"] == "pass"
+    assert assembly.observation_qc["checks"]["pressure_drop_direction"] is False
+    assert assembly.observation_qc["severity"]["pressure_drop_direction"] == "advisory"
+    assert assembly.observation_qc["failed_advisory_checks"] == [
+        "pressure_drop_direction"
+    ]
+    assert all(
+        assembly.observation_qc["checks"][name]
+        for name in (
+            "root_waveform_agreement",
+            "target_topology",
+            "target_sampling_resolution",
+            "target_split_denominator",
+        )
+    )
+
+
+def test_target_focused_qc_rejects_zero_split_denominator(tmp_path):
+    zerod = _write_target_qc_fixture(tmp_path, invalid_split=True)
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(zerod),
+        calibration=_target_focused_calibration_config(tmp_path),
+    )
+
+    assert assembly.observation_qc["status"] == "fail"
+    assert assembly.observation_qc["checks"]["target_split_denominator"] is False
+    assert assembly.observation_qc["severity"]["target_split_denominator"] == "fatal"
+
+
+def test_strict_network_still_rejects_target_case_network_failure(tmp_path):
+    zerod = _write_target_qc_fixture(tmp_path)
+    calibration = _target_focused_calibration_config(tmp_path)
+    calibration.observation_qc.enforcement = "strict_network"
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(zerod),
+        calibration=calibration,
+    )
+
+    assert assembly.observation_qc["status"] == "fail"
+    assert assembly.observation_qc["checks"]["pressure_drop_direction"] is False
+    assert assembly.observation_qc["severity"]["pressure_drop_direction"] == "fatal"
+
+
 def test_assemble_calibration_payload_from_mapped_centerline(tmp_path):
     centerline = tmp_path / "centerline.vtp"
     mapped = tmp_path / "mapped.vtp"
@@ -283,6 +427,148 @@ def test_assemble_calibration_payload_from_mapped_centerline(tmp_path):
         "tolerance_gradient": 1e-05,
         "tolerance_increment": 1e-08,
     }
+
+
+def test_postprocess_suite_descriptor_matches_mapped_centerline_assembly(
+    fixtures_dir, tmp_path
+):
+    fixture_dir = fixtures_dir / "calibration"
+    baseline_path = fixture_dir / "finite_rigid_baseline.json"
+    source_vtp = fixture_dir / "mapped_timeseries.vtp"
+    mapped_path = tmp_path / "mapped_timeseries.vtp"
+    centerline_path = tmp_path / "centerline.vtp"
+    mapped_path.write_bytes(source_vtp.read_bytes())
+    centerline_path.write_bytes(source_vtp.read_bytes())
+
+    timestamps = [0.0, 1.0 / 3.0, 2.0 / 3.0]
+    sidecar = {
+        "kind": "centerline_timeseries_last_cycle",
+        "schema_version": "1.0",
+        "frame_count": 3,
+        "point_count": 14,
+        "cell_count": 10,
+        "frame_indices": [0, 1, 2],
+        "timestamps_s": timestamps,
+        "cycle_duration_s": 1.0,
+        "source_array_names": {"pressure": "pressure", "flow": "flow"},
+        "data_contract": {
+            "pressure": {"quantity": "pressure", "units": "mmHg"},
+            "flow": {"quantity": "volumetric_flow", "units": "cm^3/s"},
+        },
+        "processed_frames": [
+            {
+                "frame_index": index,
+                "time_s": timestamp,
+                "point_arrays": [f"pressure_{index}", f"flow_{index}"],
+            }
+            for index, timestamp in enumerate(timestamps)
+        ],
+    }
+    sidecar_path = tmp_path / "timeseries_metadata.json"
+    sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
+
+    def sha256(path: Path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    artifact = {
+        "schema_version": "1.0",
+        "kind": "centerline_timeseries_last_cycle",
+        "vtp": mapped_path.name,
+        "metadata": sidecar_path.name,
+        "reference_centerline": centerline_path.name,
+        "vtp_sha256": sha256(mapped_path),
+        "metadata_sha256": sha256(sidecar_path),
+        "reference_centerline_sha256": sha256(centerline_path),
+        "frame_indices": sidecar["frame_indices"],
+        "timestamps_s": timestamps,
+        "cycle_duration_s": 1.0,
+        "frame_count": 3,
+        "point_count": 14,
+        "cell_count": 10,
+        "source_array_names": sidecar["source_array_names"],
+        "data_contract": sidecar["data_contract"],
+        "digests": {
+            "vtp": sha256(mapped_path),
+            "metadata": sha256(sidecar_path),
+            "reference_centerline": sha256(centerline_path),
+        },
+    }
+    descriptor = {
+        "kind": "pulmonary_threed_suite",
+        "schema_version": "1.0",
+        "status": "completed",
+        "steps": {
+            "pressure": {"status": "completed"},
+            "flow_split": {"status": "completed"},
+            "frames": {"status": "completed"},
+            "resistance_map": {"status": "completed"},
+            "centerline_timeseries": {"status": "completed"},
+            "resistance_map_systolic": {"status": "completed"},
+        },
+        "lineage": {
+            "tuned_zerod_config_sha256": sha256(baseline_path),
+            "tuned_zerod_config_path": os.path.relpath(
+                baseline_path, tmp_path
+            ).replace(os.sep, "/"),
+        },
+        "artifacts": {"centerline_timeseries": artifact},
+    }
+    descriptor_path = tmp_path / "postprocess_suite_metadata.json"
+    descriptor_path.write_text(json.dumps(descriptor), encoding="utf-8")
+
+    parameters = CalibrationParametersConfig(
+        vessels=CalibrationParameterSelectionConfig(default=["R_poiseuille"]),
+        junctions=CalibrationParameterSelectionConfig(default=[]),
+    )
+    mapped = CalibrationConfig(
+        data_source=CalibrationDataSourceConfig(
+            mode="mapped_centerline",
+            mapped_centerline_result=str(mapped_path),
+            metadata_json=str(sidecar_path),
+            centerline=str(centerline_path),
+            flow_array="flow",
+            flow_observation_type="flow",
+        ),
+        parameters=parameters,
+    )
+    descriptor_mode = CalibrationConfig(
+        data_source=CalibrationDataSourceConfig(
+            mode="postprocess_suite",
+            postprocess_metadata_json=str(descriptor_path),
+        ),
+        parameters=parameters,
+    )
+
+    mapped_assembly = assemble_calibration_payload(
+        zerod_config_path=str(baseline_path), calibration=mapped
+    )
+    descriptor_assembly = assemble_calibration_payload(
+        zerod_config_path=str(baseline_path), calibration=descriptor_mode
+    )
+
+    assert descriptor_assembly.solver_payload["y"] == mapped_assembly.solver_payload["y"]
+    assert descriptor_assembly.solver_payload["dy"] == mapped_assembly.solver_payload["dy"]
+    assert descriptor_assembly.data_source["mode"] == "postprocess_suite"
+    assert descriptor_assembly.data_source["lineage"]["status"] == "matched"
+
+    descriptor["status"] = "failed"
+    descriptor["steps"]["resistance_map_systolic"] = {"status": "failed"}
+    descriptor_path.write_text(json.dumps(descriptor), encoding="utf-8")
+    with pytest.raises(ValueError, match="completed terminal status"):
+        assemble_calibration_payload(
+            zerod_config_path=str(baseline_path), calibration=descriptor_mode
+        )
+
+    descriptor["status"] = "completed"
+    descriptor["steps"]["resistance_map_systolic"] = {"status": "completed"}
+    descriptor["lineage"]["tuned_zerod_config_sha256"] = hashlib.sha256(
+        b"different tuned config"
+    ).hexdigest()
+    descriptor_path.write_text(json.dumps(descriptor), encoding="utf-8")
+    with pytest.raises(ValueError, match="lineage does not match"):
+        assemble_calibration_payload(
+            zerod_config_path=str(baseline_path), calibration=descriptor_mode
+        )
 
 
 def test_committed_calibration_fixture_covers_public_observation_contract(

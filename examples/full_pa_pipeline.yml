@@ -1,0 +1,81 @@
+version: 1
+workflow: pipeline
+
+# All paths are relative to this case directory.  This example generates the
+# full pulmonary 0D seed before tuning with the installed learnedzerod CLI.
+paths:
+  root: .
+  clinical_targets: input/clinical_targets.csv
+  mesh_surfaces: input/mesh-complete/mesh-surfaces
+  inflow: input/inflow.csv
+  preop_dir: preop
+  postop_dir: postop
+  adapted_dir: adapted
+
+seed_generation:
+  method: learned_zerod
+  anatomy: pulmonary
+  input_zerod_config: input/source_0d_config.json
+  centerline: input/centerline.vtp
+  svzerodsolver: tools/svzerodsolver
+  output_dir: generated/learned-seed
+  learned_zerod_executable: learned-zerod
+  output_filename: learned_full_pa_seed.json
+  keep_tmp: false
+
+bcs:
+  type: impedance
+  is_pulmonary: true
+  impedance:
+    tuning_model: full_pa
+    solver: Nelder-Mead
+    nm_iter: 5
+    n_procs: 24
+    grid_search_init: true
+    d_min: 0.01
+    use_mean: false
+    specify_diameter: true
+    rescale_inflow: true
+    convert_to_cm: false
+    compliance_model: olufsen
+    diameter_scale: 1.0
+    diameter_std_cap: null
+    # Learned output uses the producer's serialized cap order explicitly.
+    outlet_mapping_mode: serialized_cap_order
+    outlet_mapping: null
+    tune_space:
+      free:
+        - name: lpa.alpha
+          init: 0.9
+          lb: 0.7
+          ub: 0.99
+          to_native: identity
+          from_native: identity
+        - name: lpa.beta
+          init: 0.6
+          lb: 0.3
+          ub: 0.9
+          to_native: identity
+          from_native: identity
+        - name: rpa.alpha
+          init: 0.9
+          lb: 0.7
+          ub: 0.99
+          to_native: identity
+          from_native: identity
+        - name: rpa.beta
+          init: 0.6
+          lb: 0.3
+          ub: 0.9
+          to_native: identity
+          from_native: identity
+      fixed:
+        - name: d_min
+          value: 0.01
+      tied: []
+
+pipeline:
+  run_steady: false
+  optimize_bcs: true
+  run_threed: true
+  adapt: false

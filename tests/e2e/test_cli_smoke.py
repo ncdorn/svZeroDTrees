@@ -1,11 +1,14 @@
+import json
 import pytest
 import subprocess
+import sys
 from pathlib import Path
 
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk
 
 from svzerodtrees import cli
+from svzerodtrees.api import TuneBCsWorkflow
 
 
 class RecordingWorkflow:
@@ -36,6 +39,11 @@ def test_cli_schema_renders_config_template(monkeypatch, capsys):
     assert "confirmation_absolute_tolerance: 1e-8" in rendered
     assert "pressure_bound_multiplier: 10.0" in rendered
     assert "cycle_stability_tolerance: 1e-3" in rendered
+    assert "replay_minimum_cycles: 3" in rendered
+    assert "replay_maximum_cycles: 10" in rendered
+    assert "enforcement: strict_network  # strict_network | target_focused" in rendered
+    assert "targets:" in rendered
+    assert "normalized_rms_tolerance: 0.05" in rendered
 
 
 def test_cli_dispatches_real_config_to_pipeline_workflow(monkeypatch, tmp_path):
@@ -63,6 +71,168 @@ pipeline:
     assert cli.main() == 0
     assert RecordingWorkflow.seen[0].workflow == "pipeline"
     assert RecordingWorkflow.seen[0].paths.root == str(tmp_path)
+
+
+def test_cli_dispatches_documented_full_pa_pipeline_config(monkeypatch, tmp_path):
+    RecordingWorkflow.seen = []
+
+    cfg_path = tmp_path / "full-pa.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: pipeline
+paths:
+  root: {tmp_path}
+  zerod_config: seed.json
+  clinical_targets: targets.csv
+  mesh_surfaces: mesh-surfaces
+  inflow: inflow.csv
+bcs:
+  type: impedance
+  impedance:
+    tuning_model: full_pa
+    outlet_mapping_mode: auto
+    tune_space:
+      free:
+        - name: lpa.alpha
+          init: 0.9
+          lb: 0.7
+          ub: 0.99
+      fixed: []
+      tied: []
+pipeline:
+  run_steady: false
+  optimize_bcs: true
+  run_threed: false
+  adapt: false
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(cli, "WORKFLOW_MAP", {"pipeline": RecordingWorkflow})
+    monkeypatch.setattr(
+        cli.sys, "argv", ["svzerodtrees", "pipeline", str(cfg_path)]
+    )
+
+    assert cli.main() == 0
+    config = RecordingWorkflow.seen[0]
+    assert config.bcs.type == "impedance"
+    assert config.bcs.impedance.tuning_model == "full_pa"
+    assert config.bcs.impedance.outlet_mapping_mode == "auto"
+    assert config.bcs.impedance.use_mean is False
+    assert config.bcs.impedance.diameter_scale == pytest.approx(1.0)
+
+
+def test_cli_learned_full_pa_seed_generation_smoke(monkeypatch, tmp_path):
+    """Exercise the public config/workflow boundary without external tools."""
+
+    source_config = tmp_path / "source_0d_config.json"
+    source_config.write_text('{"vessels": [], "boundary_conditions": []}\n', encoding="utf-8")
+    centerline = tmp_path / "centerline.vtp"
+    centerline.write_text("synthetic centerline input\n", encoding="utf-8")
+    solver = tmp_path / "svzerodsolver"
+    solver.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    solver.chmod(0o755)
+    clinical_targets = tmp_path / "clinical_targets.csv"
+    clinical_targets.write_text("target,value\n", encoding="utf-8")
+    (tmp_path / "mesh-surfaces").mkdir()
+
+    learned_executable = tmp_path / "fake-learned-zerod"
+    learned_executable.write_text(
+        """#!%s
+import argparse
+import json
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--anatomy', required=True)
+parser.add_argument('--zerod-json', required=True)
+parser.add_argument('--centerline-vtp', required=True)
+parser.add_argument('--svzerod', required=True)
+parser.add_argument('--output-dir', required=True)
+parser.add_argument('--output-filename', required=True)
+args = parser.parse_args()
+payload = {
+    'boundary_conditions': [
+        {'bc_name': 'INFLOW', 'bc_type': 'FLOW'},
+        {'bc_name': 'RESISTANCE_1', 'bc_type': 'RESISTANCE', 'bc_values': {'R': 11.0}},
+        {'bc_name': 'RESISTANCE_2', 'bc_type': 'RESISTANCE', 'bc_values': {'R': 12.0}},
+        {'bc_name': 'RESISTANCE_3', 'bc_type': 'RESISTANCE', 'bc_values': {'R': 13.0}},
+    ],
+    'vessels': [
+        {'vessel_name': 'branch1', 'boundary_conditions': {'outlet': 'RESISTANCE_1'}},
+        {'vessel_name': 'branch2', 'boundary_conditions': {'outlet': 'RESISTANCE_2'}},
+        {'vessel_name': 'branch3', 'boundary_conditions': {'outlet': 'RESISTANCE_3'}},
+    ],
+}
+output = Path(args.output_dir)
+output.mkdir(parents=True, exist_ok=True)
+(output / args.output_filename).write_text(json.dumps(payload, sort_keys=True) + '\\n', encoding='utf-8')
+""" % sys.executable,
+        encoding="utf-8",
+    )
+    learned_executable.chmod(0o755)
+
+    cfg_path = tmp_path / "learned.yml"
+    cfg_path.write_text(
+        f"""
+version: 1
+workflow: tune_bcs
+paths:
+  root: {tmp_path}
+  clinical_targets: {clinical_targets}
+  mesh_surfaces: {tmp_path / 'mesh-surfaces'}
+seed_generation:
+  method: learned_zerod
+  anatomy: pulmonary
+  input_zerod_config: {source_config}
+  centerline: {centerline}
+  svzerodsolver: {solver}
+  output_dir: generated
+  learned_zerod_executable: {learned_executable}
+  output_filename: learned_full_pa_seed.json
+bcs:
+  type: impedance
+  is_pulmonary: true
+  impedance:
+    tuning_model: full_pa
+    outlet_mapping_mode: serialized_cap_order
+""",
+        encoding="utf-8",
+    )
+
+    calls = {}
+
+    def fake_tuning(**kwargs):
+        calls.update(kwargs)
+        return {"tuned_zerod_config": str(tmp_path / "tuned.json")}
+
+    reported = {}
+
+    class ReportingTuneBCsWorkflow(TuneBCsWorkflow):
+        def run(self):
+            result = super().run()
+            reported.update(result)
+            return result
+
+    monkeypatch.setattr("svzerodtrees.api.run_impedance_tuning_for_iteration", fake_tuning)
+    monkeypatch.setattr(cli, "WORKFLOW_MAP", {"tune_bcs": ReportingTuneBCsWorkflow})
+    monkeypatch.setattr(cli.sys, "argv", ["svzerodtrees", "tune-bcs", str(cfg_path)])
+
+    assert cli.main() == 0
+
+    seed_path = tmp_path / "generated" / "learned_full_pa_seed.json"
+    metadata_path = tmp_path / "generated" / "learned_seed_metadata.json"
+    assert reported["learned_seed"] == str(seed_path)
+    assert reported["learned_seed_metadata"] == str(metadata_path)
+    assert calls["seed_config"] == str(seed_path)
+    assert json.loads(seed_path.read_text(encoding="utf-8"))["boundary_conditions"][-1]["bc_name"] == "RESISTANCE_3"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert metadata["status"] == "success"
+    assert metadata["method"] == "learned_zerod"
+    assert metadata["output_paths"]["seed"] == str(seed_path)
+    assert metadata["output_paths"]["metadata"] == str(metadata_path)
+    assert metadata["command"]["argv"][0] == str(learned_executable)
 
 
 def test_cli_dispatches_real_config_to_construct_trees_workflow(monkeypatch, tmp_path):
@@ -119,6 +289,25 @@ calibration:
       default: [R_poiseuille]
     junctions:
       default: [R_poiseuille]
+  observation_qc:
+    enforcement: target_focused
+  targets:
+    mpa_pressure:
+      vessel: branch0_seg0
+      interface: external_upstream
+      weight: 1.0
+      normalized_rms_tolerance: 0.05
+    rpa_flow_split:
+      rpa_vessel: branch1_seg0
+      lpa_vessel: branch2_seg0
+      interface: external_downstream
+      weight: 1.0
+      absolute_tolerance: 0.02
+    require_improvement_over_baseline: true
+  solver:
+    replay_minimum_cycles: 3
+    replay_maximum_cycles: 8
+    required_consecutive_stable_pairs: 2
 """,
         encoding="utf-8",
     )
@@ -131,7 +320,16 @@ calibration:
     )
 
     assert cli.main() == 0
-    assert RecordingWorkflow.seen[0].workflow == "calibrate_0d_from_3d"
+    config = RecordingWorkflow.seen[0]
+    assert config.workflow == "calibrate_0d_from_3d"
+    assert config.calibration.observation_qc.enforcement == "target_focused"
+    assert config.calibration.targets.mpa_pressure.vessel == "branch0_seg0"
+    assert config.calibration.targets.mpa_pressure.interface == "external_upstream"
+    assert config.calibration.targets.rpa_flow_split.rpa_vessel == "branch1_seg0"
+    assert config.calibration.targets.rpa_flow_split.lpa_vessel == "branch2_seg0"
+    assert config.calibration.solver.replay_minimum_cycles == 3
+    assert config.calibration.solver.replay_maximum_cycles == 8
+    assert config.calibration.solver.required_consecutive_stable_pairs == 2
 
 
 def test_cli_rejects_subcommand_workflow_mismatch(monkeypatch, tmp_path):

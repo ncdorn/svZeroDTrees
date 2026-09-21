@@ -17,6 +17,7 @@ tutorial_build_tree
 tutorial_simulate_tree
 tutorial_apply_tree_bc
 interface
+full_pa_calibration
 performance_improvements
 API Reference <api/index>
 :::
@@ -26,6 +27,8 @@ API Reference <api/index>
 - The main package workflows, including `pipeline`, `tune_bcs`,
   `construct_trees`, `adapt`, and `postprocess`.
 - The YAML configuration interface used by the CLI and Python API.
+- The scientific full-PA tuning, postprocess descriptor, and calibration
+  contracts.
 - Package internals exposed through generated API reference pages.
 - Notes on implementation and performance work that affect this repository.
 
@@ -44,6 +47,7 @@ clean, reusable package interface.
 - Simulate a tree directly: [tutorial_simulate_tree.md](tutorial_simulate_tree.md)
 - Apply a tree as a boundary condition: [tutorial_apply_tree_bc.md](tutorial_apply_tree_bc.md)
 - YAML interface reference: [interface.md](interface.md)
+- Full-PA workflow guide: [full_pa_calibration.md](full_pa_calibration.md)
 - Package README, development guide, and contribution policy live in the
   repository root alongside this `docs/` directory.
 

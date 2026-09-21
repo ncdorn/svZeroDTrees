@@ -8,7 +8,7 @@ Structured tree boundary condition modeling for svZeroD cardiovascular simulatio
 - Optional 3D coupling pipeline via SimVascular tools.
 
 **Requirements**
-- Python >= 3.8.
+- Python >= 3.10.
 - Validated on Sherlock with `python/3.12.1`.
 - Runtime dependencies are installed via `python3 -m pip install -e .`.
 - Solver-backed workflows additionally require `pysvzerod` from a sibling
@@ -34,6 +34,101 @@ python3 -m pip install -e .
 If you only need non-solver code paths, `svZeroDTrees` can now be installed
 before `pysvzerod`; solver-backed workflows raise an explicit runtime error
 until the sibling solver checkout is installed.
+
+**Learned full-PA seed generation**
+
+`learned-zerod` is an optional external CLI provided by the separately installed
+[StanfordCBCL learnedZeroD repository](https://github.com/StanfordCBCL/learnedZeroD).
+Ordinary `svZeroDTrees` installation does not install learnedZeroD, JAX, or its
+other dependencies. Install learnedZeroD separately and put `learned-zerod` on
+PATH, or set
+`seed_generation.learned_zerod_executable` only to override it with another
+compatible executable. The adapter also requires a readable source 0D JSON, a
+readable centerline VTP, and a readable `svzerodsolver` executable. The
+centerline is an input geometry artifact; a completed 3D simulation result is
+not required.
+
+This is a copyable `tune_bcs` configuration. When opting in, remove
+`paths.zerod_config`; the source model belongs in
+`seed_generation.input_zerod_config` instead:
+
+```yaml
+version: 1
+workflow: tune_bcs
+paths:
+  root: .
+  clinical_targets: input/clinical_targets.csv
+  mesh_surfaces: input/mesh-surfaces
+  inflow: input/inflow.csv
+
+seed_generation:
+  method: learned_zerod
+  anatomy: pulmonary
+  input_zerod_config: input/source_0d_config.json
+  centerline: input/centerline.vtp
+  svzerodsolver: tools/svzerodsolver
+  output_dir: generated/learned-seed
+  learned_zerod_executable: learned-zerod
+  output_filename: learned_full_pa_seed.json
+  keep_tmp: false
+
+bcs:
+  type: impedance
+  is_pulmonary: true
+  impedance:
+    tuning_model: full_pa
+    outlet_mapping_mode: serialized_cap_order
+    tune_space:
+      free:
+        - {name: lpa.alpha, init: 0.9, lb: 0.7, ub: 0.99}
+        - {name: lpa.beta, init: 0.6, lb: 0.3, ub: 0.9}
+        - {name: rpa.alpha, init: 0.9, lb: 0.7, ub: 0.99}
+        - {name: rpa.beta, init: 0.6, lb: 0.3, ub: 0.9}
+      fixed: []
+      tied: []
+```
+
+The learned source is accepted only for pulmonary impedance `full_pa` tuning.
+The producer must emit more than two non-inflow outlets with unique names and
+exactly one vessel attachment per outlet. Use
+`outlet_mapping_mode: serialized_cap_order` when the learned producer's
+serialized cap order is the contract (including generic names such as
+`RESISTANCE_1`). Use `outlet_mapping_mode: explicit` when a complete mapping
+is known, for example:
+
+```yaml
+    outlet_mapping_mode: explicit
+    outlet_mapping:
+      LPA_CAP: RESISTANCE_1
+      RPA_CAP: RESISTANCE_2
+      OTHER_CAP: RESISTANCE_3
+```
+
+The generated seed is written to `output_dir/output_filename` and the
+versioned `learned_seed_metadata.json` manifest is written beside it. The
+paths and command argv are deterministic for a given configuration; the
+manifest records success, anatomy, absolute source/output paths, SHA-256
+digests for the source JSON, centerline, solver, and generated JSON, command
+identity, best-effort learned-zerod version, and timing fields. Publication is
+staged and atomic, and the generated seed is passed unchanged into the
+existing full-PA tuning boundary.
+
+Missing or unreadable inputs, an unavailable `learned-zerod` executable, a
+nonzero learned-zerod exit, missing or malformed output, or invalid/reduced
+outlet topology are hard failures before tuning; the error identifies the
+missing executable or other failed prerequisite. There is no fallback to a
+static seed or to the reduced-RRI path, and a failed run does not publish a
+success manifest. To
+roll back, remove `seed_generation` and restore a prebuilt
+`paths.zerod_config`; generated files are append-only provenance and do not
+need to be deleted for that rollback.
+
+The retained `prepare_reduced_rri_seed_from_learned` helper is a legacy,
+special-purpose compatibility conversion for reduced RRI workflows. Its
+historical hardcoded `MMHG_TO_BARYE` conversion remains isolated there. The
+new learned full-PA path does not call that helper, rescale values, or apply an
+implicit mmHg conversion: values remain in the CGS units declared by the
+svZeroDSolver JSON contract.
 
 For `uv` workflows in this workspace, the sibling `../svZeroDSolver` checkout is
 still supported via the `solver` dependency group:
@@ -137,12 +232,13 @@ svzerodtrees schema
   sign or ratio. Before publication, calibration-only fields are removed,
   single-outlet `internal_junction` blocks are normalized to
   `NORMAL_JUNCTION`, and the result is replayed through the unchanged
-  `pysvzerod.simulate` API. Replay uses at least two complete cycles and checks
-  finite bounded pressure/flow values plus final-cycle normalized RMS stability
-  using `pressure_bound_multiplier`, `flow_bound_multiplier`, and
-  `cycle_stability_tolerance`. The solver JSON is atomically published only
+  `pysvzerod.simulate` API. Replay uses a bounded settling horizon controlled
+  by `replay_minimum_cycles` (default 3), `replay_maximum_cycles`, and
+  `required_consecutive_stable_pairs`; it checks finite bounded pressure/flow
+  values and final-cycle normalized RMS stability. The solver JSON is atomically published only
   after these checks pass, so a stable negative resistance is allowed while a
   divergent positive-resistance result is rejected.
+
 - `postprocess`: generate figures from saved tree pickles or compute analysis artifacts such as svSlicer-based pulmonary resistance maps or the standardized pulmonary 3D postprocess suite.
   Pulmonary resistance-map configs may optionally set `workers: auto|<int>`, and
   pulmonary 3D suite configs may optionally set `resistance_map_workers`, to
@@ -151,6 +247,48 @@ svzerodtrees schema
   where systole is the maximum simulated MPA centerline pressure in the final
   full cardiac cycle, and the systolic map reuses the mapped centerline
   intermediates generated for the mean map instead of remapping the frame.
+
+**Production calibration contract**
+
+Version-1 calibration keeps a compatibility window for existing configs:
+when `calibration.targets` is absent, observation QC defaults to
+`strict_network` and the legacy behavior is retained. A production pulmonary
+config should opt into `observation_qc.enforcement: target_focused` and define
+both target blocks explicitly. The MPA pressure target and RPA flow-split
+target name their vessel roles (`MPA`, `LPA`, and `RPA` must be distinct) and
+their interfaces (`external_upstream`, `external_downstream`, `upstream`,
+`downstream`, or an unambiguous `internal` endpoint). Anatomy is never
+inferred from branch numbers or geometry.
+
+Mapped observations must carry explicit pressure and volumetric-flow units,
+ordered timestamps, and `cycle_duration_s` in the metadata sidecar. Integrated
+flow is consumed as flow and is never multiplied by area. Target traces are
+converted to common normalized units and a common periodic phase grid before
+comparison; missing, ambiguous, non-finite, or inconsistent metadata is a
+fatal input error.
+
+Calibration success means that the complete observation contract passes its
+configured QC policy, the unchanged `pysvzerod.calibrate(config)` callable
+reaches a two-pass selected-parameter fixed point, and the normalized result
+passes bounded settled replay through the unchanged
+`pysvzerod.simulate(config)` callable. In `target_focused` mode,
+data-contract and configured-target checks are fatal; whole-network
+conservation, pressure-direction, and non-target diagnostics remain visible
+as advisory metrics.
+
+The MPA pressure waveform NRMSE and absolute RPA split error are independent
+component gates. Their tolerance-normalized weighted composite is a
+post-calibration score for reporting and gating only; it is never the
+objective passed to `pysvzerod.calibrate`. When enabled, the baseline policy
+requires the calibrated score not to regress from a stable baseline. A
+negative calibrated resistance is a warning with its path and value recorded,
+not an automatic failure when fixed-point, replay, and target gates pass.
+
+The solver boundary requires only callable standard `calibrate` and `simulate`
+APIs. Reports record the resolved module path, file metadata, optional version
+or build identity, and a SHA-256 module digest so the run is reproducible.
+Invalid input, QC, fixed-point, replay, or target gates raise an actionable
+error and leave the calibrated solver JSON unpublished.
 
 **Outputs**
 Typical outputs are written under `paths.root` and include:
@@ -168,17 +306,27 @@ Typical outputs are written under `paths.root` and include:
   black-box calibrator invocations, fixed-point deltas and tolerances, inactive
   parameter validation, solver provenance, and negative/large-ratio warnings.
 - `calibration_replay.json` beside the calibration output; it records the
-  validation-cycle settings, observation-scale bounds, finite/bounded checks,
-  and final-cycle normalized RMS stability metrics.
+  bounded settling horizon, accepted cycle, observation-scale bounds,
+  finite/bounded checks, and cycle-stability metrics.
+- `calibration_targets.json` beside the calibration output; it records the
+  explicit target roles and interfaces, normalized MPA-pressure/RPA-split
+  component errors and gates, composite score, and baseline policy.
 - `calibration_summary.json` beside the calibration output; it combines the
   input normalization, observation QC, output normalization, fixed-point
-  confirmation, warnings, provenance, and replay diagnostics.
+  confirmation, target evaluation, warnings, provenance, and replay
+  diagnostics.
 - `preop`, `postop`, `adapted` directories for pipeline/adaptation runs.
 - Figures from postprocess workflow (PNG outputs you specify).
 - Postprocess analysis artifacts such as `resistance_map_mean.vtp`,
   `resistance_map_systolic.vtp`, ranked CSV summaries, standardized
   `mpa_pressure_vs_time.csv`, flow-split comparison outputs, and metadata JSON
   files.
+
+All calibration reports and the returned result carry the same `run_id` and
+content-digest aliases (`normalized_input_digest`, `observation_digest`,
+`solver_module_sha256`, and `output_config_digest`). The calibrated solver JSON
+is written last with an atomic replacement, after every reportable check has
+passed.
 
 The copyable calibration example is
 `examples/calibration/calibrate_svslicer_timeseries.yml`. Run it from the case

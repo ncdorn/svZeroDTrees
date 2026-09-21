@@ -48,6 +48,7 @@
 - For toy-model stability lessons, read `docs/adaptation/toy-stability-notes.md`.
 - For the staged implementation plan from PA harness work through `svzt-agent` orchestration, read `docs/adaptation/stage-2-to-5-plan.md`.
 - Keep chronological experiment results in `ADAPTATION_RUN_LOG.md`; keep distilled guidance in `docs/adaptation/`.
+- all internalo units should be implemented in CGS and should match svZeroDSolver exactly unless specified otherwise. input units may be mmHg if they are sufficiently labeled, but must be converted to CGS for internal computation. If you see hardcoded units in mmHg please alert the user and propose a change.
 
 ## Git And Sherlock Workflow
 

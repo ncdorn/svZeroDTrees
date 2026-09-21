@@ -1,6 +1,7 @@
 import os
+import warnings
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import yaml
 import numpy as np
@@ -11,6 +12,16 @@ from .microvasculature.compliance.constant import ConstantCompliance
 from .microvasculature.compliance.olufsen import OlufsenCompliance
 
 CONFIG_VERSION = 1
+
+_CALIBRATION_TARGET_INTERFACES = {
+    "external_upstream",
+    "external_downstream",
+    "internal",
+    # These short forms are convenient in YAML and map to the corresponding
+    # interface direction during target resolution.
+    "upstream",
+    "downstream",
+}
 
 
 @dataclass
@@ -28,12 +39,56 @@ class PathsConfig:
 
 
 @dataclass
+class LearnedSeedGenerationConfig:
+    """Configuration for generating a full-PA seed with learned-zerod."""
+
+    method: str
+    anatomy: str
+    input_zerod_config: str
+    centerline: str
+    svzerodsolver: str
+    output_dir: str
+    learned_zerod_executable: str = "learned-zerod"
+    output_filename: str = "learned_full_pa_seed.json"
+    keep_tmp: bool = False
+
+
+@dataclass
 class BCSConfig:
     type: str
     compliance_model: str = "constant"
     tune_space: Optional[TuneSpace] = None
     is_pulmonary: bool = True
     rcr_params: Optional[List[float]] = None
+    impedance: Optional["ImpedanceConfig"] = None
+
+
+@dataclass
+class ImpedanceConfig:
+    """Validated public controls for structured-tree impedance tuning.
+
+    The nested block is the stable public representation.  ``load_config``
+    keeps the older flat ``bcs`` fields working by adapting them into this
+    model before workflow dispatch; execution code therefore only needs to
+    consume one vocabulary.
+    """
+
+    tuning_model: str = "rri"
+    solver: str = "Nelder-Mead"
+    nm_iter: int = 5
+    n_procs: int = 24
+    grid_search_init: bool = True
+    d_min: float = 0.01
+    use_mean: bool = True
+    specify_diameter: bool = True
+    rescale_inflow: bool = True
+    convert_to_cm: bool = False
+    compliance_model: str = "olufsen"
+    diameter_scale: float = 0.0
+    diameter_std_cap: Optional[float] = None
+    outlet_mapping_mode: Optional[str] = None
+    outlet_mapping: Optional[Dict[str, str]] = None
+    tune_space: Optional[TuneSpace] = None
 
 
 @dataclass
@@ -160,6 +215,11 @@ class PostprocessConfig:
 @dataclass
 class CalibrationDataSourceConfig:
     mode: str = "mapped_centerline"
+    # ``postprocess_suite`` consumes the versioned descriptor produced by the
+    # pulmonary post-processing suite.  The descriptor is resolved relative
+    # to its own location at the calibration boundary; this field is resolved
+    # relative to the configuration root here, like all other path inputs.
+    postprocess_metadata_json: Optional[str] = None
     mapped_centerline_result: Optional[str] = None
     metadata_json: Optional[str] = None
     centerline: Optional[str] = None
@@ -195,6 +255,9 @@ class CalibrationSolverConfig:
     pressure_bound_multiplier: float = 10.0
     flow_bound_multiplier: float = 10.0
     cycle_stability_tolerance: float = 1e-3
+    replay_minimum_cycles: int = 3
+    replay_maximum_cycles: int = 10
+    required_consecutive_stable_pairs: int = 1
 
 
 @dataclass
@@ -210,6 +273,31 @@ class CalibrationObservationQCConfig:
     minimum_pressure_drop_fraction: float = 0.95
     minimum_path_coverage: float = 0.99
     minimum_usable_samples: int = 3
+    enforcement: str = "strict_network"
+
+
+@dataclass
+class CalibrationMPAPressureTargetConfig:
+    vessel: str
+    interface: str
+    weight: float = 1.0
+    normalized_rms_tolerance: float = 0.05
+
+
+@dataclass
+class CalibrationRPAFlowSplitTargetConfig:
+    rpa_vessel: str
+    lpa_vessel: str
+    interface: str
+    weight: float = 1.0
+    absolute_tolerance: float = 0.02
+
+
+@dataclass
+class CalibrationTargetsConfig:
+    mpa_pressure: CalibrationMPAPressureTargetConfig
+    rpa_flow_split: CalibrationRPAFlowSplitTargetConfig
+    require_improvement_over_baseline: bool = True
 
 
 @dataclass
@@ -223,6 +311,7 @@ class CalibrationConfig:
     observation_qc: CalibrationObservationQCConfig = field(
         default_factory=CalibrationObservationQCConfig
     )
+    targets: Optional[CalibrationTargetsConfig] = None
 
 
 @dataclass
@@ -238,6 +327,7 @@ class BaseConfig:
     threed: Optional[ThreeDConfig] = None
     postprocess: Optional[PostprocessConfig] = None
     calibration: Optional[CalibrationConfig] = None
+    seed_generation: Optional[LearnedSeedGenerationConfig] = None
 
 
 def _ensure_keys(data: Dict[str, Any], allowed: List[str], context: str) -> None:
@@ -337,6 +427,267 @@ def _parse_tune_space(data: Optional[Dict[str, Any]]) -> Optional[TuneSpace]:
     return TuneSpace(free=free_params, fixed=fixed_params, tied=tied_params)
 
 
+_IMPEDANCE_CONFIG_KEYS = [
+    "tuning_model",
+    "solver",
+    "nm_iter",
+    "n_procs",
+    "grid_search_init",
+    "d_min",
+    "use_mean",
+    "specify_diameter",
+    "rescale_inflow",
+    "convert_to_cm",
+    "compliance_model",
+    "diameter_scale",
+    "diameter_std_cap",
+    "outlet_mapping_mode",
+    "outlet_mapping",
+    "tune_space",
+]
+
+_OUTLET_MAPPING_MODES = {
+    "auto",
+    "metadata",
+    "cap_name",
+    "serialized_cap_order",
+    "explicit",
+}
+
+
+def _parse_outlet_mapping(data: Any) -> Optional[Dict[str, str]]:
+    if data is None:
+        return None
+    if not isinstance(data, Mapping):
+        raise ValueError("bcs.impedance.outlet_mapping must be a mapping")
+    mapping: Dict[str, str] = {}
+    for cap, bc_name in data.items():
+        cap_name = str(cap).strip()
+        outlet_name = str(bc_name).strip()
+        if not cap_name or not outlet_name:
+            raise ValueError(
+                "bcs.impedance.outlet_mapping keys and values must be non-empty"
+            )
+        if cap_name in mapping:
+            raise ValueError(
+                f"bcs.impedance.outlet_mapping contains duplicate cap '{cap_name}'"
+            )
+        mapping[cap_name] = outlet_name
+    if not mapping:
+        raise ValueError("bcs.impedance.outlet_mapping must not be empty")
+    return mapping
+
+
+def _parse_impedance_config(
+    data: Mapping[str, Any],
+    *,
+    legacy_ordered_mapping: Optional[bool] = None,
+) -> ImpedanceConfig:
+    """Parse the canonical nested impedance block.
+
+    ``allow_ordered_outlet_mapping`` is intentionally accepted only by the
+    load-time adapter.  It is converted to the explicit full-PA mapping mode
+    and never appears on the typed configuration object.
+    """
+
+    if not isinstance(data, Mapping):
+        raise ValueError("bcs.impedance must be a mapping")
+    data = dict(data)
+    nested_legacy_mapping = data.pop("allow_ordered_outlet_mapping", None)
+    if nested_legacy_mapping is not None:
+        if legacy_ordered_mapping is not None:
+            raise ValueError(
+                "allow_ordered_outlet_mapping was supplied more than once"
+            )
+        legacy_ordered_mapping = bool(nested_legacy_mapping)
+    _ensure_keys(data, _IMPEDANCE_CONFIG_KEYS, "bcs.impedance")
+
+    tuning_model = str(data.get("tuning_model", "rri") or "rri").strip().lower()
+    if tuning_model not in {"rri", "full_pa"}:
+        raise ValueError("bcs.impedance.tuning_model must be one of rri|full_pa")
+
+    mode = data.get("outlet_mapping_mode")
+    if mode is not None:
+        mode = str(mode).strip().lower()
+        if mode not in _OUTLET_MAPPING_MODES:
+            raise ValueError(
+                "bcs.impedance.outlet_mapping_mode must be one of "
+                "auto|metadata|cap_name|serialized_cap_order|explicit"
+            )
+
+    outlet_mapping = _parse_outlet_mapping(data.get("outlet_mapping"))
+    if outlet_mapping is not None and mode != "explicit":
+        raise ValueError(
+            "bcs.impedance.outlet_mapping requires "
+            "outlet_mapping_mode='explicit'"
+        )
+    if mode == "explicit" and outlet_mapping is None:
+        raise ValueError(
+            "bcs.impedance.outlet_mapping_mode='explicit' requires outlet_mapping"
+        )
+    if tuning_model == "rri" and (mode is not None or outlet_mapping is not None):
+        raise ValueError(
+            "bcs.impedance outlet mapping controls are supported only for "
+            "tuning_model='full_pa'"
+        )
+
+    if legacy_ordered_mapping is not None:
+        warning_message = (
+            "allow_ordered_outlet_mapping is deprecated; use "
+            "outlet_mapping_mode='serialized_cap_order' instead"
+            if tuning_model == "full_pa" and bool(legacy_ordered_mapping)
+            else "allow_ordered_outlet_mapping is deprecated; use outlet_mapping_mode instead"
+        )
+        warnings.warn(warning_message, DeprecationWarning, stacklevel=3)
+        if mode is not None:
+            raise ValueError(
+                "allow_ordered_outlet_mapping cannot be combined with "
+                "bcs.impedance.outlet_mapping_mode"
+            )
+        if tuning_model == "full_pa" and bool(legacy_ordered_mapping):
+            mode = "serialized_cap_order"
+
+    if tuning_model == "full_pa" and mode is None:
+        mode = "auto"
+
+    use_mean_default = tuning_model != "full_pa"
+    diameter_scale_default = 0.0 if tuning_model != "full_pa" else 1.0
+    if "use_mean" in data and data.get("use_mean") is not None:
+        use_mean = bool(data["use_mean"])
+    else:
+        use_mean = use_mean_default
+    if "diameter_scale" in data and data.get("diameter_scale") is not None:
+        diameter_scale = float(data["diameter_scale"])
+    else:
+        diameter_scale = diameter_scale_default
+
+    solver = str(data.get("solver", "Nelder-Mead")).strip()
+    nm_iter = int(data.get("nm_iter", 5))
+    n_procs = int(data.get("n_procs", 24))
+    d_min = float(data.get("d_min", 0.01))
+    compliance_model = str(data.get("compliance_model", "olufsen")).strip().lower()
+    diameter_std_cap = (
+        float(data["diameter_std_cap"])
+        if data.get("diameter_std_cap") is not None
+        else None
+    )
+    if not solver:
+        raise ValueError("bcs.impedance.solver cannot be empty")
+    if nm_iter <= 0:
+        raise ValueError("bcs.impedance.nm_iter must be > 0")
+    if n_procs <= 0:
+        raise ValueError("bcs.impedance.n_procs must be > 0")
+    if not np.isfinite(d_min) or d_min <= 0.0:
+        raise ValueError("bcs.impedance.d_min must be > 0")
+    if compliance_model not in {"constant", "olufsen"}:
+        raise ValueError(
+            "bcs.impedance.compliance_model must be constant or olufsen"
+        )
+    if not np.isfinite(diameter_scale) or diameter_scale < 0.0:
+        raise ValueError("bcs.impedance.diameter_scale must be finite and >= 0")
+    if diameter_std_cap is not None and (
+        not np.isfinite(diameter_std_cap) or diameter_std_cap < 0.0
+    ):
+        raise ValueError(
+            "bcs.impedance.diameter_std_cap must be finite and >= 0"
+        )
+
+    return ImpedanceConfig(
+        tuning_model=tuning_model,
+        solver=solver,
+        nm_iter=nm_iter,
+        n_procs=n_procs,
+        grid_search_init=bool(data.get("grid_search_init", True)),
+        d_min=d_min,
+        use_mean=use_mean,
+        specify_diameter=bool(data.get("specify_diameter", True)),
+        rescale_inflow=bool(data.get("rescale_inflow", True)),
+        convert_to_cm=bool(data.get("convert_to_cm", False)),
+        compliance_model=compliance_model,
+        diameter_scale=diameter_scale,
+        diameter_std_cap=diameter_std_cap,
+        outlet_mapping_mode=mode,
+        outlet_mapping=outlet_mapping,
+        tune_space=_parse_tune_space(data.get("tune_space")),
+    )
+
+
+def _tune_space_to_mapping(tune_space: Optional[TuneSpace]) -> Optional[Dict[str, Any]]:
+    """Convert parsed tune-space objects back to the iteration-service shape."""
+
+    if tune_space is None:
+        return None
+
+    def transform_name(transform: Any) -> str:
+        name = getattr(transform, "__name__", "identity")
+        # ``np.log`` reports ``log`` while all public transforms have stable
+        # names.  Unknown callables cannot be represented in YAML and should
+        # fail rather than silently changing the optimizer contract.
+        if name in {"identity", "positive", "unit_interval", "log", "logit"}:
+            return name
+        raise ValueError(f"unsupported tune-space transform '{name}'")
+
+    return {
+        "free": [
+            {
+                "name": item.name,
+                "init": float(item.init),
+                "lb": float(item.lb),
+                "ub": float(item.ub),
+                "to_native": transform_name(item.to_native),
+                "from_native": transform_name(item.from_native),
+            }
+            for item in tune_space.free
+        ],
+        "fixed": [
+            {"name": item.name, "value": float(item.value)}
+            for item in tune_space.fixed
+        ],
+        "tied": [
+            {"name": item.name, "other": item.other, "fn": transform_name(item.fn)}
+            for item in tune_space.tied
+        ],
+    }
+
+
+def impedance_config_to_mapping(config: ImpedanceConfig) -> Dict[str, Any]:
+    """Return a serializable mapping accepted by the iteration service."""
+
+    # Keep the public adapter usable by programmatic callers that have not
+    # loaded YAML yet.  In particular, a raw mapping must not be treated as an
+    # empty object by ``getattr`` and silently lose its tuning controls.
+    if isinstance(config, Mapping):
+        payload = dict(config)
+        tune_space = payload.get("tune_space")
+        if isinstance(tune_space, TuneSpace):
+            payload["tune_space"] = _tune_space_to_mapping(tune_space)
+        return payload
+
+    payload: Dict[str, Any] = {
+        "tuning_model": getattr(config, "tuning_model", "rri"),
+        "solver": getattr(config, "solver", "Nelder-Mead"),
+        "nm_iter": getattr(config, "nm_iter", 5),
+        "n_procs": getattr(config, "n_procs", 24),
+        "grid_search_init": getattr(config, "grid_search_init", True),
+        "d_min": getattr(config, "d_min", 0.01),
+        "use_mean": getattr(config, "use_mean", True),
+        "specify_diameter": getattr(config, "specify_diameter", True),
+        "rescale_inflow": getattr(config, "rescale_inflow", True),
+        "convert_to_cm": getattr(config, "convert_to_cm", False),
+        "compliance_model": getattr(config, "compliance_model", "olufsen"),
+        "diameter_scale": getattr(config, "diameter_scale", 0.0),
+        "diameter_std_cap": getattr(config, "diameter_std_cap", None),
+        "tune_space": _tune_space_to_mapping(getattr(config, "tune_space", None)),
+    }
+    outlet_mapping_mode = getattr(config, "outlet_mapping_mode", None)
+    outlet_mapping = getattr(config, "outlet_mapping", None)
+    if outlet_mapping_mode is not None:
+        payload["outlet_mapping_mode"] = outlet_mapping_mode
+    if outlet_mapping is not None:
+        payload["outlet_mapping"] = dict(outlet_mapping)
+    return payload
+
+
 def _parse_compliance(model: str, params: Dict[str, Any]):
     model_l = model.lower()
     if model_l == "constant":
@@ -417,6 +768,154 @@ def _parse_paths(data: Dict[str, Any]) -> PathsConfig:
         optimized_params=_resolve_path(root_resolved, data.get("optimized_params")),
         output_config=_resolve_path(root_resolved, data.get("output_config")),
     )
+
+
+_LEARNED_SEED_GENERATION_KEYS = [
+    "method",
+    "anatomy",
+    "input_zerod_config",
+    "centerline",
+    "svzerodsolver",
+    "output_dir",
+    "learned_zerod_executable",
+    "output_filename",
+    "keep_tmp",
+]
+
+
+def _required_seed_generation_string(
+    data: Mapping[str, Any], key: str
+) -> str:
+    value = data.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"seed_generation.{key} is required and must be a non-empty string")
+    return value.strip()
+
+
+def _resolve_learned_executable(root: str, value: str) -> str:
+    """Resolve explicit executable paths while preserving PATH commands."""
+
+    # A bare command such as ``learned-zerod`` is intentionally left for PATH
+    # lookup.  Any path-like value is rooted at the configuration's paths.root.
+    if os.path.isabs(value) or os.path.dirname(value):
+        return _resolve_path(root, value)
+    return value
+
+
+def _parse_seed_generation(
+    root: str, data: Mapping[str, Any]
+) -> LearnedSeedGenerationConfig:
+    if not isinstance(data, Mapping):
+        raise ValueError("seed_generation must be a mapping")
+    data = dict(data)
+    _ensure_keys(data, _LEARNED_SEED_GENERATION_KEYS, "seed_generation")
+
+    method = _required_seed_generation_string(data, "method").lower()
+    if method != "learned_zerod":
+        raise ValueError(
+            "seed_generation.method must be 'learned_zerod'"
+        )
+    anatomy = _required_seed_generation_string(data, "anatomy").lower()
+    if anatomy != "pulmonary":
+        raise ValueError(
+            "seed_generation.anatomy must be 'pulmonary' for learned_zerod"
+        )
+
+    input_zerod_config = _resolve_path(
+        root, _required_seed_generation_string(data, "input_zerod_config")
+    )
+    centerline = _resolve_path(
+        root, _required_seed_generation_string(data, "centerline")
+    )
+    svzerodsolver = _resolve_path(
+        root, _required_seed_generation_string(data, "svzerodsolver")
+    )
+    output_dir = _resolve_path(
+        root, _required_seed_generation_string(data, "output_dir")
+    )
+    learned_executable = data.get("learned_zerod_executable", "learned-zerod")
+    if not isinstance(learned_executable, str) or not learned_executable.strip():
+        raise ValueError(
+            "seed_generation.learned_zerod_executable must be a non-empty string"
+        )
+    learned_executable = _resolve_learned_executable(root, learned_executable.strip())
+
+    output_filename = data.get("output_filename", "learned_full_pa_seed.json")
+    if not isinstance(output_filename, str) or not output_filename.strip():
+        raise ValueError(
+            "seed_generation.output_filename must be a non-empty string"
+        )
+
+    return LearnedSeedGenerationConfig(
+        method=method,
+        anatomy=anatomy,
+        input_zerod_config=input_zerod_config,
+        centerline=centerline,
+        svzerodsolver=svzerodsolver,
+        output_dir=output_dir,
+        learned_zerod_executable=learned_executable,
+        output_filename=output_filename.strip(),
+        keep_tmp=bool(data.get("keep_tmp", False)),
+    )
+
+
+def _validate_seed_generation_source(
+    workflow: str,
+    paths: PathsConfig,
+    seed_generation: Optional[LearnedSeedGenerationConfig],
+    bcs: Optional[BCSConfig],
+    pipeline: Optional[PipelineConfig],
+) -> None:
+    """Validate seed-source selection at the workflow boundary."""
+
+    has_static_seed = paths.zerod_config is not None
+    has_generated_seed = seed_generation is not None
+    if has_static_seed and has_generated_seed:
+        raise ValueError(
+            "paths.zerod_config and seed_generation are mutually exclusive; "
+            "select exactly one seed source"
+        )
+
+    tunes_bcs = workflow == "tune_bcs" or (
+        workflow == "pipeline"
+        and bcs is not None
+        and (pipeline is None or pipeline.optimize_bcs)
+    )
+    if not tunes_bcs:
+        if has_generated_seed:
+            raise ValueError(
+                "seed_generation is supported only for pipeline or tune_bcs "
+                "workflows that tune boundary conditions"
+            )
+        return
+
+    if not has_static_seed and not has_generated_seed:
+        raise ValueError(
+            f"{workflow} workflow that tunes boundary conditions requires exactly "
+            "one of paths.zerod_config or seed_generation"
+        )
+    if not has_generated_seed:
+        return
+
+    if bcs is None or bcs.type != "impedance" or bcs.impedance is None:
+        raise ValueError(
+            "seed_generation requires bcs.type='impedance' with "
+            "bcs.impedance.tuning_model='full_pa'"
+        )
+    if not bcs.is_pulmonary:
+        raise ValueError("seed_generation requires bcs.is_pulmonary=true")
+    if bcs.impedance.tuning_model != "full_pa":
+        raise ValueError(
+            "seed_generation requires bcs.impedance.tuning_model='full_pa'"
+        )
+    if bcs.impedance.outlet_mapping_mode not in {
+        "serialized_cap_order",
+        "explicit",
+    }:
+        raise ValueError(
+            "seed_generation requires bcs.impedance.outlet_mapping_mode to be "
+            "'serialized_cap_order' or 'explicit'"
+        )
 
 
 def _normalize_benchmark_models(models: Optional[List[Any]]) -> List[str]:
@@ -726,6 +1225,132 @@ def _parse_calibration_parameter_selection(
     )
 
 
+def _finite_positive_float(value: Any, *, context: str) -> float:
+    try:
+        converted = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{context} must be finite and positive") from exc
+    if not np.isfinite(converted) or converted <= 0.0:
+        raise ValueError(f"{context} must be finite and positive")
+    return converted
+
+
+def _positive_integer(value: Any, *, context: str, minimum: int = 1) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{context} must be an integer at least {minimum}")
+    try:
+        converted = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{context} must be an integer at least {minimum}") from exc
+    if (
+        not np.isfinite(converted)
+        or converted != int(converted)
+        or int(converted) < minimum
+    ):
+        raise ValueError(f"{context} must be an integer at least {minimum}")
+    return int(converted)
+
+
+def _target_vessel_name(value: Any, *, context: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{context} must be a non-empty vessel name")
+    return value.strip()
+
+
+def _target_interface(value: Any, *, context: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(
+            f"{context} must be one of {sorted(_CALIBRATION_TARGET_INTERFACES)}"
+        )
+    interface = value.strip().lower()
+    if interface not in _CALIBRATION_TARGET_INTERFACES:
+        raise ValueError(
+            f"{context} must be one of {sorted(_CALIBRATION_TARGET_INTERFACES)}"
+        )
+    return interface
+
+
+def _parse_calibration_targets(
+    data: Optional[Dict[str, Any]],
+    *,
+    context: str = "calibration.targets",
+) -> Optional[CalibrationTargetsConfig]:
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise ValueError(f"{context} must be a mapping")
+    _ensure_keys(
+        data,
+        ["mpa_pressure", "rpa_flow_split", "require_improvement_over_baseline"],
+        context,
+    )
+
+    mpa_raw = data.get("mpa_pressure")
+    rpa_raw = data.get("rpa_flow_split")
+    if not isinstance(mpa_raw, dict) or not isinstance(rpa_raw, dict):
+        raise ValueError(
+            f"{context} requires both mpa_pressure and rpa_flow_split mappings"
+        )
+    _ensure_keys(
+        mpa_raw,
+        ["vessel", "interface", "weight", "normalized_rms_tolerance"],
+        f"{context}.mpa_pressure",
+    )
+    _ensure_keys(
+        rpa_raw,
+        ["rpa_vessel", "lpa_vessel", "interface", "weight", "absolute_tolerance"],
+        f"{context}.rpa_flow_split",
+    )
+
+    mpa = CalibrationMPAPressureTargetConfig(
+        vessel=_target_vessel_name(mpa_raw.get("vessel"), context=f"{context}.mpa_pressure.vessel"),
+        interface=_target_interface(
+            mpa_raw.get("interface"), context=f"{context}.mpa_pressure.interface"
+        ),
+        weight=_finite_positive_float(
+            mpa_raw.get("weight", 1.0), context=f"{context}.mpa_pressure.weight"
+        ),
+        normalized_rms_tolerance=_finite_positive_float(
+            mpa_raw.get("normalized_rms_tolerance", 0.05),
+            context=f"{context}.mpa_pressure.normalized_rms_tolerance",
+        ),
+    )
+    rpa = CalibrationRPAFlowSplitTargetConfig(
+        rpa_vessel=_target_vessel_name(
+            rpa_raw.get("rpa_vessel"), context=f"{context}.rpa_flow_split.rpa_vessel"
+        ),
+        lpa_vessel=_target_vessel_name(
+            rpa_raw.get("lpa_vessel"), context=f"{context}.rpa_flow_split.lpa_vessel"
+        ),
+        interface=_target_interface(
+            rpa_raw.get("interface"), context=f"{context}.rpa_flow_split.interface"
+        ),
+        weight=_finite_positive_float(
+            rpa_raw.get("weight", 1.0), context=f"{context}.rpa_flow_split.weight"
+        ),
+        absolute_tolerance=_finite_positive_float(
+            rpa_raw.get("absolute_tolerance", 0.02),
+            context=f"{context}.rpa_flow_split.absolute_tolerance",
+        ),
+    )
+    roles = {mpa.vessel, rpa.rpa_vessel, rpa.lpa_vessel}
+    if len(roles) != 3:
+        raise ValueError(
+            f"{context} requires distinct MPA, LPA, and RPA vessel roles"
+        )
+
+    require_improvement = data.get("require_improvement_over_baseline", True)
+    if not isinstance(require_improvement, bool):
+        raise ValueError(
+            f"{context}.require_improvement_over_baseline must be a boolean"
+        )
+    return CalibrationTargetsConfig(
+        mpa_pressure=mpa,
+        rpa_flow_split=rpa,
+        require_improvement_over_baseline=require_improvement,
+    )
+
+
 def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
     _ensure_keys(
         data,
@@ -735,6 +1360,7 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             "solver",
             "input_normalization",
             "observation_qc",
+            "targets",
         ],
         "calibration",
     )
@@ -746,6 +1372,7 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         data_source_raw,
         [
             "mode",
+            "postprocess_metadata_json",
             "mapped_centerline_result",
             "metadata_json",
             "centerline",
@@ -758,53 +1385,97 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         ],
         "calibration.data_source",
     )
-    mode = str(data_source_raw.get("mode", "mapped_centerline"))
-    if mode != "mapped_centerline":
+    mode = str(data_source_raw.get("mode", "mapped_centerline")).strip().lower()
+    if mode not in {"mapped_centerline", "postprocess_suite"}:
         raise ValueError(
-            "calibration.data_source.mode must be 'mapped_centerline' for calibrate_0d_from_3d stage 1"
+            "calibration.data_source.mode must be one of "
+            "mapped_centerline|postprocess_suite"
         )
-    if data_source_raw.get("mapped_centerline_result") in (None, ""):
-        raise ValueError("calibration.data_source.mapped_centerline_result is required")
-    if data_source_raw.get("centerline") in (None, ""):
-        raise ValueError("calibration.data_source.centerline is required")
-    if "flow_observation_type" not in data_source_raw:
-        raise ValueError(
-            "calibration.data_source.flow_observation_type is required; "
-            "declare flow for svSlicer integrated flow or velocity for a true velocity field"
-        )
-    flow_observation_type = str(data_source_raw["flow_observation_type"]).lower()
-    if flow_observation_type not in {"flow", "velocity"}:
-        raise ValueError(
-            "calibration.data_source.flow_observation_type must be one of flow|velocity"
-        )
-    area_array = data_source_raw.get(
+
+    manual_fields = {
+        "mapped_centerline_result",
+        "metadata_json",
+        "centerline",
+        "pressure_array",
+        "flow_array",
+        "flow_observation_type",
         "area_array",
-        "CenterlineSectionArea" if flow_observation_type == "velocity" else None,
-    )
-    if area_array in ("", None):
-        area_array = None
-    if flow_observation_type == "velocity" and area_array is None:
-        raise ValueError(
-            "calibration.data_source.area_array is required when "
-            "calibration.data_source.flow_observation_type=velocity"
+        "branch_id_array",
+        "path_array",
+    }
+    supplied_manual_fields = sorted(manual_fields.intersection(data_source_raw))
+    postprocess_metadata_json = data_source_raw.get("postprocess_metadata_json")
+
+    if mode == "postprocess_suite":
+        if postprocess_metadata_json in (None, ""):
+            raise ValueError(
+                "calibration.data_source.postprocess_metadata_json is required "
+                "when mode=postprocess_suite"
+            )
+        if supplied_manual_fields:
+            raise ValueError(
+                "calibration.data_source.mode=postprocess_suite cannot be "
+                "combined with mapped-centerline fields: "
+                + ", ".join(supplied_manual_fields)
+            )
+        # The descriptor owns source filenames, array names, units, and the
+        # reference centerline.  These defaults are only placeholders for the
+        # typed model and are replaced by the descriptor adapter before any
+        # observation assembly occurs.
+        data_source = CalibrationDataSourceConfig(
+            mode=mode,
+            postprocess_metadata_json=_resolve_path(
+                root, str(postprocess_metadata_json)
+            ),
         )
-    data_source = CalibrationDataSourceConfig(
-        mode=mode,
-        mapped_centerline_result=_resolve_path(root, str(data_source_raw["mapped_centerline_result"])),
-        metadata_json=_resolve_path(
-            root,
-            str(data_source_raw["metadata_json"])
-            if data_source_raw.get("metadata_json") not in (None, "")
-            else None,
-        ),
-        centerline=_resolve_path(root, str(data_source_raw["centerline"])),
-        pressure_array=str(data_source_raw.get("pressure_array", "pressure")),
-        flow_array=str(data_source_raw.get("flow_array", "flow")),
-        flow_observation_type=flow_observation_type,
-        area_array=str(area_array) if area_array is not None else None,
-        branch_id_array=str(data_source_raw.get("branch_id_array", "BranchId")),
-        path_array=str(data_source_raw.get("path_array", "Path")),
-    )
+    else:
+        if postprocess_metadata_json not in (None, ""):
+            raise ValueError(
+                "calibration.data_source.postprocess_metadata_json is only "
+                "valid when mode=postprocess_suite"
+            )
+        if data_source_raw.get("mapped_centerline_result") in (None, ""):
+            raise ValueError("calibration.data_source.mapped_centerline_result is required")
+        if data_source_raw.get("centerline") in (None, ""):
+            raise ValueError("calibration.data_source.centerline is required")
+        if "flow_observation_type" not in data_source_raw:
+            raise ValueError(
+                "calibration.data_source.flow_observation_type is required; "
+                "declare flow for svSlicer integrated flow or velocity for a true velocity field"
+            )
+        flow_observation_type = str(data_source_raw["flow_observation_type"]).lower()
+        if flow_observation_type not in {"flow", "velocity"}:
+            raise ValueError(
+                "calibration.data_source.flow_observation_type must be one of flow|velocity"
+            )
+        area_array = data_source_raw.get(
+            "area_array",
+            "CenterlineSectionArea" if flow_observation_type == "velocity" else None,
+        )
+        if area_array in ("", None):
+            area_array = None
+        if flow_observation_type == "velocity" and area_array is None:
+            raise ValueError(
+                "calibration.data_source.area_array is required when "
+                "calibration.data_source.flow_observation_type=velocity"
+            )
+        data_source = CalibrationDataSourceConfig(
+            mode=mode,
+            mapped_centerline_result=_resolve_path(root, str(data_source_raw["mapped_centerline_result"])),
+            metadata_json=_resolve_path(
+                root,
+                str(data_source_raw["metadata_json"])
+                if data_source_raw.get("metadata_json") not in (None, "")
+                else None,
+            ),
+            centerline=_resolve_path(root, str(data_source_raw["centerline"])),
+            pressure_array=str(data_source_raw.get("pressure_array", "pressure")),
+            flow_array=str(data_source_raw.get("flow_array", "flow")),
+            flow_observation_type=flow_observation_type,
+            area_array=str(area_array) if area_array is not None else None,
+            branch_id_array=str(data_source_raw.get("branch_id_array", "BranchId")),
+            path_array=str(data_source_raw.get("path_array", "Path")),
+        )
 
     parameters_raw = data.get("parameters")
     if not isinstance(parameters_raw, dict):
@@ -837,6 +1508,9 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             "pressure_bound_multiplier",
             "flow_bound_multiplier",
             "cycle_stability_tolerance",
+            "replay_minimum_cycles",
+            "replay_maximum_cycles",
+            "required_consecutive_stable_pairs",
         ],
         "calibration.solver",
     )
@@ -857,6 +1531,20 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         pressure_bound_multiplier=float(solver_raw.get("pressure_bound_multiplier", 10.0)),
         flow_bound_multiplier=float(solver_raw.get("flow_bound_multiplier", 10.0)),
         cycle_stability_tolerance=float(solver_raw.get("cycle_stability_tolerance", 1e-3)),
+        replay_minimum_cycles=_positive_integer(
+            solver_raw.get("replay_minimum_cycles", 3),
+            context="calibration.solver.replay_minimum_cycles",
+            minimum=3,
+        ),
+        replay_maximum_cycles=_positive_integer(
+            solver_raw.get("replay_maximum_cycles", 10),
+            context="calibration.solver.replay_maximum_cycles",
+            minimum=3,
+        ),
+        required_consecutive_stable_pairs=_positive_integer(
+            solver_raw.get("required_consecutive_stable_pairs", 1),
+            context="calibration.solver.required_consecutive_stable_pairs",
+        ),
     )
     if (
         not np.isfinite(solver.initial_damping_factor)
@@ -878,6 +1566,8 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         or solver.flow_bound_multiplier <= 0.0
         or not np.isfinite(solver.cycle_stability_tolerance)
         or solver.cycle_stability_tolerance < 0.0
+        or solver.replay_maximum_cycles < solver.replay_minimum_cycles
+        or solver.required_consecutive_stable_pairs > solver.replay_maximum_cycles - 1
     ):
         raise ValueError(
             "calibration.solver requires a positive damping factor and at least "
@@ -885,7 +1575,9 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             "parameter_ratio_warning_threshold must be finite and at least 1; "
             "confirmation tolerances must be finite and non-negative; pressure and "
             "flow bound multipliers must be finite and positive; cycle stability "
-            "tolerance must be finite and non-negative"
+            "tolerance must be finite and non-negative; replay_maximum_cycles must "
+            "be at least replay_minimum_cycles and leave enough cycle pairs for "
+            "required_consecutive_stable_pairs"
         )
 
     normalization_raw = data.get("input_normalization") or {}
@@ -917,6 +1609,7 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             "minimum_pressure_drop_fraction",
             "minimum_path_coverage",
             "minimum_usable_samples",
+            "enforcement",
         ],
         "calibration.observation_qc",
     )
@@ -939,6 +1632,7 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         minimum_usable_samples=int(
             observation_qc_raw.get("minimum_usable_samples", 3)
         ),
+        enforcement=str(observation_qc_raw.get("enforcement", "strict_network")).lower(),
     )
     if (
         not np.isfinite(observation_qc.vessel_flow_continuity_tolerance)
@@ -964,6 +1658,18 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             "calibration.observation_qc.minimum_usable_samples must be at least 3"
         )
 
+    if observation_qc.enforcement not in {"strict_network", "target_focused"}:
+        raise ValueError(
+            "calibration.observation_qc.enforcement must be one of "
+            "strict_network|target_focused"
+        )
+    targets = _parse_calibration_targets(data.get("targets"))
+    if observation_qc.enforcement == "target_focused" and targets is None:
+        raise ValueError(
+            "calibration.observation_qc.enforcement=target_focused requires "
+            "calibration.targets"
+        )
+
     return CalibrationConfig(
         data_source=data_source,
         parameters=parameters,
@@ -972,6 +1678,7 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             infinite_vessel_compliance=infinite_vessel_compliance
         ),
         observation_qc=observation_qc,
+        targets=targets,
     )
 
 
@@ -985,6 +1692,7 @@ def load_config(path: str) -> BaseConfig:
             "version",
             "workflow",
             "paths",
+            "seed_generation",
             "bcs",
             "trees",
             "adaptation",
@@ -1020,16 +1728,143 @@ def load_config(path: str) -> BaseConfig:
         raise ValueError("paths section is required")
     paths = _parse_paths(raw["paths"])
 
+    seed_generation = None
+    if raw.get("seed_generation") is not None:
+        seed_generation = _parse_seed_generation(paths.root, raw["seed_generation"])
+
     bcs = None
     if raw.get("bcs") is not None:
         data = raw["bcs"]
-        _ensure_keys(data, ["type", "compliance_model", "tune_space", "is_pulmonary", "rcr_params"], "bcs")
+        if not isinstance(data, Mapping):
+            raise ValueError("bcs must be a mapping")
+        _ensure_keys(
+            data,
+            [
+                "type",
+                "is_pulmonary",
+                "impedance",
+                # Legacy flat fields.  They are converted below and are not
+                # allowed alongside the equivalent nested controls.
+                "compliance_model",
+                "tune_space",
+                "rcr_params",
+                "tuning_model",
+                "allow_ordered_outlet_mapping",
+            ],
+            "bcs",
+        )
+
+        nested_impedance = data.get("impedance")
+        legacy_flat_keys = {
+            "type",
+            "compliance_model",
+            "tune_space",
+            "rcr_params",
+            "tuning_model",
+            "allow_ordered_outlet_mapping",
+        }
+        legacy_impedance_keys = {
+            "compliance_model",
+            "tune_space",
+            "tuning_model",
+            "allow_ordered_outlet_mapping",
+        }
+        supplied_legacy_impedance = sorted(
+            key for key in legacy_impedance_keys if key in data
+        )
+
+        bcs_type_raw = data.get("type")
+        if bcs_type_raw is None:
+            bcs_type = "impedance" if nested_impedance is not None else None
+        else:
+            bcs_type = str(bcs_type_raw).strip().lower()
+        if bcs_type not in {"impedance", "rcr"}:
+            raise ValueError("bcs.type must be 'impedance' or 'rcr'")
+
+        impedance = None
+        if nested_impedance is not None:
+            if bcs_type != "impedance":
+                raise ValueError(
+                    "bcs.impedance cannot be combined with bcs.type='rcr'"
+                )
+            contradictory = [
+                key
+                for key in supplied_legacy_impedance
+                if key != "allow_ordered_outlet_mapping"
+            ]
+            if contradictory:
+                raise ValueError(
+                    "bcs.impedance cannot be combined with legacy flat fields: "
+                    + ", ".join(contradictory)
+                )
+            if "allow_ordered_outlet_mapping" in data:
+                impedance = _parse_impedance_config(
+                    nested_impedance,
+                    legacy_ordered_mapping=bool(
+                        data.get("allow_ordered_outlet_mapping")
+                    ),
+                )
+            else:
+                impedance = _parse_impedance_config(nested_impedance)
+        elif bcs_type == "impedance":
+            if not supplied_legacy_impedance:
+                # Preserve the old default shape while still giving public
+                # callers one typed impedance block to consume.
+                impedance_data: Dict[str, Any] = {}
+            else:
+                impedance_data = {
+                    key: data[key]
+                    for key in supplied_legacy_impedance
+                    if key != "allow_ordered_outlet_mapping"
+                }
+            impedance = _parse_impedance_config(
+                impedance_data,
+                legacy_ordered_mapping=(
+                    bool(data["allow_ordered_outlet_mapping"])
+                    if "allow_ordered_outlet_mapping" in data
+                    else None
+                ),
+            )
+
+        if nested_impedance is None and any(key in data for key in legacy_flat_keys):
+            message = (
+                "flat bcs impedance fields are deprecated; use bcs.impedance instead"
+                if supplied_legacy_impedance
+                else "flat bcs fields are deprecated; use bcs.impedance for impedance controls"
+            )
+            warnings.warn(
+                message,
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+        if bcs_type == "rcr" and supplied_legacy_impedance:
+            raise ValueError(
+                "legacy impedance fields require bcs.type='impedance': "
+                + ", ".join(supplied_legacy_impedance)
+            )
+        if bcs_type == "impedance" and "rcr_params" in data:
+            raise ValueError("bcs.rcr_params cannot be combined with impedance BCs")
+        if (
+            bcs_type == "impedance"
+            and impedance is not None
+            and impedance.tuning_model == "full_pa"
+            and not bool(data.get("is_pulmonary", True))
+        ):
+            raise ValueError(
+                "bcs.impedance.tuning_model='full_pa' requires is_pulmonary=true"
+            )
+
+        # ``type`` and ``rcr_params`` remain populated on BCSConfig for
+        # existing RRI/RCR API consumers.  Impedance execution uses only the
+        # nested typed block created above.
         bcs = BCSConfig(
-            type=data["type"],
-            compliance_model=data.get("compliance_model", "constant"),
+            type=bcs_type,
+            compliance_model=str(data.get("compliance_model", "constant")),
             tune_space=_parse_tune_space(data.get("tune_space")),
             is_pulmonary=bool(data.get("is_pulmonary", True)),
             rcr_params=data.get("rcr_params"),
+            impedance=impedance,
         )
 
     trees = None
@@ -1242,10 +2077,19 @@ def load_config(path: str) -> BaseConfig:
     if raw.get("calibration") is not None:
         calibration = _parse_calibration(paths.root, raw["calibration"])
 
+    _validate_seed_generation_source(
+        workflow,
+        paths,
+        seed_generation,
+        bcs,
+        pipeline,
+    )
+
     return BaseConfig(
         version=version,
         workflow=workflow,
         paths=paths,
+        seed_generation=seed_generation,
         bcs=bcs,
         trees=trees,
         adaptation=adaptation,
@@ -1274,6 +2118,18 @@ paths:
   inflow: path/to/inflow.csv
   optimized_params: path/to/optimized_params.csv
   output_config: path/to/output_config.json
+
+# Optional learned full-PA seed source. Remove paths.zerod_config when using it.
+# seed_generation:
+#   method: learned_zerod
+#   anatomy: pulmonary
+#   input_zerod_config: path/to/source_0d_config.json
+#   centerline: path/to/centerline.vtp
+#   svzerodsolver: /path/to/svzerodsolver
+#   output_dir: generated/learned-seed
+#   learned_zerod_executable: learned-zerod
+#   output_filename: learned_full_pa_seed.json
+#   keep_tmp: false
 
 calibration:
   data_source:
@@ -1305,6 +2161,9 @@ calibration:
     pressure_bound_multiplier: 10.0
     flow_bound_multiplier: 10.0
     cycle_stability_tolerance: 1e-3
+    replay_minimum_cycles: 3
+    replay_maximum_cycles: 10
+    required_consecutive_stable_pairs: 1
   input_normalization:
     infinite_vessel_compliance: error  # error | zero
   observation_qc:
@@ -1314,24 +2173,58 @@ calibration:
     minimum_pressure_drop_fraction: 0.95
     minimum_path_coverage: 0.99
     minimum_usable_samples: 3
+    enforcement: strict_network  # strict_network | target_focused
+  # Optional during the version-1 compatibility window. Required when
+  # observation_qc.enforcement is target_focused.
+  targets:
+    mpa_pressure:
+      vessel: branch0_seg0
+      interface: external_upstream
+      weight: 1.0
+      normalized_rms_tolerance: 0.05
+    rpa_flow_split:
+      rpa_vessel: branch1_seg0
+      lpa_vessel: branch2_seg0
+      interface: external_downstream
+      weight: 1.0
+      absolute_tolerance: 0.02
+    require_improvement_over_baseline: true
 
 bcs:
   type: impedance  # impedance | rcr
-  compliance_model: constant
   is_pulmonary: true
-  tune_space:
-    free:
-      - name: lpa.alpha
-        init: 0.9
-        lb: 0.7
-        ub: 0.99
-        to_native: identity
-        from_native: identity
-    fixed:
-      - name: d_min
-        value: 0.01
-    tied: []
-  rcr_params: [R_LPA, C_LPA, R_RPA, C_RPA]
+  impedance:
+    tuning_model: full_pa  # full_pa | rri
+    solver: Nelder-Mead
+    nm_iter: 5
+    n_procs: 24
+    grid_search_init: true
+    d_min: 0.01
+    use_mean: false
+    specify_diameter: true
+    rescale_inflow: true
+    convert_to_cm: false
+    compliance_model: olufsen
+    diameter_scale: 1.0
+    diameter_std_cap: null
+    outlet_mapping_mode: auto
+    outlet_mapping: null  # required when mode is explicit
+    tune_space:
+      free:
+        - name: lpa.alpha
+          init: 0.9
+          lb: 0.7
+          ub: 0.99
+          to_native: identity
+          from_native: identity
+      fixed:
+        - name: d_min
+          value: 0.01
+      tied: []
+  # Legacy flat fields remain accepted by load_config during migration.
+  # compliance_model, tune_space, and allow_ordered_outlet_mapping are
+  # deprecated in favor of bcs.impedance.*.
+  # rcr_params: [R_LPA, C_LPA, R_RPA, C_RPA]  # use with type: rcr
 
 trees:
   d_min: 0.01

@@ -1359,13 +1359,14 @@ class StructuredTree:
         if path is None:
             return d, Eh_r
         else:
-            plt.figure()
-            plt.plot(d, Eh_r)
-            plt.yscale('log')
-            plt.xlabel('diameter (cm)')
-            plt.ylabel('Eh/r (mmHg)')
-            plt.title('Eh/r vs. diameter')
-            plt.savefig(path)
+            figure, axes = plt.subplots()
+            axes.plot(d, Eh_r)
+            axes.set_yscale('log')
+            axes.set_xlabel('diameter (cm)')
+            axes.set_ylabel('Eh/r (mmHg)')
+            axes.set_title('Eh/r vs. diameter')
+            figure.savefig(path)
+            plt.close(figure)
 
         
     @property

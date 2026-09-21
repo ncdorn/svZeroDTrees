@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 import pandas as pd
@@ -12,6 +14,7 @@ from svzerodtrees.tuning.iteration import (
     OPTIMIZATION_LOG_FILENAME,
     OPTIMIZED_PARAMS_FILENAME,
     OPTIMIZED_RCR_PARAMS_FILENAME,
+    OUTLET_CAP_MAPPING_FILENAME,
     PA_CONFIG_SNAPSHOT_FILENAME,
     _build_tune_space_from_config,
     _resolve_impedance_config,
@@ -25,7 +28,11 @@ from svzerodtrees.tuning.iteration import (
     write_iteration_metrics,
 )
 from svzerodtrees.tuning.learned_seed import prepare_reduced_rri_seed_from_learned
+from svzerodtrees.config import LearnedSeedGenerationConfig
+from svzerodtrees.tuning import generate_full_pa_learned_seed
+from svzerodtrees.tuning.learned_seed import LearnedSeedResult
 from svzerodtrees.tune_bcs.assign_bcs import resolve_cap_to_bc_mapping
+from svzerodtrees.tune_bcs.outlet_mapping import resolve_outlet_cap_mapping
 
 
 def _tune_space_with_xi() -> dict[str, list[dict[str, object]]]:
@@ -241,6 +248,7 @@ def _full_pa_multi_outlet_payload() -> dict[str, object]:
 
 def _full_pa_impedance_snapshot_payload() -> dict[str, object]:
     payload = _full_pa_multi_outlet_payload()
+    payload["simulation_parameters"]["number_of_time_pts_per_cardiac_cycle"] = 3
     for bc in payload["boundary_conditions"]:
         if bc["bc_name"] == "INFLOW":
             continue
@@ -307,6 +315,98 @@ def _write_constant_inflow_csv(tmp_path: Path, mean_flow: float) -> Path:
         encoding="utf-8",
     )
     return inflow_path
+
+
+def _learned_generation_config(tmp_path: Path) -> tuple[LearnedSeedGenerationConfig, bytes]:
+    input_path = tmp_path / "source.json"
+    input_bytes = json.dumps(_seed_config_payload(), indent=2).encode("utf-8")
+    input_path.write_bytes(input_bytes)
+    centerline = tmp_path / "centerline.vtp"
+    centerline.write_bytes(b"centerline fixture")
+    solver = tmp_path / "svzerodsolver"
+    solver.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    solver.chmod(0o755)
+    learned = tmp_path / "learned-zerod"
+    learned.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    learned.chmod(0o755)
+    config = LearnedSeedGenerationConfig(
+        method="learned_zerod",
+        anatomy="pulmonary",
+        input_zerod_config=str(input_path),
+        centerline=str(centerline),
+        svzerodsolver=str(solver),
+        output_dir=str(tmp_path / "generated"),
+        learned_zerod_executable=str(learned),
+        output_filename="learned_full_pa_seed.json",
+    )
+    return config, input_bytes
+
+
+def test_generate_full_pa_learned_seed_uses_fixed_argv_and_publishes_provenance(
+    monkeypatch, tmp_path: Path
+):
+    config, input_bytes = _learned_generation_config(tmp_path)
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def _fake_run(argv, **kwargs):
+        calls.append((list(argv), dict(kwargs)))
+        output_dir = Path(argv[argv.index("--output-dir") + 1])
+        filename = argv[argv.index("--output-filename") + 1]
+        output_dir.joinpath(filename).write_text(
+            json.dumps(_full_pa_multi_outlet_payload()), encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(argv, 0, stdout="generated", stderr="")
+
+    monkeypatch.setattr("svzerodtrees.tuning.learned_seed.subprocess.run", _fake_run)
+    result = generate_full_pa_learned_seed(config)
+
+    assert isinstance(result, LearnedSeedResult)
+    assert result.seed_path == tmp_path / "generated" / "learned_full_pa_seed.json"
+    assert result.metadata_path == tmp_path / "generated" / "learned_seed_metadata.json"
+    assert result.seed_path.exists()
+    assert result.metadata_path.exists()
+    assert config.input_zerod_config and Path(config.input_zerod_config).read_bytes() == input_bytes
+
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert kwargs == {"capture_output": True, "text": True, "check": True, "shell": False}
+    assert argv[0] == str(tmp_path / "learned-zerod")
+    assert argv[argv.index("--anatomy") + 1] == "pulmonary"
+    assert Path(argv[argv.index("--zerod-json") + 1]).is_absolute()
+    assert Path(argv[argv.index("--centerline-vtp") + 1]).is_absolute()
+    assert Path(argv[argv.index("--svzerod") + 1]).is_absolute()
+    assert Path(argv[argv.index("--output-dir") + 1]).is_absolute()
+    assert argv[-1] == "learned_full_pa_seed.json"
+
+    metadata = json.loads(result.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["schema_version"] == 1
+    assert metadata["status"] == "success"
+    assert metadata["paths"]["seed"] == str(result.seed_path)
+    assert metadata["digests"]["input_zerod_config"] == hashlib.sha256(input_bytes).hexdigest()
+    assert metadata["digests"]["centerline"] == hashlib.sha256(b"centerline fixture").hexdigest()
+    assert metadata["digests"]["generated_seed"] == hashlib.sha256(result.seed_path.read_bytes()).hexdigest()
+    assert not list((tmp_path / "generated").glob(".learned_seed-*"))
+
+
+def test_generate_full_pa_learned_seed_rejects_invalid_output_without_manifest(
+    monkeypatch, tmp_path: Path
+):
+    config, _ = _learned_generation_config(tmp_path)
+
+    def _fake_run(argv, **kwargs):
+        output_dir = Path(argv[argv.index("--output-dir") + 1])
+        output_dir.joinpath(argv[argv.index("--output-filename") + 1]).write_text(
+            json.dumps({"vessels": []}), encoding="utf-8"
+        )
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("svzerodtrees.tuning.learned_seed.subprocess.run", _fake_run)
+    with pytest.raises(ValueError, match="vessels"):
+        generate_full_pa_learned_seed(config)
+
+    generated_dir = tmp_path / "generated"
+    assert not (generated_dir / "learned_full_pa_seed.json").exists()
+    assert not (generated_dir / "learned_seed_metadata.json").exists()
 
 
 def test_compute_centerline_metrics_from_values():
@@ -891,7 +991,7 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
     targets = tmp_path / "clinical_targets.csv"
     inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
     iteration_dir = tmp_path / "iter-01"
-    seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
+    seed.write_text(json.dumps(_full_pa_multi_outlet_payload()), encoding="utf-8")
     mesh_surfaces.mkdir(parents=True, exist_ok=True)
     targets.write_text("target,value\n", encoding="utf-8")
 
@@ -905,7 +1005,9 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
         bcs = {
             "INFLOW": BC("INFLOW"),
             "lpa_cap_1": BC("lpa_cap_1"),
+            "lpa_cap_2": BC("lpa_cap_2"),
             "rpa_cap_1": BC("rpa_cap_1"),
+            "rpa_cap_2": BC("rpa_cap_2"),
         }
 
         @classmethod
@@ -946,23 +1048,10 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
                 encoding="utf-8",
             )
             (out_dir / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
-                json.dumps(_impedance_artifact_payload(
-                    bc_values={"z": [1.0, 0.5], "Pd": 12.0},
-                    coupled=False,
-                    number_of_time_pts_per_cardiac_cycle=3,
-                    inflow_q=[6.0, 6.0],
-                )),
+                json.dumps(_full_pa_impedance_snapshot_payload()),
                 encoding="utf-8",
             )
             Path(str(calls["tuner_kwargs"]["log_file"])).write_text("log", encoding="utf-8")
-
-    def _fake_validate(config_handler, mesh_path, **kwargs):
-        calls["validate"] = {
-            "config_handler": config_handler,
-            "mesh_path": mesh_path,
-            "kwargs": kwargs,
-        }
-        return {"/mesh/lpa_cap_1.vtp": "lpa_cap_1", "/mesh/rpa_cap_1.vtp": "rpa_cap_1"}
 
     def _fake_construct(config_handler, mesh_path, wedge_p, lpa_params, rpa_params, d_min, **kwargs):
         calls["construct"] = {
@@ -975,7 +1064,16 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
-    monkeypatch.setattr("svzerodtrees.tuning.iteration.validate_cap_to_bc_mapping", _fake_validate)
+    # Keep the full-PA preflight and validator real.  Only the geometry reader
+    # is replaced because this synthetic fixture has no VTP files on disk.
+    monkeypatch.setattr(
+        "svzerodtrees.tune_bcs.assign_bcs.vtp_info",
+        lambda *_args, **_kwargs: (
+            {"/mesh/rpa_cap_1.vtp": 1.0, "/mesh/rpa_cap_2.vtp": 4.0},
+            {"/mesh/lpa_cap_1.vtp": 1.0, "/mesh/lpa_cap_2.vtp": 4.0},
+            {},
+        ),
+    )
     monkeypatch.setattr("svzerodtrees.tuning.iteration.construct_impedance_trees", _fake_construct)
     monkeypatch.setattr("svzerodtrees.tuning.iteration.get_pa_outlet_scale", lambda *_args, **_kwargs: 2.0)
     monkeypatch.setattr(
@@ -1002,16 +1100,81 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(monkeypatch, tmp_pa
     )
 
     assert result["tuning_model"] == "full_pa"
+    assert Path(result["outlet_cap_mapping"]).name == OUTLET_CAP_MAPPING_FILENAME
+    assert Path(result["outlet_cap_mapping"]).exists()
     assert result["impedance_config"]["diameter_std_cap"] == pytest.approx(1.5)
     assert calls["nm_iter"] == 3
-    assert calls["validate"]["mesh_path"] == str(mesh_surfaces)
-    assert calls["validate"]["kwargs"]["allow_ordered_outlet_mapping"] is True
     assert calls["tuner_kwargs"]["tuning_model"] == "full_pa"
     assert calls["tuner_kwargs"]["diameter_scale"] == pytest.approx(0.25)
     assert calls["tuner_kwargs"]["diameter_std_cap"] == pytest.approx(1.5)
+    assert calls["tuner_kwargs"]["resolved_mapping"] is calls["construct"]["kwargs"]["resolved_mapping"]
     assert calls["construct"]["kwargs"]["use_mean"] is False
     assert calls["construct"]["kwargs"]["diameter_scale"] == pytest.approx(0.25)
     assert calls["construct"]["kwargs"]["diameter_std_cap"] == pytest.approx(1.5)
+    assert calls["construct"]["kwargs"]["resolved_mapping"].pairs == (
+        ("/mesh/lpa_cap_1.vtp", "lpa_cap_1"),
+        ("/mesh/lpa_cap_2.vtp", "lpa_cap_2"),
+        ("/mesh/rpa_cap_1.vtp", "rpa_cap_1"),
+        ("/mesh/rpa_cap_2.vtp", "rpa_cap_2"),
+    )
+    mapping_payload = json.loads(Path(result["outlet_cap_mapping"]).read_text(encoding="utf-8"))
+    assert mapping_payload["version"] == 1
+    assert mapping_payload["strategy"] == "serialized_cap_order"
+    assert [pair["bc_name"] for pair in mapping_payload["pairs"]] == [
+        "lpa_cap_1",
+        "lpa_cap_2",
+        "rpa_cap_1",
+        "rpa_cap_2",
+    ]
+    assert all(pair["scaled_diameter"] is not None for pair in mapping_payload["pairs"])
+    assert mapping_payload["provenance"]["convert_to_cm"] is False
+
+
+def test_run_impedance_tuning_for_iteration_full_pa_rejects_reduced_seed_before_tuner(
+    monkeypatch, tmp_path: Path
+):
+    seed = tmp_path / "reduced_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
+    iteration_dir = tmp_path / "iter-01"
+    seed.write_text(json.dumps(_seed_config_payload()), encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+
+    class DummyConfigHandler:
+        bcs = {"INFLOW": SimpleNamespace(name="INFLOW")}
+
+        @classmethod
+        def from_json(cls, _path: str, is_pulmonary: bool = False):
+            return cls()
+
+    class DummyClinicalTargets:
+        wedge_p = 12.0
+
+        @classmethod
+        def from_csv(cls, _path: str):
+            return cls()
+
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration.ImpedanceTuner",
+        lambda *_args, **_kwargs: pytest.fail("full_pa preflight must run before tuner creation"),
+    )
+
+    with pytest.raises(ValueError, match="requires a full seed with more than two"):
+        run_impedance_tuning_for_iteration(
+            iteration_dir=iteration_dir,
+            seed_config=seed,
+            mesh_surfaces=mesh_surfaces,
+            clinical_targets=targets,
+            inflow_path=inflow_path,
+            impedance_config={
+                "tuning_model": "full_pa",
+                "tune_space": _tune_space_with_xi(),
+            },
+        )
 
 
 def test_run_impedance_tuning_for_iteration_full_pa_rejects_reduced_snapshot(
@@ -1359,9 +1522,11 @@ def test_full_pa_tuner_loss_applies_trial_bcs_and_writes_csv(monkeypatch, tmp_pa
     loss = tuner.loss_fn(x0, tuner._full_pa_base_config, finalize=True)
 
     assert loss > 0.0
-    assert calls["construct"]["kwargs"]["use_mean"] is True
-    assert calls["construct"]["kwargs"]["diameter_scale"] == pytest.approx(0.0)
-    assert calls["construct"]["kwargs"]["diameter_std_cap"] is None
+    # Candidate construction must honor the same full_pa tree contract that
+    # final publication uses; it must not silently fall back to mean trees.
+    assert calls["construct"]["kwargs"]["use_mean"] is False
+    assert calls["construct"]["kwargs"]["diameter_scale"] == pytest.approx(0.5)
+    assert calls["construct"]["kwargs"]["diameter_std_cap"] == pytest.approx(2.0)
     assert (tmp_path / OPTIMIZED_PARAMS_FILENAME).exists()
     assert (tmp_path / PA_CONFIG_SNAPSHOT_FILENAME).exists()
 
@@ -2154,6 +2319,85 @@ def test_resolve_impedance_config_supports_tuning_model_and_diameter_std_cap():
     )
     assert cfg["tuning_model"] == "full_pa"
     assert cfg["diameter_std_cap"] == pytest.approx(1.25)
+
+
+def test_resolve_impedance_config_full_pa_defaults_are_opt_in_and_rri_defaults_unchanged():
+    full_pa = _resolve_impedance_config(
+        {"tuning_model": "full_pa", "tune_space": _tune_space_with_xi()}
+    )
+    assert full_pa["use_mean"] is False
+    assert full_pa["diameter_scale"] == pytest.approx(1.0)
+    assert full_pa["outlet_mapping_mode"] == "auto"
+    assert full_pa["outlet_mapping"] is None
+    assert "allow_ordered_outlet_mapping" not in full_pa
+
+    rri = _resolve_impedance_config({"tune_space": _tune_space_with_xi()})
+    assert rri["use_mean"] is True
+    assert rri["diameter_scale"] == pytest.approx(0.0)
+    assert rri["allow_ordered_outlet_mapping"] is False
+    assert "outlet_mapping_mode" not in rri
+
+
+def test_resolve_impedance_config_full_pa_preserves_explicit_compatibility_controls():
+    cfg = _resolve_impedance_config(
+        {
+            "tuning_model": "full_pa",
+            "use_mean": True,
+            "diameter_scale": 0.0,
+            "tune_space": _tune_space_with_xi(),
+        }
+    )
+    assert cfg["use_mean"] is True
+    assert cfg["diameter_scale"] == pytest.approx(0.0)
+
+
+def test_resolve_impedance_config_migrates_legacy_ordered_mapping_flag():
+    with pytest.warns(
+        DeprecationWarning,
+        match="allow_ordered_outlet_mapping is deprecated",
+    ):
+        cfg = _resolve_impedance_config(
+            {
+                "tuning_model": "full_pa",
+                "allow_ordered_outlet_mapping": True,
+                "tune_space": _tune_space_with_xi(),
+            }
+        )
+    assert cfg["outlet_mapping_mode"] == "serialized_cap_order"
+    assert cfg["outlet_mapping"] is None
+    assert "allow_ordered_outlet_mapping" not in cfg
+
+
+def test_resolve_impedance_config_rejects_legacy_and_new_mapping_settings():
+    with pytest.raises(ValueError, match="cannot be combined"):
+        _resolve_impedance_config(
+            {
+                "tuning_model": "full_pa",
+                "outlet_mapping_mode": "auto",
+                "allow_ordered_outlet_mapping": False,
+                "tune_space": _tune_space_with_xi(),
+            }
+        )
+
+
+def test_resolve_impedance_config_requires_explicit_mapping_for_explicit_mode():
+    with pytest.raises(ValueError, match="requires outlet_mapping"):
+        _resolve_impedance_config(
+            {
+                "tuning_model": "full_pa",
+                "outlet_mapping_mode": "explicit",
+                "tune_space": _tune_space_with_xi(),
+            }
+        )
+
+    with pytest.raises(ValueError, match="requires outlet_mapping_mode='explicit'"):
+        _resolve_impedance_config(
+            {
+                "tuning_model": "full_pa",
+                "outlet_mapping": {"lpa_cap": "OUT_LPA"},
+                "tune_space": _tune_space_with_xi(),
+            }
+        )
 
 
 def test_resolve_impedance_config_nonzero_diameter_scale_disables_mean_tree_assignment():

@@ -1,7 +1,4 @@
 
-from pathlib import Path
-import re
-
 import numpy as np
 from ..io import *
 from ..io.blocks.boundary_condition import resolve_impedance_timepoint_contract
@@ -10,6 +7,11 @@ from ..microvasculature.structured_tree.structuredtree import StructuredTree
 from ..microvasculature.treeparams import TreeParameters
 from ..simulation.threedutils import vtp_info
 from .utils import *
+from .outlet_mapping import (
+    coerce_resolved_mapping,
+    mapping_key,
+    resolve_outlet_cap_mapping,
+)
 
 # this is where the logic for assigning boundary conditions to the 3D model is implemented
 
@@ -28,21 +30,36 @@ def _create_impedance_bc(tree, bc_name, outlet_id, pd, *, verbose):
         return tree.create_impedance_bc(bc_name, outlet_id, pd)
 
 
-def _attach_tree_metadata(tree, params, *, generation_mode, side, bc_names, outlet_names):
+def _attach_tree_metadata(
+    tree,
+    params,
+    *,
+    generation_mode,
+    side,
+    bc_names,
+    outlet_names,
+    resolved_mapping=None,
+    mapping_records=None,
+):
     tree.inductance = float(params.inductance)
     tree.generation_mode = generation_mode
-    tree.outlet_mapping = {
+    tree.outlet_mapping = mapping_payload = {
         "mode": generation_mode,
         "side": side,
         "bc_names": list(bc_names),
         "outlet_names": list(outlet_names),
     }
+    if resolved_mapping is not None:
+        mapping_payload["strategy"] = resolved_mapping.strategy
+        mapping_payload["pairs"] = [
+            record.to_dict()
+            for record in (mapping_records or resolved_mapping.records)
+        ]
     return tree.to_dict()
 
 
 def _mapping_key(value):
-    stem = Path(str(value)).stem
-    return re.sub(r"[^a-z0-9]+", "", stem.lower())
+    return mapping_key(value)
 
 
 def _outlet_bc_names(config_handler):
@@ -80,82 +97,93 @@ def resolve_cap_to_bc_mapping(
     *,
     bc_prefix,
     allow_ordered_outlet_mapping=False,
+    outlet_mapping_mode=None,
+    outlet_mapping=None,
+    mode=None,
+    explicit_mapping=None,
 ):
-    """Resolve mesh cap names to 0D outlet BC names without silent order guesses."""
+    """Resolve mesh cap names to 0D outlet BC names.
 
-    cap_names = list(cap_info.keys())
-    outlet_names = _outlet_bc_names(config_handler)
-    if len(outlet_names) != len(cap_names):
-        raise ValueError(
-            "number of outlet boundary conditions does not match number of cap "
-            f"surfaces: bcs={len(outlet_names)}, caps={len(cap_names)}"
-        )
+    This wrapper retains the historical dict-shaped return for direct callers;
+    callers that need provenance should use ``resolve_outlet_cap_mapping``.
+    """
 
-    metadata_mapping = _metadata_cap_to_bc(config_handler)
-    bc_by_key = {}
-    for name in outlet_names:
-        bc = config_handler.bcs[name]
-        keys = {_mapping_key(name), _mapping_key(getattr(bc, "name", name))}
-        for key in keys:
-            if key:
-                bc_by_key.setdefault(key, []).append(name)
-
-    resolved = {}
-    used = set()
-    unresolved = []
-    for cap_name in cap_names:
-        cap_key = _mapping_key(cap_name)
-        bc_name = metadata_mapping.get(cap_key)
-        if bc_name is not None and bc_name in outlet_names and bc_name not in used:
-            resolved[cap_name] = bc_name
-            used.add(bc_name)
-            continue
-
-        matches = [name for name in bc_by_key.get(cap_key, []) if name not in used]
-        if len(matches) == 1:
-            resolved[cap_name] = matches[0]
-            used.add(matches[0])
-        else:
-            unresolved.append(str(cap_name))
-
-    if not unresolved and len(resolved) == len(cap_names):
-        return resolved
-
+    requested_mode = outlet_mapping_mode if outlet_mapping_mode is not None else mode
+    requested_mode = requested_mode or "auto"
     if allow_ordered_outlet_mapping:
-        return {
-            cap_name: outlet_names[idx]
-            for idx, cap_name in enumerate(cap_names)
-        }
+        if str(requested_mode).strip().lower() not in {
+            "auto",
+            "serialized_cap_order",
+        }:
+            raise ValueError("allow_ordered_outlet_mapping conflicts with mode")
+        # Translate the deprecated direct-caller flag at this boundary.  The
+        # canonical resolver receives only outlet_mapping_mode.
+        requested_mode = "serialized_cap_order"
 
-    raise ValueError(
-        "could not deterministically map mesh caps to outlet BCs; unresolved caps: "
-        + ", ".join(unresolved)
-        + ". Add matching BC names/outlet metadata or set "
-        "allow_ordered_outlet_mapping=True for legacy order-based mapping."
-    )
+    try:
+        resolved = resolve_outlet_cap_mapping(
+            config_handler,
+            cap_info,
+            bc_prefix=bc_prefix,
+            outlet_mapping_mode=requested_mode,
+            outlet_mapping=outlet_mapping,
+            explicit_mapping=explicit_mapping,
+        )
+    except ValueError as exc:
+        raise ValueError(
+            f"could not deterministically map mesh caps to outlet BCs: {exc}"
+        ) from exc
+    return dict(resolved.items())
 
 
 def validate_cap_to_bc_mapping(
     config_handler,
     mesh_surfaces_path,
     *,
+    outlet_mapping_mode="auto",
+    outlet_mapping=None,
+    resolved_mapping=None,
     convert_to_cm=False,
-    is_pulmonary=True,
-    bc_prefix="IMPEDANCE",
-    allow_ordered_outlet_mapping=False,
+    is_pulmonary=False,
+    bc_prefix=None,
 ):
+    """Validate and resolve one cap-to-outlet mapping for a mesh.
+
+    ``outlet_mapping_mode`` and ``outlet_mapping`` are the canonical inputs.
+    A pre-resolved mapping may be supplied when a caller has already frozen
+    the identity for the remainder of an iteration, but it cannot be mixed
+    with a second mapping request.  Legacy ordered mapping is translated by
+    configuration/direct-call adapters before reaching this validator.
+    """
+
+    if outlet_mapping is not None and resolved_mapping is not None:
+        raise ValueError(
+            "outlet_mapping and resolved_mapping conflict and are mutually exclusive; "
+            "provide only one mapping input"
+        )
+
     if is_pulmonary:
         rpa_info, lpa_info, _ = vtp_info(
             mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=True
         )
-        cap_info = lpa_info | rpa_info
+        cap_info = dict(sorted((lpa_info | rpa_info).items(), key=lambda item: str(item[0])))
     else:
         cap_info = vtp_info(mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=False)
-    return resolve_cap_to_bc_mapping(
+
+    if resolved_mapping is not None:
+        return coerce_resolved_mapping(
+            resolved_mapping,
+            config_handler,
+            cap_info,
+            bc_prefix=bc_prefix,
+        )
+
+    return resolve_outlet_cap_mapping(
         config_handler,
         cap_info,
         bc_prefix=bc_prefix,
-        allow_ordered_outlet_mapping=allow_ordered_outlet_mapping,
+        outlet_mapping_mode=outlet_mapping_mode,
+        outlet_mapping=outlet_mapping,
     )
 
 def construct_impedance_trees(config_handler,
@@ -172,7 +200,12 @@ def construct_impedance_trees(config_handler,
                               diameter_scale=0.0,
                               diameter_std_cap=None,
                               allow_ordered_outlet_mapping=False,
-                              verbose=True):
+                              verbose=True,
+                              plot_stiffness=True,
+                              resolved_mapping=None,
+                              mapping=None,
+                              outlet_mapping=None,
+                              cap_to_bc_mapping=None):
     '''
     construct impedance trees for outlet BCs
     
@@ -180,7 +213,8 @@ def construct_impedance_trees(config_handler,
     :param k3: stiffness parameter 3
     :param use_mean: when True, build only two trees (LPA/RPA) and reuse for all outlets
     :param diameter_scale: for unique trees, shrink diameter spread toward the mean (0=all mean, 1=full spread)
-    :param diameter_std_cap: optional cap in std deviations on diameter deviation before scaling'''
+    :param diameter_std_cap: optional cap in std deviations on diameter deviation before scaling
+    :param plot_stiffness: write LPA/RPA stiffness plots when using shared trees'''
 
     # svZeroDSolver's steady-initial pass uses a fixed 10-step cycle. That is
     # incompatible with reconstructed IMPEDANCE kernels unless the production
@@ -200,7 +234,9 @@ def construct_impedance_trees(config_handler,
     if is_pulmonary:
         rpa_info, lpa_info, inflow_info = vtp_info(mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=True)
 
-        cap_info = lpa_info | rpa_info
+        # vtp_info scans and sorts the source files before splitting by side.
+        # Re-sort after recombining to retain that canonical filename order.
+        cap_info = dict(sorted((lpa_info | rpa_info).items(), key=lambda item: str(item[0])))
     else:
         cap_info = vtp_info(mesh_surfaces_path, convert_to_cm=convert_to_cm, pulmonary=False)
     
@@ -208,12 +244,35 @@ def construct_impedance_trees(config_handler,
     # lpa_areas = np.array(list(lpa_info.values()))
     # rpa_areas = np.array(list(rpa_info.values()))
 
-    cap_to_bc = resolve_cap_to_bc_mapping(
-        config_handler,
-        cap_info,
-        bc_prefix="IMPEDANCE",
-        allow_ordered_outlet_mapping=allow_ordered_outlet_mapping,
+    supplied_mapping = (
+        resolved_mapping
+        if resolved_mapping is not None
+        else mapping
+        if mapping is not None
+        else outlet_mapping
+        if outlet_mapping is not None
+        else cap_to_bc_mapping
     )
+    if supplied_mapping is None:
+        mapping_mode = (
+            "serialized_cap_order"
+            if allow_ordered_outlet_mapping
+            else "auto"
+        )
+        resolved_mapping = resolve_outlet_cap_mapping(
+            config_handler,
+            cap_info,
+            bc_prefix="IMPEDANCE",
+            outlet_mapping_mode=mapping_mode,
+        )
+    else:
+        resolved_mapping = coerce_resolved_mapping(
+            supplied_mapping,
+            config_handler,
+            cap_info,
+            bc_prefix="IMPEDANCE",
+        )
+    cap_to_bc = resolved_mapping
     if not hasattr(config_handler, "bc_inductance"):
         config_handler.bc_inductance = {}
 
@@ -256,7 +315,8 @@ def construct_impedance_trees(config_handler,
             eta_sym=lpa_params.eta_sym,
         )
         lpa_tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
-        lpa_tree.plot_stiffness(path='lpa_stiffness_plot.png')
+        if plot_stiffness:
+            lpa_tree.plot_stiffness(path='lpa_stiffness_plot.png')
 
         rpa_tree = StructuredTree(name='RPA', time=time_array, simparams=config_handler.simparams, compliance_model=rpa_params.compliance_model)
         print(f'building RPA tree with rpa parameters: {rpa_params.summary()}')
@@ -271,7 +331,8 @@ def construct_impedance_trees(config_handler,
             eta_sym=rpa_params.eta_sym,
         )
         rpa_tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
-        rpa_tree.plot_stiffness(path='rpa_stiffness_plot.png')
+        if plot_stiffness:
+            rpa_tree.plot_stiffness(path='rpa_stiffness_plot.png')
 
         lpa_bc_names = []
         lpa_outlet_names = []
@@ -279,12 +340,14 @@ def construct_impedance_trees(config_handler,
         rpa_outlet_names = []
 
         # distribute the impedance to lpa and rpa specifically
-        for idx, (cap_name, area) in enumerate(cap_info.items()):
+        for idx, record in enumerate(resolved_mapping.records):
+            cap_name = record.cap_path
+            area = record.area
             if verbose:
                 print(f'generating tree {idx + 1} of {len(cap_info)} for cap {cap_name}...')
-            if 'lpa' in cap_name.lower():
-                bc_name = cap_to_bc[cap_name]
-                config_handler.bcs[cap_to_bc[cap_name]] = _create_impedance_bc(
+            if record.side == "lpa":
+                bc_name = record.bc_name
+                config_handler.bcs[bc_name] = _create_impedance_bc(
                     lpa_tree,
                     bc_name,
                     0,
@@ -294,9 +357,9 @@ def construct_impedance_trees(config_handler,
                 config_handler.bc_inductance[bc_name] = lpa_params.inductance
                 lpa_bc_names.append(bc_name)
                 lpa_outlet_names.append(cap_name)
-            elif 'rpa' in cap_name.lower():
-                bc_name = cap_to_bc[cap_name]
-                config_handler.bcs[cap_to_bc[cap_name]] = _create_impedance_bc(
+            elif record.side == "rpa":
+                bc_name = record.bc_name
+                config_handler.bcs[bc_name] = _create_impedance_bc(
                     rpa_tree,
                     bc_name,
                     1,
@@ -316,6 +379,12 @@ def construct_impedance_trees(config_handler,
             side="lpa",
             bc_names=lpa_bc_names,
             outlet_names=lpa_outlet_names,
+            resolved_mapping=resolved_mapping,
+            mapping_records=[
+                record.with_scaled_diameter(lpa_mean_dia)
+                for record in resolved_mapping.records
+                if record.side == "lpa"
+            ],
         )
         config_handler.tree_params[rpa_tree.name] = _attach_tree_metadata(
             rpa_tree,
@@ -324,6 +393,12 @@ def construct_impedance_trees(config_handler,
             side="rpa",
             bc_names=rpa_bc_names,
             outlet_names=rpa_outlet_names,
+            resolved_mapping=resolved_mapping,
+            mapping_records=[
+                record.with_scaled_diameter(rpa_mean_dia)
+                for record in resolved_mapping.records
+                if record.side == "rpa"
+            ],
         )
             
     else:
@@ -331,18 +406,20 @@ def construct_impedance_trees(config_handler,
         _, _, kernel_steps = resolve_impedance_timepoint_contract(
             config_handler.simparams.to_dict()
         )
-        for idx, (cap_name, area) in enumerate(cap_info.items()):
+        for idx, record in enumerate(resolved_mapping.records):
+            cap_name = record.cap_path
+            area = record.area
 
             if verbose:
                 print(f'generating tree {idx} of {len(cap_info)} for cap {cap_name}...')
             cap_d = _cap_diameter(area)
-            if 'lpa' in cap_name.lower():
+            if record.side == "lpa":
                 if verbose:
                     print(f'building tree with lpa parameters: {lpa_params.summary()}')
                 params = lpa_params
                 mean_d = lpa_mean_dia
                 std_d = lpa_std_dia
-            elif 'rpa' in cap_name.lower():
+            elif record.side == "rpa":
                 if verbose:
                     print(f'building tree with rpa parameters: {rpa_params.summary()}')
                 params = rpa_params
@@ -367,7 +444,7 @@ def construct_impedance_trees(config_handler,
             # compute the impedance in frequency domain
             tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
 
-            bc_name = cap_to_bc[cap_name]
+            bc_name = record.bc_name
 
             config_handler.bcs[bc_name] = _create_impedance_bc(
                 tree,
@@ -381,9 +458,11 @@ def construct_impedance_trees(config_handler,
                 tree,
                 params,
                 generation_mode="per_outlet",
-                side="lpa" if 'lpa' in cap_name.lower() else "rpa",
+                side=record.side,
                 bc_names=[bc_name],
                 outlet_names=[cap_name],
+                resolved_mapping=resolved_mapping,
+                mapping_records=[record.with_scaled_diameter(scaled_d)],
             )
 
 
