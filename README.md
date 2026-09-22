@@ -8,7 +8,7 @@ Structured tree boundary condition modeling for svZeroD cardiovascular simulatio
 - Optional 3D coupling pipeline via SimVascular tools.
 
 **Requirements**
-- Python >= 3.10.
+- Python >= 3.12.
 - Validated on Sherlock with `python/3.12.1`.
 - Runtime dependencies are installed via `python3 -m pip install -e .`.
 - Solver-backed workflows additionally require `pysvzerod` from a sibling
