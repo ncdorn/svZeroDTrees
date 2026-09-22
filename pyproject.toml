@@ -35,6 +35,7 @@ dependencies = [
     "multiprocess",
     "numba",
     "pyyaml",
+    "learnedzerod @ git+https://github.com/StanfordCBCL/learnedZeroD.git",
 ]
 
 [project.urls]
@@ -88,6 +89,9 @@ only-packages = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/svzerodtrees"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.envs.build]
 description = "Build source and wheel distributions and validate metadata."

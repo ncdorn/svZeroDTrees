@@ -37,11 +37,9 @@ until the sibling solver checkout is installed.
 
 **Learned full-PA seed generation**
 
-`learned-zerod` is an optional external CLI provided by the separately installed
+`learned-zerod` is installed as a core dependency from the
 [StanfordCBCL learnedZeroD repository](https://github.com/StanfordCBCL/learnedZeroD).
-Ordinary `svZeroDTrees` installation does not install learnedZeroD, JAX, or its
-other dependencies. Install learnedZeroD separately and put `learned-zerod` on
-PATH, or set
+It provides the default executable used by learned full-PA seed generation. Set
 `seed_generation.learned_zerod_executable` only to override it with another
 compatible executable. The adapter also requires a readable source 0D JSON, a
 readable centerline VTP, and a readable `svzerodsolver` executable. The
