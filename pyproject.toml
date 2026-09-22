@@ -19,7 +19,7 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3 :: Only",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 
 # TODO: add keywords
 keywords = []
@@ -35,7 +35,7 @@ dependencies = [
     "multiprocess",
     "numba",
     "pyyaml",
-    "learnedzerod @ git+https://github.com/StanfordCBCL/learnedZeroD.git",
+    "learnedzerod @ git+https://github.com/ncdorn/learnedZeroD.git",
 ]
 
 [project.urls]
