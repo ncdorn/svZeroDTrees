@@ -40,6 +40,42 @@ def test_vessel_round_trip_and_unit_conversion(minimal_svzerod_payload):
     assert serialized["zero_d_element_values"]["L"] == pytest.approx(0.0)
 
 
+def _segment_config(seg: int, compliance: float) -> dict:
+    return {
+        "vessel_id": seg,
+        "vessel_length": 1.0,
+        "vessel_name": f"branch0_seg{seg}",
+        "zero_d_element_type": "BloodVessel",
+        "zero_d_element_values": {
+            "R_poiseuille": 10.0,
+            "C": compliance,
+            "L": 0.1,
+            "stenosis_coefficient": 0.0,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("compliances", "expected"),
+    [
+        ((1.0e-4, 2.0e-4), 3.0e-4),
+        ((0.0, 2.0e-4), 2.0e-4),
+        ((1.0e-4, 0.0), 1.0e-4),
+        ((0.0, 0.0), 0.0),
+        ((math.inf, math.inf), math.inf),
+    ],
+)
+def test_add_segment_sums_shunt_compliance(compliances, expected):
+    branch = Vessel.from_config(_segment_config(0, compliances[0]))
+
+    branch.add_segment(_segment_config(1, compliances[1]))
+
+    assert branch.C == pytest.approx(expected)
+    assert branch.R == pytest.approx(20.0)
+    assert branch.L == pytest.approx(0.2)
+    assert branch.ids == [0, 1]
+
+
 def test_junction_from_vessel_computes_child_areas(minimal_svzerod_payload):
     parent = Vessel.from_config(minimal_svzerod_payload["vessels"][0])
     child = Vessel.from_config(

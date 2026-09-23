@@ -99,7 +99,10 @@ class Vessel():
         self.ids.append(config['vessel_id'])
         # add zero d element values
         self.R += config['zero_d_element_values']['R_poiseuille']
-        self.C = 1 / ((1 / self._C) + (1 / config['zero_d_element_values']['C']))
+        # svZeroDSolver BloodVessel C is a shunt compliance to ground
+        # (Q_in - Q_out = C dP_in/dt), so segment compliances add like stored
+        # volume. C = 0 is a rigid segment; C = inf is passed through unchanged.
+        self.C += config['zero_d_element_values']['C']
         self.L += config['zero_d_element_values']['L']
         self._stenosis_coefficient += config['zero_d_element_values']['stenosis_coefficient']
         # add the segment number
