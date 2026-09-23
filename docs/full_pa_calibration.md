@@ -178,6 +178,54 @@ compatibility controls for shared-by-side or fully mean-diameter studies.
 `convert_to_cm` retains its existing geometry conversion meaning; solver
 values remain on the established CGS contract.
 
+### Objective tree policy
+
+The controls above are the *final* policy used to publish
+`tuned_zerod_config` (and the 3D BCs). By default every optimizer evaluation
+also builds trees with that policy, so a per-outlet final policy rebuilds and
+recomputes the impedance of every outlet tree at every Nelder-Mead step.
+`objective_tree_policy` decouples the two:
+
+```yaml
+    use_mean: false                 # final: one tree per cap
+    diameter_scale: 1.0
+    objective_tree_policy:
+      use_mean: true                # objective: one shared tree per side
+      reference_diameter: conductance_matched
+```
+
+Parameters tuned with shared trees do not reproduce the tuned targets when
+rebuilt per outlet at the arithmetic-mean diameter: tree conductance grows
+super-linearly with root diameter, so `N * G(mean d) < sum_i G(d_i)` and the
+objective model is too resistive (for caps spanning 0.08-0.35 cm the shared
+trees carry about 67% of the per-outlet conductance). `conductance_matched`
+builds the shared tree at `d_ref` solving `N * G(d_ref) = sum_i G(d_i)` per
+side, where `d_i` are the per-outlet diameters defined by the policy's
+`diameter_scale`/`diameter_std_cap` (inherited from the final policy). `G` is
+the exact steady Poiseuille conductance of the structured tree
+(`structured_tree_dc_resistance`, which reproduces
+`StructuredTree.equivalent_resistance()` without building the tree). It
+depends on `alpha`, `beta`, and `d_min` but not on `lrr` or viscosity, so
+`d_ref` is recomputed cheaply for each candidate.
+
+Limits of the correction:
+
+- It matches only the DC (mean-flow) conductance of each side. Pulsatile
+  impedance, compliance, and the flow distribution among outlets within a side
+  still differ from the per-outlet trees.
+- `G(d)` jumps when a generation crosses `d_min`; if a jump skips the target,
+  the closest diameter is used and `relative_conductance_residual` reports the
+  mismatch.
+- It assumes untruncated trees and warns when a tree would exceed the
+  `StructuredTree.build` `max_nodes` default.
+
+`outlet_cap_mapping.json` records the final policy in `tree_options` and the
+optimizer policy in `objective_tree_options` (`source` is `final_policy` or
+`objective_tree_policy`). For `conductance_matched` it also records the
+optimum `reference_diameters` per side. Because only DC conductance is matched,
+it is still worth checking the final per-outlet `tuned_zerod_config` against
+the clinical targets.
+
 The published `outlet_cap_mapping.json` is version 1 and is intentionally
 ordered. Each pair records the cap path/stem, cap-derived side, BC name and
 indices, cap area, raw and scaled diameters, and any graph-side disagreement.

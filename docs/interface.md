@@ -270,6 +270,10 @@ impedance_config:
   use_mean: false             # full_pa default
   diameter_scale: 1.0         # full_pa default; 0.0 is an explicit compatibility control
   diameter_std_cap: null
+  # Optional; trees used inside the optimizer only (see below).
+  # objective_tree_policy:
+  #   use_mean: true
+  #   reference_diameter: conductance_matched  # arithmetic_mean | conductance_matched
   tune_space:
     free:
       - name: lpa.alpha
@@ -308,6 +312,24 @@ deprecation warning and resolves to `outlet_mapping_mode:
 serialized_cap_order`; supplying both settings fails fast.  An explicit map
 must be complete and bijective, and its schema is `cap-or-stem: outlet-BC-name`
 (or an equivalent list of `[cap, outlet_BC]` pairs).
+
+`use_mean`, `diameter_scale`, and `diameter_std_cap` are the *final* tree
+policy: they build `tuned_zerod_config` and therefore the 3D outlet BCs.
+`objective_tree_policy` (full_pa only) optionally sets a separate policy for
+the trees built at every optimizer evaluation. Omitted, the objective uses the
+final policy. Its keys are `use_mean`, `diameter_scale`, `diameter_std_cap`
+(each inherits the final value when omitted; an explicit `null` std cap means
+no cap) and `reference_diameter` (`arithmetic_mean` default).
+`reference_diameter: conductance_matched` builds one shared tree per side at
+the diameter `d_ref` whose DC conductance, repeated once per outlet, equals the
+total DC conductance of the per-outlet trees defined by the policy's
+`diameter_scale`/`diameter_std_cap`. This removes the bias of tuning with
+mean-diameter trees and publishing per-outlet trees (see
+[`full_pa_calibration.md`](full_pa_calibration.md#objective-tree-policy)). It
+requires `use_mean: true` in the policy, a per-outlet final policy
+(`use_mean: false`), and no free `lpa.diameter`/`rpa.diameter`.
+The resolved policy is returned in `impedance_config["objective_tree_policy"]`
+and recorded as `objective_tree_options` in `outlet_cap_mapping.json`.
 
 Mesh areas and diameters retain the existing CGS computation contract.
 `convert_to_cm` controls the existing geometry conversion; it does not change

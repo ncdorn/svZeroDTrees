@@ -167,7 +167,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
                  diameter_scale=0.0,
                  diameter_std_cap=None,
                  allow_ordered_outlet_mapping=False,
-                 resolved_mapping=None):
+                 resolved_mapping=None,
+                 objective_tree_policy=None):
         super().__init__(config_handler, mesh_surfaces_path, clinical_targets)
         self.tune_space = tune_space
         self.compliance_model = (compliance_model or "").lower()
@@ -196,6 +197,13 @@ class ImpedanceTuner(BoundaryConditionTuner):
         # immutable object on the tuner so every candidate uses the exact map
         # that preflight and final construction consume.
         self.resolved_mapping = resolved_mapping
+        # Optional full_pa tree policy for optimizer evaluations only.  None
+        # keeps candidate trees identical to the final published trees.
+        self.objective_tree_policy = (
+            None if objective_tree_policy is None else dict(objective_tree_policy)
+        )
+        if self.objective_tree_policy is not None and self.tuning_model != "full_pa":
+            raise ValueError("objective_tree_policy is supported only for tuning_model='full_pa'")
 
         # grid search params
         self.grid_search_init = grid_search_init
@@ -212,10 +220,20 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self._full_pa_base_config = None
 
     def _tree_assignment_options_for_objective(self):
+        if self.objective_tree_policy is not None:
+            return {
+                "use_mean": bool(self.objective_tree_policy["use_mean"]),
+                "diameter_scale": float(self.objective_tree_policy["diameter_scale"]),
+                "diameter_std_cap": self.objective_tree_policy["diameter_std_cap"],
+                "reference_diameter": str(
+                    self.objective_tree_policy.get("reference_diameter", "arithmetic_mean")
+                ),
+            }
         return {
             "use_mean": self.use_mean,
             "diameter_scale": self.diameter_scale,
             "diameter_std_cap": self.diameter_std_cap,
+            "reference_diameter": "arithmetic_mean",
         }
 
 
@@ -481,6 +499,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 specify_diameter=self.specify_diameter,
                 diameter_scale=objective_tree_options["diameter_scale"],
                 diameter_std_cap=objective_tree_options["diameter_std_cap"],
+                reference_diameter=objective_tree_options["reference_diameter"],
                 allow_ordered_outlet_mapping=self.allow_ordered_outlet_mapping,
                 resolved_mapping=self.resolved_mapping,
                 verbose=False,
