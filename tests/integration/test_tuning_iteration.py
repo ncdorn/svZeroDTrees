@@ -1177,6 +1177,85 @@ def test_run_impedance_tuning_for_iteration_full_pa_rejects_reduced_seed_before_
         )
 
 
+def test_run_impedance_tuning_for_iteration_full_pa_passes_mapping_centerline(
+    monkeypatch, tmp_path: Path
+):
+    seed = tmp_path / "full_pa_zerod.json"
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    targets = tmp_path / "clinical_targets.csv"
+    centerline = tmp_path / "centerlines.vtp"
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
+    seed.write_text(json.dumps(_full_pa_multi_outlet_payload()), encoding="utf-8")
+    mesh_surfaces.mkdir(parents=True, exist_ok=True)
+    targets.write_text("target,value\n", encoding="utf-8")
+    centerline.write_text("", encoding="utf-8")
+
+    class DummyConfigHandler:
+        bcs = {
+            name: SimpleNamespace(name=name)
+            for name in ("INFLOW", "LPA_1", "LPA_2", "RPA_1", "RPA_2")
+        }
+
+        @classmethod
+        def from_json(cls, _path: str, is_pulmonary: bool = False):
+            return cls()
+
+    class DummyClinicalTargets:
+        wedge_p = 12.0
+
+        @classmethod
+        def from_csv(cls, _path: str):
+            return cls()
+
+    class MappingResolved(Exception):
+        pass
+
+    captured = {}
+
+    def _capture_mapping(*_args, **kwargs):
+        captured.update(kwargs)
+        raise MappingResolved
+
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration.validate_cap_to_bc_mapping", _capture_mapping
+    )
+    monkeypatch.chdir(tmp_path)
+
+    run_kwargs = dict(
+        iteration_dir=tmp_path / "iter-01",
+        seed_config=seed,
+        mesh_surfaces=mesh_surfaces,
+        clinical_targets=targets,
+        inflow_path=inflow_path,
+    )
+    with pytest.raises(MappingResolved):
+        run_impedance_tuning_for_iteration(
+            **run_kwargs,
+            impedance_config={
+                "tuning_model": "full_pa",
+                "outlet_mapping_centerline": "centerlines.vtp",
+                "tune_space": _tune_space_with_xi(),
+            },
+        )
+
+    # A relative path is resolved before the service changes directory.
+    assert captured["centerline"] == centerline.resolve()
+    assert captured["outlet_mapping_mode"] == "auto"
+    assert captured["seed_payload"] == _full_pa_multi_outlet_payload()
+
+    with pytest.raises(FileNotFoundError, match="outlet mapping centerline not found"):
+        run_impedance_tuning_for_iteration(
+            **run_kwargs,
+            impedance_config={
+                "tuning_model": "full_pa",
+                "outlet_mapping_centerline": "missing.vtp",
+                "tune_space": _tune_space_with_xi(),
+            },
+        )
+
+
 def test_run_impedance_tuning_for_iteration_full_pa_rejects_reduced_snapshot(
     monkeypatch, tmp_path: Path
 ):
@@ -2329,6 +2408,7 @@ def test_resolve_impedance_config_full_pa_defaults_are_opt_in_and_rri_defaults_u
     assert full_pa["diameter_scale"] == pytest.approx(1.0)
     assert full_pa["outlet_mapping_mode"] == "auto"
     assert full_pa["outlet_mapping"] is None
+    assert full_pa["outlet_mapping_centerline"] is None
     assert "allow_ordered_outlet_mapping" not in full_pa
 
     rri = _resolve_impedance_config({"tune_space": _tune_space_with_xi()})
@@ -2336,6 +2416,27 @@ def test_resolve_impedance_config_full_pa_defaults_are_opt_in_and_rri_defaults_u
     assert rri["diameter_scale"] == pytest.approx(0.0)
     assert rri["allow_ordered_outlet_mapping"] is False
     assert "outlet_mapping_mode" not in rri
+
+
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        ({"outlet_mapping_mode": "centerline"}, "requires outlet_mapping_centerline"),
+        (
+            {"outlet_mapping_mode": "cap_name", "outlet_mapping_centerline": "c.vtp"},
+            "used only by outlet_mapping_mode 'auto' or 'centerline'",
+        ),
+        (
+            {"tuning_model": "rri", "outlet_mapping_centerline": "c.vtp"},
+            "supported only for tuning_model='full_pa'",
+        ),
+    ],
+)
+def test_resolve_impedance_config_outlet_mapping_centerline_contract(config, message):
+    payload = {"tuning_model": "full_pa", "tune_space": _tune_space_with_xi(), **config}
+
+    with pytest.raises(ValueError, match=message):
+        _resolve_impedance_config(payload)
 
 
 def test_resolve_impedance_config_full_pa_preserves_explicit_compatibility_controls():

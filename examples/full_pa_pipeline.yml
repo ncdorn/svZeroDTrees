@@ -40,8 +40,10 @@ bcs:
     compliance_model: olufsen
     diameter_scale: 1.0
     diameter_std_cap: null
-    # Learned output uses the producer's serialized cap order explicitly.
-    outlet_mapping_mode: serialized_cap_order
+    # Caps are paired with the learned seed's outlets through its centerline
+    # (seed_generation.centerline).  Serialized cap order does not match the
+    # branch-ordered outlet BCs of a learned seed.
+    outlet_mapping_mode: auto
     outlet_mapping: null
     tune_space:
       free:

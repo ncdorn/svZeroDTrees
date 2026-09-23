@@ -88,6 +88,7 @@ class ImpedanceConfig:
     diameter_std_cap: Optional[float] = None
     outlet_mapping_mode: Optional[str] = None
     outlet_mapping: Optional[Dict[str, str]] = None
+    outlet_mapping_centerline: Optional[str] = None
     tune_space: Optional[TuneSpace] = None
 
 
@@ -443,6 +444,7 @@ _IMPEDANCE_CONFIG_KEYS = [
     "diameter_std_cap",
     "outlet_mapping_mode",
     "outlet_mapping",
+    "outlet_mapping_centerline",
     "tune_space",
 ]
 
@@ -450,6 +452,7 @@ _OUTLET_MAPPING_MODES = {
     "auto",
     "metadata",
     "cap_name",
+    "centerline",
     "serialized_cap_order",
     "explicit",
 }
@@ -512,7 +515,7 @@ def _parse_impedance_config(
         if mode not in _OUTLET_MAPPING_MODES:
             raise ValueError(
                 "bcs.impedance.outlet_mapping_mode must be one of "
-                "auto|metadata|cap_name|serialized_cap_order|explicit"
+                "auto|metadata|cap_name|centerline|serialized_cap_order|explicit"
             )
 
     outlet_mapping = _parse_outlet_mapping(data.get("outlet_mapping"))
@@ -525,7 +528,16 @@ def _parse_impedance_config(
         raise ValueError(
             "bcs.impedance.outlet_mapping_mode='explicit' requires outlet_mapping"
         )
-    if tuning_model == "rri" and (mode is not None or outlet_mapping is not None):
+    mapping_centerline = data.get("outlet_mapping_centerline")
+    if mapping_centerline is not None:
+        if not isinstance(mapping_centerline, str) or not mapping_centerline.strip():
+            raise ValueError(
+                "bcs.impedance.outlet_mapping_centerline must be a non-empty string"
+            )
+        mapping_centerline = mapping_centerline.strip()
+    if tuning_model == "rri" and (
+        mode is not None or outlet_mapping is not None or mapping_centerline is not None
+    ):
         raise ValueError(
             "bcs.impedance outlet mapping controls are supported only for "
             "tuning_model='full_pa'"
@@ -549,6 +561,11 @@ def _parse_impedance_config(
 
     if tuning_model == "full_pa" and mode is None:
         mode = "auto"
+    if mapping_centerline is not None and mode not in {"auto", "centerline"}:
+        raise ValueError(
+            "bcs.impedance.outlet_mapping_centerline is used only by "
+            "outlet_mapping_mode 'auto' or 'centerline'"
+        )
 
     use_mean_default = tuning_model != "full_pa"
     diameter_scale_default = 0.0 if tuning_model != "full_pa" else 1.0
@@ -608,6 +625,7 @@ def _parse_impedance_config(
         diameter_std_cap=diameter_std_cap,
         outlet_mapping_mode=mode,
         outlet_mapping=outlet_mapping,
+        outlet_mapping_centerline=mapping_centerline,
         tune_space=_parse_tune_space(data.get("tune_space")),
     )
 
@@ -685,6 +703,9 @@ def impedance_config_to_mapping(config: ImpedanceConfig) -> Dict[str, Any]:
         payload["outlet_mapping_mode"] = outlet_mapping_mode
     if outlet_mapping is not None:
         payload["outlet_mapping"] = dict(outlet_mapping)
+    outlet_mapping_centerline = getattr(config, "outlet_mapping_centerline", None)
+    if outlet_mapping_centerline is not None:
+        payload["outlet_mapping_centerline"] = outlet_mapping_centerline
     return payload
 
 
@@ -909,12 +930,14 @@ def _validate_seed_generation_source(
             "seed_generation requires bcs.impedance.tuning_model='full_pa'"
         )
     if bcs.impedance.outlet_mapping_mode not in {
+        "auto",
+        "centerline",
         "serialized_cap_order",
         "explicit",
     }:
         raise ValueError(
             "seed_generation requires bcs.impedance.outlet_mapping_mode to be "
-            "'serialized_cap_order' or 'explicit'"
+            "'auto', 'centerline', 'serialized_cap_order', or 'explicit'"
         )
 
 
@@ -2077,6 +2100,28 @@ def load_config(path: str) -> BaseConfig:
     if raw.get("calibration") is not None:
         calibration = _parse_calibration(paths.root, raw["calibration"])
 
+    impedance = getattr(bcs, "impedance", None)
+    if impedance is not None and impedance.tuning_model == "full_pa":
+        if impedance.outlet_mapping_centerline is not None:
+            impedance.outlet_mapping_centerline = _resolve_path(
+                paths.root, impedance.outlet_mapping_centerline
+            )
+        elif (
+            seed_generation is not None
+            and impedance.outlet_mapping_mode in {"auto", "centerline"}
+        ):
+            # A generated seed is built from this centerline, so it is the
+            # geometry that identifies each seed outlet.
+            impedance.outlet_mapping_centerline = seed_generation.centerline
+        if (
+            impedance.outlet_mapping_mode == "centerline"
+            and impedance.outlet_mapping_centerline is None
+        ):
+            raise ValueError(
+                "bcs.impedance.outlet_mapping_mode='centerline' requires "
+                "outlet_mapping_centerline"
+            )
+
     _validate_seed_generation_source(
         workflow,
         paths,
@@ -2209,6 +2254,7 @@ bcs:
     diameter_std_cap: null
     outlet_mapping_mode: auto
     outlet_mapping: null  # required when mode is explicit
+    outlet_mapping_centerline: null  # centerline the 0D seed was generated from
     tune_space:
       free:
         - name: lpa.alpha
