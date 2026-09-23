@@ -15,6 +15,8 @@ class Junction():
         else:
             self.areas = None
         self.type = config['junction_type']
+        # BloodVesselJunction loss parameters; must round-trip unchanged.
+        self.junction_values = config.get('junction_values')
 
     @classmethod
     def from_config(cls, config):
@@ -54,11 +56,15 @@ class Junction():
         convert the junction to a dict for zerod solver use
         '''
 
-        return {
+        junction_dict = {
             'junction_name': self.name,
             'junction_type': self.type,
             'inlet_vessels': self.inlet_branches,
             'outlet_vessels': self.outlet_branches,
             'areas': self.areas
         }
+        if self.junction_values is not None:
+            junction_dict['junction_values'] = self.junction_values
+
+        return junction_dict
    

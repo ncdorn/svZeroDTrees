@@ -94,6 +94,42 @@ def test_branch_and_vessel_maps_with_pulmonary_labels():
     assert handler.get_segments("lpa")[0].id == 1
 
 
+def test_blood_vessel_junction_loss_parameters_round_trip():
+    # Learned full-PA seeds store proximal resistance on the junction, not the vessels.
+    payload = _bifurcation_config()
+    junction_values = {
+        "R_poiseuille": [422.5, 0.0],
+        "L": [26.2, 0.0],
+        "stenosis_coefficient": [0.0, 0.0],
+    }
+    payload["junctions"] = [
+        {
+            "junction_name": "J0",
+            "junction_type": "BloodVesselJunction",
+            "inlet_vessels": [0],
+            "outlet_vessels": [1, 2],
+            "junction_values": junction_values,
+        }
+    ]
+    handler = ConfigHandler(payload, is_pulmonary=True)
+
+    assert [child.id for child in handler.root.children] == [1, 2]
+
+    handler.assemble_config()
+    (junction,) = handler.config["junctions"]
+    assert junction["junction_type"] == "BloodVesselJunction"
+    assert junction["junction_values"] == junction_values
+
+
+def test_normal_junction_serializes_without_junction_values():
+    handler = ConfigHandler(_bifurcation_config(), is_pulmonary=True)
+
+    handler.assemble_config()
+    (junction,) = handler.config["junctions"]
+    assert junction["junction_type"] == "NORMAL_JUNCTION"
+    assert "junction_values" not in junction
+
+
 def test_get_time_series_for_standard_and_coupled_configs():
     standard = ConfigHandler(_bifurcation_config())
     np.testing.assert_allclose(standard.get_time_series(), [0.0, 0.5, 1.0])

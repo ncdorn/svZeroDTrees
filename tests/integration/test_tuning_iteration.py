@@ -16,6 +16,7 @@ from svzerodtrees.tuning.iteration import (
     OPTIMIZED_RCR_PARAMS_FILENAME,
     OUTLET_CAP_MAPPING_FILENAME,
     PA_CONFIG_SNAPSHOT_FILENAME,
+    _assert_full_pa_snapshot_preserves_topology,
     _build_tune_space_from_config,
     _resolve_impedance_config,
     compute_centerline_mpa_metrics,
@@ -1254,6 +1255,51 @@ def test_run_impedance_tuning_for_iteration_full_pa_passes_mapping_centerline(
                 "tune_space": _tune_space_with_xi(),
             },
         )
+
+
+def _full_pa_payload_with_blood_vessel_junctions(payload: dict[str, object]) -> dict[str, object]:
+    payload["junctions"] = [
+        {
+            "junction_name": "J0",
+            "junction_type": "BloodVesselJunction",
+            "inlet_vessels": [0],
+            "outlet_vessels": [1, 2],
+            "junction_values": {
+                "R_poiseuille": [131.9, 5.2],
+                "L": [5.9, 2.3],
+                "stenosis_coefficient": [0.0, 0.0],
+            },
+        }
+    ]
+    return payload
+
+
+def test_full_pa_snapshot_guard_rejects_dropped_junction_loss_parameters(tmp_path: Path):
+    seed = tmp_path / "full_pa_zerod.json"
+    snapshot = tmp_path / PA_CONFIG_SNAPSHOT_FILENAME
+    seed.write_text(
+        json.dumps(_full_pa_payload_with_blood_vessel_junctions(_full_pa_multi_outlet_payload())),
+        encoding="utf-8",
+    )
+
+    preserved = _full_pa_payload_with_blood_vessel_junctions(_full_pa_impedance_snapshot_payload())
+    snapshot.write_text(json.dumps(preserved), encoding="utf-8")
+    _assert_full_pa_snapshot_preserves_topology(seed_config=seed, snapshot=snapshot)
+
+    # Pre-fix ConfigHandler behavior: coerced to NORMAL_JUNCTION, values dropped.
+    dropped = _full_pa_impedance_snapshot_payload()
+    dropped["junctions"] = [
+        {
+            "junction_name": "J0",
+            "junction_type": "NORMAL_JUNCTION",
+            "inlet_vessels": [0],
+            "outlet_vessels": [1, 2],
+            "areas": None,
+        }
+    ]
+    snapshot.write_text(json.dumps(dropped), encoding="utf-8")
+    with pytest.raises(ValueError, match="junction loss parameters: J0"):
+        _assert_full_pa_snapshot_preserves_topology(seed_config=seed, snapshot=snapshot)
 
 
 def test_run_impedance_tuning_for_iteration_full_pa_rejects_reduced_snapshot(
