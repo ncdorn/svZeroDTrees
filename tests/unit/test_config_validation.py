@@ -150,13 +150,86 @@ def test_learned_seed_generation_parses_typed_root_relative_paths(tmp_path):
         ({"tuning_model": "rri", "mapping_mode": ""}, "tuning_model='full_pa'"),
         ({"bcs_type": "rcr", "mapping_mode": ""}, "bcs.type='impedance'"),
         ({"is_pulmonary": False}, "is_pulmonary=true"),
-        ({"mapping_mode": "auto"}, "serialized_cap_order.*explicit"),
+        ({"mapping_mode": "cap_name"}, "'auto', 'centerline'.*explicit"),
     ],
 )
 def test_learned_seed_generation_rejects_invalid_contract(tmp_path, kwargs, message):
     cfg_path = tmp_path / "invalid-learned.yml"
     cfg_path.write_text(
         _learned_seed_pipeline_yaml(tmp_path, **kwargs),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=message):
+        load_config(str(cfg_path))
+
+
+@pytest.mark.parametrize("mapping_mode", ["auto", "centerline"])
+def test_learned_seed_generation_maps_outlets_with_its_own_centerline(tmp_path, mapping_mode):
+    cfg_path = tmp_path / "learned.yml"
+    cfg_path.write_text(
+        _learned_seed_pipeline_yaml(tmp_path, mapping_mode=mapping_mode),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    assert cfg.bcs.impedance.outlet_mapping_centerline == str(
+        tmp_path / "inputs/centerline.vtp"
+    )
+    mapped = impedance_config_to_mapping(cfg.bcs.impedance)
+    assert mapped["outlet_mapping_centerline"] == str(tmp_path / "inputs/centerline.vtp")
+
+
+def test_learned_seed_generation_keeps_centerline_out_of_explicit_mapping(tmp_path):
+    cfg_path = tmp_path / "learned.yml"
+    cfg_path.write_text(
+        _learned_seed_pipeline_yaml(tmp_path, mapping_mode="serialized_cap_order"),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    assert cfg.bcs.impedance.outlet_mapping_centerline is None
+    assert "outlet_mapping_centerline" not in impedance_config_to_mapping(cfg.bcs.impedance)
+
+
+def test_full_pa_outlet_mapping_centerline_resolves_against_root(tmp_path):
+    cfg_path = tmp_path / "full-pa.yml"
+    cfg_path.write_text(
+        _full_pa_pipeline_yaml(
+            tmp_path,
+            impedance_fields=(
+                "    outlet_mapping_mode: centerline\n"
+                "    outlet_mapping_centerline: inputs/centerlines.vtp"
+            ),
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    assert cfg.bcs.impedance.outlet_mapping_mode == "centerline"
+    assert cfg.bcs.impedance.outlet_mapping_centerline == str(
+        tmp_path / "inputs/centerlines.vtp"
+    )
+
+
+@pytest.mark.parametrize(
+    ("impedance_fields", "message"),
+    [
+        ("    outlet_mapping_mode: centerline", "requires outlet_mapping_centerline"),
+        (
+            "    outlet_mapping_mode: serialized_cap_order\n"
+            "    outlet_mapping_centerline: inputs/centerlines.vtp",
+            "used only by outlet_mapping_mode 'auto' or 'centerline'",
+        ),
+    ],
+)
+def test_full_pa_outlet_mapping_centerline_contract(tmp_path, impedance_fields, message):
+    cfg_path = tmp_path / "full-pa.yml"
+    cfg_path.write_text(
+        _full_pa_pipeline_yaml(tmp_path, impedance_fields=impedance_fields),
         encoding="utf-8",
     )
 

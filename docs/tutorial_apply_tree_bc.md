@@ -78,6 +78,8 @@ result = run_impedance_tuning_for_iteration(
     impedance_config={
         "tuning_model": "full_pa",
         "outlet_mapping_mode": "auto",
+        # Centerline the seed was generated from: pairs caps with outlets by geometry.
+        "outlet_mapping_centerline": "centerlines.vtp",
         "use_mean": False,
         "diameter_scale": 1.0,
         "tune_space": {

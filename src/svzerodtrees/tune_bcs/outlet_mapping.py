@@ -19,12 +19,15 @@ import re
 from types import MappingProxyType
 from typing import Any
 
+from .centerline_mapping import centerline_cap_pairs
+
 
 MAPPING_VERSION = 1
 MAPPING_MODES = (
     "auto",
     "metadata",
     "cap_name",
+    "centerline",
     "serialized_cap_order",
     "explicit",
 )
@@ -593,12 +596,22 @@ def resolve_outlet_cap_mapping(
     outlet_mapping: Any = None,
     allow_ordered_outlet_mapping: bool = False,
     allow_serialized_fallback: bool = False,
+    centerline: str | Path | None = None,
+    convert_to_cm: bool = False,
+    seed_payload: Mapping[str, Any] | None = None,
 ) -> ResolvedOutletCapMapping:
     """Resolve and validate one complete cap-to-outlet mapping.
 
     ``bc_prefix`` remains accepted for compatibility with the old resolver;
     non-inflow BCs are intentionally ordered from the serialized seed rather
     than from ``ConfigHandler.bcs``.
+
+    ``centerline`` is the centerline VTP the 0D model was generated from.  It
+    enables the geometric ``centerline`` strategy (see
+    ``centerline_mapping``); ``convert_to_cm`` declares a mm mesh and
+    centerline for its 0D branch-length check, and ``seed_payload`` is the
+    serialized 0D config, whose vessel records carry the centerline node ids
+    that ``ConfigHandler`` does not retain.
     """
 
     selected = outlet_mapping_mode
@@ -654,24 +667,46 @@ def resolve_outlet_cap_mapping(
     if selected == "explicit" and explicit_mapping is None:
         raise ValueError("outlet_mapping_mode='explicit' requires outlet_mapping")
 
+    if selected == "centerline" and centerline is None:
+        raise ValueError("outlet_mapping_mode='centerline' requires a centerline")
+    if centerline is not None and selected not in {"auto", "centerline"}:
+        raise ValueError(
+            "a centerline is used only by outlet_mapping_mode 'auto' or 'centerline'; "
+            f"got '{selected}'"
+        )
+
     if selected != "auto":
         strategies = [selected]
-    elif allow_serialized_fallback:
-        strategies = ["metadata", "cap_name", "serialized_cap_order"]
+    elif allow_serialized_fallback and centerline is None:
+        strategies = ["metadata", "cap_name", "centerline", "serialized_cap_order"]
     else:
         # Direct tree-construction callers historically required an explicit
         # ordered-mapping opt-in.  Keep that behavior while full_pa callers
-        # can use the resolver's documented auto strategy.
-        strategies = ["metadata", "cap_name"]
+        # can use the resolver's documented auto strategy.  A supplied
+        # centerline that fails its geometric checks is evidence against any
+        # pairing, so it never falls through to serialized order.
+        strategies = ["metadata", "cap_name", "centerline"]
     errors = []
     for strategy in strategies:
         try:
+            provenance = {"bc_prefix": bc_prefix, "requested_mode": selected}
             if strategy == "metadata":
                 pairs = _extract_metadata_pairs(config_handler)
                 if not pairs:
                     raise ValueError("no complete outlet mapping metadata was found")
             elif strategy == "cap_name":
                 pairs = _name_pairs(caps, outlets, config_handler)
+            elif strategy == "centerline":
+                if centerline is None:
+                    raise ValueError("no centerline was supplied")
+                pairs, provenance["geometry"] = centerline_cap_pairs(
+                    config_handler,
+                    [cap_path for cap_path, _, _ in caps],
+                    [name for name, _ in outlets],
+                    centerline,
+                    seed_payload=seed_payload,
+                    convert_to_cm=convert_to_cm,
+                )
             elif strategy == "serialized_cap_order":
                 pairs = [(cap_path, outlets[index][0]) for index, (cap_path, _, _) in enumerate(caps)]
             elif strategy == "explicit":
@@ -684,17 +719,18 @@ def resolve_outlet_cap_mapping(
                 outlets,
                 strategy=strategy,
                 config_handler=config_handler,
-                provenance={"bc_prefix": bc_prefix, "requested_mode": selected},
+                provenance=provenance,
             )
         except ValueError as exc:
             errors.append(f"{strategy}: {exc}")
 
     detail = "; ".join(errors)
-    if selected == "auto" and not allow_serialized_fallback:
+    if selected == "auto" and "serialized_cap_order" not in strategies:
         detail += (
-            "; auto mapping does not use serialized_cap_order; select "
-            "outlet_mapping_mode='serialized_cap_order' explicitly when order "
-            "is the intended contract"
+            "; auto mapping does not use serialized_cap_order; supply the "
+            "centerline the 0D model was generated from for geometric mapping, "
+            "or select outlet_mapping_mode='serialized_cap_order' explicitly "
+            "when order is the intended contract"
         )
     raise ValueError("could not deterministically resolve outlet-cap mapping: " + detail)
 

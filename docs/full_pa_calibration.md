@@ -27,6 +27,8 @@ result = run_impedance_tuning_for_iteration(
     impedance_config={
         "tuning_model": "full_pa",
         "outlet_mapping_mode": "auto",
+        # The centerline the seed was generated from; enables geometric mapping.
+        "outlet_mapping_centerline": "input/centerlines.vtp",
         "tune_space": {
             "free": [
                 {"name": "lpa.alpha", "init": 0.9, "lb": 0.7, "ub": 0.99},
@@ -83,6 +85,9 @@ bcs:
   impedance:
     tuning_model: full_pa
     outlet_mapping_mode: auto
+    # The centerline the seed was generated from (auto or centerline modes).
+    # Defaults to seed_generation.centerline for a generated seed.
+    outlet_mapping_centerline: input/centerlines.vtp
     # Include this only for outlet_mapping_mode: explicit.
     # outlet_mapping:
     #   lpa_cap_01: OUTLET_07
@@ -104,9 +109,10 @@ bcs:
 
 | Mode | Contract |
 | --- | --- |
-| `auto` | Try complete persisted tree metadata, then normalized cap-name matching. It does not select serialized order implicitly. |
+| `auto` | Try complete persisted tree metadata, then normalized cap-name matching, then `centerline` when `outlet_mapping_centerline` is set. It does not select serialized order implicitly. |
 | `metadata` | Require a complete mapping retained in serialized tree metadata. |
 | `cap_name` | Match normalized cap stems/names to normalized outlet BC names. |
+| `centerline` | Pair each cap with an outlet BC through the centerline geometry (see below). Requires `outlet_mapping_centerline`. |
 | `serialized_cap_order` | Pair canonical pulmonary cap order with the original serialized non-inflow BC order. This is an explicit choice. |
 | `explicit` | Require a complete cap-to-BC mapping supplied in `outlet_mapping`. |
 
@@ -116,6 +122,46 @@ entries are removed. Normalized names are used only for matching; original
 paths and names remain in provenance. An explicit map may be a YAML mapping
 from cap path/stem to BC name. It must be one-to-one, cover every cap and
 every non-inflow outlet, and contain no unknown or duplicate entries.
+
+### Geometric (`centerline`) mapping
+
+A centerline-generated 0D model names its vessels `branch<N>_seg<K>`
+(learnedZeroD appends suffixes such as `_connectorEL`), where `N` is the
+centerline `BranchId`. The `centerline` strategy computes each cap's
+area-weighted centroid, pairs it with the nearest centerline outlet endpoint,
+and takes the outlet BC of the 0D vessel on that endpoint's branch. This is
+the physically based mapping for centerline-generated seeds, whose BCs
+(`RESISTANCE_<n>`) are numbered in branch order, unrelated to cap filename
+order. Serialized order must not be used for these seeds.
+
+The strategy fails with a `ValueError` naming every violated check, and never
+falls back to another strategy, unless all of the following hold:
+
+- The 0D branch set equals the centerline branch set.
+- The seed is traceable to this centerline. When outlet vessels record
+  `centerline_node_ids` (learnedZeroD seeds), each must end on its branch's
+  terminal centerline node. Otherwise each 0D branch length must match the
+  centerline branch length within 2%, after scaling the centerline by 0.1
+  when `convert_to_cm` declares mm geometry.
+- Each cap centroid lies within 1.0 cap radius of its matched endpoint, and
+  the runner-up endpoint is at least 1.0 cap radius farther away. The cap
+  radius is `sqrt(area / pi)` of the raw cap geometry.
+- No two caps match the same endpoint.
+
+`outlet_mapping_centerline` must be the centerline the seed was generated
+from, in the same frame as the mesh caps. A centerline or mesh from another
+model revision is rejected by these checks. Paths in YAML resolve against
+`paths.root`. With `seed_generation`, the generated seed's own
+`seed_generation.centerline` is used when `outlet_mapping_centerline` is
+omitted and the mode is `auto` or `centerline`. The mapping provenance
+records the centerline path and SHA-256, the check that tied the seed to the
+centerline, the thresholds, and per-cap evidence (branch, vessel, centroid,
+endpoint, offset, and margin in cap radii).
+
+`ConfigHandler` does not retain `centerline_node_ids`, so the full-PA
+service passes the serialized seed payload to the resolver. Direct callers
+of `resolve_outlet_cap_mapping` or `validate_cap_to_bc_mapping` with a
+learnedZeroD seed must pass `seed_payload`.
 
 The cap determines the physical side: a cap identity must identify exactly one
 of LPA or RPA. 0D graph labels are retained as an optional diagnostic and
@@ -136,7 +182,7 @@ The published `outlet_cap_mapping.json` is version 1 and is intentionally
 ordered. Each pair records the cap path/stem, cap-derived side, BC name and
 indices, cap area, raw and scaled diameters, and any graph-side disagreement.
 Its provenance records the mapping strategy, requested mode, geometry
-conversion, and tree options. This artifact is the replay/audit record for
+conversion, tree options, and, for `centerline`, the geometric evidence. This artifact is the replay/audit record for
 the mapping used by both optimization and final construction.
 
 ### Legacy input

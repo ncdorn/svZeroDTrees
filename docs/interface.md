@@ -258,9 +258,11 @@ an RRI configuration keeps the historical `use_mean: true` and
 ```yaml
 impedance_config:
   tuning_model: full_pa
-  # auto tries persisted metadata, then cap-name matching. Select
-  # serialized_cap_order explicitly when serialized order is intended.
-  outlet_mapping_mode: auto  # auto | metadata | cap_name | serialized_cap_order | explicit
+  # auto tries persisted metadata, cap-name matching, then the centerline.
+  # Select serialized_cap_order explicitly when serialized order is intended.
+  outlet_mapping_mode: auto  # auto | metadata | cap_name | centerline | serialized_cap_order | explicit
+  # Centerline the seed was generated from; used by auto and centerline modes.
+  outlet_mapping_centerline: centerlines.vtp
   # Required only for outlet_mapping_mode: explicit.  Keys may be cap paths or stems.
   # outlet_mapping:
   #   lpa_cap_01: OUTLET_07
@@ -288,10 +290,17 @@ The resolver preserves the serialized boundary-condition order and records a
 complete one-to-one cap/BC pairing before the tuner is created.  A full-PA
 seed must contain more than two non-inflow outlet BCs and one mapped cap per
 outlet; reduced seeds are rejected rather than upgraded.  `metadata`,
-`cap_name`, and `serialized_cap_order` are strict single strategies. `auto`
-tries `metadata` and then `cap_name`; it does not select serialized order
+`cap_name`, `centerline`, and `serialized_cap_order` are strict single
+strategies. `auto` tries `metadata`, then `cap_name`, then `centerline` (when
+`outlet_mapping_centerline` is set). It does not select serialized order
 implicitly, so choose `outlet_mapping_mode: serialized_cap_order` when order is
-the intended contract.
+the intended contract. `centerline` pairs each cap with the 0D outlet on the
+centerline branch whose endpoint is nearest the cap centroid, after checking
+that the seed was generated from that centerline. It is the physically based
+mapping for centerline-generated seeds; see
+[`full_pa_calibration.md`](full_pa_calibration.md#geometric-centerline-mapping).
+A relative `outlet_mapping_centerline` resolves against the caller's working
+directory, and a missing file raises `FileNotFoundError` before tuning.
 
 The legacy `allow_ordered_outlet_mapping: true` setting is accepted only
 during migration when no new mapping mode is supplied.  It emits a

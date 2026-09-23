@@ -75,7 +75,7 @@ bcs:
   is_pulmonary: true
   impedance:
     tuning_model: full_pa
-    outlet_mapping_mode: serialized_cap_order
+    outlet_mapping_mode: auto
     tune_space:
       free:
         - {name: lpa.alpha, init: 0.9, lb: 0.7, ub: 0.99}
@@ -88,11 +88,15 @@ bcs:
 
 The learned source is accepted only for pulmonary impedance `full_pa` tuning.
 The producer must emit more than two non-inflow outlets with unique names and
-exactly one vessel attachment per outlet. Use
-`outlet_mapping_mode: serialized_cap_order` when the learned producer's
-serialized cap order is the contract (including generic names such as
-`RESISTANCE_1`). Use `outlet_mapping_mode: explicit` when a complete mapping
-is known, for example:
+exactly one vessel attachment per outlet. With `outlet_mapping_mode: auto` (or
+`centerline`), caps are paired with the generated seed's outlets through
+`seed_generation.centerline`: each cap goes to the outlet of the centerline
+branch whose endpoint is nearest the cap centroid (see
+[docs/full_pa_calibration.md](docs/full_pa_calibration.md#geometric-centerline-mapping)).
+Do not use `serialized_cap_order` for learned seeds. Their outlet BCs
+(`RESISTANCE_<n>`) follow centerline branch order, not cap filename order.
+Use `outlet_mapping_mode: explicit` when a complete mapping is known, for
+example:
 
 ```yaml
     outlet_mapping_mode: explicit

@@ -143,6 +143,8 @@ def validate_cap_to_bc_mapping(
     outlet_mapping_mode="auto",
     outlet_mapping=None,
     resolved_mapping=None,
+    centerline=None,
+    seed_payload=None,
     convert_to_cm=False,
     is_pulmonary=False,
     bc_prefix=None,
@@ -150,6 +152,10 @@ def validate_cap_to_bc_mapping(
     """Validate and resolve one cap-to-outlet mapping for a mesh.
 
     ``outlet_mapping_mode`` and ``outlet_mapping`` are the canonical inputs.
+    ``centerline`` is the centerline VTP the 0D model was generated from; it
+    enables geometric cap matching for ``auto`` and ``centerline`` modes, and
+    ``seed_payload`` is the serialized 0D config it checks the centerline
+    against.
     A pre-resolved mapping may be supplied when a caller has already frozen
     the identity for the remainder of an iteration, but it cannot be mixed
     with a second mapping request.  Legacy ordered mapping is translated by
@@ -184,6 +190,9 @@ def validate_cap_to_bc_mapping(
         bc_prefix=bc_prefix,
         outlet_mapping_mode=outlet_mapping_mode,
         outlet_mapping=outlet_mapping,
+        centerline=centerline,
+        seed_payload=seed_payload,
+        convert_to_cm=convert_to_cm,
     )
 
 def construct_impedance_trees(config_handler,

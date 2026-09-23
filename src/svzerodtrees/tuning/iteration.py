@@ -62,7 +62,8 @@ DEFAULT_IMPEDANCE_TUNING_CONFIG: dict[str, Any] = {
     "tuning_model": "rri",
 }
 
-# ``outlet_mapping_mode`` and ``outlet_mapping`` are full_pa controls.  They
+# ``outlet_mapping_mode``, ``outlet_mapping``, and ``outlet_mapping_centerline``
+# are full_pa controls.  They
 # are resolved below rather than added to the shared defaults so that an RRI
 # configuration retains its historical shape and behavior.
 FULL_PA_DEFAULT_USE_MEAN = False
@@ -256,6 +257,7 @@ def _validate_full_pa_preflight(
     convert_to_cm: bool,
     outlet_mapping_mode: str,
     outlet_mapping: Any,
+    outlet_mapping_centerline: Path | None = None,
 ) -> Any:
     """Validate full-PA topology and freeze its cap-to-BC mapping.
 
@@ -312,6 +314,8 @@ def _validate_full_pa_preflight(
         is_pulmonary=True,
         outlet_mapping_mode=outlet_mapping_mode,
         outlet_mapping=outlet_mapping,
+        centerline=outlet_mapping_centerline,
+        seed_payload=seed_payload,
     )
     records = getattr(resolved_mapping, "records", None)
     if records is not None and len(records) != len(seed_outlets):
@@ -404,16 +408,38 @@ def _resolve_impedance_config(
             merged["outlet_mapping_mode"] = str(requested_mode).strip().lower()
 
         merged["outlet_mapping"] = raw_config.get("outlet_mapping")
+        centerline = raw_config.get("outlet_mapping_centerline")
+        if centerline is not None and not str(centerline).strip():
+            raise ValueError("impedance tuning outlet_mapping_centerline cannot be empty")
+        merged["outlet_mapping_centerline"] = (
+            None if centerline is None else str(centerline).strip()
+        )
         if merged["outlet_mapping_mode"] not in {
             "auto",
             "metadata",
             "cap_name",
+            "centerline",
             "serialized_cap_order",
             "explicit",
         }:
             raise ValueError(
                 "impedance tuning outlet_mapping_mode must be one of "
-                "auto|metadata|cap_name|serialized_cap_order|explicit"
+                "auto|metadata|cap_name|centerline|serialized_cap_order|explicit"
+            )
+        if (
+            merged["outlet_mapping_mode"] == "centerline"
+            and merged["outlet_mapping_centerline"] is None
+        ):
+            raise ValueError(
+                "impedance tuning outlet_mapping_mode='centerline' requires "
+                "outlet_mapping_centerline"
+            )
+        if merged["outlet_mapping_centerline"] is not None and merged[
+            "outlet_mapping_mode"
+        ] not in {"auto", "centerline"}:
+            raise ValueError(
+                "impedance tuning outlet_mapping_centerline is used only by "
+                "outlet_mapping_mode 'auto' or 'centerline'"
             )
         if merged["outlet_mapping"] is not None and merged["outlet_mapping_mode"] != "explicit":
             raise ValueError(
@@ -424,9 +450,13 @@ def _resolve_impedance_config(
             raise ValueError(
                 "impedance tuning outlet_mapping_mode='explicit' requires outlet_mapping"
             )
-    elif "outlet_mapping_mode" in raw_config or "outlet_mapping" in raw_config:
+    elif any(
+        key in raw_config
+        for key in ("outlet_mapping_mode", "outlet_mapping", "outlet_mapping_centerline")
+    ):
         raise ValueError(
-            "outlet_mapping_mode and outlet_mapping are supported only for tuning_model='full_pa'"
+            "outlet_mapping_mode, outlet_mapping, and outlet_mapping_centerline are "
+            "supported only for tuning_model='full_pa'"
         )
 
     solver = str(merged.get("solver", "")).strip()
@@ -965,6 +995,14 @@ def run_impedance_tuning_for_iteration(
         raise FileNotFoundError(f"clinical targets not found: {targets_path}")
 
     tuning = _resolve_impedance_config(impedance_config)
+    mapping_centerline = None
+    if tuning.get("outlet_mapping_centerline") is not None:
+        # Resolve before changing into the output directory below.
+        mapping_centerline = Path(tuning["outlet_mapping_centerline"]).resolve()
+        if not mapping_centerline.is_file():
+            raise FileNotFoundError(
+                f"outlet mapping centerline not found: {mapping_centerline}"
+            )
     _clear_tuning_outputs(output_dir, tuned_config_name=tuned_config_name)
     required_xi_pa = _required_xi_pa_labels(tuning["tune_space"])
     targets = ClinicalTargets.from_csv(str(targets_path))
@@ -995,6 +1033,7 @@ def run_impedance_tuning_for_iteration(
                 convert_to_cm=bool(tuning["convert_to_cm"]),
                 outlet_mapping_mode=str(tuning["outlet_mapping_mode"]),
                 outlet_mapping=tuning["outlet_mapping"],
+                outlet_mapping_centerline=mapping_centerline,
             )
         tuner = ImpedanceTuner(
             reduced_config,

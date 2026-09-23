@@ -54,11 +54,14 @@ def test_validator_exposes_only_canonical_mapping_inputs():
         "outlet_mapping_mode",
         "outlet_mapping",
         "resolved_mapping",
+        "centerline",
+        "seed_payload",
         "convert_to_cm",
         "is_pulmonary",
         "bc_prefix",
     )
     assert parameters["outlet_mapping_mode"].default == "auto"
+    assert parameters["centerline"].default is None
     assert parameters["is_pulmonary"].default is False
     assert parameters["bc_prefix"].default is None
 
