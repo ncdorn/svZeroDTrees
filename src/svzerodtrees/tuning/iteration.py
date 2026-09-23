@@ -248,6 +248,31 @@ def _assert_full_pa_snapshot_preserves_topology(
                 + ", ".join(missing)
             )
 
+    # Learned full-PA seeds carry proximal resistance in BloodVesselJunction
+    # loss parameters; the tuned model must keep them unchanged.
+    snapshot_junctions = {
+        junction.get("junction_name"): junction
+        for junction in snapshot_payload.get("junctions") or []
+        if isinstance(junction, Mapping)
+    }
+    altered: list[str] = []
+    for junction in seed_payload.get("junctions") or []:
+        if not isinstance(junction, Mapping) or not junction.get("junction_values"):
+            continue
+        name = junction.get("junction_name")
+        tuned = snapshot_junctions.get(name)
+        if (
+            tuned is None
+            or tuned.get("junction_type") != junction.get("junction_type")
+            or tuned.get("junction_values") != junction.get("junction_values")
+        ):
+            altered.append(str(name))
+    if altered:
+        raise ValueError(
+            "full_pa tuning snapshot dropped or altered seed junction loss "
+            "parameters: " + ", ".join(altered)
+        )
+
 
 def _validate_full_pa_preflight(
     *,
