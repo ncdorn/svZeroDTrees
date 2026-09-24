@@ -8,6 +8,7 @@ import numpy as np
 
 from .tune_bcs.tune_space import FreeParam, FixedParam, TiedParam, TuneSpace, identity, positive, unit_interval
 from .tune_bcs.tree_policy import resolve_objective_tree_policy
+from .tune_bcs.nm_stopping import resolve_nelder_mead_stopping
 from .tune_bcs.clinical_targets import WEDGE_PRESSURE_POLICIES
 from .microvasculature.treeparams import TreeParameters
 from .microvasculature.compliance.constant import ConstantCompliance
@@ -93,6 +94,8 @@ class ImpedanceConfig:
     outlet_mapping_centerline: Optional[str] = None
     objective_tree_policy: Optional[Dict[str, Any]] = None
     wedge_pressure_policy: str = "clamp_to_diastolic"
+    # Resolved Nelder-Mead stopping policy; None keeps maxiter-only runs.
+    stopping: Optional[Dict[str, Any]] = None
     tune_space: Optional[TuneSpace] = None
 
 
@@ -451,6 +454,7 @@ _IMPEDANCE_CONFIG_KEYS = [
     "outlet_mapping_centerline",
     "objective_tree_policy",
     "wedge_pressure_policy",
+    "stopping",
     "tune_space",
 ]
 
@@ -632,6 +636,11 @@ def _parse_impedance_config(
         free_param_names=[item.name for item in (tune_space.free if tune_space else [])],
         label="bcs.impedance.objective_tree_policy",
     )
+    stopping = resolve_nelder_mead_stopping(
+        data.get("stopping"), label="bcs.impedance.stopping"
+    )
+    if stopping is not None and solver != "Nelder-Mead":
+        raise ValueError("bcs.impedance.stopping requires solver='Nelder-Mead'")
 
     return ImpedanceConfig(
         tuning_model=tuning_model,
@@ -652,6 +661,7 @@ def _parse_impedance_config(
         outlet_mapping_centerline=mapping_centerline,
         objective_tree_policy=objective_tree_policy,
         wedge_pressure_policy=wedge_pressure_policy,
+        stopping=None if stopping is None else stopping.to_dict(),
         tune_space=tune_space,
     )
 
@@ -736,6 +746,9 @@ def impedance_config_to_mapping(config: ImpedanceConfig) -> Dict[str, Any]:
     objective_tree_policy = getattr(config, "objective_tree_policy", None)
     if objective_tree_policy is not None:
         payload["objective_tree_policy"] = dict(objective_tree_policy)
+    stopping = getattr(config, "stopping", None)
+    if stopping is not None:
+        payload["stopping"] = dict(stopping)
     return payload
 
 
@@ -2293,6 +2306,11 @@ bcs:
     # objective_tree_policy:
     #   use_mean: true
     #   reference_diameter: conductance_matched  # arithmetic_mean | conductance_matched
+    # Optional clinically scaled Nelder-Mead stopping; omit for maxiter-only
+    # runs. See docs/interface.md for every key.
+    # stopping:
+    #   target_tolerance: 0.025  # relative error per objective metric
+    #   maxfev: 200              # evaluations per Nelder-Mead run
     tune_space:
       free:
         - name: lpa.alpha

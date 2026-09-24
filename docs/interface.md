@@ -349,6 +349,37 @@ regularization term: the former `1e-3 * sum(k2^2)` (Olufsen) and
 dominated the loss near a good fit, so tuned values can differ from runs made
 before this change.
 
+`stopping` (Nelder-Mead only) replaces SciPy's default stopping, which refines
+far below clinical precision (`xatol=fatol=1e-4` in raw parameter and loss
+units, `maxiter=200`, unlimited evaluations), with rules in the units the fit
+is judged in. Omitted, or with `enabled: false`, tuning keeps the historical
+behavior.
+
+```yaml
+stopping:
+  target_tolerance: 0.025          # stop once every objective metric is within 2.5% of target; null disables
+  stall_window: null               # evaluations; null -> 5 x number of free parameters
+  stall_rel_improvement: 0.01      # stop if best loss improved < 1% over the window; null disables
+  xatol: 1.0e-3                    # simplex size, in bounds-normalized [0, 1] parameter units
+  fatol: 1.0e-3                    # simplex loss spread
+  maxfev: 200                      # evaluations per Nelder-Mead run
+  initial_simplex_step: 0.1        # starting simplex edge, as a fraction of each parameter's bound range
+  restart_min_rel_improvement: 0.05  # skip further restarts if a run improved the loss by < 5%; null disables
+```
+
+Objective metrics for `target_tolerance` are the RPA split and the pressures
+with nonzero objective weight (so diastolic is excluded when its target is
+below wedge). A unit-weight loss term is `(% error / 10)^2`, and the default
+2.5% is a quarter of the 10% iteration gate. The optimizer runs in [0, 1] per finite
+bound, which gives every parameter a starting step of
+`initial_simplex_step` of its range; SciPy's default steps a zero initial value
+by only 2.5e-4. A run stops at whichever rule fires first. Restarts
+(`nm_iter`) stop after a run meets the target or improves the unweighted loss
+by less than `restart_min_rel_improvement`. Each run reports the point it
+selected (the target-meeting point, otherwise the lowest-loss evaluation) and
+logs `stop_reason` and `evaluations` to `stree_impedance_optimization.log`.
+`maxiter` is ignored under this policy.
+
 Tuning error behavior: a candidate whose simulation fails (for example an
 unstable impedance kernel) is scored with a 1e9 penalty and the optimizer
 continues. A solver capability error that every candidate would hit (a

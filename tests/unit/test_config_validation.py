@@ -365,6 +365,45 @@ def test_full_pa_objective_tree_policy_is_omitted_by_default(tmp_path):
     assert "objective_tree_policy" not in impedance_config_to_mapping(cfg.bcs.impedance)
 
 
+def test_stopping_parses_and_round_trips(tmp_path):
+    cfg_path = tmp_path / "stopping.yml"
+    cfg_path.write_text(
+        _full_pa_pipeline_yaml(
+            tmp_path,
+            impedance_fields=(
+                "    stopping:\n"
+                "      maxfev: 120\n"
+                "      target_tolerance: null"
+            ),
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    stopping = cfg.bcs.impedance.stopping
+    assert stopping["maxfev"] == 120
+    assert stopping["target_tolerance"] is None
+    assert stopping["stall_rel_improvement"] == 0.01
+    assert impedance_config_to_mapping(cfg.bcs.impedance)["stopping"] == stopping
+
+
+def test_stopping_is_omitted_by_default_and_rejects_unknown_keys(tmp_path):
+    default_path = tmp_path / "default.yml"
+    default_path.write_text(_full_pa_pipeline_yaml(tmp_path), encoding="utf-8")
+    cfg = load_config(str(default_path))
+    assert cfg.bcs.impedance.stopping is None
+    assert "stopping" not in impedance_config_to_mapping(cfg.bcs.impedance)
+
+    bad_path = tmp_path / "bad.yml"
+    bad_path.write_text(
+        _full_pa_pipeline_yaml(tmp_path, impedance_fields="    stopping:\n      tol: 0.1"),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="stopping has unknown keys"):
+        load_config(str(bad_path))
+
+
 def test_full_pa_objective_tree_policy_rejects_unknown_keys(tmp_path):
     cfg_path = tmp_path / "invalid.yml"
     cfg_path.write_text(

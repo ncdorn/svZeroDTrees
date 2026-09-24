@@ -1,13 +1,18 @@
 from .base import BoundaryConditionTuner
 import copy
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import OptimizeResult, minimize
 from ..simulation.threedutils import pa_outlet_scale_from_branch_counts, vtp_info
 from ..tune_bcs.pa_config import PAConfig
 from ..tune_bcs.assign_bcs import construct_impedance_trees
 from ..microvasculature import TreeParameters, compliance as comp_mod
 from ..microvasculature.structured_tree.asymmetry import resolve_branch_scaling
 from ..tune_bcs.tune_space import TuneSpace
+from ..tune_bcs.nm_stopping import (
+    STOP_TARGET_MET,
+    resolve_nelder_mead_stopping,
+    run_nelder_mead,
+)
 from ..io.inflow_handler import mean_flow_from_path
 from ..numerics import trapezoid
 from ..io.blocks.boundary_condition import (
@@ -185,7 +190,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
                  diameter_std_cap=None,
                  allow_ordered_outlet_mapping=False,
                  resolved_mapping=None,
-                 objective_tree_policy=None):
+                 objective_tree_policy=None,
+                 stopping=None):
         super().__init__(config_handler, mesh_surfaces_path, clinical_targets)
         self.tune_space = tune_space
         self.compliance_model = (compliance_model or "").lower()
@@ -221,6 +227,11 @@ class ImpedanceTuner(BoundaryConditionTuner):
         )
         if self.objective_tree_policy is not None and self.tuning_model != "full_pa":
             raise ValueError("objective_tree_policy is supported only for tuning_model='full_pa'")
+        # Optional clinically scaled Nelder-Mead stopping policy.  None keeps
+        # the historical maxiter-only minimize() calls and outer-loop break.
+        self.stopping = resolve_nelder_mead_stopping(stopping)
+        if self.stopping is not None and self.solver != "Nelder-Mead":
+            raise ValueError("stopping is supported only for solver='Nelder-Mead'")
 
         # grid search params
         self.grid_search_init = grid_search_init
@@ -622,16 +633,36 @@ class ImpedanceTuner(BoundaryConditionTuner):
         penalty_growth = 5.0
         max_penalty = 1e6
 
+        if self.stopping is not None:
+            _append_log(f"Nelder-Mead stopping policy: {self.stopping.to_dict()}")
+
         for run_idx in range(max_runs):
-            result = minimize(
-                fun=lambda x: self.loss_fn(x, pa_config),
-                x0=x_init,
-                method=self.solver,
-                bounds=bounds if self.solver in ("Nelder-Mead", "L-BFGS-B", "Powell", "TNC", "SLSQP", "trust-constr") else None,
-                options={"maxiter": self.maxiter}
-            )
-            unweighted_loss = self._last_loss_breakdown.get("unweighted_loss", np.inf)
-            metrics = self._last_loss_breakdown.get("metrics", {})
+            previous_best_unweighted_loss = best_unweighted_loss
+            outcome = None
+            if self.stopping is None:
+                result = minimize(
+                    fun=lambda x: self.loss_fn(x, pa_config),
+                    x0=x_init,
+                    method=self.solver,
+                    bounds=bounds if self.solver in ("Nelder-Mead", "L-BFGS-B", "Powell", "TNC", "SLSQP", "trust-constr") else None,
+                    options={"maxiter": self.maxiter}
+                )
+                unweighted_loss = self._last_loss_breakdown.get("unweighted_loss", np.inf)
+                metrics = self._last_loss_breakdown.get("metrics", {})
+                stop_note = ""
+            else:
+                outcome = self._run_nelder_mead_with_stopping(pa_config, x_init, bounds)
+                result = OptimizeResult(
+                    x=outcome.x,
+                    fun=outcome.loss,
+                    nfev=outcome.n_evaluations,
+                    success=outcome.reason != "maxfev",
+                    message=outcome.reason,
+                )
+                # Report the chosen point, not whichever candidate ran last.
+                unweighted_loss = outcome.breakdown.get("unweighted_loss", np.inf)
+                metrics = outcome.breakdown.get("metrics", {})
+                stop_note = f", stop_reason={outcome.reason}, evaluations={outcome.n_evaluations}"
             accepted = True
             if best_x is None:
                 best_x = result.x
@@ -644,6 +675,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
             print(
                 f"Nelder-Mead run {run_idx + 1}/{max_runs} complete: "
                 f"weighted loss={result.fun}, unweighted loss={unweighted_loss}, weights={self._loss_weights}"
+                f"{stop_note}"
             )
             _append_log(
                 f"Nelder-Mead run {run_idx + 1}/{max_runs} complete: "
@@ -657,6 +689,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 f"{self.clinical_targets.mpa_p[2]:.6f} mmHg, "
                 f"rpa_split={metrics.get('rpa_split', np.nan):.6f}, "
                 f"rpa_split_target={self.clinical_targets.rpa_split:.6f}"
+                f"{stop_note}"
             )
             if accepted:
                 x_init = result.x
@@ -667,12 +700,20 @@ class ImpedanceTuner(BoundaryConditionTuner):
                     "Nelder-Mead run rejected: "
                     f"unweighted loss {unweighted_loss:.6e} exceeded previous {best_unweighted_loss:.6e}"
                 )
-            if unweighted_loss < 1e-5:
+            if outcome is None:
+                if unweighted_loss < 1e-5:
+                    break
+            elif self._should_stop_restarting(
+                outcome.reason, previous_best_unweighted_loss, best_unweighted_loss, _append_log
+            ):
                 break
             if run_idx == max_runs - 1:
                 break
 
-            components = self._last_loss_breakdown.get("components", {})
+            if outcome is None:
+                components = self._last_loss_breakdown.get("components", {})
+            else:
+                components = outcome.breakdown.get("components", {})
             finite_components = {k: v for k, v in components.items() if np.isfinite(v)}
             total_residual = sum(finite_components.values()) if finite_components else 0.0
             for key in ["sys", "dia", "mean", "flow"]:
@@ -718,11 +759,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
         ``weighted_loss`` applies the current augmented-Lagrangian weights
         (all 1.0 outside tune()).
         """
-        pressure_weights = (
-            {"sys": 1.5, "dia": 1.0, "mean": 1.2}
-            if (self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p)
-            else {"sys": 1.0, "dia": 0.0, "mean": 1.0}
-        )
+        pressure_weights = self._pressure_weights()
         pressure_diff = np.abs(np.array(p_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p
         components = {
             "sys": pressure_weights["sys"] * pressure_diff[0] ** 2 * 100.0,
@@ -738,6 +775,57 @@ class ImpedanceTuner(BoundaryConditionTuner):
             "unweighted_loss": unweighted_loss,
             "components": components,
         }
+
+    def _pressure_weights(self) -> dict:
+        # A diastolic target below wedge pressure is unreachable, so it is
+        # dropped from the objective.
+        if self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p:
+            return {"sys": 1.5, "dia": 1.0, "mean": 1.2}
+        return {"sys": 1.0, "dia": 0.0, "mean": 1.0}
+
+    def _objective_targets_met(self, breakdown: dict, tolerance: float) -> bool:
+        """True when every metric the objective weights is within ``tolerance``
+        relative error of its clinical target."""
+        metrics = breakdown.get("metrics") or {}
+        targets = self.clinical_targets
+        pairs = [(metrics.get("rpa_split"), targets.rpa_split)]
+        weights = self._pressure_weights()
+        for idx, key in enumerate(("sys", "dia", "mean")):
+            if weights[key] > 0.0:
+                pairs.append((metrics.get(f"{key}_pressure"), targets.mpa_p[idx]))
+        for value, target in pairs:
+            if value is None or not np.isfinite(value):
+                return False
+            if abs(float(value) - float(target)) > tolerance * abs(float(target)):
+                return False
+        return True
+
+    def _run_nelder_mead_with_stopping(self, pa_config, x_init, bounds):
+        def _evaluate(x):
+            self._last_loss_breakdown = {}
+            loss = self.loss_fn(x, pa_config)
+            # loss_fn leaves the breakdown empty when the simulation failed.
+            return loss, (dict(self._last_loss_breakdown) or None)
+
+        return run_nelder_mead(
+            _evaluate, x_init, bounds, self.stopping, self._objective_targets_met
+        )
+
+    def _should_stop_restarting(self, reason, previous_best, current_best, append_log) -> bool:
+        if reason == STOP_TARGET_MET:
+            append_log("Stopping restarts: every objective metric is within target_tolerance")
+            return True
+        threshold = self.stopping.restart_min_rel_improvement
+        if threshold is None or not np.isfinite(previous_best) or previous_best <= 0.0:
+            return False
+        improvement = (previous_best - current_best) / previous_best
+        if improvement < threshold:
+            append_log(
+                "Stopping restarts: run improved unweighted loss by "
+                f"{improvement:.2%} (< restart_min_rel_improvement {threshold:.2%})"
+            )
+            return True
+        return False
 
     def prepare_objective(self):
         """Build the tuning model exactly as tune() does and return it.

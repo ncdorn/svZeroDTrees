@@ -36,6 +36,7 @@ from svzerodtrees.microvasculature.structured_tree.dc_resistance import (
 )
 from svzerodtrees.tune_bcs.tree_policy import resolve_objective_tree_policy
 from svzerodtrees.tune_bcs.impedance_tuner import ImpedanceTuner
+from svzerodtrees.tune_bcs.nm_stopping import resolve_nelder_mead_stopping
 from svzerodtrees.tune_bcs.rcr_tuner import RCRTuner, write_rcr_params_csv
 from svzerodtrees.tune_bcs.tune_space import (
     FixedParam,
@@ -561,6 +562,16 @@ def _resolve_impedance_config(
     )
     if objective_policy is not None:
         merged["objective_tree_policy"] = objective_policy
+
+    # Optional Nelder-Mead stopping policy.  Absent (or enabled: false) keeps
+    # the historical maxiter-only runs, so the key is dropped in that case.
+    stopping = resolve_nelder_mead_stopping(
+        merged.pop("stopping", None), label="impedance tuning stopping"
+    )
+    if stopping is not None:
+        if merged["solver"] != "Nelder-Mead":
+            raise ValueError("impedance tuning stopping requires solver='Nelder-Mead'")
+        merged["stopping"] = stopping.to_dict()
 
     return merged
 
@@ -1198,6 +1209,7 @@ def run_impedance_tuning_for_iteration(
             ),
             resolved_mapping=resolved_mapping,
             objective_tree_policy=tuning.get("objective_tree_policy"),
+            stopping=tuning.get("stopping"),
         )
         prev_csv = str(previous_optimized_params) if previous_optimized_params is not None else None
         if prev_csv is not None and os.path.isfile(prev_csv):
