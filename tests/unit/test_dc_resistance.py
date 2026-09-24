@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import pytest
 
@@ -95,3 +97,19 @@ def test_conductance_matched_diameter_warns_when_trees_would_be_truncated():
         conductance_matched_diameter(
             [0.1, 0.3], d_min=0.01, alpha=0.9, beta=0.6, max_nodes=1000
         )
+
+
+def test_dc_resistance_handles_trees_deeper_than_the_recursion_limit():
+    import sys
+
+    # alpha near 1 (a tuned TST-STAN-5 candidate) gives >1000 generations.
+    alpha, beta = 0.9971960582518679, 0.4555430769694871
+    assert math.log(0.3 / 0.01) / -math.log(alpha) > sys.getrecursionlimit()
+
+    resistance = structured_tree_dc_resistance(0.3, d_min=0.01, alpha=alpha, beta=beta)
+    d_ref, _ = conductance_matched_diameter(
+        [0.2, 0.4], d_min=0.01, alpha=alpha, beta=beta, max_nodes=None
+    )
+
+    assert np.isfinite(resistance) and resistance > 0.0
+    assert 0.2 < d_ref < 0.4
