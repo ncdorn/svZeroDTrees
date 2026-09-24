@@ -590,7 +590,20 @@ class ImpedanceTuner(BoundaryConditionTuner):
                     f"invalid inflow mean flow for rescaling: {current_mean_flow}"
                 )
             scale_factor = self._expected_snapshot_cardiac_output / current_mean_flow
-            pa_config.bcs['INFLOW'].Q = [q * scale_factor for q in pa_config.bcs['INFLOW'].Q]
+            scale_flow_bc = getattr(pa_config, "scale_flow_bc", None)
+            if callable(scale_flow_bc):
+                # ConfigHandler re-applies its cached Inflow on serialization,
+                # so both copies must be scaled.
+                scale_flow_bc(scale_factor, "INFLOW")
+            else:
+                pa_config.bcs['INFLOW'].Q = [q * scale_factor for q in pa_config.bcs['INFLOW'].Q]
+        if self.tuning_model == "full_pa" and hasattr(pa_config, "config"):
+            # The inflow is identical for every candidate, so check it once
+            # here: a mismatch would otherwise fail every evaluation.
+            validate_flow_cardiac_output_config(
+                pa_config.config,
+                expected_cardiac_output=self._expected_snapshot_cardiac_output,
+            )
         self._full_pa_base_config = pa_config
 
         x0, bounds = self.tune_space.pack_init_and_bounds()

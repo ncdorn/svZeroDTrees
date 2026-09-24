@@ -56,3 +56,24 @@ def test_tune_raises_when_no_evaluation_succeeds(tmp_path):
 
     assert "unstable impedance kernel" in (tmp_path / "tuning.log").read_text(encoding="utf-8")
     assert stale_csv.read_text(encoding="utf-8") == "pa\nlpa\nrpa\n"
+
+
+def test_full_pa_tune_checks_inflow_before_any_evaluation(tmp_path):
+    tuner = _tuner(tmp_path)
+    tuner.tuning_model = "full_pa"
+    evaluations = []
+    tuner._prepare_geometry_defaults = lambda: None
+    # The serialized config disagrees with the in-memory BC, as a stale
+    # cached Inflow would; every candidate would fail the snapshot check.
+    tuner._make_tuning_model = lambda: SimpleNamespace(
+        bcs={"INFLOW": SimpleNamespace(Q=[6.0, 6.0])},
+        config={"boundary_conditions": [
+            {"bc_name": "INFLOW", "bc_type": "FLOW", "bc_values": {"Q": [5.0, 5.0], "t": [0.0, 1.0]}}
+        ]},
+    )
+    tuner._evaluate_model = lambda *args, **kwargs: evaluations.append(args)
+
+    with pytest.raises(ValueError, match="cardiac output mismatch"):
+        tuner.tune(nm_iter=1)
+
+    assert evaluations == []

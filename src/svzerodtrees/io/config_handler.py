@@ -570,6 +570,23 @@ class ConfigHandler():
         return inflow
     
 
+    def scale_flow_bc(self, scale, bc_name="INFLOW"):
+        '''
+        scale a FLOW boundary condition waveform by ``scale``.
+
+        assemble_config() re-applies cached Inflow objects over ``self.bcs``,
+        so the boundary condition and its cached Inflow are scaled together;
+        scaling only ``self.bcs[bc_name].Q`` is discarded on serialization.
+        '''
+        bc = self.bcs.get(bc_name)
+        if bc is None or str(getattr(bc, "type", "")).strip().upper() != "FLOW":
+            raise KeyError(f"FLOW boundary condition '{bc_name}' is not available")
+        scale = float(scale)
+        bc.Q = [q * scale for q in bc.Q]
+        inflow = self.inflows.get(bc_name)
+        if inflow is not None:
+            inflow.q = [q * scale for q in inflow.q]
+
     def set_inflow(self, inflow, bc_name="INFLOW", threed_coupled=False):
         '''
         set the inflow for the config

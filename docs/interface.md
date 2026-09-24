@@ -339,6 +339,11 @@ support) raises `RuntimeError` immediately, naming the loaded `pysvzerod`
 path. If no evaluation simulates successfully, `ImpedanceTuner.tune` raises
 `RuntimeError` with the last error instead of returning, so an existing
 `optimized_params.csv` from an earlier run is never published.
+For `full_pa`, the (optionally rescaled) inflow cardiac output is checked once
+before optimization and a mismatch raises `ValueError` immediately, because the
+inflow is identical for every candidate. `rescale_inflow` scales the seed's
+FLOW BC through `ConfigHandler.scale_flow_bc`, which keeps the cached `Inflow`
+consistent so the scaling survives serialization.
 
 Mesh areas and diameters retain the existing CGS computation contract.
 `convert_to_cm` controls the existing geometry conversion; it does not change
