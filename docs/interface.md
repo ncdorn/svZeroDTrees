@@ -345,6 +345,14 @@ inflow is identical for every candidate. `rescale_inflow` scales the seed's
 FLOW BC through `ConfigHandler.scale_flow_bc`, which keeps the cached `Inflow`
 consistent so the scaling survives serialization.
 
+`ImpedanceTuner` exposes its objective for initial-guess and multi-start
+searches: `prepare_objective()` builds the tuning model exactly as `tune()`
+does, `evaluate_candidate(x, model)` scores one free-parameter vector at unit
+loss weights (the objective of the first Nelder-Mead run) and returns the loss,
+its components, the MPA pressures in mmHg and the RPA split, and
+`objective_terms(p_mpa, rpa_split, params)` evaluates the loss formula for
+externally simulated metrics.
+
 Mesh areas and diameters retain the existing CGS computation contract.
 `convert_to_cm` controls the existing geometry conversion; it does not change
 the solver's CGS values.  Wedge pressure inputs continue to be converted from
