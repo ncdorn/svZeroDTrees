@@ -331,6 +331,15 @@ requires `use_mean: true` in the policy, a per-outlet final policy
 The resolved policy is returned in `impedance_config["objective_tree_policy"]`
 and recorded as `objective_tree_options` in `outlet_cap_mapping.json`.
 
+Tuning error behavior: a candidate whose simulation fails (for example an
+unstable impedance kernel) is scored with a 1e9 penalty and the optimizer
+continues. A solver capability error that every candidate would hit (a
+`pysvzerod` build reporting `Invalid block type`, e.g. without IMPEDANCE BC
+support) raises `RuntimeError` immediately, naming the loaded `pysvzerod`
+path. If no evaluation simulates successfully, `ImpedanceTuner.tune` raises
+`RuntimeError` with the last error instead of returning, so an existing
+`optimized_params.csv` from an earlier run is never published.
+
 Mesh areas and diameters retain the existing CGS computation contract.
 `convert_to_cm` controls the existing geometry conversion; it does not change
 the solver's CGS values.  Wedge pressure inputs continue to be converted from

@@ -15,8 +15,25 @@ from ..io.blocks.boundary_condition import (
     validate_flow_cardiac_output_config,
     validate_impedance_timing_config,
 )
-import csv, json, math, os
+import csv, json, math, os, sys
 import warnings
+
+# Solver errors that no candidate can avoid (e.g. a pysvzerod build without
+# IMPEDANCE BC support).  They must abort tuning instead of being scored as a
+# penalized candidate.
+_SOLVER_CAPABILITY_ERROR_MARKERS = ("Invalid block type",)
+
+
+def _solver_capability_error(exc: Exception) -> RuntimeError | None:
+    message = str(exc)
+    if not any(marker in message for marker in _SOLVER_CAPABILITY_ERROR_MARKERS):
+        return None
+    module_path = getattr(sys.modules.get("pysvzerod"), "__file__", "<not imported>")
+    return RuntimeError(
+        f"pysvzerod cannot simulate the tuning model ({message}); loaded "
+        f"pysvzerod from {module_path}. Impedance tuning requires a solver "
+        "build with IMPEDANCE boundary-condition support."
+    )
 
 
 # Column names in optimized_params.csv → free-param name templates.
@@ -216,6 +233,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self._loss_weights = None
         self._last_loss_breakdown = {}
         self._opt_csv_path = None
+        self._n_successful_evaluations = 0
+        self._last_evaluation_error = None
         self._expected_snapshot_cardiac_output = None
         self._full_pa_base_config = None
 
@@ -556,6 +575,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
             with open(self.log_file, "a") as lf:
                 lf.write(msg + "\n")
 
+        self._n_successful_evaluations = 0
+        self._last_evaluation_error = None
         self._prepare_geometry_defaults()
         pa_config = self._make_tuning_model()
         self._expected_snapshot_cardiac_output = self._resolve_expected_snapshot_cardiac_output(
@@ -684,6 +705,16 @@ class ImpedanceTuner(BoundaryConditionTuner):
             if not np.isfinite(unweighted_loss):
                 break
 
+        if self._n_successful_evaluations == 0:
+            # Every candidate failed, so there is no optimum to publish.  Fail
+            # here so a stale optimized_params.csv is never mistaken for output.
+            message = (
+                "impedance tuning failed: no optimizer evaluation simulated "
+                f"successfully; last error: {self._last_evaluation_error}"
+            )
+            _append_log(message)
+            raise RuntimeError(message)
+
         print(f"[ImpedanceTuner] Optimized: {best_x}  f={best_unweighted_loss:.3f}")
         # final simulate & plot
         _ = self.loss_fn(best_x, pa_config, finalize=True)
@@ -701,9 +732,14 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 provided_model=pa_config,
             )
         except Exception as e:
+            capability_error = _solver_capability_error(e)
+            if capability_error is not None:
+                raise capability_error from e
             params = self.tune_space.vector_to_param_dict(x)
+            self._last_evaluation_error = f"{type(e).__name__}: {e}"
             print(f"[loss_fn] simulation error: {e} params={params}")
             return 1e9
+        self._n_successful_evaluations += 1
 
         # ---- Loss: weighted MPA pressure (sys/dia/mean separately) + flow split + mild L2 on compliance ----
         pressure_weights = (
