@@ -37,7 +37,6 @@ def test_objective_terms_match_documented_formula(tmp_path):
         "dia": 1.0 * (6.0 / 12.0) ** 2 * 100.0,
         "mean": 0.0,
         "flow": (0.1 / 0.5) ** 2 * 100.0,
-        "reg": 1e-5 * 5.0,
     }
     assert terms["components"] == pytest.approx(expected)
     assert terms["unweighted_loss"] == pytest.approx(sum(expected.values()))
@@ -46,7 +45,7 @@ def test_objective_terms_match_documented_formula(tmp_path):
 
 def test_evaluate_candidate_reports_metrics_at_unit_weights(tmp_path):
     tuner = _tuner(tmp_path)
-    tuner._loss_weights = {"sys": 9.0, "dia": 9.0, "mean": 9.0, "flow": 9.0, "reg": 9.0}
+    tuner._loss_weights = {"sys": 9.0, "dia": 9.0, "mean": 9.0, "flow": 9.0}
     tuner._evaluate_model = lambda x, provided_model=None: (
         None,
         {"P_mpa": [33.0, 6.0, 20.0], "rpa_split": 0.6},

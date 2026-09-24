@@ -617,7 +617,6 @@ class ImpedanceTuner(BoundaryConditionTuner):
             "dia": 1.0,
             "mean": 1.0,
             "flow": 1.0,
-            "reg": 1.0,
         }
         self._last_loss_breakdown = {}
         penalty_growth = 5.0
@@ -713,7 +712,9 @@ class ImpedanceTuner(BoundaryConditionTuner):
         """Return the tuning objective for MPA pressures [mmHg] and RPA split.
 
         Weighted relative squared errors of systolic/diastolic/mean MPA
-        pressure (x100), RPA split (x100), and a mild L2 term on compliance.
+        pressure (x100) and RPA split (x100).  There is no compliance
+        regularization: it biased k2/C toward zero and dominated the loss once
+        the fit was close.  ``params`` is accepted for interface stability.
         ``weighted_loss`` applies the current augmented-Lagrangian weights
         (all 1.0 outside tune()).
         """
@@ -729,12 +730,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
             "mean": pressure_weights["mean"] * pressure_diff[2] ** 2 * 100.0,
             "flow": ((rpa_split - self.clinical_targets.rpa_split) / self.clinical_targets.rpa_split) ** 2 * 100.0,
         }
-        if self.compliance_model == "olufsen":
-            components["reg"] = 1e-3 * (params["comp.lpa.k2"]**2 + params["comp.rpa.k2"]**2)
-        else:
-            components["reg"] = 1e-5 * (params["comp.lpa.C"]**2 + params["comp.rpa.C"]**2)
-
-        loss_weights = self._loss_weights or {"sys": 1.0, "dia": 1.0, "mean": 1.0, "flow": 1.0, "reg": 1.0}
+        loss_weights = self._loss_weights or {"sys": 1.0, "dia": 1.0, "mean": 1.0, "flow": 1.0}
         unweighted_loss = float(sum(components.values()))
         weighted_loss = float(sum(loss_weights.get(key, 1.0) * value for key, value in components.items()))
         return {
@@ -792,7 +788,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
         """
         saved = (self._augmented_mode, self._loss_weights, self._last_evaluation_error)
         self._augmented_mode = True
-        self._loss_weights = {"sys": 1.0, "dia": 1.0, "mean": 1.0, "flow": 1.0, "reg": 1.0}
+        self._loss_weights = {"sys": 1.0, "dia": 1.0, "mean": 1.0, "flow": 1.0}
         self._last_loss_breakdown = {}
         self._last_evaluation_error = None
         try:
@@ -834,9 +830,6 @@ class ImpedanceTuner(BoundaryConditionTuner):
         rpa_split = metrics["rpa_split"]
         terms = self.objective_terms(p_mpa, rpa_split, params)
         components = terms["components"]
-        pressure_contrib = {key: components[key] for key in ("sys", "dia", "mean")}
-        flowsplit_loss = components["flow"]
-        l2 = components["reg"]
         base_total = terms["unweighted_loss"]
         weighted_total = terms["weighted_loss"]
         unweighted_loss = terms["unweighted_loss"]
@@ -845,13 +838,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
             self._last_loss_breakdown = {
                 "weighted_loss": weighted_total,
                 "unweighted_loss": unweighted_loss,
-                "components": {
-                    "sys": pressure_contrib["sys"],
-                    "dia": pressure_contrib["dia"],
-                    "mean": pressure_contrib["mean"],
-                    "flow": flowsplit_loss,
-                    "reg": l2,
-                },
+                "components": dict(components),
                 "metrics": {
                     "sys_pressure": p_mpa[0],
                     "dia_pressure": p_mpa[1],

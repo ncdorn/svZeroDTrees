@@ -1116,8 +1116,8 @@ def test_impedance_tuner_loss_fn_computes_weighted_loss():
         weights["mean"] * pressure_components[2]
     ) * 100.0
     flowsplit_loss = ((pa_config.rpa_split - clinical_targets.rpa_split) / clinical_targets.rpa_split) ** 2 * 100.0
-    l2 = 1e-5 * (params["comp.lpa.C"] ** 2 + params["comp.rpa.C"] ** 2)
-    expected = pressure_loss + flowsplit_loss + l2
+    # No compliance regularization term.
+    expected = pressure_loss + flowsplit_loss
 
     assert pa_config.created is not None
     assert pa_config.last_json == "pa_config_tuning_snapshot.json"

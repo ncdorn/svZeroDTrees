@@ -342,6 +342,13 @@ includes the diastolic term only when the diastolic target is at least the
 wedge pressure, so `measured` drops it when the wedge exceeds the diastolic
 target.
 
+The impedance tuning objective is the weighted relative squared error of MPA
+systolic/diastolic/mean pressure plus the RPA split. It has no compliance
+regularization term: the former `1e-3 * sum(k2^2)` (Olufsen) and
+`1e-5 * sum(C^2)` (constant) penalties biased compliance toward zero and
+dominated the loss near a good fit, so tuned values can differ from runs made
+before this change.
+
 Tuning error behavior: a candidate whose simulation fails (for example an
 unstable impedance kernel) is scored with a 1e9 penalty and the optimizer
 continues. A solver capability error that every candidate would hit (a
