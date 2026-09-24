@@ -29,6 +29,10 @@ __all__ = [
 ]
 
 _SCAN_POINTS = 256
+# max_nodes values already reported by the truncation warning.  Tuning calls
+# the solver once per optimizer evaluation, and per-evaluation filter resets
+# defeat the default once-per-location warning filter.
+_TRUNCATION_WARNED: set[int] = set()
 _REFINE_POINTS = 64
 _REFINE_PASSES = 4
 
@@ -204,9 +208,8 @@ def conductance_matched_diameter(
         largest = structured_tree_node_count(
             float(values.max()), d_min=d_min, alpha=alpha, beta=beta
         )
-        if largest > int(max_nodes):
-            # Constant text so the default warning filter reports it once per
-            # call site instead of on every optimizer evaluation.
+        if largest > int(max_nodes) and int(max_nodes) not in _TRUNCATION_WARNED:
+            _TRUNCATION_WARNED.add(int(max_nodes))
             warnings.warn(
                 "conductance_matched_diameter: per-outlet trees exceed "
                 f"max_nodes={int(max_nodes)} and will be truncated when built, so "

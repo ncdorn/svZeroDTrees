@@ -92,11 +92,21 @@ def test_conductance_matched_diameter_rejects_invalid_inputs(diameters, kwargs, 
         conductance_matched_diameter(diameters, **options)
 
 
-def test_conductance_matched_diameter_warns_when_trees_would_be_truncated():
-    with pytest.warns(UserWarning, match="max_nodes=1000"):
-        conductance_matched_diameter(
-            [0.1, 0.3], d_min=0.01, alpha=0.9, beta=0.6, max_nodes=1000
-        )
+def test_conductance_matched_diameter_warns_once_when_trees_would_be_truncated(monkeypatch):
+    import warnings
+
+    from svzerodtrees.microvasculature.structured_tree import dc_resistance
+
+    monkeypatch.setattr(dc_resistance, "_TRUNCATION_WARNED", set())
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        for _ in range(3):
+            conductance_matched_diameter(
+                [0.1, 0.3], d_min=0.01, alpha=0.9, beta=0.6, max_nodes=1000
+            )
+
+    messages = [str(w.message) for w in caught if "max_nodes=1000" in str(w.message)]
+    assert len(messages) == 1
 
 
 def test_dc_resistance_handles_trees_deeper_than_the_recursion_limit():

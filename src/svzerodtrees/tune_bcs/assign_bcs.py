@@ -358,7 +358,7 @@ def construct_impedance_trees(config_handler,
         time_array = config_handler.inflows[next(iter(config_handler.inflows))].t
 
         lpa_tree = StructuredTree(name='LPA', time=time_array, simparams=config_handler.simparams, compliance_model=lpa_params.compliance_model)
-        print(f'building LPA tree with lpa parameters: {lpa_params.summary()}')
+        print(f'building LPA tree at initial_d={lpa_mean_dia:.4f} with lpa parameters: {lpa_params.summary()}')
 
         lpa_tree.build(
             initial_d=lpa_mean_dia,
@@ -374,7 +374,7 @@ def construct_impedance_trees(config_handler,
             lpa_tree.plot_stiffness(path='lpa_stiffness_plot.png')
 
         rpa_tree = StructuredTree(name='RPA', time=time_array, simparams=config_handler.simparams, compliance_model=rpa_params.compliance_model)
-        print(f'building RPA tree with rpa parameters: {rpa_params.summary()}')
+        print(f'building RPA tree at initial_d={rpa_mean_dia:.4f} with rpa parameters: {rpa_params.summary()}')
 
         rpa_tree.build(
             initial_d=rpa_mean_dia,
