@@ -270,6 +270,11 @@ impedance_config:
   use_mean: false             # full_pa default
   diameter_scale: 1.0         # full_pa default; 0.0 is an explicit compatibility control
   diameter_std_cap: null
+  wedge_pressure_policy: clamp_to_diastolic  # clamp_to_diastolic | measured
+  # Optional; trees used inside the optimizer only (see below).
+  # objective_tree_policy:
+  #   use_mean: true
+  #   reference_diameter: conductance_matched  # arithmetic_mean | conductance_matched
   tune_space:
     free:
       - name: lpa.alpha
@@ -308,6 +313,63 @@ deprecation warning and resolves to `outlet_mapping_mode:
 serialized_cap_order`; supplying both settings fails fast.  An explicit map
 must be complete and bijective, and its schema is `cap-or-stem: outlet-BC-name`
 (or an equivalent list of `[cap, outlet_BC]` pairs).
+
+`use_mean`, `diameter_scale`, and `diameter_std_cap` are the *final* tree
+policy: they build `tuned_zerod_config` and therefore the 3D outlet BCs.
+`objective_tree_policy` (full_pa only) optionally sets a separate policy for
+the trees built at every optimizer evaluation. Omitted, the objective uses the
+final policy. Its keys are `use_mean`, `diameter_scale`, `diameter_std_cap`
+(each inherits the final value when omitted; an explicit `null` std cap means
+no cap) and `reference_diameter` (`arithmetic_mean` default).
+`reference_diameter: conductance_matched` builds one shared tree per side at
+the diameter `d_ref` whose DC conductance, repeated once per outlet, equals the
+total DC conductance of the per-outlet trees defined by the policy's
+`diameter_scale`/`diameter_std_cap`. This removes the bias of tuning with
+mean-diameter trees and publishing per-outlet trees (see
+[`full_pa_calibration.md`](full_pa_calibration.md#objective-tree-policy)). It
+requires `use_mean: true` in the policy, a per-outlet final policy
+(`use_mean: false`), and no free `lpa.diameter`/`rpa.diameter`.
+The resolved policy is returned in `impedance_config["objective_tree_policy"]`
+and recorded as `objective_tree_options` in `outlet_cap_mapping.json`.
+
+`wedge_pressure_policy` sets the outlet distal pressure `Pd` from the
+clinical-targets `wedge_pressure` [mmHg, converted to CGS]. `clamp_to_diastolic`
+(default, historical) uses `min(wedge, diastolic MPA target)`; `measured` uses
+the measured wedge even when it exceeds the diastolic target, as with
+pulmonary regurgitation. With a prescribed inflow, `Pd` shifts all MPA
+pressures uniformly, and no tree parameter can. Note that the objective
+includes the diastolic term only when the diastolic target is at least the
+wedge pressure, so `measured` drops it when the wedge exceeds the diastolic
+target.
+
+The impedance tuning objective is the weighted relative squared error of MPA
+systolic/diastolic/mean pressure plus the RPA split. It has no compliance
+regularization term: the former `1e-3 * sum(k2^2)` (Olufsen) and
+`1e-5 * sum(C^2)` (constant) penalties biased compliance toward zero and
+dominated the loss near a good fit, so tuned values can differ from runs made
+before this change.
+
+Tuning error behavior: a candidate whose simulation fails (for example an
+unstable impedance kernel) is scored with a 1e9 penalty and the optimizer
+continues. A solver capability error that every candidate would hit (a
+`pysvzerod` build reporting `Invalid block type`, e.g. without IMPEDANCE BC
+support) raises `RuntimeError` immediately, naming the loaded `pysvzerod`
+path. If no evaluation simulates successfully, `ImpedanceTuner.tune` raises
+`RuntimeError` with the last error instead of returning, so an existing
+`optimized_params.csv` from an earlier run is never published.
+For `full_pa`, the (optionally rescaled) inflow cardiac output is checked once
+before optimization and a mismatch raises `ValueError` immediately, because the
+inflow is identical for every candidate. `rescale_inflow` scales the seed's
+FLOW BC through `ConfigHandler.scale_flow_bc`, which keeps the cached `Inflow`
+consistent so the scaling survives serialization.
+
+`ImpedanceTuner` exposes its objective for initial-guess and multi-start
+searches: `prepare_objective()` builds the tuning model exactly as `tune()`
+does, `evaluate_candidate(x, model)` scores one free-parameter vector at unit
+loss weights (the objective of the first Nelder-Mead run) and returns the loss,
+its components, the MPA pressures in mmHg and the RPA split, and
+`objective_terms(p_mpa, rpa_split, params)` evaluates the loss formula for
+externally simulated metrics.
 
 Mesh areas and diameters retain the existing CGS computation contract.
 `convert_to_cm` controls the existing geometry conversion; it does not change

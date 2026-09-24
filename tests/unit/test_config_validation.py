@@ -300,6 +300,85 @@ def test_full_pa_impedance_block_parses_and_round_trips_to_service_mapping(tmp_p
     assert mapped["tune_space"]["free"][0]["name"] == "lpa.alpha"
 
 
+def test_full_pa_objective_tree_policy_parses_and_round_trips(tmp_path):
+    cfg_path = tmp_path / "full-pa-objective.yml"
+    cfg_path.write_text(
+        _full_pa_pipeline_yaml(
+            tmp_path,
+            impedance_fields=(
+                "    diameter_std_cap: 2.0\n"
+                "    objective_tree_policy:\n"
+                "      use_mean: true\n"
+                "      reference_diameter: conductance_matched"
+            ),
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    expected = {
+        "use_mean": True,
+        "diameter_scale": 1.0,
+        "diameter_std_cap": 2.0,
+        "reference_diameter": "conductance_matched",
+    }
+    assert cfg.bcs.impedance.use_mean is False
+    assert cfg.bcs.impedance.objective_tree_policy == expected
+    assert impedance_config_to_mapping(cfg.bcs.impedance)["objective_tree_policy"] == expected
+
+
+def test_wedge_pressure_policy_parses_and_round_trips(tmp_path):
+    cfg_path = tmp_path / "wedge.yml"
+    cfg_path.write_text(
+        _full_pa_pipeline_yaml(tmp_path, impedance_fields="    wedge_pressure_policy: measured"),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    assert cfg.bcs.impedance.wedge_pressure_policy == "measured"
+    assert impedance_config_to_mapping(cfg.bcs.impedance)["wedge_pressure_policy"] == "measured"
+
+
+def test_wedge_pressure_policy_defaults_and_rejects_unknown(tmp_path):
+    default_path = tmp_path / "default.yml"
+    default_path.write_text(_full_pa_pipeline_yaml(tmp_path), encoding="utf-8")
+    assert load_config(str(default_path)).bcs.impedance.wedge_pressure_policy == "clamp_to_diastolic"
+
+    bad_path = tmp_path / "bad.yml"
+    bad_path.write_text(
+        _full_pa_pipeline_yaml(tmp_path, impedance_fields="    wedge_pressure_policy: mean"),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="wedge_pressure_policy must be one of"):
+        load_config(str(bad_path))
+
+
+def test_full_pa_objective_tree_policy_is_omitted_by_default(tmp_path):
+    cfg_path = tmp_path / "full-pa.yml"
+    cfg_path.write_text(_full_pa_pipeline_yaml(tmp_path), encoding="utf-8")
+
+    cfg = load_config(str(cfg_path))
+
+    assert cfg.bcs.impedance.objective_tree_policy is None
+    assert "objective_tree_policy" not in impedance_config_to_mapping(cfg.bcs.impedance)
+
+
+def test_full_pa_objective_tree_policy_rejects_unknown_keys(tmp_path):
+    cfg_path = tmp_path / "invalid.yml"
+    cfg_path.write_text(
+        _full_pa_pipeline_yaml(
+            tmp_path,
+            impedance_fields="    objective_tree_policy:\n      d_ref: 0.2",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="objective_tree_policy has unknown keys"):
+        load_config(str(cfg_path))
+
+
 def test_legacy_flat_impedance_fields_adapt_once_with_deprecation_warning(tmp_path):
     cfg_path = tmp_path / "legacy.yml"
     cfg_path.write_text(

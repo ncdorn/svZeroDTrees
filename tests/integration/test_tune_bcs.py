@@ -1116,8 +1116,8 @@ def test_impedance_tuner_loss_fn_computes_weighted_loss():
         weights["mean"] * pressure_components[2]
     ) * 100.0
     flowsplit_loss = ((pa_config.rpa_split - clinical_targets.rpa_split) / clinical_targets.rpa_split) ** 2 * 100.0
-    l2 = 1e-5 * (params["comp.lpa.C"] ** 2 + params["comp.rpa.C"] ** 2)
-    expected = pressure_loss + flowsplit_loss + l2
+    # No compliance regularization term.
+    expected = pressure_loss + flowsplit_loss
 
     assert pa_config.created is not None
     assert pa_config.last_json == "pa_config_tuning_snapshot.json"
@@ -1693,3 +1693,152 @@ def test_rcr_tuner_rejects_non_pulmonary_models():
 
     with pytest.raises(ValueError, match="pulmonary"):
         tuner.tune()
+
+
+def _four_outlet_full_pa_payload():
+    def vessel(vessel_id, bcs):
+        return {
+            "vessel_id": vessel_id,
+            "vessel_name": f"branch{vessel_id}_seg0",
+            "vessel_length": 1.0,
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {
+                "R_poiseuille": 1.0,
+                "C": 1.0,
+                "L": 0.0,
+                "stenosis_coefficient": 0.0,
+            },
+            "boundary_conditions": bcs,
+        }
+
+    return {
+        "simulation_parameters": {
+            "density": 1.06,
+            "viscosity": 0.04,
+            "number_of_cardiac_cycles": 2,
+            "number_of_time_pts_per_cardiac_cycle": 5,
+            "output_all_cycles": True,
+        },
+        "boundary_conditions": [
+            {
+                "bc_name": "INFLOW",
+                "bc_type": "FLOW",
+                "bc_values": {"Q": [5.0, 5.0], "t": [0.0, 0.8]},
+            },
+        ]
+        + [
+            {
+                "bc_name": f"RESISTANCE_{idx}",
+                "bc_type": "RESISTANCE",
+                "bc_values": {"R": 100.0, "Pd": 0.0},
+            }
+            for idx in range(4)
+        ],
+        "vessels": [vessel(0, {"inlet": "INFLOW"})]
+        + [vessel(idx + 1, {"outlet": f"RESISTANCE_{idx}"}) for idx in range(4)],
+        "junctions": [],
+    }
+
+
+@pytest.mark.parametrize("reference_diameter", ["arithmetic_mean", "conductance_matched"])
+def test_shared_tree_reference_diameter(monkeypatch, tmp_path, reference_diameter):
+    from svzerodtrees.microvasculature.structured_tree.dc_resistance import (
+        conductance_matched_diameter,
+    )
+
+    built = []
+
+    class DummyStructuredTree:
+        def __init__(self, name, time, simparams, compliance_model):
+            self.name = name
+
+        def build(self, **kwargs):
+            built.append((self.name, kwargs["initial_d"]))
+
+        def compute_olufsen_impedance(self, n_procs=1, tsteps=None):
+            self.Z_t = [1.0] * int(tsteps)
+
+        def create_impedance_bc(self, bc_name, outlet_id, pd):
+            return BoundaryCondition.from_config(
+                {"bc_name": bc_name, "bc_type": "IMPEDANCE", "bc_values": {"z": list(self.Z_t), "Pd": pd}}
+            )
+
+        def to_dict(self):
+            return {"name": self.name, "outlet_mapping": getattr(self, "outlet_mapping", {})}
+
+    diameters = {"lpa_a.vtp": 0.1, "lpa_b.vtp": 0.3, "rpa_a.vtp": 0.15, "rpa_b.vtp": 0.25}
+    areas = {cap: np.pi * (d / 2.0) ** 2 for cap, d in diameters.items()}
+    monkeypatch.setattr(assign_bcs_module, "StructuredTree", DummyStructuredTree)
+    monkeypatch.setattr(
+        assign_bcs_module,
+        "vtp_info",
+        lambda *_args, **_kwargs: (
+            {k: v for k, v in areas.items() if k.startswith("rpa")},
+            {k: v for k, v in areas.items() if k.startswith("lpa")},
+            {},
+        ),
+    )
+    params = TreeParameters(
+        name="pa",
+        lrr=10.0,
+        diameter=0.42,  # tune-space diameter; conductance matching must ignore it
+        d_min=0.01,
+        alpha=0.9,
+        beta=0.6,
+        compliance_model=ConstantCompliance(6.6e4),
+    )
+    config_handler = ConfigHandler(_four_outlet_full_pa_payload(), is_pulmonary=True)
+
+    construct_impedance_trees(
+        config_handler,
+        str(tmp_path / "mesh-surfaces"),
+        wedge_pressure=12.0,
+        lpa_params=params,
+        rpa_params=params,
+        d_min=0.01,
+        n_procs=1,
+        use_mean=True,
+        specify_diameter=True,
+        diameter_scale=1.0,
+        reference_diameter=reference_diameter,
+        allow_ordered_outlet_mapping=True,
+        verbose=False,
+        plot_stiffness=False,
+    )
+
+    built_d = dict(built)
+    assert len(built) == 2
+    if reference_diameter == "arithmetic_mean":
+        assert built_d == {"LPA": 0.42, "RPA": 0.42}
+        assert "reference_diameter" not in config_handler.tree_params["LPA"]["outlet_mapping"]
+        return
+    expected_lpa, _ = conductance_matched_diameter([0.1, 0.3], d_min=0.01, alpha=0.9, beta=0.6)
+    expected_rpa, _ = conductance_matched_diameter([0.15, 0.25], d_min=0.01, alpha=0.9, beta=0.6)
+    assert built_d["LPA"] == pytest.approx(expected_lpa)
+    assert built_d["RPA"] == pytest.approx(expected_rpa)
+    assert built_d["LPA"] > 0.2  # above the arithmetic mean diameter
+    record = config_handler.tree_params["LPA"]["outlet_mapping"]["reference_diameter"]
+    assert record["mode"] == "conductance_matched"
+    assert record["diameter"] == pytest.approx(expected_lpa)
+    assert record["arithmetic_mean_diameter"] == pytest.approx(0.2)
+
+
+def test_conductance_matched_reference_requires_shared_trees(tmp_path):
+    params = TreeParameters(
+        name="pa", lrr=10.0, diameter=0.3, d_min=0.01, alpha=0.9, beta=0.6,
+        compliance_model=ConstantCompliance(6.6e4),
+    )
+    config_handler = ConfigHandler(_four_outlet_full_pa_payload(), is_pulmonary=True)
+
+    with pytest.raises(ValueError, match="requires use_mean=True"):
+        construct_impedance_trees(
+            config_handler,
+            str(tmp_path),
+            wedge_pressure=12.0,
+            lpa_params=params,
+            rpa_params=params,
+            d_min=0.01,
+            use_mean=False,
+            reference_diameter="conductance_matched",
+            resolved_mapping={},
+        )

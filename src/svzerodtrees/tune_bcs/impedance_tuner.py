@@ -15,8 +15,25 @@ from ..io.blocks.boundary_condition import (
     validate_flow_cardiac_output_config,
     validate_impedance_timing_config,
 )
-import csv, json, math, os
+import csv, json, math, os, sys
 import warnings
+
+# Solver errors that no candidate can avoid (e.g. a pysvzerod build without
+# IMPEDANCE BC support).  They must abort tuning instead of being scored as a
+# penalized candidate.
+_SOLVER_CAPABILITY_ERROR_MARKERS = ("Invalid block type",)
+
+
+def _solver_capability_error(exc: Exception) -> RuntimeError | None:
+    message = str(exc)
+    if not any(marker in message for marker in _SOLVER_CAPABILITY_ERROR_MARKERS):
+        return None
+    module_path = getattr(sys.modules.get("pysvzerod"), "__file__", "<not imported>")
+    return RuntimeError(
+        f"pysvzerod cannot simulate the tuning model ({message}); loaded "
+        f"pysvzerod from {module_path}. Impedance tuning requires a solver "
+        "build with IMPEDANCE boundary-condition support."
+    )
 
 
 # Column names in optimized_params.csv → free-param name templates.
@@ -167,7 +184,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
                  diameter_scale=0.0,
                  diameter_std_cap=None,
                  allow_ordered_outlet_mapping=False,
-                 resolved_mapping=None):
+                 resolved_mapping=None,
+                 objective_tree_policy=None):
         super().__init__(config_handler, mesh_surfaces_path, clinical_targets)
         self.tune_space = tune_space
         self.compliance_model = (compliance_model or "").lower()
@@ -196,6 +214,13 @@ class ImpedanceTuner(BoundaryConditionTuner):
         # immutable object on the tuner so every candidate uses the exact map
         # that preflight and final construction consume.
         self.resolved_mapping = resolved_mapping
+        # Optional full_pa tree policy for optimizer evaluations only.  None
+        # keeps candidate trees identical to the final published trees.
+        self.objective_tree_policy = (
+            None if objective_tree_policy is None else dict(objective_tree_policy)
+        )
+        if self.objective_tree_policy is not None and self.tuning_model != "full_pa":
+            raise ValueError("objective_tree_policy is supported only for tuning_model='full_pa'")
 
         # grid search params
         self.grid_search_init = grid_search_init
@@ -208,14 +233,26 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self._loss_weights = None
         self._last_loss_breakdown = {}
         self._opt_csv_path = None
+        self._n_successful_evaluations = 0
+        self._last_evaluation_error = None
         self._expected_snapshot_cardiac_output = None
         self._full_pa_base_config = None
 
     def _tree_assignment_options_for_objective(self):
+        if self.objective_tree_policy is not None:
+            return {
+                "use_mean": bool(self.objective_tree_policy["use_mean"]),
+                "diameter_scale": float(self.objective_tree_policy["diameter_scale"]),
+                "diameter_std_cap": self.objective_tree_policy["diameter_std_cap"],
+                "reference_diameter": str(
+                    self.objective_tree_policy.get("reference_diameter", "arithmetic_mean")
+                ),
+            }
         return {
             "use_mean": self.use_mean,
             "diameter_scale": self.diameter_scale,
             "diameter_std_cap": self.diameter_std_cap,
+            "reference_diameter": "arithmetic_mean",
         }
 
 
@@ -481,6 +518,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 specify_diameter=self.specify_diameter,
                 diameter_scale=objective_tree_options["diameter_scale"],
                 diameter_std_cap=objective_tree_options["diameter_std_cap"],
+                reference_diameter=objective_tree_options["reference_diameter"],
                 allow_ordered_outlet_mapping=self.allow_ordered_outlet_mapping,
                 resolved_mapping=self.resolved_mapping,
                 verbose=False,
@@ -537,21 +575,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
             with open(self.log_file, "a") as lf:
                 lf.write(msg + "\n")
 
-        self._prepare_geometry_defaults()
-        pa_config = self._make_tuning_model()
-        self._expected_snapshot_cardiac_output = self._resolve_expected_snapshot_cardiac_output(
-            pa_config.bcs["INFLOW"]
-        )
-
-        if self.rescale_inflow:
-            current_mean_flow = self._compute_boundary_condition_mean_flow(pa_config.bcs["INFLOW"])
-            if not np.isfinite(current_mean_flow) or current_mean_flow == 0.0:
-                raise ValueError(
-                    f"invalid inflow mean flow for rescaling: {current_mean_flow}"
-                )
-            scale_factor = self._expected_snapshot_cardiac_output / current_mean_flow
-            pa_config.bcs['INFLOW'].Q = [q * scale_factor for q in pa_config.bcs['INFLOW'].Q]
-        self._full_pa_base_config = pa_config
+        pa_config = self.prepare_objective()
 
         x0, bounds = self.tune_space.pack_init_and_bounds()
 
@@ -593,7 +617,6 @@ class ImpedanceTuner(BoundaryConditionTuner):
             "dia": 1.0,
             "mean": 1.0,
             "flow": 1.0,
-            "reg": 1.0,
         }
         self._last_loss_breakdown = {}
         penalty_growth = 5.0
@@ -665,6 +688,16 @@ class ImpedanceTuner(BoundaryConditionTuner):
             if not np.isfinite(unweighted_loss):
                 break
 
+        if self._n_successful_evaluations == 0:
+            # Every candidate failed, so there is no optimum to publish.  Fail
+            # here so a stale optimized_params.csv is never mistaken for output.
+            message = (
+                "impedance tuning failed: no optimizer evaluation simulated "
+                f"successfully; last error: {self._last_evaluation_error}"
+            )
+            _append_log(message)
+            raise RuntimeError(message)
+
         print(f"[ImpedanceTuner] Optimized: {best_x}  f={best_unweighted_loss:.3f}")
         # final simulate & plot
         _ = self.loss_fn(best_x, pa_config, finalize=True)
@@ -672,6 +705,108 @@ class ImpedanceTuner(BoundaryConditionTuner):
             pa_config.plot_mpa()
         return result
     
+
+    # ---- Objective ---- #
+
+    def objective_terms(self, p_mpa, rpa_split, params) -> dict:
+        """Return the tuning objective for MPA pressures [mmHg] and RPA split.
+
+        Weighted relative squared errors of systolic/diastolic/mean MPA
+        pressure (x100) and RPA split (x100).  There is no compliance
+        regularization: it biased k2/C toward zero and dominated the loss once
+        the fit was close.  ``params`` is accepted for interface stability.
+        ``weighted_loss`` applies the current augmented-Lagrangian weights
+        (all 1.0 outside tune()).
+        """
+        pressure_weights = (
+            {"sys": 1.5, "dia": 1.0, "mean": 1.2}
+            if (self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p)
+            else {"sys": 1.0, "dia": 0.0, "mean": 1.0}
+        )
+        pressure_diff = np.abs(np.array(p_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p
+        components = {
+            "sys": pressure_weights["sys"] * pressure_diff[0] ** 2 * 100.0,
+            "dia": pressure_weights["dia"] * pressure_diff[1] ** 2 * 100.0,
+            "mean": pressure_weights["mean"] * pressure_diff[2] ** 2 * 100.0,
+            "flow": ((rpa_split - self.clinical_targets.rpa_split) / self.clinical_targets.rpa_split) ** 2 * 100.0,
+        }
+        loss_weights = self._loss_weights or {"sys": 1.0, "dia": 1.0, "mean": 1.0, "flow": 1.0}
+        unweighted_loss = float(sum(components.values()))
+        weighted_loss = float(sum(loss_weights.get(key, 1.0) * value for key, value in components.items()))
+        return {
+            "weighted_loss": weighted_loss,
+            "unweighted_loss": unweighted_loss,
+            "components": components,
+        }
+
+    def prepare_objective(self):
+        """Build the tuning model exactly as tune() does and return it.
+
+        Resolves geometry defaults, rescales the inflow when requested, and for
+        full_pa checks the inflow cardiac output.  Pass the returned model to
+        evaluate_candidate() or loss_fn().
+        """
+        self._n_successful_evaluations = 0
+        self._last_evaluation_error = None
+        self._prepare_geometry_defaults()
+        pa_config = self._make_tuning_model()
+        self._expected_snapshot_cardiac_output = self._resolve_expected_snapshot_cardiac_output(
+            pa_config.bcs["INFLOW"]
+        )
+
+        if self.rescale_inflow:
+            current_mean_flow = self._compute_boundary_condition_mean_flow(pa_config.bcs["INFLOW"])
+            if not np.isfinite(current_mean_flow) or current_mean_flow == 0.0:
+                raise ValueError(
+                    f"invalid inflow mean flow for rescaling: {current_mean_flow}"
+                )
+            scale_factor = self._expected_snapshot_cardiac_output / current_mean_flow
+            scale_flow_bc = getattr(pa_config, "scale_flow_bc", None)
+            if callable(scale_flow_bc):
+                # ConfigHandler re-applies its cached Inflow on serialization,
+                # so both copies must be scaled.
+                scale_flow_bc(scale_factor, "INFLOW")
+            else:
+                pa_config.bcs['INFLOW'].Q = [q * scale_factor for q in pa_config.bcs['INFLOW'].Q]
+        if self.tuning_model == "full_pa" and hasattr(pa_config, "config"):
+            # The inflow is identical for every candidate, so check it once
+            # here: a mismatch would otherwise fail every evaluation.
+            validate_flow_cardiac_output_config(
+                pa_config.config,
+                expected_cardiac_output=self._expected_snapshot_cardiac_output,
+            )
+        self._full_pa_base_config = pa_config
+        return pa_config
+
+    def evaluate_candidate(self, x, pa_config) -> dict:
+        """Score one free-parameter vector with the objective at unit weights.
+
+        This is the objective of tune()'s first Nelder-Mead run.  Returns
+        ``loss``, ``components``, ``metrics`` (pressures in mmHg, rpa_split)
+        and native ``params``; a failed simulation returns ``loss=inf`` and
+        ``error``.  Solver capability errors propagate as in loss_fn().
+        """
+        saved = (self._augmented_mode, self._loss_weights, self._last_evaluation_error)
+        self._augmented_mode = True
+        self._loss_weights = {"sys": 1.0, "dia": 1.0, "mean": 1.0, "flow": 1.0}
+        self._last_loss_breakdown = {}
+        self._last_evaluation_error = None
+        try:
+            loss = self.loss_fn(np.asarray(x, dtype=float), pa_config)
+            breakdown = dict(self._last_loss_breakdown)
+            error = self._last_evaluation_error
+        finally:
+            self._augmented_mode, self._loss_weights = saved[0], saved[1]
+        params = self.tune_space.vector_to_param_dict(np.asarray(x, dtype=float))
+        if error is not None or not breakdown:
+            return {"loss": float("inf"), "params": params, "error": error}
+        return {
+            "loss": float(loss),
+            "components": dict(breakdown["components"]),
+            "metrics": dict(breakdown["metrics"]),
+            "params": params,
+            "error": None,
+        }
 
     # ---- Loss function ---- #
 
@@ -682,63 +817,28 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 provided_model=pa_config,
             )
         except Exception as e:
+            capability_error = _solver_capability_error(e)
+            if capability_error is not None:
+                raise capability_error from e
             params = self.tune_space.vector_to_param_dict(x)
+            self._last_evaluation_error = f"{type(e).__name__}: {e}"
             print(f"[loss_fn] simulation error: {e} params={params}")
             return 1e9
+        self._n_successful_evaluations += 1
 
-        # ---- Loss: weighted MPA pressure (sys/dia/mean separately) + flow split + mild L2 on compliance ----
-        pressure_weights = (
-            {"sys": 1.5, "dia": 1.0, "mean": 1.2}
-            if (self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p)
-            else {"sys": 1.0, "dia": 0.0, "mean": 1.0}
-        )
         p_mpa = metrics["P_mpa"]
         rpa_split = metrics["rpa_split"]
-        pressure_diff = np.abs(np.array(p_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p
-        pressure_components = {
-            "sys": pressure_diff[0] ** 2,
-            "dia": pressure_diff[1] ** 2,
-            "mean": pressure_diff[2] ** 2,
-        }
-        pressure_contrib = {
-            "sys": pressure_weights["sys"] * pressure_components["sys"] * 100.0,
-            "dia": pressure_weights["dia"] * pressure_components["dia"] * 100.0,
-            "mean": pressure_weights["mean"] * pressure_components["mean"] * 100.0,
-        }
-        pressure_loss = (
-            pressure_contrib["sys"] +
-            pressure_contrib["dia"] +
-            pressure_contrib["mean"]
-        )
-        flowsplit_loss = ((rpa_split - self.clinical_targets.rpa_split) / self.clinical_targets.rpa_split)**2 * 100.0
-
-        if self.compliance_model == "olufsen":
-            l2 = 1e-3 * (params["comp.lpa.k2"]**2 + params["comp.rpa.k2"]**2)
-        else:
-            l2 = 1e-5 * (params["comp.lpa.C"]**2 + params["comp.rpa.C"]**2)
-
-        base_total = float(pressure_loss + flowsplit_loss + l2)
-        loss_weights = self._loss_weights or {"sys": 1.0, "dia": 1.0, "mean": 1.0, "flow": 1.0, "reg": 1.0}
-        weighted_total = (
-            loss_weights.get("sys", 1.0) * pressure_contrib["sys"] +
-            loss_weights.get("dia", 1.0) * pressure_contrib["dia"] +
-            loss_weights.get("mean", 1.0) * pressure_contrib["mean"] +
-            loss_weights.get("flow", 1.0) * flowsplit_loss +
-            loss_weights.get("reg", 1.0) * l2
-        )
-        unweighted_loss = pressure_loss + flowsplit_loss + l2
+        terms = self.objective_terms(p_mpa, rpa_split, params)
+        components = terms["components"]
+        base_total = terms["unweighted_loss"]
+        weighted_total = terms["weighted_loss"]
+        unweighted_loss = terms["unweighted_loss"]
 
         if self._augmented_mode:
             self._last_loss_breakdown = {
                 "weighted_loss": weighted_total,
                 "unweighted_loss": unweighted_loss,
-                "components": {
-                    "sys": pressure_contrib["sys"],
-                    "dia": pressure_contrib["dia"],
-                    "mean": pressure_contrib["mean"],
-                    "flow": flowsplit_loss,
-                    "reg": l2,
-                },
+                "components": dict(components),
                 "metrics": {
                     "sys_pressure": p_mpa[0],
                     "dia_pressure": p_mpa[1],

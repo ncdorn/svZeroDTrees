@@ -7,6 +7,8 @@ import yaml
 import numpy as np
 
 from .tune_bcs.tune_space import FreeParam, FixedParam, TiedParam, TuneSpace, identity, positive, unit_interval
+from .tune_bcs.tree_policy import resolve_objective_tree_policy
+from .tune_bcs.clinical_targets import WEDGE_PRESSURE_POLICIES
 from .microvasculature.treeparams import TreeParameters
 from .microvasculature.compliance.constant import ConstantCompliance
 from .microvasculature.compliance.olufsen import OlufsenCompliance
@@ -89,6 +91,8 @@ class ImpedanceConfig:
     outlet_mapping_mode: Optional[str] = None
     outlet_mapping: Optional[Dict[str, str]] = None
     outlet_mapping_centerline: Optional[str] = None
+    objective_tree_policy: Optional[Dict[str, Any]] = None
+    wedge_pressure_policy: str = "clamp_to_diastolic"
     tune_space: Optional[TuneSpace] = None
 
 
@@ -445,6 +449,8 @@ _IMPEDANCE_CONFIG_KEYS = [
     "outlet_mapping_mode",
     "outlet_mapping",
     "outlet_mapping_centerline",
+    "objective_tree_policy",
+    "wedge_pressure_policy",
     "tune_space",
 ]
 
@@ -608,6 +614,24 @@ def _parse_impedance_config(
         raise ValueError(
             "bcs.impedance.diameter_std_cap must be finite and >= 0"
         )
+    wedge_pressure_policy = str(
+        data.get("wedge_pressure_policy") or "clamp_to_diastolic"
+    ).strip().lower()
+    if wedge_pressure_policy not in WEDGE_PRESSURE_POLICIES:
+        raise ValueError(
+            "bcs.impedance.wedge_pressure_policy must be one of "
+            + "|".join(WEDGE_PRESSURE_POLICIES)
+        )
+    tune_space = _parse_tune_space(data.get("tune_space"))
+    objective_tree_policy = resolve_objective_tree_policy(
+        data.get("objective_tree_policy"),
+        tuning_model=tuning_model,
+        use_mean=use_mean,
+        diameter_scale=diameter_scale,
+        diameter_std_cap=diameter_std_cap,
+        free_param_names=[item.name for item in (tune_space.free if tune_space else [])],
+        label="bcs.impedance.objective_tree_policy",
+    )
 
     return ImpedanceConfig(
         tuning_model=tuning_model,
@@ -626,7 +650,9 @@ def _parse_impedance_config(
         outlet_mapping_mode=mode,
         outlet_mapping=outlet_mapping,
         outlet_mapping_centerline=mapping_centerline,
-        tune_space=_parse_tune_space(data.get("tune_space")),
+        objective_tree_policy=objective_tree_policy,
+        wedge_pressure_policy=wedge_pressure_policy,
+        tune_space=tune_space,
     )
 
 
@@ -695,6 +721,7 @@ def impedance_config_to_mapping(config: ImpedanceConfig) -> Dict[str, Any]:
         "compliance_model": getattr(config, "compliance_model", "olufsen"),
         "diameter_scale": getattr(config, "diameter_scale", 0.0),
         "diameter_std_cap": getattr(config, "diameter_std_cap", None),
+        "wedge_pressure_policy": getattr(config, "wedge_pressure_policy", "clamp_to_diastolic"),
         "tune_space": _tune_space_to_mapping(getattr(config, "tune_space", None)),
     }
     outlet_mapping_mode = getattr(config, "outlet_mapping_mode", None)
@@ -706,6 +733,9 @@ def impedance_config_to_mapping(config: ImpedanceConfig) -> Dict[str, Any]:
     outlet_mapping_centerline = getattr(config, "outlet_mapping_centerline", None)
     if outlet_mapping_centerline is not None:
         payload["outlet_mapping_centerline"] = outlet_mapping_centerline
+    objective_tree_policy = getattr(config, "objective_tree_policy", None)
+    if objective_tree_policy is not None:
+        payload["objective_tree_policy"] = dict(objective_tree_policy)
     return payload
 
 
@@ -2255,6 +2285,14 @@ bcs:
     outlet_mapping_mode: auto
     outlet_mapping: null  # required when mode is explicit
     outlet_mapping_centerline: null  # centerline the 0D seed was generated from
+    wedge_pressure_policy: clamp_to_diastolic  # clamp_to_diastolic | measured
+    # Optional full_pa tree policy for optimizer evaluations only; the fields
+    # above still build the published tuned config. Omit to tune with the
+    # final policy. Example: cheap shared trees conductance-matched to the
+    # per-outlet trees published for 3D.
+    # objective_tree_policy:
+    #   use_mean: true
+    #   reference_diameter: conductance_matched  # arithmetic_mean | conductance_matched
     tune_space:
       free:
         - name: lpa.alpha

@@ -4,6 +4,7 @@ from ..io import *
 from ..io.blocks.boundary_condition import resolve_impedance_timepoint_contract
 from ..utils import *
 from ..microvasculature.structured_tree.structuredtree import StructuredTree
+from ..microvasculature.structured_tree.dc_resistance import conductance_matched_diameter
 from ..microvasculature.treeparams import TreeParameters
 from ..simulation.threedutils import vtp_info
 from .utils import *
@@ -40,6 +41,7 @@ def _attach_tree_metadata(
     outlet_names,
     resolved_mapping=None,
     mapping_records=None,
+    reference_diameter=None,
 ):
     tree.inductance = float(params.inductance)
     tree.generation_mode = generation_mode
@@ -49,6 +51,8 @@ def _attach_tree_metadata(
         "bc_names": list(bc_names),
         "outlet_names": list(outlet_names),
     }
+    if reference_diameter is not None:
+        mapping_payload["reference_diameter"] = dict(reference_diameter)
     if resolved_mapping is not None:
         mapping_payload["strategy"] = resolved_mapping.strategy
         mapping_payload["pairs"] = [
@@ -208,6 +212,7 @@ def construct_impedance_trees(config_handler,
                               specify_diameter=False,
                               diameter_scale=0.0,
                               diameter_std_cap=None,
+                              reference_diameter="arithmetic_mean",
                               allow_ordered_outlet_mapping=False,
                               verbose=True,
                               plot_stiffness=True,
@@ -223,7 +228,23 @@ def construct_impedance_trees(config_handler,
     :param use_mean: when True, build only two trees (LPA/RPA) and reuse for all outlets
     :param diameter_scale: for unique trees, shrink diameter spread toward the mean (0=all mean, 1=full spread)
     :param diameter_std_cap: optional cap in std deviations on diameter deviation before scaling
+    :param reference_diameter: shared-tree diameter when use_mean is True.
+        'arithmetic_mean' (default) uses the tree parameter diameter
+        (specify_diameter) or the mean cap diameter.  'conductance_matched'
+        uses the diameter whose DC conductance, repeated once per outlet,
+        equals that of per-outlet trees at the diameters defined by
+        diameter_scale/diameter_std_cap (see conductance_matched_diameter).
     :param plot_stiffness: write LPA/RPA stiffness plots when using shared trees'''
+
+    if reference_diameter not in ("arithmetic_mean", "conductance_matched"):
+        raise ValueError(
+            "reference_diameter must be 'arithmetic_mean' or 'conductance_matched'"
+        )
+    if reference_diameter == "conductance_matched" and not (use_mean and is_pulmonary):
+        raise ValueError(
+            "reference_diameter='conductance_matched' requires use_mean=True "
+            "and is_pulmonary=True"
+        )
 
     # svZeroDSolver's steady-initial pass uses a fixed 10-step cycle. That is
     # incompatible with reconstructed IMPEDANCE kernels unless the production
@@ -293,9 +314,34 @@ def construct_impedance_trees(config_handler,
     lpa_std_dia = np.std(lpa_diameters) if lpa_diameters.size > 0 else 0.0
     rpa_std_dia = np.std(rpa_diameters) if rpa_diameters.size > 0 else 0.0
 
+    side_reference = {"lpa": None, "rpa": None}
     if use_mean:
         '''use the mean diameter of the cap surfaces to construct the lpa and rpa trees and use these trees for all outlets'''
-        if specify_diameter:
+        if reference_diameter == "conductance_matched":
+            # Match each side's total DC conductance to the per-outlet trees
+            # that diameter_scale/diameter_std_cap would build.
+            for side, params, diameters, mean_d, std_d in (
+                ("lpa", lpa_params, lpa_diameters, lpa_mean_dia, lpa_std_dia),
+                ("rpa", rpa_params, rpa_diameters, rpa_mean_dia, rpa_std_dia),
+            ):
+                targets = [_scaled_diameter(d, mean_d, std_d) for d in diameters]
+                d_ref, residual = conductance_matched_diameter(
+                    targets,
+                    d_min=params.d_min,
+                    alpha=params.alpha,
+                    beta=params.beta,
+                )
+                side_reference[side] = {
+                    "mode": "conductance_matched",
+                    "diameter": float(d_ref),
+                    "relative_conductance_residual": float(residual),
+                    "arithmetic_mean_diameter": float(mean_d),
+                    "diameter_scale": float(diameter_scale),
+                    "diameter_std_cap": diameter_std_cap,
+                }
+            lpa_mean_dia = side_reference["lpa"]["diameter"]
+            rpa_mean_dia = side_reference["rpa"]["diameter"]
+        elif specify_diameter:
             lpa_mean_dia = lpa_params.diameter
             rpa_mean_dia = rpa_params.diameter
 
@@ -312,7 +358,7 @@ def construct_impedance_trees(config_handler,
         time_array = config_handler.inflows[next(iter(config_handler.inflows))].t
 
         lpa_tree = StructuredTree(name='LPA', time=time_array, simparams=config_handler.simparams, compliance_model=lpa_params.compliance_model)
-        print(f'building LPA tree with lpa parameters: {lpa_params.summary()}')
+        print(f'building LPA tree at initial_d={lpa_mean_dia:.4f} with lpa parameters: {lpa_params.summary()}')
 
         lpa_tree.build(
             initial_d=lpa_mean_dia,
@@ -328,7 +374,7 @@ def construct_impedance_trees(config_handler,
             lpa_tree.plot_stiffness(path='lpa_stiffness_plot.png')
 
         rpa_tree = StructuredTree(name='RPA', time=time_array, simparams=config_handler.simparams, compliance_model=rpa_params.compliance_model)
-        print(f'building RPA tree with rpa parameters: {rpa_params.summary()}')
+        print(f'building RPA tree at initial_d={rpa_mean_dia:.4f} with rpa parameters: {rpa_params.summary()}')
 
         rpa_tree.build(
             initial_d=rpa_mean_dia,
@@ -394,6 +440,7 @@ def construct_impedance_trees(config_handler,
                 for record in resolved_mapping.records
                 if record.side == "lpa"
             ],
+            reference_diameter=side_reference["lpa"],
         )
         config_handler.tree_params[rpa_tree.name] = _attach_tree_metadata(
             rpa_tree,
@@ -408,6 +455,7 @@ def construct_impedance_trees(config_handler,
                 for record in resolved_mapping.records
                 if record.side == "rpa"
             ],
+            reference_diameter=side_reference["rpa"],
         )
             
     else:

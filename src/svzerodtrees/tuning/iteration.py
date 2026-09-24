@@ -30,7 +30,11 @@ from svzerodtrees.tune_bcs.assign_bcs import (
     construct_impedance_trees,
     validate_cap_to_bc_mapping,
 )
-from svzerodtrees.tune_bcs.clinical_targets import ClinicalTargets
+from svzerodtrees.tune_bcs.clinical_targets import ClinicalTargets, WEDGE_PRESSURE_POLICIES
+from svzerodtrees.microvasculature.structured_tree.dc_resistance import (
+    conductance_matched_diameter,
+)
+from svzerodtrees.tune_bcs.tree_policy import resolve_objective_tree_policy
 from svzerodtrees.tune_bcs.impedance_tuner import ImpedanceTuner
 from svzerodtrees.tune_bcs.rcr_tuner import RCRTuner, write_rcr_params_csv
 from svzerodtrees.tune_bcs.tune_space import (
@@ -60,6 +64,7 @@ DEFAULT_IMPEDANCE_TUNING_CONFIG: dict[str, Any] = {
     "diameter_std_cap": None,
     "allow_ordered_outlet_mapping": False,
     "tuning_model": "rri",
+    "wedge_pressure_policy": "clamp_to_diastolic",
 }
 
 # ``outlet_mapping_mode``, ``outlet_mapping``, and ``outlet_mapping_centerline``
@@ -498,6 +503,12 @@ def _resolve_impedance_config(
     merged["rescale_inflow"] = bool(merged["rescale_inflow"])
     merged["convert_to_cm"] = bool(merged["convert_to_cm"])
     merged["compliance_model"] = str(merged["compliance_model"]).strip().lower()
+    merged["wedge_pressure_policy"] = str(merged["wedge_pressure_policy"]).strip().lower()
+    if merged["wedge_pressure_policy"] not in WEDGE_PRESSURE_POLICIES:
+        raise ValueError(
+            "impedance tuning wedge_pressure_policy must be one of "
+            + "|".join(WEDGE_PRESSURE_POLICIES)
+        )
     merged["diameter_scale"] = float(merged["diameter_scale"])
     if merged["diameter_std_cap"] is not None:
         merged["diameter_std_cap"] = float(merged["diameter_std_cap"])
@@ -535,6 +546,21 @@ def _resolve_impedance_config(
         and ("use_mean" not in raw_config or raw_config.get("use_mean") is None)
     ):
         merged["use_mean"] = False
+
+    # Optional full_pa objective-only tree policy.  Resolved against the final
+    # policy above so omitted fields inherit it.  Absent means the objective
+    # uses the final policy, so the key is dropped to keep historical shape.
+    objective_policy = resolve_objective_tree_policy(
+        merged.pop("objective_tree_policy", None),
+        tuning_model=merged["tuning_model"],
+        use_mean=merged["use_mean"],
+        diameter_scale=merged["diameter_scale"],
+        diameter_std_cap=merged["diameter_std_cap"],
+        free_param_names=[entry["name"] for entry in merged["tune_space"]["free"]],
+        label="impedance tuning objective_tree_policy",
+    )
+    if objective_policy is not None:
+        merged["objective_tree_policy"] = objective_policy
 
     return merged
 
@@ -872,12 +898,17 @@ def _mapping_artifact_payload(
     diameter_scale: float,
     diameter_std_cap: float | None,
     convert_to_cm: bool,
+    objective_tree_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build deterministic mapping provenance for a completed full_pa run.
 
     The resolver's records contain the source geometry and cap-derived side.
     Add the exact construction diameter here so the artifact can be replayed
     independently of the mutable ``ConfigHandler`` used for final output.
+
+    ``tree_options`` describes the final (published) trees.
+    ``objective_tree_options`` describes the trees used inside the optimizer;
+    it equals ``tree_options`` unless ``objective_tree_policy`` was supplied.
     """
 
     to_dict = getattr(resolved_mapping, "to_dict", None)
@@ -912,6 +943,12 @@ def _mapping_artifact_payload(
                 "diameter_std_cap": diameter_std_cap,
                 "generation_mode": "shared_by_side" if use_mean else "per_outlet",
             },
+            "objective_tree_options": _objective_tree_options_payload(
+                objective_tree_policy,
+                use_mean=use_mean,
+                diameter_scale=diameter_scale,
+                diameter_std_cap=diameter_std_cap,
+            ),
         }
 
     payload = to_dict()
@@ -987,7 +1024,81 @@ def _mapping_artifact_payload(
         "diameter_std_cap": diameter_std_cap,
         "generation_mode": "shared_by_side" if use_mean else "per_outlet",
     }
+    objective_options = _objective_tree_options_payload(
+        objective_tree_policy,
+        use_mean=use_mean,
+        diameter_scale=diameter_scale,
+        diameter_std_cap=diameter_std_cap,
+    )
+    if objective_options["reference_diameter"] == "conductance_matched":
+        # Record the shared-tree diameter the objective used at the optimum.
+        objective_options["reference_diameters"] = {
+            side: _conductance_matched_reference(
+                side_diameters[side],
+                side_params[side],
+                diameter_scale=objective_options["diameter_scale"],
+                diameter_std_cap=objective_options["diameter_std_cap"],
+            )
+            for side in ("lpa", "rpa")
+        }
+    payload["objective_tree_options"] = objective_options
     return payload
+
+
+def _objective_tree_options_payload(
+    objective_tree_policy: Mapping[str, Any] | None,
+    *,
+    use_mean: bool,
+    diameter_scale: float,
+    diameter_std_cap: float | None,
+) -> dict[str, Any]:
+    if objective_tree_policy is None:
+        policy = {
+            "use_mean": bool(use_mean),
+            "diameter_scale": float(diameter_scale),
+            "diameter_std_cap": diameter_std_cap,
+            "reference_diameter": "arithmetic_mean",
+        }
+        source = "final_policy"
+    else:
+        policy = {
+            "use_mean": bool(objective_tree_policy["use_mean"]),
+            "diameter_scale": float(objective_tree_policy["diameter_scale"]),
+            "diameter_std_cap": objective_tree_policy["diameter_std_cap"],
+            "reference_diameter": str(objective_tree_policy["reference_diameter"]),
+        }
+        source = "objective_tree_policy"
+    policy["generation_mode"] = "shared_by_side" if policy["use_mean"] else "per_outlet"
+    policy["source"] = source
+    return policy
+
+
+def _conductance_matched_reference(
+    raw_diameters: Sequence[float],
+    params: TreeParameters,
+    *,
+    diameter_scale: float,
+    diameter_std_cap: float | None,
+) -> dict[str, float]:
+    values = np.asarray(raw_diameters, dtype=float)
+    mean_diameter = float(np.mean(values))
+    std_diameter = float(np.std(values))
+    deviation = values - mean_diameter
+    if diameter_std_cap is not None and std_diameter > 0.0:
+        max_deviation = float(diameter_std_cap) * std_diameter
+        deviation = np.clip(deviation, -max_deviation, max_deviation)
+    targets = mean_diameter + float(diameter_scale) * deviation
+    d_ref, residual = conductance_matched_diameter(
+        targets,
+        d_min=float(params.d_min),
+        alpha=float(params.alpha),
+        beta=float(params.beta),
+    )
+    return {
+        "diameter": float(d_ref),
+        "relative_conductance_residual": float(residual),
+        "arithmetic_mean_diameter": mean_diameter,
+    }
 
 
 def run_impedance_tuning_for_iteration(
@@ -1030,7 +1141,10 @@ def run_impedance_tuning_for_iteration(
             )
     _clear_tuning_outputs(output_dir, tuned_config_name=tuned_config_name)
     required_xi_pa = _required_xi_pa_labels(tuning["tune_space"])
-    targets = ClinicalTargets.from_csv(str(targets_path))
+    targets = ClinicalTargets.from_csv(
+        str(targets_path),
+        wedge_pressure_policy=str(tuning["wedge_pressure_policy"]),
+    )
     tune_space = _build_tune_space_from_config(tuning["tune_space"])
     expected_snapshot_co = _expected_snapshot_inflow_cardiac_output(
         seed_config=seed_config_path,
@@ -1083,6 +1197,7 @@ def run_impedance_tuning_for_iteration(
                 tuning.get("allow_ordered_outlet_mapping", False)
             ),
             resolved_mapping=resolved_mapping,
+            objective_tree_policy=tuning.get("objective_tree_policy"),
         )
         prev_csv = str(previous_optimized_params) if previous_optimized_params is not None else None
         if prev_csv is not None and os.path.isfile(prev_csv):
@@ -1183,6 +1298,7 @@ def run_impedance_tuning_for_iteration(
             diameter_scale=float(tuning["diameter_scale"]),
             diameter_std_cap=tuning["diameter_std_cap"],
             convert_to_cm=bool(tuning["convert_to_cm"]),
+            objective_tree_policy=tuning.get("objective_tree_policy"),
         )
         outlet_cap_mapping.write_text(
             json.dumps(mapping_payload, sort_keys=True, indent=2) + "\n",

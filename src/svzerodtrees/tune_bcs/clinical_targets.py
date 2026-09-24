@@ -1,6 +1,12 @@
 import pandas as pd
 import csv
 from ..utils import write_to_log
+
+# How the measured wedge pressure becomes the distal pressure (Pd) of outlet BCs.
+#   clamp_to_diastolic: min(wedge, diastolic MPA target) (historical default)
+#   measured: the measured wedge pressure, even when it exceeds the diastolic
+#             target (e.g. pulmonary regurgitation)
+WEDGE_PRESSURE_POLICIES = ("clamp_to_diastolic", "measured")
 class ClinicalTargets():
     '''
     class to handle clinical target values
@@ -31,10 +37,17 @@ class ClinicalTargets():
 
 
     @classmethod
-    def from_csv(cls, clinical_targets: csv, steady=True):
+    def from_csv(cls, clinical_targets: csv, steady=True, wedge_pressure_policy="clamp_to_diastolic"):
         '''
         initialize from a csv file
+
+        :param wedge_pressure_policy: one of WEDGE_PRESSURE_POLICIES; sets how
+            the measured wedge pressure [mmHg] becomes ``wedge_p``
         '''
+        if wedge_pressure_policy not in WEDGE_PRESSURE_POLICIES:
+            raise ValueError(
+                "wedge_pressure_policy must be one of " + "|".join(WEDGE_PRESSURE_POLICIES)
+            )
         # get the flowrate
         df = pd.read_csv(clinical_targets)
         df.columns = map(str.lower, df.columns)
@@ -56,9 +69,12 @@ class ClinicalTargets():
         mpa_p = [float(p) for p in df.loc[0,"mpa_pressure"].split("/")] # sys, dia, mean
 
         # get wedge pressure
-        wedge_p = float(df.loc[0,"wedge_pressure"])
-
-        wedge_p = wedge_p if wedge_p <= mpa_p[1] else mpa_p[1]  # ensure wedge pressure is not greater than diastolic MPA pressure
+        measured_wedge_p = float(df.loc[0,"wedge_pressure"])
+        if wedge_pressure_policy == "clamp_to_diastolic":
+            # ensure wedge pressure is not greater than diastolic MPA pressure
+            wedge_p = min(measured_wedge_p, mpa_p[1])
+        else:
+            wedge_p = measured_wedge_p
 
         # get RPA flow split
         rpa_split = float(df.loc[0,"rpa_split"])
@@ -74,6 +90,8 @@ class ClinicalTargets():
             svc_flow=svc_flow,
         )
         instance.path = str(clinical_targets)
+        instance.measured_wedge_p = measured_wedge_p
+        instance.wedge_pressure_policy = wedge_pressure_policy
         return instance
 
         
