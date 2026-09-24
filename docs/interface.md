@@ -270,6 +270,7 @@ impedance_config:
   use_mean: false             # full_pa default
   diameter_scale: 1.0         # full_pa default; 0.0 is an explicit compatibility control
   diameter_std_cap: null
+  wedge_pressure_policy: clamp_to_diastolic  # clamp_to_diastolic | measured
   # Optional; trees used inside the optimizer only (see below).
   # objective_tree_policy:
   #   use_mean: true
@@ -330,6 +331,16 @@ requires `use_mean: true` in the policy, a per-outlet final policy
 (`use_mean: false`), and no free `lpa.diameter`/`rpa.diameter`.
 The resolved policy is returned in `impedance_config["objective_tree_policy"]`
 and recorded as `objective_tree_options` in `outlet_cap_mapping.json`.
+
+`wedge_pressure_policy` sets the outlet distal pressure `Pd` from the
+clinical-targets `wedge_pressure` [mmHg, converted to CGS]. `clamp_to_diastolic`
+(default, historical) uses `min(wedge, diastolic MPA target)`; `measured` uses
+the measured wedge even when it exceeds the diastolic target, as with
+pulmonary regurgitation. With a prescribed inflow, `Pd` shifts all MPA
+pressures uniformly, and no tree parameter can. Note that the objective
+includes the diastolic term only when the diastolic target is at least the
+wedge pressure, so `measured` drops it when the wedge exceeds the diastolic
+target.
 
 Tuning error behavior: a candidate whose simulation fails (for example an
 unstable impedance kernel) is scored with a 1e9 penalty and the optimizer

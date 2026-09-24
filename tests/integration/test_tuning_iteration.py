@@ -806,7 +806,7 @@ def test_run_impedance_tuning_for_iteration_contract(monkeypatch, tmp_path: Path
         wedge_p = 12.0
 
         @classmethod
-        def from_csv(cls, path: str):
+        def from_csv(cls, path: str, **_kwargs):
             calls["targets_path"] = path
             return cls()
 
@@ -936,7 +936,7 @@ def test_run_rcr_tuning_for_iteration_contract(monkeypatch, tmp_path: Path):
         wedge_p = 12.0
 
         @classmethod
-        def from_csv(cls, path: str):
+        def from_csv(cls, path: str, **_kwargs):
             calls["targets_path"] = path
             return cls()
 
@@ -1040,8 +1040,9 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(
         wedge_p = 12.0
 
         @classmethod
-        def from_csv(cls, path: str):
+        def from_csv(cls, path: str, **kwargs):
             calls["targets_path"] = path
+            calls["targets_kwargs"] = kwargs
             return cls()
 
     class DummyTuner:
@@ -1148,6 +1149,7 @@ def test_run_impedance_tuning_for_iteration_full_pa_contract(
     ]
     assert all(pair["scaled_diameter"] is not None for pair in mapping_payload["pairs"])
     assert mapping_payload["provenance"]["convert_to_cm"] is False
+    assert calls["targets_kwargs"] == {"wedge_pressure_policy": "clamp_to_diastolic"}
     # The final (published) trees always follow the top-level policy.
     assert "reference_diameter" not in calls["construct"]["kwargs"]
     assert mapping_payload["tree_options"]["generation_mode"] == "per_outlet"
@@ -1199,7 +1201,7 @@ def test_run_impedance_tuning_for_iteration_full_pa_rejects_reduced_seed_before_
         wedge_p = 12.0
 
         @classmethod
-        def from_csv(cls, _path: str):
+        def from_csv(cls, _path: str, **_kwargs):
             return cls()
 
     monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
@@ -1250,7 +1252,7 @@ def test_run_impedance_tuning_for_iteration_full_pa_passes_mapping_centerline(
         wedge_p = 12.0
 
         @classmethod
-        def from_csv(cls, _path: str):
+        def from_csv(cls, _path: str, **_kwargs):
             return cls()
 
     class MappingResolved(Exception):
@@ -1382,7 +1384,7 @@ def test_run_impedance_tuning_for_iteration_full_pa_rejects_reduced_snapshot(
         wedge_p = 12.0
 
         @classmethod
-        def from_csv(cls, _path: str):
+        def from_csv(cls, _path: str, **_kwargs):
             return cls()
 
     class ReducedSnapshotTuner:
@@ -1462,7 +1464,7 @@ def test_run_impedance_tuning_for_iteration_clears_stale_snapshot(
         wedge_p = 12.0
 
         @classmethod
-        def from_csv(cls, _path: str):
+        def from_csv(cls, _path: str, **_kwargs):
             return cls()
 
     class NoSnapshotTuner:
@@ -1516,7 +1518,7 @@ def test_run_impedance_tuning_for_iteration_rri_expands_reduced_bcs_for_caps(
         wedge_p = 12.0
 
         @classmethod
-        def from_csv(cls, _path: str):
+        def from_csv(cls, _path: str, **_kwargs):
             return cls()
 
     class DummyTuner:
@@ -1742,7 +1744,7 @@ def test_run_impedance_tuning_for_iteration_missing_snapshot_raises(monkeypatch,
         wedge_p = 10.0
 
         @classmethod
-        def from_csv(cls, _path: str):
+        def from_csv(cls, _path: str, **_kwargs):
             return cls()
 
     class DummyTuner:
@@ -1791,7 +1793,7 @@ def test_run_impedance_tuning_for_iteration_missing_required_xi_raises(monkeypat
         wedge_p = 10.0
 
         @classmethod
-        def from_csv(cls, _path: str):
+        def from_csv(cls, _path: str, **_kwargs):
             return cls()
 
     class DummyTuner:
@@ -1870,7 +1872,7 @@ def test_run_impedance_tuning_for_iteration_rejects_legacy_snapshot(monkeypatch,
         wedge_p = 10.0
 
         @classmethod
-        def from_csv(cls, _path: str):
+        def from_csv(cls, _path: str, **_kwargs):
             return cls()
 
     class DummyTuner:
@@ -1941,7 +1943,7 @@ def test_run_impedance_tuning_for_iteration_rejects_legacy_tuned_config(monkeypa
         wedge_p = 10.0
 
         @classmethod
-        def from_csv(cls, _path: str):
+        def from_csv(cls, _path: str, **_kwargs):
             return cls()
 
     class DummyTuner:
@@ -2021,7 +2023,7 @@ def test_run_impedance_tuning_for_iteration_rejects_snapshot_timestep_mismatch(m
         wedge_p = 10.0
 
         @classmethod
-        def from_csv(cls, _path: str):
+        def from_csv(cls, _path: str, **_kwargs):
             return cls()
 
     class DummyTuner:
@@ -2092,7 +2094,7 @@ def test_run_impedance_tuning_for_iteration_rejects_coupled_tuned_config_wrong_n
         wedge_p = 10.0
 
         @classmethod
-        def from_csv(cls, _path: str):
+        def from_csv(cls, _path: str, **_kwargs):
             return cls()
 
     class DummyTuner:
@@ -2172,7 +2174,7 @@ def test_run_impedance_tuning_for_iteration_rejects_snapshot_inflow_mismatch(mon
         wedge_p = 10.0
 
         @classmethod
-        def from_csv(cls, _path: str):
+        def from_csv(cls, _path: str, **_kwargs):
             return cls()
 
     class DummyTuner:
@@ -2244,7 +2246,7 @@ def test_run_impedance_tuning_for_iteration_accepts_scaled_snapshot_inflow(monke
         wedge_p = 10.0
 
         @classmethod
-        def from_csv(cls, _path: str):
+        def from_csv(cls, _path: str, **_kwargs):
             return cls()
 
     class DummyTuner:
@@ -2324,7 +2326,7 @@ def test_run_impedance_tuning_for_iteration_uses_unscaled_seed_inflow_when_resca
         wedge_p = 10.0
 
         @classmethod
-        def from_csv(cls, _path: str):
+        def from_csv(cls, _path: str, **_kwargs):
             return cls()
 
     class DummyTuner:
@@ -2408,7 +2410,7 @@ def test_run_impedance_tuning_for_iteration_uses_inflow_file_mean_source(monkeyp
         wedge_p = 10.0
 
         @classmethod
-        def from_csv(cls, _path: str):
+        def from_csv(cls, _path: str, **_kwargs):
             return cls()
 
     class DummyTuner:
@@ -2472,7 +2474,7 @@ def test_run_impedance_tuning_for_iteration_requires_inflow_path_when_rescaling(
         wedge_p = 10.0
 
         @classmethod
-        def from_csv(cls, _path: str):
+        def from_csv(cls, _path: str, **_kwargs):
             return cls()
 
     monkeypatch = pytest.MonkeyPatch()
@@ -2488,6 +2490,19 @@ def test_run_impedance_tuning_for_iteration_requires_inflow_path_when_rescaling(
             )
         finally:
             monkeypatch.undo()
+
+
+def test_resolve_impedance_config_wedge_pressure_policy():
+    assert _resolve_impedance_config({"tune_space": _tune_space_with_xi()})[
+        "wedge_pressure_policy"
+    ] == "clamp_to_diastolic"
+    assert _resolve_impedance_config(
+        {"wedge_pressure_policy": "Measured", "tune_space": _tune_space_with_xi()}
+    )["wedge_pressure_policy"] == "measured"
+    with pytest.raises(ValueError, match="wedge_pressure_policy must be one of"):
+        _resolve_impedance_config(
+            {"wedge_pressure_policy": "mean", "tune_space": _tune_space_with_xi()}
+        )
 
 
 def test_resolve_impedance_config_objective_tree_policy_inherits_final_policy():
@@ -2978,7 +2993,7 @@ def test_run_impedance_tuning_for_iteration_passes_prev_csv_to_tune(monkeypatch,
         wedge_p = 12.0
 
         @classmethod
-        def from_csv(cls, path: str):
+        def from_csv(cls, path: str, **_kwargs):
             return cls()
 
     class DummyTuner:
@@ -3068,7 +3083,7 @@ def test_run_impedance_tuning_for_iteration_no_prev_csv_passes_none(monkeypatch,
         wedge_p = 12.0
 
         @classmethod
-        def from_csv(cls, path: str):
+        def from_csv(cls, path: str, **_kwargs):
             return cls()
 
     class DummyTuner:
@@ -3160,7 +3175,7 @@ def test_run_impedance_tuning_for_iteration_missing_prev_csv_passes_none(monkeyp
         wedge_p = 12.0
 
         @classmethod
-        def from_csv(cls, path: str):
+        def from_csv(cls, path: str, **_kwargs):
             return cls()
 
     class DummyTuner:

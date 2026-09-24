@@ -30,7 +30,7 @@ from svzerodtrees.tune_bcs.assign_bcs import (
     construct_impedance_trees,
     validate_cap_to_bc_mapping,
 )
-from svzerodtrees.tune_bcs.clinical_targets import ClinicalTargets
+from svzerodtrees.tune_bcs.clinical_targets import ClinicalTargets, WEDGE_PRESSURE_POLICIES
 from svzerodtrees.microvasculature.structured_tree.dc_resistance import (
     conductance_matched_diameter,
 )
@@ -64,6 +64,7 @@ DEFAULT_IMPEDANCE_TUNING_CONFIG: dict[str, Any] = {
     "diameter_std_cap": None,
     "allow_ordered_outlet_mapping": False,
     "tuning_model": "rri",
+    "wedge_pressure_policy": "clamp_to_diastolic",
 }
 
 # ``outlet_mapping_mode``, ``outlet_mapping``, and ``outlet_mapping_centerline``
@@ -502,6 +503,12 @@ def _resolve_impedance_config(
     merged["rescale_inflow"] = bool(merged["rescale_inflow"])
     merged["convert_to_cm"] = bool(merged["convert_to_cm"])
     merged["compliance_model"] = str(merged["compliance_model"]).strip().lower()
+    merged["wedge_pressure_policy"] = str(merged["wedge_pressure_policy"]).strip().lower()
+    if merged["wedge_pressure_policy"] not in WEDGE_PRESSURE_POLICIES:
+        raise ValueError(
+            "impedance tuning wedge_pressure_policy must be one of "
+            + "|".join(WEDGE_PRESSURE_POLICIES)
+        )
     merged["diameter_scale"] = float(merged["diameter_scale"])
     if merged["diameter_std_cap"] is not None:
         merged["diameter_std_cap"] = float(merged["diameter_std_cap"])
@@ -1134,7 +1141,10 @@ def run_impedance_tuning_for_iteration(
             )
     _clear_tuning_outputs(output_dir, tuned_config_name=tuned_config_name)
     required_xi_pa = _required_xi_pa_labels(tuning["tune_space"])
-    targets = ClinicalTargets.from_csv(str(targets_path))
+    targets = ClinicalTargets.from_csv(
+        str(targets_path),
+        wedge_pressure_policy=str(tuning["wedge_pressure_policy"]),
+    )
     tune_space = _build_tune_space_from_config(tuning["tune_space"])
     expected_snapshot_co = _expected_snapshot_inflow_cardiac_output(
         seed_config=seed_config_path,

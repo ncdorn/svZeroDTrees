@@ -328,6 +328,33 @@ def test_full_pa_objective_tree_policy_parses_and_round_trips(tmp_path):
     assert impedance_config_to_mapping(cfg.bcs.impedance)["objective_tree_policy"] == expected
 
 
+def test_wedge_pressure_policy_parses_and_round_trips(tmp_path):
+    cfg_path = tmp_path / "wedge.yml"
+    cfg_path.write_text(
+        _full_pa_pipeline_yaml(tmp_path, impedance_fields="    wedge_pressure_policy: measured"),
+        encoding="utf-8",
+    )
+
+    cfg = load_config(str(cfg_path))
+
+    assert cfg.bcs.impedance.wedge_pressure_policy == "measured"
+    assert impedance_config_to_mapping(cfg.bcs.impedance)["wedge_pressure_policy"] == "measured"
+
+
+def test_wedge_pressure_policy_defaults_and_rejects_unknown(tmp_path):
+    default_path = tmp_path / "default.yml"
+    default_path.write_text(_full_pa_pipeline_yaml(tmp_path), encoding="utf-8")
+    assert load_config(str(default_path)).bcs.impedance.wedge_pressure_policy == "clamp_to_diastolic"
+
+    bad_path = tmp_path / "bad.yml"
+    bad_path.write_text(
+        _full_pa_pipeline_yaml(tmp_path, impedance_fields="    wedge_pressure_policy: mean"),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="wedge_pressure_policy must be one of"):
+        load_config(str(bad_path))
+
+
 def test_full_pa_objective_tree_policy_is_omitted_by_default(tmp_path):
     cfg_path = tmp_path / "full-pa.yml"
     cfg_path.write_text(_full_pa_pipeline_yaml(tmp_path), encoding="utf-8")
