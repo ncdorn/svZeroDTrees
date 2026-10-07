@@ -191,6 +191,24 @@ def test_proximal_compliance_rigid_vessel_needs_geometry():
         apply_proximal_compliance(seed, 5.0e4)
 
 
+def test_proximal_compliance_takes_learned_connector_length_from_centerline():
+    # Raw learnedZeroD seed: branch 1's R/L live on the junction; its
+    # connectorEL vessel has zero length, and a split connector keeps 0.1 cm.
+    seed = _seed([0.0, 1e-10, 0.0])
+    names = ["branch0_seg0", "branch1_seg0_connectorEL", "branch1_seg0_connector0"]
+    for vessel, name, length in zip(seed["vessels"], names, [2.0, 0.0, 0.1]):
+        vessel["vessel_name"] = name
+        vessel["vessel_length"] = length
+    with pytest.raises(ValueError, match="outlet_mapping_centerline"):
+        apply_proximal_compliance(seed, 5.0e4)
+    payload, summary = apply_proximal_compliance(seed, 5.0e4, {0: 2.0, 1: 1.5})
+    c = [v["zero_d_element_values"]["C"] for v in payload["vessels"]]
+    assert c == pytest.approx([3.0 * 0.75 * length / (2.0 * 5.0e4) for length in (2.0, 1.4, 0.1)])
+    assert summary["n_branch_length_from_centerline"] == 1
+    assert summary["seed_volume_ml"] == pytest.approx(0.75 * 3.5)
+    assert payload["vessels"][1]["vessel_length"] == 0.0
+
+
 def test_vessel_round_trip_preserves_geometric_params():
     config = _seed([0.0])["vessels"][0] | {"vessel_id": 0, "vessel_name": "branch0_seg0"}
     assert Vessel(config).to_dict()["geometric_params"] == {"inlet_area": 1.0, "outlet_area": 0.5}

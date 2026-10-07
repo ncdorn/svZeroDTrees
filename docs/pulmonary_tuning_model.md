@@ -129,7 +129,11 @@ outlet pressure represents the pressure downstream of the arterial tree.
   deformable walls.
 - **Assumptions**: linear compliance over the full pulse (at 31 mmHg pulse it
   already implies ~60-125% area change, so softer walls are not defensible
-  without data); cm-g-s seed with `geometric_params`.
+  without data); cm-g-s seed with `geometric_params`. Raw learnedZeroD seeds
+  fold branch R and L into junctions and leave zero-length
+  `branch{N}_..._connectorEL` vessels; these take the branch length from
+  `outlet_mapping_centerline` (minus the branch's split connectors), which
+  reproduces the calibrated seed's geometry (TST-STAN-5: 15.64 mL, 0.626 mL/mmHg).
 - **Consistency with the 3D wall**: the deformable 3D wall was softened
   (2026-10-06) from E 2.5e6 to 1.375e5 dyn/cm^2 at h 0.2 cm so that its total
   compliance matches the 0D proximal compliance. A uniform wall over the seed

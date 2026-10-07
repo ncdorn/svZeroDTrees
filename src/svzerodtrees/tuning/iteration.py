@@ -38,6 +38,7 @@ from svzerodtrees.tune_bcs.clinical_targets import (
     WEDGE_PRESSURE_POLICIES,
     validate_outlet_pressure,
 )
+from svzerodtrees.tune_bcs.centerline_mapping import centerline_branches
 from svzerodtrees.tune_bcs.objective import resolve_tuning_objective
 from svzerodtrees.tune_bcs.tuning_diagnostics import (
     SEED_WITH_PROXIMAL_COMPLIANCE_FILENAME,
@@ -1463,10 +1464,19 @@ def run_impedance_tuning_for_iteration(
     if tuning.get("proximal_compliance") is not None:
         # The tuning model, preflight, and exported config all use the seed
         # with proximal compliance, so the published model is the tuned one.
+        # Raw learnedZeroD seeds keep branch length only in the centerline.
+        branch_lengths = None
+        if mapping_centerline is not None:
+            _, centerline_lengths = centerline_branches(mapping_centerline)
+            scale = 0.1 if bool(tuning["convert_to_cm"]) else 1.0
+            branch_lengths = {
+                branch_id: scale * length for branch_id, length in centerline_lengths.items()
+            }
         seed_config_path, proximal_summary = write_seed_with_proximal_compliance(
             seed_config_path,
             output_dir,
             float(tuning["proximal_compliance"]["wall_ehr"]),
+            branch_lengths,
         )
     expected_snapshot_co = _expected_snapshot_inflow_cardiac_output(
         seed_config=seed_config_path,

@@ -9,6 +9,13 @@ L = ``vessel_length`` (cm-g-s units).  Only effectively rigid vessels are
 filled (C below RIGID_COMPLIANCE_THRESHOLD); compliance calibrated in a later
 iteration is kept, and applying the step twice gives the same seed.
 
+Raw learnedZeroD seeds fold each branch's R and L into its junction outlet and
+leave a zero-length ``branch{N}_seg{K}_connectorEL`` vessel that keeps the
+branch area.  Given centerline ``branch_lengths`` (cm, by ``BranchId``), such a
+vessel takes the branch length minus the lengths of the other vessels on that
+branch (the split connectors of multi-outlet junctions), which reproduces the
+geometry of the calibrated seed built from the same centerline.
+
 Diagnostics (``tuning_diagnostics.json``): the outlet pressure and how it was
 derived, per-tree size/truncation/resistance/compliance of the exported trees,
 total model compliance (trees + proximal), and the stroke-volume /
@@ -21,6 +28,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
+import re
 from typing import Any, Mapping
 
 import numpy as np
@@ -31,6 +39,8 @@ from ..numerics import trapezoid
 DYN_PER_MMHG = 1333.2
 SEED_WITH_PROXIMAL_COMPLIANCE_FILENAME = "seed_with_proximal_compliance.json"
 TUNING_DIAGNOSTICS_FILENAME = "tuning_diagnostics.json"
+_BRANCH_ID = re.compile(r"^branch(\d+)_")
+_FOLDED_LENGTH_SUFFIX = "_connectorEL"
 
 
 # A seed vessel counts as rigid when its C is below this value [cm^5/dyn]
@@ -39,12 +49,18 @@ TUNING_DIAGNOSTICS_FILENAME = "tuning_diagnostics.json"
 RIGID_COMPLIANCE_THRESHOLD = 1.0e-8
 
 
-def apply_proximal_compliance(seed_payload: Mapping[str, Any], wall_ehr: float) -> tuple[dict, dict]:
+def apply_proximal_compliance(
+    seed_payload: Mapping[str, Any],
+    wall_ehr: float,
+    branch_lengths: Mapping[int, float] | None = None,
+) -> tuple[dict, dict]:
     """Fill rigid seed vessels with C = 3 A L / (2 wall_ehr).
 
     Vessels whose C already exceeds RIGID_COMPLIANCE_THRESHOLD (e.g. compliance
     calibrated against a 3D run in a later iteration) keep their value.  A
-    rigid vessel without ``geometric_params`` / ``vessel_length`` is an error.
+    rigid vessel without ``geometric_params`` / ``vessel_length`` is an error,
+    except that learnedZeroD connector vessels take their length from
+    ``branch_lengths`` (cm by centerline ``BranchId``) when given.
     Returns the updated payload and a summary with per-category counts.
     """
     wall_ehr = float(wall_ehr)
@@ -54,6 +70,7 @@ def apply_proximal_compliance(seed_payload: Mapping[str, Any], wall_ehr: float) 
     vessels = payload.get("vessels") or []
     if not vessels:
         raise ValueError("proximal_compliance requires a seed with vessels")
+    folded_lengths = _folded_branch_lengths(vessels, branch_lengths) if branch_lengths else {}
     missing, applied, kept = [], [], []
     applied_total = kept_total = 0.0
     volume = volume_radius = 0.0
@@ -61,7 +78,7 @@ def apply_proximal_compliance(seed_payload: Mapping[str, Any], wall_ehr: float) 
         values = vessel.setdefault("zero_d_element_values", {})
         name = str(vessel.get("vessel_name", vessel.get("vessel_id")))
         existing = float(values.get("C") or 0.0)
-        geometry = _vessel_area_length(vessel)
+        geometry = _vessel_area_length(vessel, folded_lengths.get(name))
         if geometry is not None:
             area, length = geometry
             volume += area * length
@@ -81,12 +98,19 @@ def apply_proximal_compliance(seed_payload: Mapping[str, Any], wall_ehr: float) 
         raise ValueError(
             "proximal_compliance needs geometric_params.inlet_area/outlet_area and "
             "vessel_length for every rigid seed vessel; missing for: " + ", ".join(missing[:10])
+            + (
+                ""
+                if branch_lengths
+                else " (zero-length learnedZeroD connector vessels take their branch "
+                "length from outlet_mapping_centerline)"
+            )
         )
     summary = {
         "wall_ehr": wall_ehr,
         "n_vessels": len(vessels),
         "n_applied": len(applied),
         "n_kept_existing": len(kept),
+        "n_branch_length_from_centerline": len(folded_lengths),
         "applied_compliance_ml_per_mmhg": applied_total * DYN_PER_MMHG,
         "kept_compliance_ml_per_mmhg": kept_total * DYN_PER_MMHG,
         "total_compliance_ml_per_mmhg": (applied_total + kept_total) * DYN_PER_MMHG,
@@ -100,12 +124,46 @@ def apply_proximal_compliance(seed_payload: Mapping[str, Any], wall_ehr: float) 
     return payload, summary
 
 
-def _vessel_area_length(vessel: Mapping[str, Any]) -> tuple[float, float] | None:
+def _folded_branch_lengths(
+    vessels: list[Mapping[str, Any]], branch_lengths: Mapping[int, float]
+) -> dict[str, float]:
+    """Lengths of zero-length learnedZeroD connector vessels, by vessel name.
+
+    Each ``branch{N}_..._connectorEL`` vessel stands for branch N, whose R and
+    L learnedZeroD folded into the junction outlet.  It gets the centerline
+    branch length minus the lengths of the other vessels on branch N.
+    """
+    on_branch: dict[int, float] = {}
+    folded: dict[str, int] = {}
+    for vessel in vessels:
+        name = str(vessel.get("vessel_name", ""))
+        match = _BRANCH_ID.match(name)
+        if match is None:
+            continue
+        branch_id = int(match.group(1))
+        length = float(vessel.get("vessel_length") or 0.0)
+        if name.endswith(_FOLDED_LENGTH_SUFFIX) and length == 0.0:
+            folded[name] = branch_id
+        else:
+            on_branch[branch_id] = on_branch.get(branch_id, 0.0) + length
+    lengths: dict[str, float] = {}
+    for name, branch_id in folded.items():
+        if branch_id not in branch_lengths:
+            continue
+        remaining = float(branch_lengths[branch_id]) - on_branch.get(branch_id, 0.0)
+        if math.isfinite(remaining) and remaining > 0.0:
+            lengths[name] = remaining
+    return lengths
+
+
+def _vessel_area_length(
+    vessel: Mapping[str, Any], length_override: float | None = None
+) -> tuple[float, float] | None:
     """Mean lumen area and length of a seed vessel, or None without geometry."""
     geom = vessel.get("geometric_params") or {}
     try:
         area = 0.5 * (float(geom["inlet_area"]) + float(geom["outlet_area"]))
-        length = float(vessel.get("vessel_length"))
+        length = float(vessel.get("vessel_length") if length_override is None else length_override)
     except (KeyError, TypeError, ValueError):
         return None
     if not (math.isfinite(area) and area > 0.0 and math.isfinite(length) and length > 0.0):
@@ -114,10 +172,13 @@ def _vessel_area_length(vessel: Mapping[str, Any]) -> tuple[float, float] | None
 
 
 def write_seed_with_proximal_compliance(
-    seed_path: str | Path, output_dir: str | Path, wall_ehr: float
+    seed_path: str | Path,
+    output_dir: str | Path,
+    wall_ehr: float,
+    branch_lengths: Mapping[int, float] | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     payload = json.loads(Path(seed_path).read_text(encoding="utf-8"))
-    updated, summary = apply_proximal_compliance(payload, wall_ehr)
+    updated, summary = apply_proximal_compliance(payload, wall_ehr, branch_lengths)
     out = (Path(output_dir) / SEED_WITH_PROXIMAL_COMPLIANCE_FILENAME).resolve()
     out.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
     summary = {
