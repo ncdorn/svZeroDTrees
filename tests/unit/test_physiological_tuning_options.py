@@ -196,9 +196,20 @@ def test_proximal_compliance_takes_learned_connector_length_from_centerline():
     # connectorEL vessel has zero length, and a split connector keeps 0.1 cm.
     seed = _seed([0.0, 1e-10, 0.0])
     names = ["branch0_seg0", "branch1_seg0_connectorEL", "branch1_seg0_connector0"]
-    for vessel, name, length in zip(seed["vessels"], names, [2.0, 0.0, 0.1]):
+    for index, (vessel, name, length) in enumerate(zip(seed["vessels"], names, [2.0, 0.0, 0.1])):
+        vessel["vessel_id"] = index
         vessel["vessel_name"] = name
         vessel["vessel_length"] = length
+    seed["vessels"][1]["zero_d_element_values"].update(R_poiseuille=0.0, L=0.0)
+    seed["junctions"] = [
+        {
+            "junction_name": "J0",
+            "junction_type": "BloodVesselJunction",
+            "inlet_vessels": [0],
+            "outlet_vessels": [1, 2],
+            "junction_values": {"R_poiseuille": [7.0, 3.0], "L": [2.0, 1.0], "stenosis_coefficient": [0.0, 0.0]},
+        }
+    ]
     with pytest.raises(ValueError, match="outlet_mapping_centerline"):
         apply_proximal_compliance(seed, 5.0e4)
     payload, summary = apply_proximal_compliance(seed, 5.0e4, {0: 2.0, 1: 1.5})
@@ -207,6 +218,15 @@ def test_proximal_compliance_takes_learned_connector_length_from_centerline():
     assert summary["n_branch_length_from_centerline"] == 1
     assert summary["seed_volume_ml"] == pytest.approx(0.75 * 3.5)
     assert payload["vessels"][1]["vessel_length"] == 0.0
+    # Branch 1's junction R/L now sit on its compliant connector vessel; the
+    # split connector (non-zero R) keeps its junction values.
+    assert summary["n_junction_values_moved_to_vessel"] == 1
+    assert payload["vessels"][1]["zero_d_element_values"]["R_poiseuille"] == 7.0
+    assert payload["vessels"][1]["zero_d_element_values"]["L"] == 2.0
+    assert payload["junctions"][0]["junction_values"]["R_poiseuille"] == [0.0, 3.0]
+    assert payload["junctions"][0]["junction_values"]["L"] == [0.0, 1.0]
+    again, _ = apply_proximal_compliance(payload, 5.0e4, {0: 2.0, 1: 1.5})
+    assert again == payload
 
 
 def test_vessel_round_trip_preserves_geometric_params():

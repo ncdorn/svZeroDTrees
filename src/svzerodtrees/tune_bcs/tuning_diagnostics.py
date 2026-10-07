@@ -14,7 +14,12 @@ leave a zero-length ``branch{N}_seg{K}_connectorEL`` vessel that keeps the
 branch area.  Given centerline ``branch_lengths`` (cm, by ``BranchId``), such a
 vessel takes the branch length minus the lengths of the other vessels on that
 branch (the split connectors of multi-outlet junctions), which reproduces the
-geometry of the calibrated seed built from the same centerline.
+geometry of the calibrated seed built from the same centerline.  The branch's
+R, L, and stenosis coefficient move from the junction outlet onto that vessel,
+so the compliance sits on a vessel with its own resistance as in the calibrated
+seed (without C the two forms are the same model).  A compliant vessel with
+R = L = 0 directly upstream of an IMPEDANCE outlet makes the solver's Newton
+iteration fail.
 
 Diagnostics (``tuning_diagnostics.json``): the outlet pressure and how it was
 derived, per-tree size/truncation/resistance/compliance of the exported trees,
@@ -94,6 +99,7 @@ def apply_proximal_compliance(
         values["C"] = compliance
         applied.append(name)
         applied_total += compliance
+    moved = _unfold_junction_values(payload, set(folded_lengths) & set(applied))
     if missing:
         raise ValueError(
             "proximal_compliance needs geometric_params.inlet_area/outlet_area and "
@@ -111,6 +117,7 @@ def apply_proximal_compliance(
         "n_applied": len(applied),
         "n_kept_existing": len(kept),
         "n_branch_length_from_centerline": len(folded_lengths),
+        "n_junction_values_moved_to_vessel": moved,
         "applied_compliance_ml_per_mmhg": applied_total * DYN_PER_MMHG,
         "kept_compliance_ml_per_mmhg": kept_total * DYN_PER_MMHG,
         "total_compliance_ml_per_mmhg": (applied_total + kept_total) * DYN_PER_MMHG,
@@ -154,6 +161,40 @@ def _folded_branch_lengths(
         if math.isfinite(remaining) and remaining > 0.0:
             lengths[name] = remaining
     return lengths
+
+
+def _unfold_junction_values(payload: dict, vessel_names: set[str]) -> int:
+    """Move junction-outlet R, L, stenosis onto the named downstream vessels.
+
+    Only outlets whose vessel still has R = L = 0 move, so repeating the step
+    changes nothing.  Returns the number of outlets moved.
+    """
+    if not vessel_names:
+        return 0
+    by_id = {
+        vessel.get("vessel_id"): vessel
+        for vessel in payload.get("vessels") or []
+        if str(vessel.get("vessel_name", "")) in vessel_names
+    }
+    moved = 0
+    for junction in payload.get("junctions") or []:
+        junction_values = junction.get("junction_values")
+        if junction.get("junction_type") != "BloodVesselJunction" or not junction_values:
+            continue
+        for index, outlet in enumerate(junction.get("outlet_vessels") or []):
+            vessel = by_id.get(outlet)
+            if vessel is None:
+                continue
+            values = vessel["zero_d_element_values"]
+            if float(values.get("R_poiseuille") or 0.0) != 0.0 or float(values.get("L") or 0.0) != 0.0:
+                continue
+            for key in ("R_poiseuille", "L", "stenosis_coefficient"):
+                series = junction_values.get(key)
+                if isinstance(series, list) and index < len(series):
+                    values[key] = float(series[index])
+                    series[index] = 0.0
+            moved += 1
+    return moved
 
 
 def _vessel_area_length(
