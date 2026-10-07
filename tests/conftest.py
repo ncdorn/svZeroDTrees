@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import pytest
+
+# Tests use the lightweight pyvista shim in tests/_stubs (it reads the JSON
+# fixtures), even where the real package is installed.  It lives outside src/
+# so it can never shadow the real pyvista in production.
+sys.path.insert(0, str(Path(__file__).with_name("_stubs")))
 
 
 def pytest_collection_modifyitems(config, items):

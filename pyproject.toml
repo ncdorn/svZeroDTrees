@@ -35,6 +35,7 @@ dependencies = [
     "multiprocess",
     "numba",
     "pyyaml",
+    "pyvista",
     "learnedzerod @ git+https://github.com/ncdorn/learnedZeroD.git",
 ]
 

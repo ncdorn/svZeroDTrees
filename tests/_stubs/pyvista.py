@@ -1,4 +1,4 @@
-"""Minimal local pyvista compatibility layer for test workflows.
+"""Minimal pyvista compatibility layer for the test suite (tests/conftest.py).
 
 This covers the subset of the API exercised by svzerodtrees tests without
 requiring the optional external pyvista dependency in the local workspace.
