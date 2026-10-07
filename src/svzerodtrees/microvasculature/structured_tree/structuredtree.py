@@ -22,6 +22,12 @@ from functools import partial
 import time
 from collections import deque
 
+# Default structured-tree node budget; trees larger than this are truncated and
+# their frontier leaves collapsed into terminal outlets (see builder.py).
+DEFAULT_MAX_NODES = 100_000
+# Memory budget per [n_nodes, chunk] complex array in compute_olufsen_impedance.
+IMPEDANCE_CHUNK_BUDGET_BYTES = 256 * 1024 * 1024
+
 class StructuredTree:
     """
     Structured tree representing microvascular adaptation at the outlet of a 0D model.
@@ -225,7 +231,10 @@ class StructuredTree:
                 if metadata.get("eta_sym") is not None
                 else None
             ),
+            max_nodes=int(metadata.get("max_nodes") or DEFAULT_MAX_NODES),
         )
+        if metadata.get("adapted_diameter_scale") is not None:
+            tree.apply_diameter_scale(float(metadata["adapted_diameter_scale"]))
         tree.inductance = float(metadata.get("inductance", 0.0) or 0.0)
         tree.outlet_mapping = cls._coerce_serializable_mapping(
             metadata.get("outlet_mapping")
@@ -332,6 +341,16 @@ class StructuredTree:
             "terminal_resistance": self._serialize_optional_float(
                 getattr(self, "terminal_resistance", 0.0)
             ),
+            # Recorded so trees rebuilt from metadata match the tuned trees
+            # when a non-default node budget truncated them.
+            "max_nodes": int(getattr(self, "max_nodes", DEFAULT_MAX_NODES)),
+            # Written only for adapted trees, so rebuilds (e.g. coupled-timing
+            # kernel regeneration) keep the adapted geometry.
+            **(
+                {"adapted_diameter_scale": float(self.adapted_diameter_scale)}
+                if getattr(self, "adapted_diameter_scale", None) is not None
+                else {}
+            ),
             "compliance": {
                 "model": self.compliance_model.description(),
                 "params": self.compliance_model.params,
@@ -385,7 +404,8 @@ class StructuredTree:
         # explicit, side-effectful convenience method
         xi = build_kwargs.pop("xi", None)
         eta_sym = build_kwargs.pop("eta_sym", None)
-        max_nodes = int(build_kwargs.pop("max_nodes", 100_000))
+        max_nodes = build_kwargs.pop("max_nodes", None)
+        max_nodes = DEFAULT_MAX_NODES if max_nodes is None else int(max_nodes)
         initial_d = build_kwargs["initial_d"]
         d_min = build_kwargs["d_min"]
         lrr = build_kwargs["lrr"]
@@ -419,7 +439,28 @@ class StructuredTree:
         self.homeostatic_ims = None
         self._homeostatic_wss_map = None
         self._homeostatic_ims_map = None
+        self.adapted_diameter_scale = None
         return self.store
+
+    def apply_diameter_scale(self, scale: float) -> None:
+        """Multiply every vessel diameter of the built tree by ``scale``.
+
+        The topology (built from ``initial_d`` and ``d_min``) is unchanged.
+        The cumulative factor is kept in ``adapted_diameter_scale`` and
+        serialized by ``to_dict`` so ``from_tree_metadata`` rebuilds the same
+        tree.
+        """
+        scale = float(scale)
+        if not np.isfinite(scale) or scale <= 0.0:
+            raise ValueError(f"diameter scale must be finite and > 0, got {scale}")
+        if not hasattr(self, "store") or self.store is None:
+            raise RuntimeError("StructuredTree.apply_diameter_scale() requires a built store.")
+        orig_dtype = np.asarray(self.store.d).dtype
+        self.store.d = (np.asarray(self.store.d, dtype=np.float64) * scale).astype(
+            orig_dtype, copy=False
+        )
+        previous = getattr(self, "adapted_diameter_scale", None)
+        self.adapted_diameter_scale = scale * (1.0 if previous is None else float(previous))
 
     def segment_resistances(self) -> np.ndarray:
         """
@@ -484,6 +525,91 @@ class StructuredTree:
 
         return float(R_eq[0])
 
+    def _dc_resistance_function(self):
+        """Return R_leaf -> root DC resistance with R_leaf at every leaf.
+
+        Same recursion as ``equivalent_resistance``, vectorized per generation;
+        the tree structure is grouped once so repeated calls are cheap.
+        """
+        if not hasattr(self, "store") or self.store is None:
+            raise RuntimeError("StructuredTree DC resistance requires a built store.")
+        st = self.store
+        R_seg = np.asarray(self.segment_resistances(), dtype=np.float64)
+        if R_seg.size == 0:
+            return lambda terminal_resistance: 0.0
+        left = np.asarray(st.left, dtype=np.int64)
+        right = np.asarray(st.right, dtype=np.int64)
+        gen = np.asarray(st.gen, dtype=np.int64)
+        leaf = (left < 0) & (right < 0)
+        internal = np.flatnonzero(~leaf)
+        internal = internal[np.argsort(gen[internal], kind="stable")[::-1]]
+        bounds = np.flatnonzero(np.diff(gen[internal])) + 1
+        buckets = [
+            (idx, left[idx], right[idx], left[idx] >= 0, right[idx] >= 0)
+            for idx in np.split(internal, bounds)
+            if idx.size
+        ]
+
+        def _conductance(R):
+            return np.where(R > 0.0, 1.0 / np.where(R > 0.0, R, 1.0), 0.0)
+
+        def dc_resistance(terminal_resistance: float) -> float:
+            R_eq = R_seg.copy()
+            R_eq[leaf] += float(terminal_resistance)
+            for idx, li, ri, has_l, has_r in buckets:
+                inv = np.zeros(idx.size, dtype=np.float64)
+                inv[has_l] += _conductance(R_eq[li[has_l]])
+                inv[has_r] += _conductance(R_eq[ri[has_r]])
+                R_eq[idx] = R_seg[idx] + _conductance(inv)
+            return float(R_eq[0])
+
+        dc_resistance.n_leaves = int(np.count_nonzero(leaf))
+        return dc_resistance
+
+    def dc_input_resistance(self, terminal_resistance: float | None = None) -> float:
+        """Root DC resistance with ``terminal_resistance`` at every leaf
+        (``None``: the tree's current ``terminal_resistance``)."""
+        if terminal_resistance is None:
+            terminal_resistance = float(getattr(self, "terminal_resistance", 0.0) or 0.0)
+        return self._dc_resistance_function()(terminal_resistance)
+
+    def set_leaf_resistance_for_fraction(self, downstream_fraction: float) -> dict:
+        """Set ``terminal_resistance`` so the leaves carry a share of the DC resistance.
+
+        Every leaf (terminal arteriole) gets the same resistance R_leaf to the
+        outlet pressure, standing in for the capillary + venous bed it feeds.
+        R_leaf solves R_in(R_leaf) = R_in(0) / (1 - f), so the leaf resistances
+        carry the fraction ``f`` of the tree's root-to-outlet DC resistance and
+        the arterial tree the rest.  Returns the solution summary.
+        """
+        from scipy.optimize import brentq
+
+        fraction = float(downstream_fraction)
+        if not (0.0 <= fraction < 1.0):
+            raise ValueError("leaf downstream_fraction must be in [0, 1)")
+        dc_resistance = self._dc_resistance_function()
+        arterial = dc_resistance(0.0)
+        if fraction == 0.0 or arterial <= 0.0:
+            leaf_r = 0.0
+        else:
+            target = arterial / (1.0 - fraction)
+            # Equal-leaf-flow estimate as the bracket start, then solve exactly.
+            hi = max(dc_resistance.n_leaves, 1) * (target - arterial)
+            while dc_resistance(hi) < target:
+                hi *= 2.0
+            leaf_r = float(brentq(lambda r: dc_resistance(r) - target, 0.0, hi,
+                                  xtol=1e-12, rtol=1e-10, maxiter=200))
+        total = dc_resistance(leaf_r)
+        self.terminal_resistance = leaf_r
+        self.leaf_downstream_fraction = fraction
+        return {
+            "terminal_resistance": leaf_r,
+            "arterial_dc_resistance": arterial,
+            "total_dc_resistance": total,
+            "downstream_fraction": (1.0 - arterial / total) if total > 0.0 else 0.0,
+            "n_leaves": dc_resistance.n_leaves,
+        }
+
 
     def reset_tree(self, keep_root=False):
         """
@@ -525,7 +651,7 @@ class StructuredTree:
         self,
         n_procs: Optional[int] = None,     # kept for API compatibility (unused)
         tsteps: Optional[int] = None,
-        chunk_size: int = 512,
+        chunk_size: Optional[int] = None,
         *,
         # ---- the 3 switches ----
         dc_mode: Literal["segment_only","poiseuille_network"] = "poiseuille_network",
@@ -601,6 +727,12 @@ class StructuredTree:
         idx_by_gen = [np.where(gens == g)[0] for g in range(max_gen + 1)]
         # absolute index -> row-in-gen map
         n_nodes = d.size
+        # Frequency chunk: each chunk allocates several [n_nodes, chunk]
+        # complex128 arrays.  Results do not depend on the chunk size, so the
+        # default sizes it from the tree (~256 MB per array, 8..512 freqs).
+        if chunk_size is None:
+            chunk_size = int(np.clip(IMPEDANCE_CHUNK_BUDGET_BYTES // (16 * max(n_nodes, 1)), 8, 512))
+        chunk_size = max(1, int(chunk_size))
         pos_map_by_gen = []
         for g in range(max_gen + 1):
             idx = idx_by_gen[g]
@@ -609,6 +741,12 @@ class StructuredTree:
             pos_map_by_gen.append(mp)
 
         EPS = 1e-14
+        # Per-leaf resistance to the outlet pressure ("zero" termination).  It
+        # applies at every node without children, not only the deepest
+        # generation: asymmetric trees end most branches at shallower
+        # generations (matches equivalent_resistance / dc_input_resistance).
+        terminal_resistance = float(getattr(self, "terminal_resistance", 0.0) or 0.0)
+        apply_leaf_resistance = leaf_termination == "zero" and terminal_resistance != 0.0
 
         # ---------------- DC handling (switch) ----------------
         # Poiseuille segment resistance
@@ -630,7 +768,10 @@ class StructuredTree:
                     li = left_idx[idx];  ri = right_idx[idx]
                     hasL = (li >= 0);  hasR = (ri >= 0)
                     if g == max_gen or Z_dc_next is None or next_idx.size == 0:
-                        Z_load = np.zeros(idx.size, dtype=np.float64)
+                        Z_load = np.full(
+                            idx.size, terminal_resistance if apply_leaf_resistance else 0.0,
+                            dtype=np.float64,
+                        )
                     else:
                         pos_child = pos_map_by_gen[g + 1]
                         Z1 = np.zeros(idx.size, dtype=np.float64)
@@ -648,6 +789,8 @@ class StructuredTree:
                             safe = ~zero
                             Zb = np.zeros_like(num); Zb[safe] = num[safe] / den[safe]
                             Z_load[both] = Zb
+                        if apply_leaf_resistance:
+                            Z_load[~hasL & ~hasR] = terminal_resistance
                     Z_dc_next = R_seg[idx] + Z_load
                     next_idx = idx
                 root_row = 0 if next_idx.size == 1 else int(np.where(next_idx == 0)[0][0])
@@ -728,9 +871,6 @@ class StructuredTree:
 
                     if g == max_gen or Z_next is None or next_idx.size == 0:
                         if leaf_termination == "zero":
-                            terminal_resistance = float(
-                                getattr(self, "terminal_resistance", 0.0) or 0.0
-                            )
                             ZL = np.full(
                                 (idx.size, Fc),
                                 terminal_resistance,
@@ -760,6 +900,8 @@ class StructuredTree:
                             safe = ~zero
                             Zb = np.zeros_like(num); Zb[safe] = num[safe] / den[safe]
                             ZL[both, :] = Zb
+                        if apply_leaf_resistance:
+                            ZL[~hasL & ~hasR, :] = terminal_resistance
 
                     sin_k = np.sin(kappa[idx, :])
                     cos_k = np.cos(kappa[idx, :])

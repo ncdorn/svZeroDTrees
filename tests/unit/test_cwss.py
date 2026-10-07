@@ -55,6 +55,35 @@ class FakePA:
         self.sim_calls += 1
 
 
+def _shared_tuned_config(tmp_path):
+    """Tuned config with one shared tree per side (the M1/M3 contract)."""
+    trees = []
+    for name, side, caps in (("LPA", "lpa", ["LPA_1.vtp", "LPA_2.vtp"]), ("RPA", "rpa", ["RPA_1.vtp"])):
+        bc_names = [f"{name}_BC_{index}" for index in range(len(caps))]
+        trees.append(
+            {
+                "name": name,
+                "initial_d": 0.3,
+                "d_min": 0.01,
+                "lrr": 10.0,
+                "max_nodes": 1000,
+                "compliance": {"model": "ConstantCompliance", "params": {"value": 66000.0}},
+                "outlet_mapping": {"side": side, "bc_names": bc_names, "outlet_names": caps},
+            }
+        )
+    payload = {
+        "boundary_conditions": [
+            {"bc_name": bc, "bc_type": "IMPEDANCE", "bc_values": {"z": [1.0], "Pd": 13332.0}}
+            for tree in trees
+            for bc in tree["outlet_mapping"]["bc_names"]
+        ],
+        "trees": trees,
+    }
+    path = tmp_path / "svzerod_3d_coupling_tuned.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return str(path)
+
+
 def _model():
     return CWSSAdaptation([1.0, 0.0, 0.0, 0.0])
 
@@ -470,6 +499,8 @@ def test_run_structured_tree_adaptation_m1_uses_stable_dispatch_and_exports_solv
 
         def __init__(self, preop, postop, adapted, targets, **kwargs):
             self.adapted_simdir = adapted
+            DummyAdaptor.init_kwargs = kwargs
+            DummyAdaptor.targets = targets
 
         def adapt_cwss(self, **kwargs):
             DummyAdaptor.call_kwargs = kwargs
@@ -517,6 +548,7 @@ def test_run_structured_tree_adaptation_m1_uses_stable_dispatch_and_exports_solv
         clinical_targets=str(tmp_path / "clinical_targets.csv"),
         reduced_order_pa=str(tmp_path / "reduced.json"),
         tree_params=str(tmp_path / "optimized_params.csv"),
+        tuned_config=_shared_tuned_config(tmp_path),
         model="M1",
         parameter_set={
             "iterations": 2,
@@ -527,6 +559,8 @@ def test_run_structured_tree_adaptation_m1_uses_stable_dispatch_and_exports_solv
     )
 
     assert DummyAdaptor.call_kwargs["n_iter"] == 2
+    assert [tree.name for tree in DummyAdaptor.init_kwargs["tuned_model"].trees] == ["LPA", "RPA"]
+    assert DummyAdaptor.targets.wedge_p == pytest.approx(13332.0 / 1333.2)
     assert DummyAdaptor.call_kwargs["max_nodes"] == 200_000
     assert DummyAdaptor.call_kwargs["wss_gain"] == pytest.approx(0.01)
     assert DummyAdaptor.call_kwargs["terminal_resistance"] == pytest.approx(50_000.0)
@@ -590,18 +624,18 @@ def test_run_structured_tree_adaptation_m2_omits_flow_split_convergence_artifact
         return SimpleNamespace(path=path, svzerod_3Dcoupling=None)
 
     class DummyAdaptor:
+        constructed = False
+
         def __init__(self, preop, postop, adapted, targets, **kwargs):
-            self.adapted_simdir = adapted
-            self.lpa_tree = None
-            self.rpa_tree = None
+            DummyAdaptor.constructed = True
 
-        def construct_impedance_trees(self, *, max_nodes):
-            tree = lambda: SimpleNamespace(store=SimpleNamespace(d=np.asarray([1.0], dtype=float)))
-            return tree(), tree()
+    written = {}
 
-        def _finalize_coupling_with_adapted_trees(self):
-            return None
+    def fake_write_m2_adapted_coupler(**kwargs):
+        written.update(kwargs)
+        return {"LPA": {"side": "lpa"}, "RPA": {"side": "rpa"}}
 
+    monkeypatch.setattr(workflow_module, "_write_m2_adapted_coupler", fake_write_m2_adapted_coupler)
     monkeypatch.setattr(workflow_module.SimulationDirectory, "from_directory", fake_from_directory)
     monkeypatch.setattr(
         workflow_module.ClinicalTargets,
@@ -617,11 +651,15 @@ def test_run_structured_tree_adaptation_m2_omits_flow_split_convergence_artifact
         clinical_targets=str(tmp_path / "clinical_targets.csv"),
         reduced_order_pa=str(tmp_path / "reduced.json"),
         tree_params=str(tmp_path / "optimized_params.csv"),
+        tuned_config=_shared_tuned_config(tmp_path),
         model="M2",
         parameter_set={"iterations": 2},
         output_root=str(tmp_path / "results"),
     )
 
+    assert DummyAdaptor.constructed is False  # M2 adapts the tuned trees directly
+    assert written["tuned_model"].outlet_pressure_mmhg == pytest.approx(13332.0 / 1333.2)
+    assert sorted(summary["tree_metrics"]) == ["LPA", "RPA"]
     assert "internal_zerod" not in summary["hemodynamics"]
     assert "flow_split_convergence_csv" not in summary["artifacts"]
     assert "flow_split_convergence_png" not in summary["artifacts"]
@@ -710,6 +748,7 @@ def test_run_structured_tree_adaptation_m3_exports_solver_metrics(
         clinical_targets=str(tmp_path / "clinical_targets.csv"),
         reduced_order_pa=str(tmp_path / "reduced.json"),
         tree_params=str(tmp_path / "optimized_params.csv"),
+        tuned_config=_shared_tuned_config(tmp_path),
         model="M3",
         parameter_set={
             "k_arr": [1.0, 2.0, 3.0, 4.0],

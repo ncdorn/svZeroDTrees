@@ -12,6 +12,7 @@ from svzerodtrees.adaptation.microvascular_adaptor import (
     _resolve_target_pressure_csv,
     MicrovascularAdaptor,
 )
+from svzerodtrees.adaptation.tuned_trees import load_tuned_tree_model
 from svzerodtrees.io.config_handler import ConfigHandler
 from svzerodtrees.microvasculature.compliance import ConstantCompliance
 from svzerodtrees.microvasculature.treeparams import TreeParameters
@@ -259,45 +260,83 @@ def test_tree_metadata_with_outlet_mapping_attaches_bc_names():
     assert metadata["outlet_mapping"] == {"bc_names": ["LPA_A", "LPA_B"]}
 
 
-def test_create_impedance_bcs_tracks_runtime_tree_names(monkeypatch):
-    class FakeTree:
-        def __init__(self, name):
-            self.name = name
+def _side_tuned_model(bc_order):
+    """Shared LPA/RPA tuned model; LPA_OUT serves lpa_cap, RPA_OUT rpa_cap."""
+    trees = [
+        {
+            "name": name,
+            "initial_d": 0.3,
+            "d_min": 0.01,
+            "lrr": 10.0,
+            "compliance": {"model": "ConstantCompliance", "params": {"value": 1.0}},
+            "outlet_mapping": {"side": side, "bc_names": [bc], "outlet_names": [cap]},
+        }
+        for name, side, bc, cap in (
+            ("LPA", "lpa", "LPA_OUT", "lpa_cap.vtp"),
+            ("RPA", "rpa", "RPA_OUT", "rpa_cap.vtp"),
+        )
+    ]
+    bcs = {
+        bc: SimpleNamespace(name=bc, type="IMPEDANCE", values={"Pd": 12.0 * 1333.2})
+        for bc in bc_order
+    }
+    return load_tuned_tree_model(SimpleNamespace(tree_params={t["name"]: t for t in trees}, bcs=bcs))
 
-        def compute_olufsen_impedance(self, n_procs=1, tsteps=None):
-            return np.ones(int(tsteps or 1)), [0.0, 1.0]
 
-        def create_impedance_bc(self, name, _outlet_id, Pd=0.0):
-            return SimpleNamespace(name=name, Pd=Pd)
+class _ImpedanceFakeTree:
+    def __init__(self, name):
+        self.name = name
 
+    def compute_olufsen_impedance(self, n_procs=1, tsteps=None):
+        return np.ones(int(tsteps or 1)), [0.0, 1.0]
+
+    def create_impedance_bc(self, name, _outlet_id, Pd=0.0):
+        return SimpleNamespace(name=name, Pd=Pd, tree=self.name)
+
+
+def _impedance_adaptor(monkeypatch, bc_order):
     monkeypatch.setattr(adaptor_module, "_impedance_kernel_steps_from_config", lambda _cfg: 2)
-    monkeypatch.setattr(
-        adaptor_module,
-        "vtp_info",
-        lambda *_args, **_kwargs: {"lpa_cap.vtp": 1.0, "rpa_cap.vtp": 1.0},
-    )
-
     adaptor = MicrovascularAdaptor.__new__(MicrovascularAdaptor)
-    adaptor.lpa_tree = FakeTree("LPA")
-    adaptor.rpa_tree = FakeTree("RPA")
-    adaptor.clinical_targets = SimpleNamespace(wedge_p=12.0)
+    adaptor.lpa_tree = _ImpedanceFakeTree("LPA")
+    adaptor.rpa_tree = _ImpedanceFakeTree("RPA")
+    adaptor.clinical_targets = SimpleNamespace(wedge_p=3.0)
     adaptor.convert_to_cm = False
+    adaptor.tuned_model = _side_tuned_model(bc_order)
     adaptor.postop_simdir = SimpleNamespace(
         svzerod_3Dcoupling=SimpleNamespace(
-            bcs={
-                "LPA_OUT": SimpleNamespace(name="LPA_OUT"),
-                "RPA_OUT": SimpleNamespace(name="RPA_OUT"),
-            }
+            bcs={name: SimpleNamespace(name=name) for name in bc_order},
+            coupling_blocks={
+                "LPA_OUT": SimpleNamespace(surface="lpa_cap.vtp"),
+                "RPA_OUT": SimpleNamespace(surface="rpa_cap.vtp"),
+            },
         ),
-        mesh_complete=SimpleNamespace(mesh_surfaces_dir="mesh-surfaces"),
     )
+    return adaptor
+
+
+def test_create_impedance_bcs_pairs_bcs_by_tuned_mapping_not_order(monkeypatch):
+    # BCs listed RPA first while caps sort LPA first: positional pairing
+    # would put the LPA tree on RPA_OUT.
+    adaptor = _impedance_adaptor(monkeypatch, ["RPA_OUT", "LPA_OUT"])
 
     adaptor.createImpedanceBCs()
 
+    bcs = adaptor.postop_simdir.svzerod_3Dcoupling.bcs
+    assert bcs["RPA_OUT"].tree == "RPA"
+    assert bcs["LPA_OUT"].tree == "LPA"
+    assert bcs["RPA_OUT"].Pd == pytest.approx(12.0 * 1333.2)  # tuned Pd, not wedge_p
     assert adaptor._adapted_tree_outlet_mapping == {
         "LPA": ["LPA_OUT"],
         "RPA": ["RPA_OUT"],
     }
+
+
+def test_create_impedance_bcs_requires_tuned_mapping(monkeypatch):
+    adaptor = _impedance_adaptor(monkeypatch, ["LPA_OUT", "RPA_OUT"])
+    adaptor.tuned_model = None
+
+    with pytest.raises(ValueError, match="not paired by list position"):
+        adaptor.createImpedanceBCs()
 
 
 def test_construct_impedance_trees_preserves_inductance(monkeypatch):

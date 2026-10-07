@@ -6,6 +6,7 @@ from importlib import import_module
 
 __all__ = [
     "DEFAULT_CONVERGENCE_TOLERANCE",
+    "SUPPORTED_IMPEDANCE_KEYS",
     "compute_centerline_mpa_metrics",
     "compute_flow_split_metrics",
     "evaluate_iteration_gate",
@@ -24,6 +25,12 @@ _LAZY_EXPORTS = {
     "DEFAULT_CONVERGENCE_TOLERANCE": (
         "svzerodtrees.tuning.iteration",
         "DEFAULT_CONVERGENCE_TOLERANCE",
+    ),
+    # Callers check rendered impedance configs against this set so an older
+    # install fails loudly instead of silently ignoring new controls.
+    "SUPPORTED_IMPEDANCE_KEYS": (
+        "svzerodtrees.tune_bcs.pipeline_options",
+        "SUPPORTED_IMPEDANCE_KEYS",
     ),
     "compute_centerline_mpa_metrics": (
         "svzerodtrees.tuning.iteration",

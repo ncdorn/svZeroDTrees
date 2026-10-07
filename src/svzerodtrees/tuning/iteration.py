@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
+import copy
 import json
 import os
 import warnings
@@ -30,7 +31,29 @@ from svzerodtrees.tune_bcs.assign_bcs import (
     construct_impedance_trees,
     validate_cap_to_bc_mapping,
 )
-from svzerodtrees.tune_bcs.clinical_targets import ClinicalTargets, WEDGE_PRESSURE_POLICIES
+from svzerodtrees.tune_bcs.clinical_targets import (
+    DEFAULT_DIASTOLIC_OFFSET_MMHG,
+    DEFAULT_PRECAPILLARY_FRACTION,
+    ClinicalTargets,
+    WEDGE_PRESSURE_POLICIES,
+    validate_outlet_pressure,
+)
+from svzerodtrees.tune_bcs.objective import resolve_tuning_objective
+from svzerodtrees.tune_bcs.tuning_diagnostics import (
+    SEED_WITH_PROXIMAL_COMPLIANCE_FILENAME,
+    TUNING_DIAGNOSTICS_FILENAME,
+    build_tuning_diagnostics,
+    write_seed_with_proximal_compliance,
+)
+from svzerodtrees.tune_bcs.pipeline_options import (
+    SUPPORTED_IMPEDANCE_KEYS,
+    validate_tune_space_names,
+    resolve_leaf_resistance,
+    resolve_outlet_parameters,
+    resolve_polish,
+    resolve_proximal_compliance,
+    resolve_tree_max_nodes,
+)
 from svzerodtrees.microvasculature.structured_tree.dc_resistance import (
     conductance_matched_diameter,
 )
@@ -86,6 +109,9 @@ OPTIMIZED_PARAMS_FILENAME = "optimized_params.csv"
 OPTIMIZED_RCR_PARAMS_FILENAME = "optimized_rcr_params.csv"
 OPTIMIZATION_LOG_FILENAME = "stree_impedance_optimization.log"
 PA_CONFIG_SNAPSHOT_FILENAME = "pa_config_tuning_snapshot.json"
+# Shared objective-tree results kept when a per-cap polish follows.
+SHARED_OPTIMIZED_PARAMS_FILENAME = "optimized_params_shared.csv"
+SHARED_PA_CONFIG_SNAPSHOT_FILENAME = "pa_config_tuning_snapshot_shared.json"
 TUNED_ZEROD_CONFIG_FILENAME = "svzerod_3d_coupling_tuned.json"
 OUTLET_CAP_MAPPING_FILENAME = "outlet_cap_mapping.json"
 MMHG_TO_BARYE = 1333.2
@@ -98,10 +124,204 @@ def _clear_tuning_outputs(output_dir: Path, *, tuned_config_name: str) -> None:
         PA_CONFIG_SNAPSHOT_FILENAME,
         OUTLET_CAP_MAPPING_FILENAME,
         tuned_config_name,
+        SEED_WITH_PROXIMAL_COMPLIANCE_FILENAME,
+        TUNING_DIAGNOSTICS_FILENAME,
+        SHARED_OPTIMIZED_PARAMS_FILENAME,
+        SHARED_PA_CONFIG_SNAPSHOT_FILENAME,
     ):
         path = output_dir / filename
         if path.exists() and path.is_file():
             path.unlink()
+
+
+def _json_default(value: Any) -> Any:
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, Path):
+        return str(value)
+    return str(value)
+
+
+def _optimized_csv_fit(path: Path) -> dict[str, Any] | None:
+    """MPA pressures, RPA split and loss recorded in an optimized_params.csv."""
+    try:
+        frame = pd.read_csv(path)
+        row = frame[frame["pa"].astype(str).str.lower() == "rpa"].iloc[0]
+        pressures = [float(v) for v in str(row["p_mpa"]).strip("[]").split()]
+        return {
+            "mpa_pressure_mmhg": pressures,
+            "rpa_split": float(row["flow_split"]),
+            "loss": float(row["loss"]),
+        }
+    except Exception:
+        return None
+
+
+PUBLISHED_SOLVER_TOLERANCES = (None, 1e-7, 1e-6, 1e-5)
+
+
+def _score_published_full_pa_model(config_path: Path) -> dict[str, Any]:
+    """Simulate the exported per-cap model and return its MPA pressures/split.
+
+    On Newton non-convergence the absolute tolerance is relaxed in the raw
+    config (ConfigHandler's SimParams drops unknown simulation_parameters);
+    converged results are insensitive to this tolerance.  Failure is reported,
+    never raised.
+    """
+    import contextlib
+
+    handler = ConfigHandler.from_json(str(config_path), is_pulmonary=True)
+    raw = _load_json_payload(Path(config_path))
+    errors: list[str] = []
+    for tolerance in PUBLISHED_SOLVER_TOLERANCES:
+        payload = json.loads(json.dumps(raw))
+        if tolerance is not None:
+            payload.setdefault("simulation_parameters", {})["absolute_tolerance"] = tolerance
+        try:
+            with contextlib.redirect_stdout(open(os.devnull, "w")):
+                result = simulate_pysvzerod(payload)
+        except RuntimeError as exc:
+            errors.append(f"tol={tolerance}: {exc}")
+            continue
+        metrics = ImpedanceTuner._compute_full_pa_metrics(
+            object.__new__(ImpedanceTuner), handler, result
+        )
+        try:
+            inflow_mean = float(_resolve_flow_mean_config(raw, bc_name="INFLOW"))
+        except Exception:
+            inflow_mean = None
+        try:
+            outlets = _published_outlet_means(handler, raw, result)
+        except Exception:
+            outlets = None
+        return {
+            "mpa_pressure_mmhg": [float(v) for v in metrics["P_mpa"]],
+            "rpa_split": float(metrics["rpa_split"]),
+            # Last-cycle mean pressure [mmHg] and flow at every outlet BC.
+            "outlet_means": outlets,
+            # The exported model keeps the seed's inflow; compared with
+            # inflow.csv (the optimizer's flow) in tuning_diagnostics.json.
+            "inflow_mean_flow": inflow_mean,
+            "solver_absolute_tolerance": tolerance,
+            "solver_retries": errors,
+        }
+    return {"error": "published model did not converge", "solver_retries": errors}
+
+
+def _published_outlet_means(handler, raw: Mapping[str, Any], result) -> dict[str, dict[str, float]]:
+    """Last-cycle mean pressure [mmHg] and flow of each outlet vessel, by BC name."""
+    period = getattr(handler.simparams, "cardiac_period", None)
+    if period is None:
+        inflow_t = np.asarray(getattr(handler.bcs["INFLOW"], "t", []) or [], dtype=float)
+        period = float(inflow_t.max() - inflow_t.min()) if inflow_t.size >= 2 else None
+    outlets: dict[str, dict[str, float]] = {}
+    for vessel in raw.get("vessels") or []:
+        bc_name = (vessel.get("boundary_conditions") or {}).get("outlet")
+        if not bc_name:
+            continue
+        rows = result[result.name == vessel.get("vessel_name")]
+        if rows.empty:
+            continue
+        time = np.asarray(rows.time, dtype=float)
+        if period:
+            rows = rows[time > time.max() - float(period)]
+        outlets[str(bc_name)] = {
+            "pressure_mmhg": float(np.mean(np.asarray(rows.pressure_out, dtype=float))) / 1333.2,
+            "flow": float(np.mean(np.asarray(rows.flow_out, dtype=float))),
+        }
+    return outlets
+
+
+def _leaf_downstream_fraction(tuning: Mapping[str, Any]) -> float | None:
+    leaf = tuning.get("leaf_resistance")
+    return None if not leaf else float(leaf["downstream_fraction"])
+
+
+def _bound_flags(tune_space, x, rel: float = 0.01) -> list[dict[str, Any]]:
+    """Free parameters within ``rel`` of their bound range at the selected point."""
+    if x is None:
+        return []
+    flags = []
+    _, bounds = tune_space.pack_init_and_bounds()
+    for param, value, (lo, hi) in zip(tune_space.free, np.asarray(x, dtype=float), bounds):
+        span = float(hi) - float(lo)
+        if not np.isfinite(span) or span <= 0.0:
+            continue
+        side = "lower" if value - lo <= rel * span else "upper" if hi - value <= rel * span else None
+        if side is not None:
+            flags.append({"name": param.name, "bound": side, "native": float(param.to_native(value))})
+    return flags
+
+
+def _run_per_cap_polish(
+    *,
+    tuner: ImpedanceTuner,
+    tuning: Mapping[str, Any],
+    output_dir: Path,
+    opt_log: Path,
+) -> tuple[dict[str, Any], Any]:
+    """Re-tune with the final per-cap trees, seeded from the shared optimum.
+
+    Returns ``(polish_summary, final_x)``.
+
+    The shared conductance-matched objective trees are fast but misrepresent
+    the exported per-cap model (they carry less compliance), so the
+    optimizer's reported fit differs from the published model.  A short
+    Nelder-Mead run on the per-cap trees removes that bias.  If it fails, the
+    shared result is restored so a completed fit is never lost.
+    """
+    import shutil
+
+    optimized = output_dir / OPTIMIZED_PARAMS_FILENAME
+    snapshot = output_dir / PA_CONFIG_SNAPSHOT_FILENAME
+    shared_csv = output_dir / SHARED_OPTIMIZED_PARAMS_FILENAME
+    shared_snapshot = output_dir / SHARED_PA_CONFIG_SNAPSHOT_FILENAME
+    if not optimized.exists():
+        raise FileNotFoundError(f"impedance tuning did not produce {OPTIMIZED_PARAMS_FILENAME}")
+    shutil.copyfile(optimized, shared_csv)
+    if snapshot.exists():
+        shutil.copyfile(snapshot, shared_snapshot)
+
+    maxfev = int(tuning["polish"]["maxfev"])
+    summary: dict[str, Any] = {
+        "maxfev": maxfev,
+        "shared_optimized_params_csv": str(shared_csv),
+        "shared_fit": _optimized_csv_fit(shared_csv),
+    }
+    with open(opt_log, "a", encoding="utf-8") as fh:
+        fh.write(
+            "\n=== per-cap polish: objective trees = final per-cap trees, "
+            f"maxfev={maxfev}, started at the shared optimum (copy: {shared_csv.name}) ===\n"
+        )
+    polisher = copy.copy(tuner)
+    polisher.objective_tree_policy = None
+    polisher.grid_search_init = False
+    polish_stopping = {**dict(tuning.get("stopping") or {}), "maxfev": maxfev}
+    if tuning["polish"].get("initial_simplex_step") is not None:
+        polish_stopping["initial_simplex_step"] = float(tuning["polish"]["initial_simplex_step"])
+    polisher.stopping = resolve_nelder_mead_stopping(
+        polish_stopping, label="impedance tuning polish stopping"
+    )
+    best_x = getattr(tuner, "best_x", None)
+    try:
+        if best_x is not None:
+            polisher.tune(nm_iter=1, x0=best_x)
+        else:
+            polisher.tune(nm_iter=1, initial_params_csv=str(shared_csv))
+    except Exception as exc:
+        shutil.copyfile(shared_csv, optimized)
+        if shared_snapshot.exists():
+            shutil.copyfile(shared_snapshot, snapshot)
+        summary.update({"used": "shared", "error": f"{type(exc).__name__}: {exc}"})
+        with open(opt_log, "a", encoding="utf-8") as fh:
+            fh.write(f"per-cap polish failed ({summary['error']}); shared result kept\n")
+        return summary, best_x
+    summary.update({"used": "per_cap", "polished_fit": _optimized_csv_fit(optimized)})
+    return summary, getattr(polisher, "best_x", best_x)
 
 
 def _load_json_payload(path: Path) -> dict[str, Any]:
@@ -378,6 +598,27 @@ def _resolve_impedance_config(
             "free, fixed, and tied"
         )
 
+    unknown_keys = sorted(set(config) - SUPPORTED_IMPEDANCE_KEYS)
+    if unknown_keys:
+        raise ValueError(
+            f"impedance tuning config has unknown keys {unknown_keys}; this svZeroDTrees "
+            "install may be older than the caller (see SUPPORTED_IMPEDANCE_KEYS)"
+        )
+    validate_tune_space_names(
+        [
+            entry.get("name")
+            for group in ("free", "fixed", "tied")
+            for entry in (config["tune_space"].get(group) or [])
+            if isinstance(entry, Mapping)
+        ]
+        + [
+            entry.get("other")
+            for entry in (config["tune_space"].get("tied") or [])
+            if isinstance(entry, Mapping)
+        ],
+        label="impedance tune_space",
+    )
+
     raw_config = config
     tuning_model = str(raw_config.get("tuning_model", "rri") or "rri").strip().lower()
     if tuning_model not in {"rri", "full_pa"}:
@@ -572,6 +813,58 @@ def _resolve_impedance_config(
         if merged["solver"] != "Nelder-Mead":
             raise ValueError("impedance tuning stopping requires solver='Nelder-Mead'")
         merged["stopping"] = stopping.to_dict()
+
+    # Optional controls (see tune_bcs/pipeline_options.py).  Omitted controls
+    # are dropped so historical configs keep their resolved shape.
+    fraction, offset = resolve_outlet_parameters(
+        merged.pop("precapillary_fraction", None),
+        merged.pop("diastolic_offset_mmhg", None),
+        label="impedance tuning",
+    )
+    if fraction != DEFAULT_PRECAPILLARY_FRACTION:
+        merged["precapillary_fraction"] = fraction
+    if offset != DEFAULT_DIASTOLIC_OFFSET_MMHG:
+        merged["diastolic_offset_mmhg"] = offset
+    if bool(merged.pop("keep_diastolic_target", False)):
+        merged["keep_diastolic_target"] = True
+    objective = merged.pop("objective", None)
+    if objective is not None:
+        merged["objective"] = resolve_tuning_objective(
+            objective, label="impedance tuning objective"
+        ).to_dict()
+    proximal = resolve_proximal_compliance(
+        merged.pop("proximal_compliance", None), label="impedance tuning proximal_compliance"
+    )
+    if proximal is not None:
+        if merged["tuning_model"] != "full_pa":
+            raise ValueError("impedance tuning proximal_compliance requires tuning_model='full_pa'")
+        if merged["convert_to_cm"]:
+            raise ValueError(
+                "impedance tuning proximal_compliance assumes a cm-g-s seed; "
+                "it cannot be combined with convert_to_cm=True"
+            )
+        merged["proximal_compliance"] = proximal
+    max_nodes = resolve_tree_max_nodes(
+        merged.pop("tree_max_nodes", None), label="impedance tuning tree_max_nodes"
+    )
+    if max_nodes is not None:
+        merged["tree_max_nodes"] = max_nodes
+    polish = resolve_polish(
+        merged.pop("polish", None),
+        tuning_model=merged["tuning_model"],
+        objective_tree_policy=merged.get("objective_tree_policy"),
+        label="impedance tuning polish",
+    )
+    if polish is not None:
+        merged["polish"] = polish
+    leaf = resolve_leaf_resistance(
+        merged.pop("leaf_resistance", None),
+        tuning_model=merged["tuning_model"],
+        wedge_pressure_policy=merged.get("wedge_pressure_policy", "clamp_to_diastolic"),
+        label="impedance tuning leaf_resistance",
+    )
+    if leaf is not None:
+        merged["leaf_resistance"] = leaf
 
     return merged
 
@@ -1152,11 +1445,29 @@ def run_impedance_tuning_for_iteration(
             )
     _clear_tuning_outputs(output_dir, tuned_config_name=tuned_config_name)
     required_xi_pa = _required_xi_pa_labels(tuning["tune_space"])
-    targets = ClinicalTargets.from_csv(
-        str(targets_path),
-        wedge_pressure_policy=str(tuning["wedge_pressure_policy"]),
-    )
+    targets_kwargs: dict[str, Any] = {
+        "wedge_pressure_policy": str(tuning["wedge_pressure_policy"])
+    }
+    if tuning["wedge_pressure_policy"] == "precapillary_fraction":
+        targets_kwargs["precapillary_fraction"] = float(
+            tuning.get("precapillary_fraction", DEFAULT_PRECAPILLARY_FRACTION)
+        )
+    elif tuning["wedge_pressure_policy"] == "diastolic_offset":
+        targets_kwargs["diastolic_offset_mmhg"] = float(
+            tuning.get("diastolic_offset_mmhg", DEFAULT_DIASTOLIC_OFFSET_MMHG)
+        )
+    targets = ClinicalTargets.from_csv(str(targets_path), **targets_kwargs)
+    validate_outlet_pressure(targets)
     tune_space = _build_tune_space_from_config(tuning["tune_space"])
+    proximal_summary = None
+    if tuning.get("proximal_compliance") is not None:
+        # The tuning model, preflight, and exported config all use the seed
+        # with proximal compliance, so the published model is the tuned one.
+        seed_config_path, proximal_summary = write_seed_with_proximal_compliance(
+            seed_config_path,
+            output_dir,
+            float(tuning["proximal_compliance"]["wall_ehr"]),
+        )
     expected_snapshot_co = _expected_snapshot_inflow_cardiac_output(
         seed_config=seed_config_path,
         mesh_surfaces=mesh_surfaces_path,
@@ -1210,6 +1521,10 @@ def run_impedance_tuning_for_iteration(
             resolved_mapping=resolved_mapping,
             objective_tree_policy=tuning.get("objective_tree_policy"),
             stopping=tuning.get("stopping"),
+            objective=tuning.get("objective"),
+            keep_diastolic_target=bool(tuning.get("keep_diastolic_target", False)),
+            tree_max_nodes=tuning.get("tree_max_nodes"),
+            leaf_downstream_fraction=_leaf_downstream_fraction(tuning),
         )
         prev_csv = str(previous_optimized_params) if previous_optimized_params is not None else None
         if prev_csv is not None and os.path.isfile(prev_csv):
@@ -1224,6 +1539,16 @@ def run_impedance_tuning_for_iteration(
                 prev_csv,
             )
         tuner.tune(nm_iter=int(tuning["nm_iter"]), initial_params_csv=prev_csv)
+
+        polish_summary = None
+        final_x = getattr(tuner, "best_x", None)
+        if tuning.get("polish") is not None:
+            polish_summary, final_x = _run_per_cap_polish(
+                tuner=tuner,
+                tuning=tuning,
+                output_dir=output_dir,
+                opt_log=opt_log,
+            )
 
     optimized_csv = output_dir / OPTIMIZED_PARAMS_FILENAME
     pa_snapshot = output_dir / PA_CONFIG_SNAPSHOT_FILENAME
@@ -1262,7 +1587,10 @@ def run_impedance_tuning_for_iteration(
         "allow_ordered_outlet_mapping": bool(
             tuning.get("allow_ordered_outlet_mapping", False)
         ),
+        "max_nodes": tuning.get("tree_max_nodes"),
     }
+    if _leaf_downstream_fraction(tuning) is not None:
+        construct_kwargs["leaf_downstream_fraction"] = _leaf_downstream_fraction(tuning)
     if resolved_mapping is not None:
         # Full-PA construction consumes the preflight result instead of
         # reconstructing a mapping from mutable ConfigHandler state.
@@ -1317,6 +1645,32 @@ def run_impedance_tuning_for_iteration(
             encoding="utf-8",
         )
 
+    diagnostics_path = output_dir / TUNING_DIAGNOSTICS_FILENAME
+    published_fit = None
+    if tuning["tuning_model"] == "full_pa":
+        # Scored separately so a scoring failure keeps the rest of the report.
+        try:
+            published_fit = _score_published_full_pa_model(tuned_zerod_config)
+        except Exception as exc:
+            published_fit = {"error": f"{type(exc).__name__}: {exc}"}
+    try:
+        diagnostics = build_tuning_diagnostics(
+            targets=targets,
+            tuning=tuning,
+            tree_diagnostics=getattr(tuned_config, "tree_diagnostics", None),
+            proximal_summary=proximal_summary,
+            inflow_path=inflow_path,
+            polish_summary=polish_summary,
+            published_fit=published_fit,
+            optimizer_fit=_optimized_csv_fit(optimized_csv),
+            bound_flags=_bound_flags(tune_space, final_x),
+        )
+    except Exception as exc:  # diagnostics must never fail a completed tuning
+        diagnostics = {"error": f"{type(exc).__name__}: {exc}"}
+    diagnostics_path.write_text(
+        json.dumps(diagnostics, indent=2, default=_json_default) + "\n", encoding="utf-8"
+    )
+
     return {
         "optimized_params_csv": str(optimized_csv),
         "stree_optimization_log": str(opt_log),
@@ -1326,6 +1680,10 @@ def run_impedance_tuning_for_iteration(
         "impedance_config": tuning,
         "outlet_cap_mapping": (
             str(outlet_cap_mapping) if outlet_cap_mapping is not None else None
+        ),
+        "tuning_diagnostics": str(diagnostics_path),
+        "seed_with_proximal_compliance": (
+            proximal_summary["seed_with_proximal_compliance"] if proximal_summary else None
         ),
     }
 
@@ -1756,16 +2114,27 @@ def evaluate_iteration_gate(
     metrics: Mapping[str, float],
     clinical_targets: str | Path | Mapping[str, Any],
     tolerance: float | None = None,
+    sigma: Mapping[str, float] | None = None,
+    sigma_multiple: float = 1.0,
 ) -> dict[str, Any]:
     """Evaluate convergence gate and return machine-readable decision payload.
 
-    Each metric must be within ``tolerance`` (fraction) of its clinical target.
-    Default tolerance is ``DEFAULT_CONVERGENCE_TOLERANCE`` (10%).
+    Relative mode (default): each metric must be within ``tolerance``
+    (fraction, default ``DEFAULT_CONVERGENCE_TOLERANCE`` = 10%) of its target.
+    Sigma mode (``sigma={"pressure_mmhg": s_p, "split": s_s}``): each metric
+    must be within ``sigma_multiple`` measurement standard deviations, which
+    avoids demanding ~0.3 mmHg on a 3 mmHg diastolic target.
     """
 
     tol = float(tolerance) if tolerance is not None else DEFAULT_CONVERGENCE_TOLERANCE
     if tol <= 0.0:
         raise ValueError("tolerance must be > 0")
+    if sigma is not None:
+        sigma_p = float(sigma["pressure_mmhg"])
+        sigma_s = float(sigma["split"])
+        k = float(sigma_multiple)
+        if not (sigma_p > 0.0 and sigma_s > 0.0 and k > 0.0):
+            raise ValueError("sigma values and sigma_multiple must be > 0")
 
     targets = _clinical_targets_from_input(clinical_targets)
     required = ["mpa_sys", "mpa_dia", "mpa_mean", "rpa_split"]
@@ -1773,20 +2142,26 @@ def evaluate_iteration_gate(
     if missing:
         raise ValueError(f"metrics missing required keys: {missing}")
 
-    zero_targets = [key for key in required if targets[key] == 0.0]
-    if zero_targets:
-        raise ValueError(
-            f"clinical target values must be non-zero for percentage threshold; "
-            f"got zero for: {zero_targets}"
-        )
-
-    thresholds = {key: tol * abs(targets[key]) for key in required}
+    if sigma is not None:
+        thresholds = {
+            key: k * (sigma_s if key == "rpa_split" else sigma_p) for key in required
+        }
+    else:
+        zero_targets = [key for key in required if targets[key] == 0.0]
+        if zero_targets:
+            raise ValueError(
+                f"clinical target values must be non-zero for percentage threshold; "
+                f"got zero for: {zero_targets}"
+            )
+        thresholds = {key: tol * abs(targets[key]) for key in required}
     deltas = {key: abs(float(metrics[key]) - float(targets[key])) for key in required}
     close_to_targets = all(deltas[key] <= thresholds[key] for key in required)
 
     return {
         "decision": "converged" if close_to_targets else "not_close",
         "close_to_targets": close_to_targets,
+        "gate_mode": "sigma" if sigma is not None else "relative",
+        "sigma": None if sigma is None else {"pressure_mmhg": sigma_p, "split": sigma_s, "multiple": k},
         "tolerance": tol,
         "thresholds": thresholds,
         "clinical_targets": targets,

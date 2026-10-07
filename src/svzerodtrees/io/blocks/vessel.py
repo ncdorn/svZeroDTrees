@@ -41,6 +41,9 @@ class Vessel():
         self._C_eq = self._C
         self._L_eq = self._L
         self._terminal_resistance = 0.0
+        # 3D-derived geometry (learned / calibrated seeds); kept so later
+        # iterations can still derive geometry-based quantities.
+        self.geometric_params = config.get('geometric_params')
         # get diameter with viscosity 0.04
         self._diameter = self._calculate_diameter(self._R)
     
@@ -59,34 +62,25 @@ class Vessel():
         convert the vessel to a dict for zerod solver use
         '''
 
-        if self.bc is None:
-            return {
-                'vessel_id': self.id,
-                'vessel_length': self.length,
-                'vessel_name': self.name,
-                'zero_d_element_type': "BloodVessel",
-                'zero_d_element_values': {
-                    'R_poiseuille': self.R,
-                    'C': self.C,
-                    'L': self.L,
-                    'stenosis_coefficient': self.stenosis_coefficient
-                },
-            }
-        
-        else:
-            return {
-                'boundary_conditions': self.bc,
-                'vessel_id': self.id,
-                'vessel_length': self.length,
-                'vessel_name': self.name,
-                'zero_d_element_type': "BloodVessel",
-                'zero_d_element_values': {
-                    'R_poiseuille': self.R,
-                    'C': self.C,
-                    'L': self.L,
-                    'stenosis_coefficient': self.stenosis_coefficient
-                },
-            }
+        payload = {}
+        if self.bc is not None:
+            payload['boundary_conditions'] = self.bc
+        payload.update({
+            'vessel_id': self.id,
+            'vessel_length': self.length,
+            'vessel_name': self.name,
+            'zero_d_element_type': "BloodVessel",
+            'zero_d_element_values': {
+                'R_poiseuille': self.R,
+                'C': self.C,
+                'L': self.L,
+                'stenosis_coefficient': self.stenosis_coefficient
+            },
+        })
+        # Geometry describes a single segment; merged branches do not carry it.
+        if self.geometric_params is not None and len(self.ids) == 1:
+            payload['geometric_params'] = dict(self.geometric_params)
+        return payload
 
 
     def add_segment(self, config: dict):

@@ -3,7 +3,7 @@ import numpy as np
 from ..io import *
 from ..io.blocks.boundary_condition import resolve_impedance_timepoint_contract
 from ..utils import *
-from ..microvasculature.structured_tree.structuredtree import StructuredTree
+from ..microvasculature.structured_tree.structuredtree import DEFAULT_MAX_NODES, StructuredTree
 from ..microvasculature.structured_tree.dc_resistance import conductance_matched_diameter
 from ..microvasculature.treeparams import TreeParameters
 from ..simulation.threedutils import vtp_info
@@ -60,6 +60,58 @@ def _attach_tree_metadata(
             for record in (mapping_records or resolved_mapping.records)
         ]
     return tree.to_dict()
+
+
+def tree_diagnostics(tree) -> dict:
+    """Size, truncation, DC resistance and static compliance of a solved tree.
+
+    Static compliance sums 3 A L / (2 Eh/r) over vessels (the same linear
+    thin-wall law the impedance uses); DC resistance is Z(omega = 0).
+    """
+    store = tree.store
+    radius = 0.5 * np.asarray(store.d, dtype=float)
+    lrr = float(store.lrr)
+    area = np.pi * radius * radius
+    ehr = np.broadcast_to(
+        np.asarray(store.compliance_model.evaluate(radius), dtype=float), radius.shape
+    )
+    max_nodes = int(getattr(tree, "max_nodes", 0) or 0)
+    z_t = getattr(tree, "Z_t", None)
+    return {
+        "root_diameter": float(radius[0] * 2.0) if radius.size else float("nan"),
+        "n_nodes": int(radius.size),
+        "max_nodes": max_nodes,
+        "truncated": bool(max_nodes and radius.size >= max_nodes),
+        "dc_resistance": float(np.sum(np.asarray(z_t, dtype=float))) if z_t is not None else None,
+        "static_compliance": float(np.sum(3.0 * area * lrr * radius / (2.0 * ehr))),
+        "ehr_min": float(np.min(ehr)) if ehr.size else None,
+        "ehr_max": float(np.max(ehr)) if ehr.size else None,
+        "ehr_root": float(ehr[0]) if ehr.size else None,
+        "terminal_resistance": float(getattr(tree, "terminal_resistance", 0.0) or 0.0),
+        "leaf_resistance": dict(getattr(tree, "leaf_resistance_summary", None) or {}) or None,
+    }
+
+
+def _apply_leaf_resistance(tree, leaf_downstream_fraction):
+    """Set the tree's per-leaf capillary + venous resistance (no-op when unset)."""
+    if leaf_downstream_fraction is None:
+        return
+    tree.leaf_resistance_summary = tree.set_leaf_resistance_for_fraction(
+        float(leaf_downstream_fraction)
+    )
+
+
+def _record_tree_diagnostics(config_handler, key, tree, **extra):
+    """Keep the latest diagnostics per tree on the config handler (not serialized)."""
+    store = getattr(config_handler, "tree_diagnostics", None)
+    if store is None:
+        store = {}
+        config_handler.tree_diagnostics = store
+    try:
+        stats = tree_diagnostics(tree)
+    except Exception as exc:  # diagnostics must never break tree assignment
+        stats = {"error": f"{type(exc).__name__}: {exc}"}
+    store[str(key)] = {**stats, **extra}
 
 
 def _mapping_key(value):
@@ -219,9 +271,16 @@ def construct_impedance_trees(config_handler,
                               resolved_mapping=None,
                               mapping=None,
                               outlet_mapping=None,
-                              cap_to_bc_mapping=None):
+                              cap_to_bc_mapping=None,
+                              max_nodes=None,
+                              leaf_downstream_fraction=None):
     '''
     construct impedance trees for outlet BCs
+
+    :param leaf_downstream_fraction: when set, every tree gets a per-leaf
+        resistance to ``wedge_pressure`` carrying this fraction of its DC
+        resistance (capillary + venous bed; see
+        StructuredTree.set_leaf_resistance_for_fraction)
     
     :param k2: stiffness parameter 2
     :param k3: stiffness parameter 3
@@ -330,6 +389,7 @@ def construct_impedance_trees(config_handler,
                     d_min=params.d_min,
                     alpha=params.alpha,
                     beta=params.beta,
+                    max_nodes=DEFAULT_MAX_NODES if max_nodes is None else int(max_nodes),
                 )
                 side_reference[side] = {
                     "mode": "conductance_matched",
@@ -368,8 +428,11 @@ def construct_impedance_trees(config_handler,
             beta=lpa_params.beta,
             xi=lpa_params.xi,
             eta_sym=lpa_params.eta_sym,
+            max_nodes=max_nodes,
         )
+        _apply_leaf_resistance(lpa_tree, leaf_downstream_fraction)
         lpa_tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
+        _record_tree_diagnostics(config_handler, "LPA", lpa_tree)
         if plot_stiffness:
             lpa_tree.plot_stiffness(path='lpa_stiffness_plot.png')
 
@@ -384,8 +447,11 @@ def construct_impedance_trees(config_handler,
             beta=rpa_params.beta,
             xi=rpa_params.xi,
             eta_sym=rpa_params.eta_sym,
+            max_nodes=max_nodes,
         )
+        _apply_leaf_resistance(rpa_tree, leaf_downstream_fraction)
         rpa_tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
+        _record_tree_diagnostics(config_handler, "RPA", rpa_tree)
         if plot_stiffness:
             rpa_tree.plot_stiffness(path='rpa_stiffness_plot.png')
 
@@ -496,12 +562,15 @@ def construct_impedance_trees(config_handler,
                 beta=params.beta,
                 xi=params.xi,
                 eta_sym=params.eta_sym,
+                max_nodes=max_nodes,
             )
 
+            _apply_leaf_resistance(tree, leaf_downstream_fraction)
             # compute the impedance in frequency domain
             tree.compute_olufsen_impedance(n_procs=n_procs, tsteps=kernel_steps)
 
             bc_name = record.bc_name
+            _record_tree_diagnostics(config_handler, bc_name, tree, cap=cap_name, side=record.side)
 
             config_handler.bcs[bc_name] = _create_impedance_bc(
                 tree,

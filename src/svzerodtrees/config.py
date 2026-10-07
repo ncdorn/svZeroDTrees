@@ -10,6 +10,16 @@ from .tune_bcs.tune_space import FreeParam, FixedParam, TiedParam, TuneSpace, id
 from .tune_bcs.tree_policy import resolve_objective_tree_policy
 from .tune_bcs.nm_stopping import resolve_nelder_mead_stopping
 from .tune_bcs.clinical_targets import WEDGE_PRESSURE_POLICIES
+from .tune_bcs.objective import resolve_tuning_objective
+from .tune_bcs.pipeline_options import (
+    IMPEDANCE_CONFIG_KEYS,
+    validate_tune_space_names,
+    resolve_outlet_parameters,
+    resolve_leaf_resistance,
+    resolve_polish,
+    resolve_proximal_compliance,
+    resolve_tree_max_nodes,
+)
 from .microvasculature.treeparams import TreeParameters
 from .microvasculature.compliance.constant import ConstantCompliance
 from .microvasculature.compliance.olufsen import OlufsenCompliance
@@ -94,6 +104,21 @@ class ImpedanceConfig:
     outlet_mapping_centerline: Optional[str] = None
     objective_tree_policy: Optional[Dict[str, Any]] = None
     wedge_pressure_policy: str = "clamp_to_diastolic"
+    # Parameters of the precapillary_fraction / diastolic_offset policies.
+    precapillary_fraction: float = 0.332
+    diastolic_offset_mmhg: float = 2.0
+    # Keep the diastolic term when its target is below the outlet pressure.
+    keep_diastolic_target: bool = False
+    # Resolved objective ({type, pressure_sigma_mmhg, split_sigma}); None = relative.
+    objective: Optional[Dict[str, Any]] = None
+    # {wall_ehr}: thin-wall compliance on the seed vessels; None = rigid seed.
+    proximal_compliance: Optional[Dict[str, Any]] = None
+    # Structured-tree node budget; None = library default (100k).
+    tree_max_nodes: Optional[int] = None
+    # {maxfev}: per-cap re-tune after a shared objective-tree fit (full_pa).
+    polish: Optional[Dict[str, Any]] = None
+    # {downstream_fraction}: per-leaf capillary + venous resistance (full_pa).
+    leaf_resistance: Optional[Dict[str, Any]] = None
     # Resolved Nelder-Mead stopping policy; None keeps maxiter-only runs.
     stopping: Optional[Dict[str, Any]] = None
     tune_space: Optional[TuneSpace] = None
@@ -422,6 +447,12 @@ def _parse_tune_space(data: Optional[Dict[str, Any]]) -> Optional[TuneSpace]:
     for entry in data.get("fixed", []) or []:
         _ensure_keys(entry, ["name", "value"], "bcs.tune_space.fixed")
         fixed_params.append(FixedParam(name=entry["name"], value=float(entry["value"])))
+    validate_tune_space_names(
+        [p.name for p in free_params] + [p.name for p in fixed_params]
+        + [entry.get("name") for entry in data.get("tied", []) or []]
+        + [entry.get("other") for entry in data.get("tied", []) or []],
+        label="bcs.tune_space",
+    )
     tied_params = []
     for entry in data.get("tied", []) or []:
         _ensure_keys(entry, ["name", "other", "fn"], "bcs.tune_space.tied")
@@ -435,28 +466,7 @@ def _parse_tune_space(data: Optional[Dict[str, Any]]) -> Optional[TuneSpace]:
     return TuneSpace(free=free_params, fixed=fixed_params, tied=tied_params)
 
 
-_IMPEDANCE_CONFIG_KEYS = [
-    "tuning_model",
-    "solver",
-    "nm_iter",
-    "n_procs",
-    "grid_search_init",
-    "d_min",
-    "use_mean",
-    "specify_diameter",
-    "rescale_inflow",
-    "convert_to_cm",
-    "compliance_model",
-    "diameter_scale",
-    "diameter_std_cap",
-    "outlet_mapping_mode",
-    "outlet_mapping",
-    "outlet_mapping_centerline",
-    "objective_tree_policy",
-    "wedge_pressure_policy",
-    "stopping",
-    "tune_space",
-]
+_IMPEDANCE_CONFIG_KEYS = list(IMPEDANCE_CONFIG_KEYS)
 
 _OUTLET_MAPPING_MODES = {
     "auto",
@@ -641,6 +651,41 @@ def _parse_impedance_config(
     )
     if stopping is not None and solver != "Nelder-Mead":
         raise ValueError("bcs.impedance.stopping requires solver='Nelder-Mead'")
+    precapillary_fraction, diastolic_offset_mmhg = resolve_outlet_parameters(
+        data.get("precapillary_fraction"),
+        data.get("diastolic_offset_mmhg"),
+        label="bcs.impedance",
+    )
+    objective = (
+        None
+        if data.get("objective") is None
+        else resolve_tuning_objective(data["objective"], label="bcs.impedance.objective").to_dict()
+    )
+    proximal_compliance = resolve_proximal_compliance(
+        data.get("proximal_compliance"), label="bcs.impedance.proximal_compliance"
+    )
+    if proximal_compliance is not None and tuning_model != "full_pa":
+        raise ValueError("bcs.impedance.proximal_compliance requires tuning_model='full_pa'")
+    if proximal_compliance is not None and bool(data.get("convert_to_cm", False)):
+        raise ValueError(
+            "bcs.impedance.proximal_compliance assumes a cm-g-s seed; it cannot be "
+            "combined with convert_to_cm=True"
+        )
+    tree_max_nodes = resolve_tree_max_nodes(
+        data.get("tree_max_nodes"), label="bcs.impedance.tree_max_nodes"
+    )
+    polish = resolve_polish(
+        data.get("polish"),
+        tuning_model=tuning_model,
+        objective_tree_policy=data.get("objective_tree_policy"),
+        label="bcs.impedance.polish",
+    )
+    leaf_resistance = resolve_leaf_resistance(
+        data.get("leaf_resistance"),
+        tuning_model=tuning_model,
+        wedge_pressure_policy=wedge_pressure_policy,
+        label="bcs.impedance.leaf_resistance",
+    )
 
     return ImpedanceConfig(
         tuning_model=tuning_model,
@@ -661,6 +706,14 @@ def _parse_impedance_config(
         outlet_mapping_centerline=mapping_centerline,
         objective_tree_policy=objective_tree_policy,
         wedge_pressure_policy=wedge_pressure_policy,
+        precapillary_fraction=precapillary_fraction,
+        diastolic_offset_mmhg=diastolic_offset_mmhg,
+        keep_diastolic_target=bool(data.get("keep_diastolic_target", False)),
+        objective=objective,
+        proximal_compliance=proximal_compliance,
+        tree_max_nodes=tree_max_nodes,
+        polish=polish,
+        leaf_resistance=leaf_resistance,
         stopping=None if stopping is None else stopping.to_dict(),
         tune_space=tune_space,
     )
@@ -749,6 +802,20 @@ def impedance_config_to_mapping(config: ImpedanceConfig) -> Dict[str, Any]:
     stopping = getattr(config, "stopping", None)
     if stopping is not None:
         payload["stopping"] = dict(stopping)
+    # Optional controls are emitted only when they differ from the historical
+    # behavior so existing configs keep their exact mapping shape.
+    if getattr(config, "precapillary_fraction", 0.332) != 0.332:
+        payload["precapillary_fraction"] = float(config.precapillary_fraction)
+    if getattr(config, "diastolic_offset_mmhg", 2.0) != 2.0:
+        payload["diastolic_offset_mmhg"] = float(config.diastolic_offset_mmhg)
+    if getattr(config, "keep_diastolic_target", False):
+        payload["keep_diastolic_target"] = True
+    for key in ("objective", "proximal_compliance", "polish", "leaf_resistance"):
+        value = getattr(config, key, None)
+        if value is not None:
+            payload[key] = dict(value)
+    if getattr(config, "tree_max_nodes", None) is not None:
+        payload["tree_max_nodes"] = int(config.tree_max_nodes)
     return payload
 
 
@@ -2363,7 +2430,7 @@ adaptation:
   iterations: 10
   territory_scheme: lpa_rpa
   mode: predict
-  parameter_set: {}  # e.g. {max_nodes: 200000, wss_gain: 0.01}
+  parameter_set: {}  # e.g. {iterations: 1, wss_gain: 1.0}; M2 trees keep their tuned max_nodes
 
 adapt_benchmark:
   study_id: tst-stan-1-reduced-pa

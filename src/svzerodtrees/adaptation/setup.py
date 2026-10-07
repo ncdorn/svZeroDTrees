@@ -82,7 +82,7 @@ def initialize_from_paths(
         preop_config_path: str,
         postop_config_path: str,
         optimized_tree_params_csv: str,
-        clinical_targets_csv: str,
+        clinical_targets_csv: str | ClinicalTargets,
         *,
         max_nodes: int = 100_000,
 ) -> tuple[PAConfig, PAConfig]:
@@ -92,11 +92,16 @@ def initialize_from_paths(
     :param preop_config_path: Path to the preoperative configuration file.
     :param postop_config_path: Path to the postoperative configuration file.
     :param optimized_tree_params_csv: Path to the optimized tree parameters CSV file.
-    :param clinical_targets_csv: Path to the clinical targets CSV file.
+    :param clinical_targets_csv: ClinicalTargets (whose ``wedge_p`` is the outlet
+        pressure the trees use; adaptation passes the tuned Pd), or a path to the
+        clinical targets CSV (legacy ``clamp_to_diastolic`` outlet pressure).
     :return: A tuple containing the preoperative and postoperative PAConfig objects.
     """
 
-    clinical_targets = ClinicalTargets.from_csv(clinical_targets_csv)
+    if isinstance(clinical_targets_csv, ClinicalTargets):
+        clinical_targets = clinical_targets_csv
+    else:
+        clinical_targets = ClinicalTargets.from_csv(clinical_targets_csv)
     lpa_params, rpa_params = load_optimized_params(optimized_tree_params_csv)
 
     preop_pa = create_preop_model(

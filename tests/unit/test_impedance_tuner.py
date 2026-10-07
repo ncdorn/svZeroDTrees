@@ -21,6 +21,24 @@ def test_olufsen_compliance_uses_optional_k3_parameter():
     assert compliance.k3 == pytest.approx(100000.0)
 
 
+def test_olufsen_compliance_uses_optional_k1_parameter():
+    tuner = object.__new__(ImpedanceTuner)
+    tuner.compliance_model = "olufsen"
+
+    compliance = tuner._build_compliance(
+        "rpa",
+        {
+            "comp.rpa.k1": 300000.0,
+            "comp.rpa.k2": -15.0,
+            "comp.rpa.k3": 100000.0,
+        },
+    )
+
+    assert compliance.k1 == pytest.approx(300000.0)
+    assert compliance.k2 == pytest.approx(-15.0)
+    assert compliance.k3 == pytest.approx(100000.0)
+
+
 def test_tree_params_apply_tied_olufsen_k3_to_both_pas():
     tuner = object.__new__(ImpedanceTuner)
     tuner.compliance_model = "olufsen"

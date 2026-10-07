@@ -18,12 +18,12 @@ from ..io.blocks.boundary_condition import (
 from ..microvasculature.structured_tree.structuredtree import StructuredTree
 from ..microvasculature.treeparams import TreeParameters
 from ..simulation.simulation_directory import SimulationDirectory
-from ..simulation.threedutils import vtp_info
 from ..tune_bcs.clinical_targets import ClinicalTargets
 from ..utils import *
 from .integrator import run_adaptation
 from .models import CWSSAdaptation, CWSSIMSAdaptation
 from .setup import *
+from .tuned_trees import TunedTreeModel, check_coupler_matches_tuned_model
 
 
 _DEFAULT_ALPHA = 0.9
@@ -193,7 +193,8 @@ class MicrovascularAdaptor:
                  location: str = 'uniform',
                  bc_type: str = 'impedance',
                  n_iter: int = 100,
-                 convert_to_cm: bool = False):
+                 convert_to_cm: bool = False,
+                 tuned_model: TunedTreeModel | None = None):
         '''
         initialize the MicrovascularAdaptation class
         
@@ -203,6 +204,9 @@ class MicrovascularAdaptor:
         :param tree_params: csv file optimized_params.csv
         :param method: adaptation method, default is 'cwss'. options ['cwss', 'wss-ims']
         :param location: location of the adaptation, default is 'uniform'
+        :param tuned_model: tuned trees, outlet mapping and Pd (tuned_trees.load_tuned_tree_model);
+            required to write adapted impedance BCs, and when given the LPA/RPA trees
+            are built by the adaptation method instead of here
         '''
         self.preop_simdir = preop_simdir
         self.postop_simdir = postop_simdir
@@ -216,6 +220,7 @@ class MicrovascularAdaptor:
         self.convert_to_cm = convert_to_cm
 
         self.clinical_targets = clinical_targets
+        self.tuned_model = tuned_model
 
         if method not in ['cwss', 'wss-ims']:
             raise ValueError(f"adaptation method {method} not recognized, please use 'cwss' or 'wss-ims'")
@@ -246,8 +251,9 @@ class MicrovascularAdaptor:
             opt_params = pd.read_csv(tree_params)
             self.tree_params['lpa'] = _load_tree_parameters(opt_params, 'lpa')
             self.tree_params['rpa'] = _load_tree_parameters(opt_params, 'rpa')
-            # construct lpa and rpa trees
-            self.lpa_tree, self.rpa_tree = self.construct_impedance_trees()
+            # construct lpa and rpa trees (M1/M3 rebuild them in the reduced PA model)
+            if tuned_model is None:
+                self.lpa_tree, self.rpa_tree = self.construct_impedance_trees()
         elif self.bc_type == 'resistance':
             print("adapting resistance boundary conditions")
             if tree_params is not None:
@@ -425,7 +431,7 @@ class MicrovascularAdaptor:
             preop_config_path,
             postop_config_path,
             self.tree_params_csv,
-            getattr(self.clinical_targets, "path", os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv'),
+            self.clinical_targets,
             max_nodes=max_nodes,
         )
         preop_pa.lpa_tree.terminal_resistance = float(terminal_resistance or 0.0)
@@ -647,61 +653,66 @@ class MicrovascularAdaptor:
                 simparams=self.preop_simdir.svzerod_3Dcoupling.simparams,
             )
 
+    def _tuned_outlet_pressure_dyn(self) -> float:
+        """Outlet pressure [dyn/cm^2] the preop trees were tuned with.
+
+        Taken from the tuned model when one was supplied; otherwise read from
+        the preop coupler's IMPEDANCE BCs so adaptation uses the same Pd policy
+        as tuning (e.g. pre-capillary or diastolic-offset), falling back to the
+        clinical-target wedge pressure when the BCs disagree or are absent.
+        """
+        tuned_model = getattr(self, "tuned_model", None)
+        if tuned_model is not None:
+            return float(tuned_model.outlet_pressure_dyn)
+        coupler = getattr(getattr(self, "preop_simdir", None), "svzerod_3Dcoupling", None)
+        values = []
+        for bc in (getattr(coupler, "bcs", None) or {}).values():
+            if str(getattr(bc, "type", "")).upper() != "IMPEDANCE":
+                continue
+            try:
+                values.append(float(bc.values["Pd"]))
+            except (AttributeError, KeyError, TypeError, ValueError):
+                continue
+        if values and max(values) - min(values) <= 1e-6 * max(1.0, abs(values[0])):
+            return values[0]
+        return self.clinical_targets.wedge_p * 1333.2
+
     def createImpedanceBCs(self, *, target_coupler=None):
         '''
-        create the impedance boundary conditions for the adapted trees
+        create the impedance boundary conditions for the adapted LPA/RPA trees
+
+        Every outlet BC gets its side's adapted tree.  BCs, caps and sides come
+        from the tuned outlet mapping (``self.tuned_model``); caps and BCs are
+        never paired by list position (learned seeds name BCs in centerline
+        order).
         '''
-        # if self.location == 'uniform':
         coupler = target_coupler or self.postop_simdir.svzerod_3Dcoupling
+        tuned_model = getattr(self, "tuned_model", None)
+        if tuned_model is None:
+            raise ValueError(
+                "createImpedanceBCs needs the tuned outlet mapping (tuned_model, see "
+                "adaptation.tuned_trees.load_tuned_tree_model); caps and outlet BCs are "
+                "not paired by list position"
+            )
+        check_coupler_matches_tuned_model(coupler, tuned_model)
 
-        kernel_steps = _impedance_kernel_steps_from_config(
-            coupler
-        )
-        Z_t_l_adapt, time = self.lpa_tree.compute_olufsen_impedance(
-            n_procs=24,
-            tsteps=kernel_steps,
-        )
-        Z_t_r_adapt, time = self.rpa_tree.compute_olufsen_impedance(
-            n_procs=24,
-            tsteps=kernel_steps,
-        )
-
-        cap_info = vtp_info(self.postop_simdir.mesh_complete.mesh_surfaces_dir, convert_to_cm=self.convert_to_cm, pulmonary=False)
-
-        outlet_bc_names = [name for name, bc in coupler.bcs.items() if 'inflow' not in bc.name.lower()]
-
-        # assumed that cap and boundary condition orders match, TODO: UPDATE THIS TO BE USED with SIMULATIONDIRECTORY CLASS
-        if len(outlet_bc_names) != len(cap_info):
-            print('number of outlet boundary conditions does not match number of cap surfaces, automatically assigning bc names...')
-            for i, name in enumerate(outlet_bc_names):
-                # delete the unused bcs
-                del coupler.bcs[name]
-            outlet_bc_names = [f'IMPEDANCE_{i}' for i in range(len(cap_info))]
-        
-        cap_to_bc = {list(cap_info.keys())[i]: outlet_bc_names[i] for i in range(len(outlet_bc_names))}
+        kernel_steps = _impedance_kernel_steps_from_config(coupler)
+        side_trees = {"lpa": self.lpa_tree, "rpa": self.rpa_tree}
+        for tree in side_trees.values():
+            tree.compute_olufsen_impedance(n_procs=24, tsteps=kernel_steps)
 
         outlet_mapping = self._empty_outlet_mapping()
-        lpa_name = str(self.lpa_tree.name)
-        rpa_name = str(self.rpa_tree.name)
-        for idx, (cap_name, area) in enumerate(cap_info.items()):
-            print(f'generating tree {idx + 1} of {len(cap_info)} for cap {cap_name}...')
-            bc_name = cap_to_bc[cap_name]
-            if 'lpa' in cap_name.lower():
-                coupler.bcs[bc_name] = self.lpa_tree.create_impedance_bc(
+        outlet_pd = self._tuned_outlet_pressure_dyn()
+        for tuned_tree in tuned_model.trees:
+            tree = side_trees[tuned_tree.side]
+            for bc_name in tuned_tree.bc_names:
+                print(f'assigning adapted {tuned_tree.side.upper()} tree to {bc_name}...')
+                coupler.bcs[bc_name] = tree.create_impedance_bc(
                     bc_name,
-                    0,
-                    self.clinical_targets.wedge_p * 1333.2,
+                    0 if tuned_tree.side == "lpa" else 1,
+                    outlet_pd,
                 )
-                outlet_mapping[lpa_name].append(bc_name)
-            elif 'rpa' in cap_name.lower():
-                coupler.bcs[bc_name] = self.rpa_tree.create_impedance_bc(
-                    bc_name,
-                    1,
-                    self.clinical_targets.wedge_p * 1333.2,
-                )
-                outlet_mapping[rpa_name].append(bc_name)
-            else:
-                raise ValueError('cap name not recognized')
+                outlet_mapping[str(tree.name)].append(bc_name)
         self._adapted_tree_outlet_mapping = outlet_mapping
                     
     
@@ -727,7 +738,7 @@ class MicrovascularAdaptor:
             preop_config_path,
             postop_config_path,
             self.tree_params_csv,
-            getattr(self.clinical_targets, "path", os.path.dirname(self.preop_simdir.path) + '/clinical_targets.csv'),
+            self.clinical_targets,
             max_nodes=max_nodes,
         )
         # run adaptation

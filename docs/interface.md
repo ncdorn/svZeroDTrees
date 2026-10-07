@@ -270,7 +270,15 @@ impedance_config:
   use_mean: false             # full_pa default
   diameter_scale: 1.0         # full_pa default; 0.0 is an explicit compatibility control
   diameter_std_cap: null
-  wedge_pressure_policy: clamp_to_diastolic  # clamp_to_diastolic | measured
+  wedge_pressure_policy: clamp_to_diastolic  # clamp_to_diastolic | measured | precapillary_fraction | diastolic_offset
+  # precapillary_fraction: 0.332    # used by precapillary_fraction
+  # diastolic_offset_mmhg: 2.0      # used by diastolic_offset
+  # keep_diastolic_target: false    # keep the diastolic term when its target < Pd
+  # objective: {type: likelihood, pressure_sigma_mmhg: 2.0, split_sigma: 0.02, target_sigma: 1.0}
+  # proximal_compliance: {wall_ehr: 5.0e+4}   # full_pa; thin-wall C on rigid seed vessels
+  # tree_max_nodes: 1000000         # structured-tree node budget (default 100000)
+  # polish: {maxfev: 100}           # full_pa + objective_tree_policy; per-cap re-tune
+  # leaf_resistance: {downstream_fraction: 0.668}  # full_pa + measured; capillary/venous leaf R
   # Optional; trees used inside the optimizer only (see below).
   # objective_tree_policy:
   #   use_mean: true
@@ -332,22 +340,101 @@ requires `use_mean: true` in the policy, a per-outlet final policy
 The resolved policy is returned in `impedance_config["objective_tree_policy"]`
 and recorded as `objective_tree_options` in `outlet_cap_mapping.json`.
 
-`wedge_pressure_policy` sets the outlet distal pressure `Pd` from the
-clinical-targets `wedge_pressure` [mmHg, converted to CGS]. `clamp_to_diastolic`
-(default, historical) uses `min(wedge, diastolic MPA target)`; `measured` uses
-the measured wedge even when it exceeds the diastolic target, as with
-pulmonary regurgitation. With a prescribed inflow, `Pd` shifts all MPA
-pressures uniformly, and no tree parameter can. Note that the objective
-includes the diastolic term only when the diastolic target is at least the
-wedge pressure, so `measured` drops it when the wedge exceeds the diastolic
-target.
+`wedge_pressure_policy` sets the constant outlet (distal) pressure `Pd` of
+the structured trees [mmHg, converted to CGS]:
 
-The impedance tuning objective is the weighted relative squared error of MPA
-systolic/diastolic/mean pressure plus the RPA split. It has no compliance
+| policy | `Pd` | needs `wedge_pressure` | intended use |
+|---|---|---|---|
+| `clamp_to_diastolic` (default) | `min(wedge, diastolic)` | yes (NaN otherwise) | historical |
+| `measured` | `wedge` | yes (NaN otherwise) | with `leaf_resistance` (outlet at PCWP) |
+| `precapillary_fraction` | `wedge + precapillary_fraction * (mean - wedge)` | yes (error otherwise) | pulmonary regurgitation |
+| `diastolic_offset` | `diastolic - diastolic_offset_mmhg` | no | no regurgitation |
+
+`precapillary_fraction` places a constant `Pd` a fraction of the way from
+`wedge` to the mean pressure (0.332 by default). The default is a fitted
+choice, not Dong et al. 2021's partition: Dong et al. put 33.2% of PVR in the
+arteries (MPA to pre-capillary arterioles), which as a constant pressure would
+be `wedge + 0.668 * (mean - wedge)`, above PA diastolic for most patients. The
+partition describes mean pressures; `leaf_resistance` (below) is the way to
+apply it in a pulsatile model. Without backflow the model's MPA pressure only decays toward a constant `Pd`,
+so `diastolic_offset` keeps the diastolic target reachable; with regurgitation
+backflow drains compliance below `Pd`. Before any tree is built, the
+iteration service (`validate_outlet_pressure`) rejects a non-finite or
+negative `Pd` and, for every policy including `measured`, `Pd >= mean` (no
+pressure drop to drive the mean flow). Direct `resolve_outlet_pressure`
+callers get NaN for the legacy policies when no wedge pressure was measured. With a prescribed inflow, `Pd` shifts all MPA pressures uniformly,
+and no tree parameter can. The objective drops the diastolic term when the
+diastolic target is below `Pd` unless `keep_diastolic_target: true`. The
+modeling rationale is in [`pulmonary_tuning_model.md`](pulmonary_tuning_model.md).
+
+`objective` selects the loss. `relative` (default) is the weighted relative
+squared error of MPA systolic/diastolic/mean pressure (weights 1.5/1.0/1.2)
+plus the RPA split, x100; because each error is divided by its target, one
+mmHg on a 3 mmHg diastolic target weighs ~100x one systolic mmHg.
+`likelihood` is `sum(((model - target) / sigma)^2)` with `pressure_sigma_mmhg`
+(default 2) and `split_sigma` (default 0.02): a chi-square statistic. With the
+likelihood, restarts keep unit weights (no augmented re-weighting), and the
+Nelder-Mead target stop fires when every weighted target is within
+`target_sigma` standard deviations (default 1; `null` disables it) instead of
+using `stopping.target_tolerance`. Neither objective has a compliance
 regularization term: the former `1e-3 * sum(k2^2)` (Olufsen) and
 `1e-5 * sum(C^2)` (constant) penalties biased compliance toward zero and
 dominated the loss near a good fit, so tuned values can differ from runs made
-before this change.
+before that change.
+
+Further full-PA controls (all default to historical behavior):
+
+- `proximal_compliance: {wall_ehr}` writes `seed_with_proximal_compliance.json`
+  to the results directory, in which every effectively rigid seed vessel
+  (`C <= 1e-8` cm^5/dyn) gets `C = 3 A L / (2 Eh/r)` with `A` the mean of
+  `geometric_params.inlet_area/outlet_area` and `L = vessel_length`.
+  Compliance already present (e.g. calibrated in a later iteration) is kept.
+  A rigid vessel without geometry is an error; `convert_to_cm: true` is
+  rejected (cm-g-s seed assumed). Preflight, tuning, and the exported config
+  all use this seed.
+- `tree_max_nodes` sets the node budget of every tree built in tuning and final
+  assignment. Larger trees are truncated (frontier leaves collapsed) and
+  flagged in `tuning_diagnostics.json`; the budget is stored in the tree
+  metadata so `from_tree_metadata` rebuilds identical trees.
+- `polish: {maxfev, initial_simplex_step}` (requires `objective_tree_policy`)
+  re-tunes for up to `maxfev` evaluations with the final per-cap trees,
+  starting at the shared-tree optimum. The shared result is kept as
+  `optimized_params_shared.csv` / `pa_config_tuning_snapshot_shared.json`; if
+  the polish fails, the shared result is restored.
+- `leaf_resistance: {downstream_fraction: f}` (requires `tuning_model: full_pa`
+  and `wedge_pressure_policy: measured`) gives every tree leaf the same
+  resistance to `Pd = wedge` (PCWP), standing in for the capillary + venous
+  bed. Per tree, the leaf resistance solves `R_in(R_leaf) = R_in(0) / (1 - f)`,
+  so the leaves carry the fraction `f` of the tree's DC resistance. It is
+  applied at every node without children (not only the deepest generation) in
+  the DC resistance and the impedance recursion, and stored in the tree
+  metadata (`terminal_resistance`). Before 2026-10-06 the impedance applied a
+  nonzero `terminal_resistance` only at the deepest generation and left it out
+  of the DC value, so trees using it (e.g. adaptation M1's
+  `terminal_resistance`) now get an impedance consistent with their DC
+  resistance, and their results change. Because the proximal (3D-domain) vessels
+  are arterial too, the capillary + venous share of the whole MPA-to-PCWP drop
+  is smaller than `f`; `tuning_diagnostics.json` reports it as
+  `leaf_resistance.model_capillary_venous_share_of_pvr` (flow-weighted over the
+  published model's outlets). Evaluated on TST-STAN-5 and not adopted
+  (chi2 50.6 vs 17.2; [`pulmonary_tuning_model.md`](pulmonary_tuning_model.md)
+  §2.3).
+- After export, the per-cap model is simulated once (relaxing the solver
+  absolute tolerance on Newton non-convergence) and reported as
+  `published_fit` beside `optimizer_fit` in `tuning_diagnostics.json`, which
+  also records the outlet pressure and policy, per-tree size / truncation /
+  resistance / static compliance, total model compliance against the
+  stroke-volume / pulse-pressure bracket, parameters within 1% of a bound,
+  the polish summary, the package version and peak memory.
+
+The iteration service rejects keys outside `SUPPORTED_IMPEDANCE_KEYS`
+(exported from `svzerodtrees.tuning`) and tune-space names the tuner does not
+read (`{lpa,rpa}.{xi,eta_sym,alpha,beta,diameter,inductance}`,
+`comp.{lpa,rpa}.{k1,k2,k3,C}`, `lrr`, `d_min`), so a caller newer than the
+installed library fails loudly instead of silently losing a control.
+`evaluate_iteration_gate(..., sigma={"pressure_mmhg", "split"},
+sigma_multiple=k)` accepts metrics within `k` measurement standard deviations
+instead of the 10% relative default.
 
 `stopping` (Nelder-Mead only) replaces SciPy's default stopping, which refines
 far below clinical precision (`xatol=fatol=1e-4` in raw parameter and loss
@@ -369,7 +456,8 @@ stopping:
 
 Objective metrics for `target_tolerance` are the RPA split and the pressures
 with nonzero objective weight (so diastolic is excluded when its target is
-below wedge). A unit-weight loss term is `(% error / 10)^2`, and the default
+below `Pd`, unless `keep_diastolic_target: true`); with the likelihood
+objective the sigma-based `objective.target_sigma` replaces this tolerance. A unit-weight loss term is `(% error / 10)^2`, and the default
 2.5% is a quarter of the 10% iteration gate. The optimizer runs in [0, 1] per finite
 bound, which gives every parameter a starting step of
 `initial_simplex_step` of its range; SciPy's default steps a zero initial value
@@ -442,10 +530,60 @@ If `optimized_params_csv` is present, `lpa` and `rpa` blocks are optional.
 **Adaptation**
 ```yaml
 adaptation:
-  method: cwss
-  location: uniform
-  iterations: 10
+  model: M2                 # M1 | M2 | M3
+  territory_scheme: lpa_rpa
+  mode: predict             # predict | retrospective_fit
+  parameter_set: {}         # e.g. {iterations: 1, wss_gain: 1.0, ims_gain: 1.0, compliance_gain: 1.0}
 ```
+
+`run_structured_tree_adaptation(...)` (and the `adapt` workflow) starts from
+the tuned preop structured trees:
+
+- **Starting trees**: rebuilt from the `trees` metadata of `tuned_config`
+  (e.g. `svzerod_3d_coupling_tuned.json`; default: the preop
+  `svzerod_3Dcoupling.json`), one per tree entry, with its tuned parameters,
+  `initial_d` and node budget `max_nodes`. For the physiological full-PA model
+  that is one tree per outlet cap at its measured diameter.
+- **Cap-to-BC pairing**: each tree's `outlet_mapping` (`side`, `bc_names`,
+  `outlet_names`) ties it to its BCs and caps. `outlet_cap_mapping` (path to
+  `outlet_cap_mapping.json`) is checked against it: same BCs, caps, sides and
+  diameters. A tree without an outlet mapping, an IMPEDANCE BC without a tree,
+  a postop coupler whose outlet BCs differ from the tuned ones, or an outlet
+  BC whose coupling block is missing or has a `surface` other than the mapped
+  cap raises `ValueError`. Caps and BCs are never paired by list position.
+- **Outlet pressure**: `Pd` is the (single) `Pd` of the tuned IMPEDANCE BCs;
+  disagreeing BCs raise. The clinical targets' `wedge_p` is set to it, so the
+  reduced-PA BCs, the steady tree hemodynamics and the adapted IMPEDANCE BCs
+  all use the tuned `Pd`. Optional `wedge_pressure_policy`
+  (+ `precapillary_fraction` / `diastolic_offset_mmhg`) is resolved as in
+  tuning and must reproduce it.
+- **Node budget**: per-cap trees use the metadata `max_nodes`;
+  `parameter_set.max_nodes` only fills it in for metadata written before the
+  budget was recorded and otherwise must equal it. For M1/M3 it sets the
+  reduced-PA tree budget (default: the tuned budget).
+- **M2** applies the territory update (`total_scale = ((Q_post/Q_pre)^(wss_gain/3)
+  (R_post/R_pre)^(ims_gain/4))^iterations` from the 3D LPA/RPA flows and
+  resistances) to every tuned tree on that side, scales Olufsen `k1`/`k3`
+  (or constant `Eh/r`) by `total_scale^-compliance_gain`, and writes each
+  adapted tree to its own BCs. The adapted tree metadata keeps the tuned
+  outlet mapping and adds `adapted_diameter_scale` (the factor applied to
+  every vessel diameter after the build), so the coupled-timing kernel
+  regeneration in `SimulationDirectory.write_files` rebuilds the adapted
+  trees, not the preop ones. The exported kernels use the same
+  `linspace(0, cardiac_period, kernel_steps + 1)` grid when the coupler has a
+  coupled cardiac period and step size.
+- **M1/M3** integrate CWSS / CWSS-IMS on one LPA and one RPA tree in the
+  reduced-order PA (RRI) model, built from `optimized_params.csv`. They
+  accept only tuned models with one tree per side and raise `ValueError` for
+  per-cap tuned models. Known limitation: their per-vessel adapted radii are
+  not representable in tree metadata, so the coupled-timing regeneration
+  rebuilds those trees from `initial_d` and the adapted radii do not reach
+  the 3D simulation.
+
+`adaptation_summary.json` records `tuned_model` (source, mapping, trees),
+`outlet_pressure` (`pd_mmhg`, source, optional policy check) and, for M2,
+`tree_metrics` per tree (side, BCs, `initial_d`, `max_nodes` and its source,
+`n_nodes`, `truncated`, `total_scale`).
 
 **Reduced-PA Adaptation Benchmark**
 ```yaml

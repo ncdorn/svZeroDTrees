@@ -8,6 +8,7 @@ from ..tune_bcs.assign_bcs import construct_impedance_trees
 from ..microvasculature import TreeParameters, compliance as comp_mod
 from ..microvasculature.structured_tree.asymmetry import resolve_branch_scaling
 from ..tune_bcs.tune_space import TuneSpace
+from ..tune_bcs.objective import resolve_tuning_objective
 from ..tune_bcs.nm_stopping import (
     STOP_TARGET_MET,
     resolve_nelder_mead_stopping,
@@ -47,12 +48,31 @@ _CSV_PER_PA_COLUMNS: dict[str, str] = {
     "xi": "{pa}.xi",
     "eta_sym": "{pa}.eta_sym",
     "inductance": "{pa}.inductance",
+    "k1": "comp.{pa}.k1",
     "k2": "comp.{pa}.k2",
     "k3": "comp.{pa}.k3",
     "diameter": "{pa}.diameter",
 }
 # These columns are shared across both PA sides; read from the lpa row.
 _CSV_SHARED_COLUMNS: tuple[str, ...] = ("lrr", "d_min")
+
+
+def _clip_to_bounds_within_tolerance(value, lb, ub, *, param_name, source, rel_tol=1e-9):
+    """Clip floating round-off (e.g. exp(log(ub)) > ub) back into [lb, ub].
+
+    Values beyond a relative tolerance of a bound still raise.
+    """
+    span = max(abs(float(lb)), abs(float(ub)), 1.0)
+    if float(lb) - rel_tol * span <= value < float(lb):
+        return float(lb)
+    if float(ub) < value <= float(ub) + rel_tol * span:
+        return float(ub)
+    if not (float(lb) <= value <= float(ub)):
+        raise ValueError(
+            f"[csv_seed] value {value} for '{param_name}' "
+            f"is outside configured bounds [{lb}, {ub}] (from {source})"
+        )
+    return float(value)
 
 
 def _seed_x0_from_csv(
@@ -111,11 +131,9 @@ def _seed_x0_from_csv(
                     f"for pa='{pa}' in {csv_path}"
                 )
             idx, p = free_idx[param_name]
-            if not (p.lb <= native_val <= p.ub):
-                raise ValueError(
-                    f"[csv_seed] value {native_val} for '{param_name}' "
-                    f"is outside configured bounds [{p.lb}, {p.ub}] (from {csv_path})"
-                )
+            native_val = _clip_to_bounds_within_tolerance(
+                native_val, p.lb, p.ub, param_name=param_name, source=csv_path
+            )
             x0[idx] = p.from_native(native_val)
             log_fn(
                 f"[csv_seed] '{param_name}' seeded from previous CSV: "
@@ -150,11 +168,9 @@ def _seed_x0_from_csv(
                     f"[csv_seed] non-finite value {native_val!r} in column '{col}' in {csv_path}"
                 )
             idx, p = free_idx[param_name]
-            if not (p.lb <= native_val <= p.ub):
-                raise ValueError(
-                    f"[csv_seed] value {native_val} for '{param_name}' "
-                    f"is outside configured bounds [{p.lb}, {p.ub}] (from {csv_path})"
-                )
+            native_val = _clip_to_bounds_within_tolerance(
+                native_val, p.lb, p.ub, param_name=param_name, source=csv_path
+            )
             x0[idx] = p.from_native(native_val)
             log_fn(
                 f"[csv_seed] '{param_name}' seeded from previous CSV: "
@@ -191,7 +207,11 @@ class ImpedanceTuner(BoundaryConditionTuner):
                  allow_ordered_outlet_mapping=False,
                  resolved_mapping=None,
                  objective_tree_policy=None,
-                 stopping=None):
+                 stopping=None,
+                 objective=None,
+                 keep_diastolic_target=False,
+                 tree_max_nodes=None,
+                 leaf_downstream_fraction=None):
         super().__init__(config_handler, mesh_surfaces_path, clinical_targets)
         self.tune_space = tune_space
         self.compliance_model = (compliance_model or "").lower()
@@ -232,6 +252,21 @@ class ImpedanceTuner(BoundaryConditionTuner):
         self.stopping = resolve_nelder_mead_stopping(stopping)
         if self.stopping is not None and self.solver != "Nelder-Mead":
             raise ValueError("stopping is supported only for solver='Nelder-Mead'")
+        # Objective (relative squared error by default, or Gaussian likelihood).
+        self.objective = resolve_tuning_objective(objective)
+        # Keep the diastolic term even when the diastolic target lies below the
+        # outlet pressure (reachable under pulmonary regurgitation).
+        self.keep_diastolic_target = bool(keep_diastolic_target)
+        # Structured-tree node budget for every tree built during tuning.
+        self.tree_max_nodes = None if tree_max_nodes is None else int(tree_max_nodes)
+        # full_pa only: per-leaf capillary + venous resistance share (None: none).
+        self.leaf_downstream_fraction = (
+            None if leaf_downstream_fraction is None else float(leaf_downstream_fraction)
+        )
+        if self.leaf_downstream_fraction is not None and self.tuning_model != "full_pa":
+            raise ValueError("leaf_downstream_fraction is supported only for tuning_model='full_pa'")
+        if self.tree_max_nodes is not None and self.tree_max_nodes <= 0:
+            raise ValueError("tree_max_nodes must be > 0")
 
         # grid search params
         self.grid_search_init = grid_search_init
@@ -348,7 +383,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
 
     def _build_compliance(self, side: str, params: dict[str, float]):
         if self.compliance_model == "olufsen":
-            k1 = 19992500.0
+            k1 = params.get(f"comp.{side}.k1", 19992500.0)
             k2 = params[f"comp.{side}.k2"]
             k3 = params.get(f"comp.{side}.k3", 0.0)
             return comp_mod.OlufsenCompliance(k1=k1, k2=k2, k3=k3)
@@ -534,6 +569,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 resolved_mapping=self.resolved_mapping,
                 verbose=False,
                 plot_stiffness=False,
+                max_nodes=self.tree_max_nodes,
+                leaf_downstream_fraction=getattr(self, "leaf_downstream_fraction", None),
             )
             self._write_and_validate_snapshot(model)
             if not self._impedance_bcs_are_finite(model):
@@ -550,7 +587,12 @@ class ImpedanceTuner(BoundaryConditionTuner):
         if model is None:
             raise ValueError("RRI tuning model has not been initialized")
         lpa_params, rpa_params = self._build_tree_params(params)
-        model.create_impedance_trees(lpa_params, rpa_params, self.n_procs)
+        if self.tree_max_nodes is None:
+            model.create_impedance_trees(lpa_params, rpa_params, self.n_procs)
+        else:
+            model.create_impedance_trees(
+                lpa_params, rpa_params, self.n_procs, max_nodes=self.tree_max_nodes
+            )
         self._write_and_validate_snapshot(model)
         if (np.isnan(model.bcs['LPA_BC'].Z[0]) or
             np.isnan(model.bcs['RPA_BC'].Z[0])):
@@ -569,7 +611,19 @@ class ImpedanceTuner(BoundaryConditionTuner):
 
     # ---- Main tuning routine ---- #
 
-    def tune(self, nm_iter: int = 1, initial_params_csv: str | None = None):
+    def tune(
+        self,
+        nm_iter: int = 1,
+        initial_params_csv: str | None = None,
+        x0: np.ndarray | None = None,
+    ):
+        """Run the optimizer.
+
+        ``x0`` (optimizer-space vector) overrides tune_space init and any CSV
+        seed; it is how a per-cap polish starts exactly at the shared optimum.
+        The selected point is kept as ``self.best_x``.
+        """
+        x0_override = None if x0 is None else np.asarray(x0, dtype=float).copy()
         # set log path if not provided
         if self.log_file is None:
             base_dir = getattr(self.config_handler, "path", None)
@@ -589,6 +643,11 @@ class ImpedanceTuner(BoundaryConditionTuner):
         pa_config = self.prepare_objective()
 
         x0, bounds = self.tune_space.pack_init_and_bounds()
+        if x0_override is not None:
+            if x0_override.shape != x0.shape:
+                raise ValueError("x0 does not match the number of free parameters")
+            x0 = np.clip(x0_override, [b[0] for b in bounds], [b[1] for b in bounds])
+            initial_params_csv = None
 
         # ——— Seed x0 from previous-iteration optimized_params.csv ———
         if initial_params_csv is not None:
@@ -716,7 +775,10 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 components = outcome.breakdown.get("components", {})
             finite_components = {k: v for k, v in components.items() if np.isfinite(v)}
             total_residual = sum(finite_components.values()) if finite_components else 0.0
-            for key in ["sys", "dia", "mean", "flow"]:
+            # The likelihood keeps unit weights across restarts so the loss
+            # stays a chi-square statistic; restarts still re-seed the simplex.
+            reweight_keys = [] if self.objective.is_likelihood else ["sys", "dia", "mean", "flow"]
+            for key in reweight_keys:
                 residual = components.get(key, np.inf)
                 if not np.isfinite(residual) or total_residual <= 0.0:
                     continue
@@ -739,6 +801,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
             _append_log(message)
             raise RuntimeError(message)
 
+        self.best_x = None if best_x is None else np.asarray(best_x, dtype=float).copy()
         print(f"[ImpedanceTuner] Optimized: {best_x}  f={best_unweighted_loss:.3f}")
         # final simulate & plot
         _ = self.loss_fn(best_x, pa_config, finalize=True)
@@ -760,13 +823,27 @@ class ImpedanceTuner(BoundaryConditionTuner):
         (all 1.0 outside tune()).
         """
         pressure_weights = self._pressure_weights()
-        pressure_diff = np.abs(np.array(p_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p
-        components = {
-            "sys": pressure_weights["sys"] * pressure_diff[0] ** 2 * 100.0,
-            "dia": pressure_weights["dia"] * pressure_diff[1] ** 2 * 100.0,
-            "mean": pressure_weights["mean"] * pressure_diff[2] ** 2 * 100.0,
-            "flow": ((rpa_split - self.clinical_targets.rpa_split) / self.clinical_targets.rpa_split) ** 2 * 100.0,
-        }
+        if self.objective.is_likelihood:
+            # Gaussian likelihood: each target scaled by its measurement sigma;
+            # a pressure weight of 0 (diastolic dropped) removes that term.
+            sigma_p = self.objective.pressure_sigma_mmhg
+            targets = self.clinical_targets.mpa_p
+            components = {
+                key: (1.0 if pressure_weights[key] > 0.0 else 0.0)
+                * ((float(p_mpa[idx]) - float(targets[idx])) / sigma_p) ** 2
+                for idx, key in enumerate(("sys", "dia", "mean"))
+            }
+            components["flow"] = (
+                (rpa_split - self.clinical_targets.rpa_split) / self.objective.split_sigma
+            ) ** 2
+        else:
+            pressure_diff = np.abs(np.array(p_mpa) - np.array(self.clinical_targets.mpa_p)) / self.clinical_targets.mpa_p
+            components = {
+                "sys": pressure_weights["sys"] * pressure_diff[0] ** 2 * 100.0,
+                "dia": pressure_weights["dia"] * pressure_diff[1] ** 2 * 100.0,
+                "mean": pressure_weights["mean"] * pressure_diff[2] ** 2 * 100.0,
+                "flow": ((rpa_split - self.clinical_targets.rpa_split) / self.clinical_targets.rpa_split) ** 2 * 100.0,
+            }
         loss_weights = self._loss_weights or {"sys": 1.0, "dia": 1.0, "mean": 1.0, "flow": 1.0}
         unweighted_loss = float(sum(components.values()))
         weighted_loss = float(sum(loss_weights.get(key, 1.0) * value for key, value in components.items()))
@@ -777,9 +854,13 @@ class ImpedanceTuner(BoundaryConditionTuner):
         }
 
     def _pressure_weights(self) -> dict:
-        # A diastolic target below wedge pressure is unreachable, so it is
-        # dropped from the objective.
-        if self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p:
+        # A diastolic target below the outlet pressure is unreachable without
+        # backflow, so it is dropped unless keep_diastolic_target is set (e.g.
+        # pulmonary regurgitation drains compliance below the outlet pressure).
+        if (
+            getattr(self, "keep_diastolic_target", False)
+            or self.clinical_targets.mpa_p[1] >= self.clinical_targets.wedge_p
+        ):
             return {"sys": 1.5, "dia": 1.0, "mean": 1.2}
         return {"sys": 1.0, "dia": 0.0, "mean": 1.0}
 
@@ -788,6 +869,25 @@ class ImpedanceTuner(BoundaryConditionTuner):
         relative error of its clinical target."""
         metrics = breakdown.get("metrics") or {}
         targets = self.clinical_targets
+        if self.objective.is_likelihood:
+            # Within target_sigma measurement standard deviations; the relative
+            # tolerance would demand ~0.08 mmHg on a 3 mmHg diastolic target.
+            k = self.objective.target_sigma
+            if k is None:
+                return False
+            weights = self._pressure_weights()
+            checks = [(metrics.get("rpa_split"), targets.rpa_split, self.objective.split_sigma)]
+            for idx, key in enumerate(("sys", "dia", "mean")):
+                if weights[key] > 0.0:
+                    checks.append(
+                        (metrics.get(f"{key}_pressure"), targets.mpa_p[idx], self.objective.pressure_sigma_mmhg)
+                    )
+            for value, target, sigma in checks:
+                if value is None or not np.isfinite(value):
+                    return False
+                if abs(float(value) - float(target)) > k * sigma:
+                    return False
+            return True
         pairs = [(metrics.get("rpa_split"), targets.rpa_split)]
         weights = self._pressure_weights()
         for idx, key in enumerate(("sys", "dia", "mean")):
