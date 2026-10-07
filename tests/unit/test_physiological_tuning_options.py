@@ -229,6 +229,38 @@ def test_proximal_compliance_takes_learned_connector_length_from_centerline():
     assert again == payload
 
 
+def test_proximal_compliance_clamps_negative_learned_inductance():
+    # learnedZeroD can fit a negative junction-outlet L; on a compliant vessel
+    # it makes the solver's Newton iteration fail, so it is set to 0.
+    seed = _seed([0.0, 1e-10, 5e-6])
+    names = ["branch0_seg0", "branch1_seg0_connectorEL", "branch2_seg0"]
+    for index, (vessel, name, length) in enumerate(zip(seed["vessels"], names, [2.0, 0.0, 1.0])):
+        vessel["vessel_id"] = index
+        vessel["vessel_name"] = name
+        vessel["vessel_length"] = length
+    seed["vessels"][1]["zero_d_element_values"].update(R_poiseuille=0.0, L=0.0)
+    seed["vessels"][2]["zero_d_element_values"].update(L=-1.0)
+    seed["junctions"] = [
+        {
+            "junction_name": "J0",
+            "junction_type": "BloodVesselJunction",
+            "inlet_vessels": [0],
+            "outlet_vessels": [1, 2],
+            "junction_values": {"R_poiseuille": [7.0, 0.0], "L": [-16.8, 0.0], "stenosis_coefficient": [0.0, 0.0]},
+        }
+    ]
+    payload, summary = apply_proximal_compliance(seed, 5.0e4, {0: 2.0, 1: 1.5})
+    values = payload["vessels"][1]["zero_d_element_values"]
+    assert values["R_poiseuille"] == 7.0 and values["L"] == 0.0 and values["C"] > 0.0
+    assert payload["junctions"][0]["junction_values"]["L"] == [0.0, 0.0]
+    assert summary["n_negative_l_clamped"] == 1
+    assert summary["negative_l_clamped"] == {"branch1_seg0_connectorEL": -16.8}
+    # A vessel whose calibrated compliance is kept is left as it is.
+    assert payload["vessels"][2]["zero_d_element_values"]["L"] == -1.0
+    again, summary2 = apply_proximal_compliance(payload, 5.0e4, {0: 2.0, 1: 1.5})
+    assert again == payload and summary2["n_negative_l_clamped"] == 0
+
+
 def test_vessel_round_trip_preserves_geometric_params():
     config = _seed([0.0])["vessels"][0] | {"vessel_id": 0, "vessel_name": "branch0_seg0"}
     assert Vessel(config).to_dict()["geometric_params"] == {"inlet_area": 1.0, "outlet_area": 0.5}

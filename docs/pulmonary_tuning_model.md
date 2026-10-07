@@ -136,7 +136,11 @@ outlet pressure represents the pressure downstream of the arterial tree.
   reproduces the calibrated seed's geometry (TST-STAN-5: 15.64 mL, 0.626 mL/mmHg).
   The branch's junction-outlet R and L move onto that vessel (the same model
   without C); a compliant R = L = 0 vessel in front of an IMPEDANCE outlet
-  makes svZeroDSolver's Newton iteration fail at every evaluation.
+  makes svZeroDSolver's Newton iteration fail at every evaluation. learnedZeroD
+  can also fit negative junction-outlet L (a surrogate loss term, not an
+  inertance); on a compliant vessel it is unstable, so vessels that receive
+  proximal compliance have L < 0 set to 0 (`negative_l_clamped` in the
+  summary; TST-STAN-1: two outlets, L = -16.8 and -10.6).
 - **Consistency with the 3D wall**: the deformable 3D wall was softened
   (2026-10-06) from E 2.5e6 to 1.375e5 dyn/cm^2 at h 0.2 cm so that its total
   compliance matches the 0D proximal compliance. A uniform wall over the seed

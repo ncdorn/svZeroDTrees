@@ -21,6 +21,12 @@ seed (without C the two forms are the same model).  A compliant vessel with
 R = L = 0 directly upstream of an IMPEDANCE outlet makes the solver's Newton
 iteration fail.
 
+learnedZeroD can also fit a negative junction-outlet inductance (a surrogate
+pressure-loss term, not a physical inertance).  Without compliance it is
+harmless, but on a compliant vessel C and L < 0 form an unstable element and
+the solver's Newton iteration fails on every step.  Vessels that receive
+compliance here therefore have negative L set to 0 (``n_negative_l_clamped``).
+
 Diagnostics (``tuning_diagnostics.json``): the outlet pressure and how it was
 derived, per-tree size/truncation/resistance/compliance of the exported trees,
 total model compliance (trees + proximal), and the stroke-volume /
@@ -100,6 +106,7 @@ def apply_proximal_compliance(
         applied.append(name)
         applied_total += compliance
     moved = _unfold_junction_values(payload, set(folded_lengths) & set(applied))
+    clamped = _clamp_negative_inductance(vessels, set(applied))
     if missing:
         raise ValueError(
             "proximal_compliance needs geometric_params.inlet_area/outlet_area and "
@@ -118,6 +125,8 @@ def apply_proximal_compliance(
         "n_kept_existing": len(kept),
         "n_branch_length_from_centerline": len(folded_lengths),
         "n_junction_values_moved_to_vessel": moved,
+        "n_negative_l_clamped": len(clamped),
+        "negative_l_clamped": clamped,
         "applied_compliance_ml_per_mmhg": applied_total * DYN_PER_MMHG,
         "kept_compliance_ml_per_mmhg": kept_total * DYN_PER_MMHG,
         "total_compliance_ml_per_mmhg": (applied_total + kept_total) * DYN_PER_MMHG,
@@ -195,6 +204,26 @@ def _unfold_junction_values(payload: dict, vessel_names: set[str]) -> int:
                     series[index] = 0.0
             moved += 1
     return moved
+
+
+def _clamp_negative_inductance(
+    vessels: list[dict], vessel_names: set[str]
+) -> dict[str, float]:
+    """Set L < 0 to 0 on the named (newly compliant) vessels.
+
+    Returns the original negative L by vessel name.
+    """
+    clamped: dict[str, float] = {}
+    for vessel in vessels:
+        name = str(vessel.get("vessel_name", vessel.get("vessel_id")))
+        if name not in vessel_names:
+            continue
+        values = vessel["zero_d_element_values"]
+        inductance = float(values.get("L") or 0.0)
+        if inductance < 0.0:
+            clamped[name] = inductance
+            values["L"] = 0.0
+    return clamped
 
 
 def _vessel_area_length(
