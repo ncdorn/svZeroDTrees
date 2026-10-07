@@ -622,24 +622,22 @@ def assign_rcr_bcs(config_handler,
     rpa_total_area = np.sum(np.array(list(rpa_info.values())))
     cap_to_bc = resolve_cap_to_bc_mapping(config_handler, cap_info, bc_prefix="RCR")
 
-    # build a unique tree for each outlet
-    for idx, (cap_name, area) in enumerate(cap_info.items()):
+    # build an RCR BC for each outlet, named after the outlet BC the cap maps to
+    for cap_name, area in cap_info.items():
+        bc_name = cap_to_bc[cap_name]
 
         if 'lpa' in cap_name.lower():
             print(f'creating RCR BC for LPA with parameters: {rcr_params[:2]}')
             resistance, capacitance = rcr_params[:2]
             adjusted_resistance = resistance * (lpa_total_area / area)
-            # create BC object
-            rcr_bc = generate_outlet_rcr(adjusted_resistance, capacitance, wedge_pressure * 1333.2, f'RCR_{idx}')
         elif 'rpa' in cap_name.lower():
             print(f'creating RCR BC for RPA with parameters: {rcr_params[2:]}')
             resistance, capacitance = rcr_params[2:]
             adjusted_resistance = resistance * (rpa_total_area / area)
-            # create BC object
-            rcr_bc = generate_outlet_rcr(adjusted_resistance, capacitance, wedge_pressure * 1333.2, f'RCR_{idx}')
         else:
             raise ValueError('cap name not recognized')
 
-        bc_name = cap_to_bc[cap_name]
-
-        config_handler.bcs[bc_name] = rcr_bc
+        # the BC's own name is what is serialized and what vessels/coupling blocks reference
+        config_handler.bcs[bc_name] = generate_outlet_rcr(
+            adjusted_resistance, capacitance, wedge_pressure * 1333.2, bc_name
+        )

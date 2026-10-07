@@ -244,6 +244,12 @@ bcs:
   rcr_params: [R_LPA, C_LPA, R_RPA, C_RPA]
 ```
 
+With `type: rcr`, `assign_rcr_bcs` pairs each cap with an outlet BC by tree
+`outlet_mapping` metadata or by cap name, then replaces that BC, keeping its
+name, with an RCR BC: `R = R_side * side_cap_area / cap_area` (`Rp = 0.1 R`,
+`Rd = 0.9 R`), `C = C_side`, `Pd` = wedge pressure. If neither pairing
+resolves, it raises `ValueError`; it never pairs by order.
+
 Supported transforms for `tune_space`:
 - `to_native`: `identity|positive|unit_interval`
 - `from_native`: `identity|log`
@@ -722,8 +728,11 @@ so directories and the `.vtp` suffix do not matter.
 - Other outlet BCs (RCR, RESISTANCE) without tree metadata couple to the cap
   with the same name (BC `LPA_1` -> `LPA_1.vtp`). Only BCs with neither take
   the caps left over, in mesh-surface order, and a `WARNING` naming them is
-  printed. `assign_rcr_bcs` does not record its cap pairing, so this order
-  fallback is the old behavior for `RCR_k` / `RESISTANCE_k` BCs.
+  printed. `assign_rcr_bcs` output does not reach this fallback when it
+  paired caps by cap name (the BC keeps the cap's name) or by tree
+  `bc_names` / `outlet_names` metadata (the form svZeroDTrees writes), since
+  both are serialized. The fallback is the old behavior for `RCR_k` /
+  `RESISTANCE_k` BCs from other sources, such as an untuned seed.
 - `ValueError`, raised before anything is written, when:
   - an IMPEDANCE BC has no tree `outlet_mapping` entry;
   - an `outlet_mapping` has unequal `bc_names` / `outlet_names` lengths;
