@@ -672,6 +672,26 @@ def test_impedance_tuner_build_tree_params_uses_defaults():
     assert rpa_params.beta == pytest.approx(0.55)
 
 
+def _with_side_tree_outlet_mapping(config, inductance=0.0):
+    """Add the per-side tree outlet mapping the 3D coupler pairs LPA_BC/RPA_BC with LPA.vtp/RPA.vtp by."""
+    return {
+        **config,
+        "trees": [
+            {
+                "name": side,
+                "inductance": inductance,
+                "outlet_mapping": {
+                    "mode": "shared_by_side",
+                    "side": side.lower(),
+                    "bc_names": [f"{side}_BC"],
+                    "outlet_names": [f"{side}.vtp"],
+                },
+            }
+            for side in ("LPA", "RPA")
+        ],
+    }
+
+
 def test_impedance_tuning_with_inductance_builds_valid_threed_config(monkeypatch, tmp_path):
     pa_config = _build_pa_config([10.0, 10.0])
 
@@ -726,7 +746,7 @@ def test_impedance_tuning_with_inductance_builds_valid_threed_config(monkeypatch
     )
 
     pa_config.create_impedance_trees(lpa_params, rpa_params, n_procs=1)
-    config_handler = ConfigHandler(pa_config.config)
+    config_handler = ConfigHandler(_with_side_tree_outlet_mapping(pa_config.config, inductance_value))
 
     class DummySurface:
         def __init__(self, filename):
@@ -804,7 +824,7 @@ def test_impedance_threed_coupler_without_distal_vessels_uses_distinct_coupling_
         inductance=0.0,
     )
     pa_config.create_impedance_trees(tree_params, tree_params, n_procs=1)
-    config_handler = ConfigHandler(pa_config.config)
+    config_handler = ConfigHandler(_with_side_tree_outlet_mapping(pa_config.config))
 
     class DummySurface:
         def __init__(self, filename):

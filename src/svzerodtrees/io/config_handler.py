@@ -2,7 +2,10 @@ import json
 import pickle
 import os
 import math
+from collections import Counter
+from pathlib import Path
 from svzerodtrees._pysvzerod import simulate_pysvzerod
+from svzerodtrees.tune_bcs.outlet_mapping import mapping_key
 from svzerodtrees.utils import *
 from .blocks.boundary_condition import (
     resolve_coupled_impedance_kernel_steps,
@@ -916,6 +919,114 @@ class ConfigHandler():
             return [self.vessel_map[id].to_dict() for id in self.branch_map[branch].ids]
 
 
+    def _tree_mapped_outlet_caps(self):
+        '''
+        return {bc_name: cap} from the tree outlet_mapping metadata (bc_names[i] was built for outlet_names[i])
+        '''
+        caps = {}
+        for tree_name, metadata in self.tree_params.items():
+            mapping = metadata.get("outlet_mapping") if isinstance(metadata, dict) else None
+            if not isinstance(mapping, dict):
+                continue
+            bc_names = [str(name) for name in mapping.get("bc_names") or []]
+            outlet_names = [str(name) for name in mapping.get("outlet_names") or []]
+            if len(bc_names) != len(outlet_names):
+                raise ValueError(
+                    f"tree {tree_name!r} outlet_mapping needs one outlet_names entry per "
+                    f"bc_names entry (bc_names={bc_names}, outlet_names={outlet_names}); "
+                    "regenerate the tuned config with the current svZeroDTrees"
+                )
+            for bc_name, cap in zip(bc_names, outlet_names):
+                if bc_name in caps and mapping_key(caps[bc_name]) != mapping_key(cap):
+                    raise ValueError(
+                        f"outlet BC {bc_name!r} is mapped to caps {Path(caps[bc_name]).name!r} "
+                        f"and {Path(cap).name!r} by the tree metadata"
+                    )
+                caps[bc_name] = cap
+        return caps
+
+    def _resolve_outlet_coupling_surfaces(self, outlet_bcs, mesh_complete):
+        '''
+        pair each outlet BC with the mesh cap it couples to, never by position for mapped BCs
+
+        BCs in the tree outlet_mapping metadata (every IMPEDANCE BC must be) couple to their
+        mapped cap.  Other BCs couple to the cap with the same name (mapping_key), and only
+        BCs with neither take the remaining caps in mesh_surfaces order, with a warning.
+
+        :param outlet_bcs: outlet BoundaryCondition objects in coupler order
+        :param mesh_complete: MeshComplete object
+
+        :return surfaces: dict of bc name -> mesh surface filename
+        '''
+        if not outlet_bcs:
+            return {}
+        if mesh_complete is None:
+            raise ValueError("generate_threed_coupler needs mesh_complete to couple outlet BCs to mesh caps")
+
+        caps = [
+            vtp.filename for vtp in mesh_complete.mesh_surfaces.values()
+            if 'inflow' not in vtp.filename.lower()
+        ]
+        caps_by_key = {}
+        for cap in caps:
+            key = mapping_key(cap)
+            if key in caps_by_key:
+                raise ValueError(f"mesh caps {caps_by_key[key]!r} and {cap!r} cannot be told apart by name")
+            caps_by_key[key] = cap
+
+        tree_caps = self._tree_mapped_outlet_caps()
+        surfaces = {}
+        unmapped = []
+        for bc in outlet_bcs:
+            if bc.name in tree_caps:
+                mapped = tree_caps[bc.name]
+                cap = caps_by_key.get(mapping_key(mapped))
+                if cap is None:
+                    raise ValueError(
+                        f"{bc.type} BC {bc.name!r} was built for cap {Path(mapped).name!r}, "
+                        f"which is not a mesh surface (mesh caps: {caps})"
+                    )
+                surfaces[bc.name] = cap
+            elif bc.type == "IMPEDANCE":
+                raise ValueError(
+                    f"IMPEDANCE BC {bc.name!r} has no cap in the tree outlet_mapping metadata; "
+                    "the 3D coupler never pairs IMPEDANCE BCs with caps by position. "
+                    "Regenerate the tuned config with the current svZeroDTrees."
+                )
+            elif mapping_key(bc.name) in caps_by_key:
+                surfaces[bc.name] = caps_by_key[mapping_key(bc.name)]
+            else:
+                unmapped.append(bc.name)
+
+        shared = sorted(cap for cap, count in Counter(surfaces.values()).items() if count > 1)
+        if shared:
+            raise ValueError(
+                "mesh caps would be coupled to more than one outlet BC: "
+                + "; ".join(
+                    f"{cap!r} <- {[name for name, surface in surfaces.items() if surface == cap]}"
+                    for cap in shared
+                )
+            )
+
+        claimed = set(surfaces.values())
+        remaining = [cap for cap in caps if cap not in claimed]
+        if unmapped:
+            if len(unmapped) > len(remaining):
+                raise ValueError(
+                    f"outlet BCs {unmapped[len(remaining):]} have no mesh cap left to couple to "
+                    f"(mesh caps: {caps})"
+                )
+            print(
+                f"WARNING: outlet BCs {unmapped} have no tree outlet_mapping and no cap of the "
+                f"same name; coupling them by position to the remaining caps {remaining[:len(unmapped)]}"
+            )
+            surfaces.update(zip(unmapped, remaining))
+            remaining = remaining[len(unmapped):]
+        if remaining:
+            raise ValueError(f"no outlet BC for mesh caps {remaining}; every outlet cap must be coupled")
+
+        return surfaces
+
     def  generate_threed_coupler(self, simdir, inflow_from_0d=True, mesh_complete=None, include_distal_vessel=False):
         '''
         create a 3D-0D coupling blocks config from the boundary conditions and save it to a json
@@ -1012,12 +1123,16 @@ class ConfigHandler():
                 del threed_coupler.bcs[bc_name]
         
         print(f"threed coupler vessel map: {threed_coupler.vessel_map}")
+        # pair outlet BCs with caps by the tree outlet mapping, not by mesh surface order
+        outlet_surfaces = self._resolve_outlet_coupling_surfaces(
+            [bc for bc in threed_coupler.bcs.values() if 'inflow' not in bc.name.lower()],
+            mesh_complete,
+        )
         # create the coupling blocks
-        bc_count = 0
         next_vessel_id = max(threed_coupler.vessel_map.keys(), default=-1) + 1
-        for i, bc in enumerate(threed_coupler.bcs.values()):
+        for bc in threed_coupler.bcs.values():
             if 'inflow' not in bc.name.lower():
-                surface = list(mesh_complete.mesh_surfaces.values())[bc_count + self.n_inflows].filename
+                surface = outlet_surfaces[bc.name]
                 inductance = 0.0
                 if include_distal_vessel and bc.type == "IMPEDANCE":
                     inductance = float(self.bc_inductance.get(bc.name, 0.0) or 0.0)
@@ -1058,7 +1173,6 @@ class ConfigHandler():
                     next_vessel_id += 1
                 else:
                     threed_coupler.coupling_blocks[bc.name] = CouplingBlock.from_bc(bc, surface=surface)
-                bc_count += 1
 
         # copy the trees over
         threed_coupler.tree_params = self.tree_params

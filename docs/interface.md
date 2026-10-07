@@ -550,7 +550,9 @@ the tuned preop structured trees:
   diameters. A tree without an outlet mapping, an IMPEDANCE BC without a tree,
   a postop coupler whose outlet BCs differ from the tuned ones, or an outlet
   BC whose coupling block is missing or has a `surface` other than the mapped
-  cap raises `ValueError`. Caps and BCs are never paired by list position.
+  cap raises `ValueError`. Caps and BCs are never paired by list position
+  (`generate_threed_coupler` follows the same mapping; see **3D coupler cap
+  pairing**).
 - **Outlet pressure**: `Pd` is the (single) `Pd` of the tuned IMPEDANCE BCs;
   disagreeing BCs raise. The clinical targets' `wedge_p` is set to it, so the
   reduced-PA BCs, the steady tree hemodynamics and the adapted IMPEDANCE BCs
@@ -704,6 +706,38 @@ not support `tissue_support`.
 Optional `threed.execution.slurm.mail_user` and `mail_types` can be set when
 Slurm email notifications are desired; otherwise the generated script omits
 mail directives.
+
+**3D coupler cap pairing.** `ConfigHandler.generate_threed_coupler` (used by
+`SimulationDirectory.from_directory(..., threed_coupler=...)` and
+`write_files` whenever they generate `svzerod_3Dcoupling.json` from a 0D model)
+sets each outlet coupling block's `surface` from the cap the BC was built for,
+not from its position in `MeshComplete.mesh_surfaces` (inflow first, then caps
+sorted by name). A tuned full-PA config keeps its seed's BC order, e.g. the
+centerline order of a `learned_zerod` seed, which need not match the sorted
+cap order. Caps and BCs are compared with `tune_bcs.outlet_mapping.mapping_key`,
+so directories and the `.vtp` suffix do not matter.
+
+- A BC listed in a tree's `outlet_mapping` couples to `outlet_names[i]` for
+  `bc_names[i]`. Every IMPEDANCE BC must be listed there.
+- Other outlet BCs (RCR, RESISTANCE) without tree metadata couple to the cap
+  with the same name (BC `LPA_1` -> `LPA_1.vtp`). Only BCs with neither take
+  the caps left over, in mesh-surface order, and a `WARNING` naming them is
+  printed. `assign_rcr_bcs` does not record its cap pairing, so this order
+  fallback is the old behavior for `RCR_k` / `RESISTANCE_k` BCs.
+- `ValueError`, raised before anything is written, when:
+  - an IMPEDANCE BC has no tree `outlet_mapping` entry;
+  - an `outlet_mapping` has unequal `bc_names` / `outlet_names` lengths;
+  - a mapped cap is not a surface of the mesh in use (for example a postop
+    mesh whose caps were renamed);
+  - two BCs map to the same cap;
+  - there are more outlet BCs than caps;
+  - an outlet cap is left uncoupled;
+  - two caps have the same `mapping_key`;
+  - outlet BCs exist but no `mesh_complete` is given.
+
+A coupler generated this way passes the adaptation stage's
+`check_coupler_matches_tuned_model`. An explicit `threed_coupler` file that
+already has coupling blocks is still copied verbatim, without regeneration.
 
 **Postprocess**
 ```yaml

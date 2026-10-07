@@ -57,7 +57,12 @@ def _sample_config_payload() -> dict[str, object]:
         ],
         "junctions": [],
         "external_solver_coupling_blocks": [],
-        "trees": [],
+        "trees": [
+            {
+                "name": "outlet_tree",
+                "outlet_mapping": {"bc_names": ["OUTLET"], "outlet_names": ["outlet.vtp"]},
+            }
+        ],
     }
 
 
