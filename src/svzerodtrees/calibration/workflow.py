@@ -31,6 +31,12 @@ from .replay import validate_replay as validate_settled_replay
 from .targets import evaluate_pulmonary_targets
 
 _VESSEL_NAME_RE = re.compile(r"^branch(?P<branch_id>\d+)_seg(?P<seg_id>\d+)$")
+# learnedZeroD names: ``branch{N}_seg{K}[_{K2}...]_connectorEL`` is the branch's
+# first vessel (zero length; branch R/L folded into the junction) and
+# ``..._connector{M}`` the M-th split connector after it along the branch.
+_LEARNED_CONNECTOR_RE = re.compile(
+    r"^branch(?P<branch_id>\d+)_seg\d+(?:_\d+)*_connector(?P<connector>EL|\d+)$"
+)
 _PATH_TOLERANCE_ABS = 1e-3
 _MIN_USABLE_INTERFACE_SAMPLES = 3
 _FLOW_EPS = 1e-8
@@ -790,15 +796,43 @@ def _branch_series_from_mapped_centerline(
 
 def _branch_and_segment_for_vessel(vessel_name: str) -> tuple[int, int]:
     match = _VESSEL_NAME_RE.match(vessel_name)
-    if match is None:
-        raise ValueError(
-            "stage-1 calibration requires vessel names of the form 'branch<id>_seg<id>'; "
-            f"received '{vessel_name}'"
-        )
-    return int(match.group("branch_id")), int(match.group("seg_id"))
+    if match is not None:
+        return int(match.group("branch_id")), int(match.group("seg_id"))
+    learned = _LEARNED_CONNECTOR_RE.match(vessel_name)
+    if learned is not None:
+        connector = learned.group("connector")
+        seg_id = 0 if connector == "EL" else int(connector) + 1
+        return int(learned.group("branch_id")), seg_id
+    raise ValueError(
+        "stage-1 calibration requires vessel names of the form 'branch<id>_seg<id>' "
+        "or learnedZeroD 'branch<id>_seg<id>..._connector(EL|<n>)'; "
+        f"received '{vessel_name}'"
+    )
 
 
-def _network_topology(config: Dict[str, Any]) -> tuple[Dict[str, VesselTopology], Dict[str, str], Dict[str, str]]:
+def _is_folded_learned_connector(vessel: Mapping[str, Any]) -> bool:
+    """learnedZeroD connectorEL vessel whose branch length lives only in the centerline."""
+    name = str(vessel.get("vessel_name", ""))
+    match = _LEARNED_CONNECTOR_RE.match(name)
+    return (
+        match is not None
+        and match.group("connector") == "EL"
+        and float(vessel.get("vessel_length") or 0.0) == 0.0
+    )
+
+
+def _network_topology(
+    config: Dict[str, Any],
+    branch_path_extents: Mapping[int, float] | None = None,
+    derived_lengths: Dict[str, float] | None = None,
+) -> tuple[Dict[str, VesselTopology], Dict[str, str], Dict[str, str]]:
+    """Vessel positions along their mapped branches plus interface names.
+
+    A zero-length learnedZeroD connectorEL vessel spans the observed branch
+    path (``branch_path_extents``, the branch's maximum mapped path) minus the
+    other vessels on that branch; the lengths used are written to
+    ``derived_lengths``.
+    """
     vessel_id_to_name: Dict[int, str] = {}
     upstream_names: Dict[str, str] = {}
     downstream_names: Dict[str, str] = {}
@@ -828,13 +862,29 @@ def _network_topology(config: Dict[str, Any]) -> tuple[Dict[str, VesselTopology]
                 f"branch {branch_id} vessel segments must be contiguous from seg0; found {seg_ids}"
             )
 
+        folded_lengths: Dict[str, float] = {}
+        folded = [entry for entry in branch_entries if _is_folded_learned_connector(entry[2])]
+        if folded and branch_path_extents is not None and branch_id in branch_path_extents:
+            other_length = sum(
+                float(vessel.get("vessel_length") or 0.0)
+                for _seg, name, vessel in branch_entries
+                if name != folded[0][1]
+            )
+            remaining = float(branch_path_extents[branch_id]) - other_length
+            if len(folded) == 1 and np.isfinite(remaining) and remaining > 0.0:
+                folded_lengths[folded[0][1]] = remaining
+                if derived_lengths is not None:
+                    derived_lengths[folded[0][1]] = remaining
         cumulative_path = 0.0
         for seg_id, vessel_name, vessel in branch_entries:
-            if "vessel_length" not in vessel:
+            if vessel_name in folded_lengths:
+                vessel_length = folded_lengths[vessel_name]
+            elif "vessel_length" not in vessel:
                 raise ValueError(
                     f"stage-1 calibration requires vessel_length for multi-segment mapping ({vessel_name})"
                 )
-            vessel_length = float(vessel["vessel_length"])
+            else:
+                vessel_length = float(vessel["vessel_length"])
             if not np.isfinite(vessel_length) or vessel_length <= 0.0:
                 raise ValueError(f"{vessel_name} vessel_length must be positive and finite")
             start_path = cumulative_path
@@ -1837,7 +1887,21 @@ def assemble_calibration_payload(
         branch_id_array=source_config.branch_id_array,
         path_array=source_config.path_array,
     )
-    vessel_topology, upstream_names, downstream_names = _network_topology(solver_config)
+    derived_connector_lengths: Dict[str, float] = {}
+    vessel_topology, upstream_names, downstream_names = _network_topology(
+        solver_config,
+        branch_path_extents={
+            branch_id: float(series.paths[-1])
+            for branch_id, series in branch_series_by_id.items()
+            if len(series.paths)
+        },
+        derived_lengths=derived_connector_lengths,
+    )
+    if derived_connector_lengths:
+        input_normalization = {
+            **input_normalization,
+            "learned_connector_lengths_from_centerline": derived_connector_lengths,
+        }
     vessel_parameters = _selected_parameters(
         (str(vessel["vessel_name"]) for vessel in solver_config.get("vessels", []) or []),
         default=calibration.parameters.vessels.default,
