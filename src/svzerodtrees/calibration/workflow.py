@@ -3138,6 +3138,13 @@ def _replay_target_observations(
         if times.ndim != 1 or values.ndim != 1 or times.size != values.size:
             raise ValueError(f"settled replay target series for {vessel!r} is malformed")
         local_phases = (times - start) / duration
+        # The accepted cycle spans [start, end] with end - start = one period,
+        # so its last sample is the next cycle's first.  A settled replay is
+        # periodic only within the cycle-stability tolerance, so keep the
+        # half-open cycle instead of demanding an exact phase-0/phase-1 match.
+        if local_phases.size > 2 and local_phases[-1] >= 1.0 - 1.0e-9:
+            local_phases = local_phases[:-1]
+            values = values[:-1]
         return {
             "phases": [float(value) for value in local_phases],
             "values": [float(value) for value in values],

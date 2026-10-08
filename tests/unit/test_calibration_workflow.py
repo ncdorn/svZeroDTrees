@@ -297,6 +297,48 @@ def test_replay_target_pressure_is_labeled_as_solver_native_cgs() -> None:
     assert replay_targets["rpa_flow"]["units"] == "cm^3/s"
 
 
+def test_replay_target_series_drop_next_cycle_endpoint() -> None:
+    """A settled replay is periodic only within tolerance; its phase-1 sample
+    (the next cycle's start) must not be required to equal phase 0."""
+    from svzerodtrees.calibration.targets import _periodic_arrays, TargetSeries
+
+    targets = CalibrationTargetsConfig(
+        mpa_pressure=CalibrationMPAPressureTargetConfig(
+            vessel="branch0_seg0",
+            interface="external_upstream",
+        ),
+        rpa_flow_split=CalibrationRPAFlowSplitTargetConfig(
+            rpa_vessel="branch1_seg0",
+            lpa_vessel="branch2_seg0",
+            interface="external_downstream",
+        ),
+    )
+    times = [2.4, 2.6, 2.8, 3.0, 3.2]
+    replay_summary = {
+        "accepted_final_cycle": {
+            "start_time": 2.4,
+            "end_time": 3.2,
+            "series": [
+                {"kind": "pressure", "name": "branch0_seg0", "column": "pressure_in",
+                 "times": times, "values": [1000.0, 3000.0, 2000.0, 1500.0, 1000.4]},
+                {"kind": "flow", "name": "branch1_seg0", "column": "flow_out",
+                 "times": times, "values": [1.0, 2.0, 1.5, 1.2, 1.0001]},
+                {"kind": "flow", "name": "branch2_seg0", "column": "flow_out",
+                 "times": times, "values": [1.0, 2.0, 1.5, 1.2, 1.0001]},
+            ],
+        }
+    }
+    replay_targets = _replay_target_observations(replay_summary, targets)
+    pressure = replay_targets["mpa_pressure"]
+    assert pressure["phases"] == pytest.approx([0.0, 0.25, 0.5, 0.75])
+    assert pressure["values"] == [1000.0, 3000.0, 2000.0, 1500.0]
+    phases, values = _periodic_arrays(
+        TargetSeries(pressure["phases"], pressure["values"], "dyn/cm^2", "away_from_mpa"),
+        label="mpa",
+    )
+    assert phases.size == 4
+
+
 def _write_target_qc_fixture(tmp_path: Path, *, invalid_split: bool = False) -> Path:
     centerline = tmp_path / "centerline.vtp"
     mapped = tmp_path / "mapped.vtp"
