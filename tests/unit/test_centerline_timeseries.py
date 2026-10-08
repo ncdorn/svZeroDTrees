@@ -111,7 +111,8 @@ def test_publish_centerline_timeseries_writes_ordered_arrays_and_descriptor(
     assert artifact["reference_centerline"] == "../reference.vtp"
     assert artifact["frame_indices"] == [0, 1]
     assert artifact["timestamps_s"] == [0.2, 0.4]
-    assert artifact["data_contract"]["pressure"]["units"] == "mmHg"
+    # svSlicer pressure is the solver CGS field, published unconverted.
+    assert artifact["data_contract"]["pressure"]["units"] == "dyn/cm^2"
     assert artifact["data_contract"]["flow"] == {
         "quantity": "volumetric_flow",
         "units": "cm^3/s",

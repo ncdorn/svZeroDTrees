@@ -373,14 +373,25 @@ def _validate_cycle_duration(cycle_duration_s: float) -> float:
     return duration
 
 
+# svSlicer samples the svMultiPhysics ``Pressure`` field in the solver's CGS
+# unit, and calibration hands these values to the CGS solver unchanged, so the
+# published series declares dyn/cm^2.  mmHg remains accepted for callers that
+# publish converted data.
+CENTERLINE_PRESSURE_UNITS = frozenset({"mmHg", "dyn/cm^2"})
+SOLVER_PRESSURE_UNITS = "dyn/cm^2"
+
+
 def _validate_data_contract(
     *,
     pressure_units: str,
     flow_units: str,
     flow_quantity: str,
 ) -> None:
-    if pressure_units != "mmHg":
-        raise ValueError("centerline timeseries pressure units must be mmHg")
+    if pressure_units not in CENTERLINE_PRESSURE_UNITS:
+        raise ValueError(
+            "centerline timeseries pressure units must be one of "
+            f"{sorted(CENTERLINE_PRESSURE_UNITS)}"
+        )
     if flow_units != "cm^3/s" or flow_quantity != "volumetric_flow":
         raise ValueError(
             "centerline timeseries flow must declare quantity=volumetric_flow and units=cm^3/s"
@@ -817,7 +828,7 @@ def publish_centerline_timeseries(
     tuned_zerod_config_path: str | Path | None = None,
     pressure_array: str = "pressure",
     flow_array: str = "velocity",
-    pressure_units: str = "mmHg",
+    pressure_units: str = SOLVER_PRESSURE_UNITS,
     flow_units: str = "cm^3/s",
     flow_quantity: str = "volumetric_flow",
 ) -> dict[str, Any]:

@@ -269,8 +269,13 @@ and an `artifacts.centerline_timeseries` record. The record contains:
 - contiguous `frame_indices`, ordered `timestamps_s`, positive
   `cycle_duration_s`, and frame/point/cell counts;
 - source pressure/flow array names; and
-- the data contract, including `pressure` as `mmHg` and `flow` as integrated
-  `volumetric_flow` in `cm^3/s`.
+- the data contract, including `pressure` units and `flow` as integrated
+  `volumetric_flow` in `cm^3/s`. The pulmonary suite publishes svSlicer's
+  `Pressure` field unconverted and declares it `dyn/cm^2` (the solver's CGS
+  unit, which calibration passes to the solver as is); `mmHg` remains accepted.
+  Target scoring converts each series by its declared unit. Descriptors from
+  before 2026-10-07 declared `mmHg` for these dyn/cm^2 values; their target
+  gates compare mismatched units and must be regenerated.
 
 Callers producing a calibratable artifact must pass the exact tuned full-0D
 JSON through `tuned_zerod_config_path`. The suite descriptor then carries one

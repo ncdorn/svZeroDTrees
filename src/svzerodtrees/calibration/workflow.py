@@ -562,9 +562,12 @@ def _resolve_postprocess_suite_data_source(
         raise ValueError("postprocess suite descriptor data_contract is required")
     pressure_contract = data_contract.get("pressure")
     flow_contract = data_contract.get("flow")
-    if not isinstance(pressure_contract, Mapping) or pressure_contract.get("units") != "mmHg":
+    if not isinstance(pressure_contract, Mapping) or pressure_contract.get("units") not in {
+        "mmHg",
+        "dyn/cm^2",
+    }:
         raise ValueError(
-            "postprocess suite descriptor pressure units must be mmHg"
+            "postprocess suite descriptor pressure units must be mmHg or dyn/cm^2"
         )
     if (
         not isinstance(flow_contract, Mapping)
