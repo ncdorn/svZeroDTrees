@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from svzerodtrees.pa_naming import pa_side
 from pathlib import Path
 import copy
 import json
@@ -136,9 +137,9 @@ def _mean_resistances_from_postprocessed_mpa(simdir: SimulationDirectory) -> tup
             continue
         mean_pressure = float(np.mean(pressure_arr[-100:]))
         surface_name = str(getattr(block, "surface", "")).lower()
-        if "lpa" in surface_name:
+        if pa_side(surface_name) == "lpa":
             lpa_outlet_pressures.append(mean_pressure)
-        elif "rpa" in surface_name:
+        elif pa_side(surface_name) == "rpa":
             rpa_outlet_pressures.append(mean_pressure)
 
     if not lpa_outlet_pressures or not rpa_outlet_pressures:

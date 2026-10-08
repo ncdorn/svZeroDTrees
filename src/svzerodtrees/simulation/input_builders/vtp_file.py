@@ -1,3 +1,4 @@
+from svzerodtrees.pa_naming import pa_side
 import vtk
 from .simulation_file import SimulationFile
 
@@ -11,11 +12,11 @@ class VTPFile(SimulationFile):
 
         self.lobe = None # to be assigned later
 
-        if 'lpa' in self.filename.lower():
+        if pa_side(self.filename) == 'lpa':
             self.lpa = True
             self.rpa = False
             self.inflow = False
-        elif 'rpa' in self.filename.lower():
+        elif pa_side(self.filename) == 'rpa':
             self.rpa = True
             self.lpa = False
             self.inflow = False

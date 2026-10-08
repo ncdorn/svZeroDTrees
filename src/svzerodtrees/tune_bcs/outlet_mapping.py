@@ -14,6 +14,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 import json
 import math
+
+from ..pa_naming import pa_side
 from pathlib import Path
 import re
 from types import MappingProxyType
@@ -51,14 +53,12 @@ def cap_side(value: Any) -> str:
     not inspect 0D vessel graph labels or branch membership.
     """
 
-    value_lower = Path(str(value)).stem.lower()
-    has_lpa = "lpa" in value_lower
-    has_rpa = "rpa" in value_lower
-    if has_lpa == has_rpa:
+    side = pa_side(value)
+    if side is None:
         raise ValueError(
             f"cap '{value}' must identify exactly one pulmonary side using LPA or RPA"
         )
-    return "lpa" if has_lpa else "rpa"
+    return side
 
 
 def _finite_float(value: Any, *, label: str) -> float:

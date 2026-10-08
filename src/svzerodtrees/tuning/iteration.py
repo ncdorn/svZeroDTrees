@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from svzerodtrees.pa_naming import pa_side
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -404,7 +405,7 @@ def _expanded_rri_payload_for_caps(
     expanded_bcs: list[dict[str, Any]] = list(inflow_bcs)
     used_names = {str(bc.get("bc_name")) for bc in expanded_bcs}
     for index, cap_name in enumerate(cap_info):
-        template = lpa_template if "lpa" in str(cap_name).lower() else rpa_template
+        template = lpa_template if pa_side(cap_name) == "lpa" else rpa_template
         bc_payload = json.loads(json.dumps(template))
         bc_name = Path(str(cap_name)).stem
         if not bc_name or bc_name in used_names:

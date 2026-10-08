@@ -1,3 +1,4 @@
+from svzerodtrees.pa_naming import pa_side
 from ..utils import *
 from .._pysvzerod import simulate_pysvzerod
 from .threedutils import *
@@ -693,11 +694,11 @@ class SimulationDirectory:
 
             sys_val, dia_val, mean_val = self._cycle_statistics(pressure_last_period)
 
-            if 'lpa' in block.surface.lower():
+            if pa_side(block.surface) == 'lpa':
                 lpa_outlet_pressures['sys'].append(sys_val)
                 lpa_outlet_pressures['dia'].append(dia_val)
                 lpa_outlet_pressures['mean'].append(mean_val)
-            elif 'rpa' in block.surface.lower():
+            elif pa_side(block.surface) == 'rpa':
                 rpa_outlet_pressures['sys'].append(sys_val)
                 rpa_outlet_pressures['dia'].append(dia_val)
                 rpa_outlet_pressures['mean'].append(mean_val)
@@ -765,9 +766,9 @@ class SimulationDirectory:
             lpa_outlet_pressures = []
             rpa_outlet_pressures = []
             for block in self.svzerod_3Dcoupling.coupling_blocks.values():
-                if 'lpa' in block.surface.lower():
+                if pa_side(block.surface) == 'lpa':
                     lpa_outlet_pressures.append(np.mean(self.svzerod_data.get_result(block)[2][-100:]))
-                if 'rpa' in block.surface.lower():
+                if pa_side(block.surface) == 'rpa':
                     rpa_outlet_pressures.append(np.mean(self.svzerod_data.get_result(block)[2][-100:]))
 
             lpa_outlet_mean_pressure = np.mean(lpa_outlet_pressures)
@@ -1921,9 +1922,9 @@ class SimulationDirectory:
             if time.size == 0:
                 continue
 
-            if 'lpa' in block.surface.lower():
+            if pa_side(block.surface) == 'lpa':
                 color='r'
-            elif 'rpa' in block.surface.lower():
+            elif pa_side(block.surface) == 'rpa':
                 color='b'
             else:
                 color='g'

@@ -1,4 +1,5 @@
 
+from svzerodtrees.pa_naming import pa_side
 import numpy as np
 from ..io import *
 from ..io.blocks.boundary_condition import resolve_impedance_timepoint_contract
@@ -626,11 +627,11 @@ def assign_rcr_bcs(config_handler,
     for cap_name, area in cap_info.items():
         bc_name = cap_to_bc[cap_name]
 
-        if 'lpa' in cap_name.lower():
+        if pa_side(cap_name) == 'lpa':
             print(f'creating RCR BC for LPA with parameters: {rcr_params[:2]}')
             resistance, capacitance = rcr_params[:2]
             adjusted_resistance = resistance * (lpa_total_area / area)
-        elif 'rpa' in cap_name.lower():
+        elif pa_side(cap_name) == 'rpa':
             print(f'creating RCR BC for RPA with parameters: {rcr_params[2:]}')
             resistance, capacitance = rcr_params[2:]
             adjusted_resistance = resistance * (rpa_total_area / area)
