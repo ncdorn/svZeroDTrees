@@ -99,9 +99,13 @@ def full_pa_calibration_targets(
     mpa_normalized_rms_tolerance: float = 0.05,
     rpa_split_absolute_tolerance: float = 0.02,
     require_improvement_over_baseline: bool = True,
-    gate_policy: str = "absolute",
+    gate_policy: str = "improvement_only",
 ) -> dict[str, Any]:
-    """``calibration.targets`` block for a tuned full-PA model."""
+    """``calibration.targets`` block for a tuned full-PA model.
+
+    Iteration seeds use ``improvement_only``: R-only calibration improves the
+    targets but need not meet the absolute tolerances (TST-STAN-5, 2026-10-07).
+    """
     zerod_config = json.loads(Path(zerod_config_path).read_text(encoding="utf-8"))
     mapping = json.loads(Path(outlet_cap_mapping_path).read_text(encoding="utf-8"))
     roles = pa_target_roles(zerod_config, mapping)

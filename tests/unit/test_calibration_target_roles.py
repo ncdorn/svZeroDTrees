@@ -66,4 +66,5 @@ def test_targets_block_parses_as_calibration_targets(tmp_path):
     targets = full_pa_calibration_targets(model, mapping)
     assert targets["rpa_flow_split"]["rpa_vessel"] == "branch4_seg0_connectorEL"
     assert targets["mpa_pressure"]["interface"] == "external_upstream"
+    assert targets["gate_policy"] == "improvement_only"
     assert _parse_calibration_targets(targets) is not None
