@@ -3643,16 +3643,36 @@ def calibrate_0d_from_mapped_centerline(
                 "candidate_composite_score": candidate_score,
                 "passed": policy_passed,
             }
+        gate_policy = str(getattr(calibration.targets, "gate_policy", "absolute"))
+        if gate_policy == "improvement_only":
+            # The calibrated model must be scored and beat a scored baseline;
+            # the per-target tolerances are advisory.
+            improved = (
+                isinstance(candidate_score, (int, float))
+                and baseline_policy.get("status") == "pass"
+            )
+            if not improved and baseline_policy.get("status") != "fail":
+                baseline_policy = {
+                    **baseline_policy,
+                    "passed": False,
+                    "reason": "improvement_only requires scored baseline and candidate models",
+                }
+            status = "pass" if improved else "fail"
+        else:
+            status = (
+                "pass"
+                if candidate_targets.get("status") == "pass" and baseline_policy["passed"]
+                else "fail"
+            )
         target_summary.update(
             {
-                "status": "pass"
-                if candidate_targets.get("status") == "pass"
-                and baseline_policy["passed"]
-                else "fail",
+                "status": status,
+                "gate_policy": gate_policy,
                 "baseline": baseline_summary,
                 "candidate": candidate_targets,
                 "baseline_policy": baseline_policy,
                 "component_gates": candidate_targets.get("gate_results", {}),
+                "component_gates_advisory": gate_policy == "improvement_only",
             }
         )
         target_path = output_path.parent / "calibration_targets.json"

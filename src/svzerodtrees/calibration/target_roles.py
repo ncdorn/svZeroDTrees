@@ -99,6 +99,7 @@ def full_pa_calibration_targets(
     mpa_normalized_rms_tolerance: float = 0.05,
     rpa_split_absolute_tolerance: float = 0.02,
     require_improvement_over_baseline: bool = True,
+    gate_policy: str = "absolute",
 ) -> dict[str, Any]:
     """``calibration.targets`` block for a tuned full-PA model."""
     zerod_config = json.loads(Path(zerod_config_path).read_text(encoding="utf-8"))
@@ -119,4 +120,5 @@ def full_pa_calibration_targets(
             "absolute_tolerance": float(rpa_split_absolute_tolerance),
         },
         "require_improvement_over_baseline": bool(require_improvement_over_baseline),
+        "gate_policy": str(gate_policy),
     }

@@ -23,6 +23,7 @@ def _write_fixture_calibration_config(
     mapped_path: Path,
     metadata_path: Path,
     target_focused: bool = False,
+    gate_policy: str | None = None,
 ) -> None:
     target_config = ""
     if target_focused:
@@ -38,6 +39,8 @@ def _write_fixture_calibration_config(
       lpa_vessel: branch2_seg0
       interface: external_downstream
 """
+        if gate_policy is not None:
+            target_config += f"    gate_policy: {gate_policy}\n"
     path.write_text(
         f"""
 version: 1
@@ -231,6 +234,62 @@ def test_target_gate_failure_does_not_publish_current_run_success(
     assert target_report["status"] == "fail"
     assert target_report["candidate"]["gate_results"]["mpa_pressure"] is False
     assert target_report["run_id"]
+
+
+def _improvement_only_fixture(monkeypatch, tmp_path, *, candidate_offset: float) -> tuple[Path, Path]:
+    """Baseline replay is 10 mmHg off target; the calibrated (R-doubled) one by candidate_offset."""
+    fixture_dir = Path(__file__).parents[1] / "fixtures" / "calibration"
+    baseline_path = fixture_dir / "finite_rigid_baseline.json"
+    output_path = tmp_path / "calibrated.json"
+    config_path = tmp_path / "calibrate.yml"
+    _write_fixture_calibration_config(
+        config_path,
+        output_path=output_path,
+        baseline_path=baseline_path,
+        mapped_path=fixture_dir / "mapped_timeseries.vtp",
+        metadata_path=fixture_dir / "mapped_timeseries_metadata.json",
+        target_focused=True,
+        gate_policy="improvement_only",
+    )
+    baseline_r = json.loads(baseline_path.read_text(encoding="utf-8"))["vessels"][0][
+        "zero_d_element_values"
+    ]["R_poiseuille"]
+
+    def calibrate(payload):
+        updated = json.loads(json.dumps(payload))
+        updated["vessels"][0]["zero_d_element_values"]["R_poiseuille"] = 2.0 * baseline_r
+        return updated
+
+    def simulate(payload):
+        r = payload["vessels"][0]["zero_d_element_values"]["R_poiseuille"]
+        offset = candidate_offset if r != baseline_r else 10.0
+        return _fixture_replay_rows(pressure_offset=offset)
+
+    monkeypatch.setattr("svzerodtrees.calibration.workflow.calibrate_pysvzerod", calibrate)
+    monkeypatch.setattr("svzerodtrees.calibration.workflow.simulate_pysvzerod", simulate)
+    return config_path, output_path
+
+
+def test_improvement_only_publishes_improved_model_with_advisory_gates(monkeypatch, tmp_path):
+    config_path, output_path = _improvement_only_fixture(monkeypatch, tmp_path, candidate_offset=6.0)
+    run_from_config_file(str(config_path))
+    assert output_path.exists()
+    report = json.loads((tmp_path / "calibration_targets.json").read_text(encoding="utf-8"))
+    assert report["status"] == "pass"
+    assert report["gate_policy"] == "improvement_only"
+    assert report["component_gates_advisory"] is True
+    assert report["candidate"]["gate_results"]["mpa_pressure"] is False
+    assert report["baseline_policy"]["status"] == "pass"
+
+
+def test_improvement_only_rejects_a_worse_model(monkeypatch, tmp_path):
+    config_path, output_path = _improvement_only_fixture(monkeypatch, tmp_path, candidate_offset=14.0)
+    with pytest.raises(ValueError, match="pulmonary target gates failed"):
+        run_from_config_file(str(config_path))
+    assert not output_path.exists()
+    report = json.loads((tmp_path / "calibration_targets.json").read_text(encoding="utf-8"))
+    assert report["status"] == "fail"
+    assert report["baseline_policy"]["status"] == "fail"
 
 
 def test_baseline_policy_failure_does_not_publish_candidate(

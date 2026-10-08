@@ -393,7 +393,12 @@ RPA vessel roles and explicit, topology-valid interfaces. Target-focused
 calibration independently gates the MPA pressure-waveform normalized RMS
 error and absolute RPA flow-split error. Their weighted,
 tolerance-normalized composite is a post-calibration score, not a second
-optimizer. Omitting `calibration.targets` retains `strict_network` behavior
+optimizer. `targets.gate_policy` (`absolute` by default) selects what must
+pass: `absolute` requires both tolerances; `improvement_only` publishes when the
+calibrated model's composite score is no worse than the uncalibrated model's
+(both scored, replay passed) and reports the tolerance gates as advisory
+(`component_gates_advisory` in `calibration_targets.json`). Omitting
+`calibration.targets` retains `strict_network` behavior
 during the version-1 compatibility window.
 
 ## Calibration quality gates and outputs

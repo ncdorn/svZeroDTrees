@@ -331,6 +331,10 @@ class CalibrationTargetsConfig:
     mpa_pressure: CalibrationMPAPressureTargetConfig
     rpa_flow_split: CalibrationRPAFlowSplitTargetConfig
     require_improvement_over_baseline: bool = True
+    # "absolute": the MPA/RPA tolerances must pass.  "improvement_only": the
+    # calibrated model must beat the uncalibrated one on the composite score;
+    # the tolerance gates are reported as advisory.
+    gate_policy: str = "absolute"
 
 
 @dataclass
@@ -1414,7 +1418,7 @@ def _parse_calibration_targets(
         raise ValueError(f"{context} must be a mapping")
     _ensure_keys(
         data,
-        ["mpa_pressure", "rpa_flow_split", "require_improvement_over_baseline"],
+        ["mpa_pressure", "rpa_flow_split", "require_improvement_over_baseline", "gate_policy"],
         context,
     )
 
@@ -1477,10 +1481,16 @@ def _parse_calibration_targets(
         raise ValueError(
             f"{context}.require_improvement_over_baseline must be a boolean"
         )
+    gate_policy = str(data.get("gate_policy", "absolute")).strip().lower()
+    if gate_policy not in {"absolute", "improvement_only"}:
+        raise ValueError(
+            f"{context}.gate_policy must be one of absolute|improvement_only"
+        )
     return CalibrationTargetsConfig(
         mpa_pressure=mpa,
         rpa_flow_split=rpa,
         require_improvement_over_baseline=require_improvement,
+        gate_policy=gate_policy,
     )
 
 
