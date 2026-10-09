@@ -150,8 +150,11 @@ outlet pressure represents the pressure downstream of the arterial tree.
   The uniform wall places relatively more compliance in the largest vessels
   (Eh/r 3.5e4 in the MPA to 1.5e5 in the smallest branches). Each run reports
   r_eff and the matched E h in `tuning_diagnostics.json`
-  (`proximal_compliance.matched_uniform_wall_eh`), and svzt-agent logs the
-  ratio of the configured 3D wall to it. The large linear strain noted under
+  (`proximal_compliance.matched_uniform_wall_eh`);
+  `matched_wall_elasticity_modulus(diagnostics, h)` returns E = that / h, which
+  svzt-agent applies per patient with
+  `threed.elasticity_modulus: "match_proximal_compliance"` and otherwise
+  compares with the configured 3D wall. The large linear strain noted under
   Assumptions now applies to the 3D wall motion too, which exceeds the
   coupled-momentum method's small-strain assumption.
 - **Later iterations**: compliance already present (calibrated against 3D) is

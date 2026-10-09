@@ -259,6 +259,36 @@ def write_seed_with_proximal_compliance(
     return out, summary
 
 
+def matched_wall_elasticity_modulus(
+    diagnostics_path: str | Path, shell_thickness: float
+) -> dict[str, Any]:
+    """E of a uniform 3D wall with the total proximal compliance of the 0D seed.
+
+    Summed over the seed vessels, sum 3 A L r / (2 E h) = sum 3 A L / (2 wall_ehr)
+    when E h = wall_ehr * r_eff (``matched_uniform_wall_eh`` in
+    ``tuning_diagnostics.json``), so E = matched_uniform_wall_eh / h.
+    """
+    thickness = float(shell_thickness)
+    if not math.isfinite(thickness) or thickness <= 0.0:
+        raise ValueError(f"shell_thickness must be > 0, got {shell_thickness!r}")
+    payload = json.loads(Path(diagnostics_path).read_text(encoding="utf-8")) or {}
+    proximal = payload.get("proximal_compliance") or {}
+    matched_eh = proximal.get("matched_uniform_wall_eh")
+    if not matched_eh or not math.isfinite(float(matched_eh)) or float(matched_eh) <= 0.0:
+        raise ValueError(
+            f"{diagnostics_path} has no proximal_compliance.matched_uniform_wall_eh; "
+            "tune with tuning.impedance.proximal_compliance enabled"
+        )
+    return {
+        "elasticity_modulus": float(matched_eh) / thickness,
+        "shell_thickness": thickness,
+        "matched_uniform_wall_eh": float(matched_eh),
+        "volume_weighted_radius_cm": proximal.get("volume_weighted_radius_cm"),
+        "wall_ehr": proximal.get("wall_ehr"),
+        "tuning_diagnostics": str(diagnostics_path),
+    }
+
+
 def svpp_bracket(inflow_path: str | Path | None, mpa_p) -> dict[str, Any] | None:
     """Total-compliance bracket [mL/mmHg] from one inflow period and the pulse pressure."""
     if inflow_path is None or not Path(inflow_path).exists():

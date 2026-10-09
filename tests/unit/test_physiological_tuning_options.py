@@ -22,6 +22,7 @@ from svzerodtrees.tune_bcs.pipeline_options import (
 from svzerodtrees.tune_bcs.tuning_diagnostics import (
     RIGID_COMPLIANCE_THRESHOLD,
     apply_proximal_compliance,
+    matched_wall_elasticity_modulus,
     svpp_bracket,
 )
 from svzerodtrees.tuning.iteration import _resolve_impedance_config, evaluate_iteration_gate
@@ -467,6 +468,26 @@ def test_proximal_summary_reports_compliance_matched_uniform_wall():
     # A uniform wall with that E*h carries the same total compliance.
     uniform = sum(3.0 * a * length * r / (2.0 * summary["matched_uniform_wall_eh"]) for a, r in zip(areas, radii))
     assert uniform * 1333.2 == pytest.approx(summary["total_compliance_ml_per_mmhg"])
+
+
+def test_matched_wall_elasticity_modulus_divides_matched_eh_by_thickness(tmp_path):
+    seed = _seed([0.0, 0.0])
+    _, summary = apply_proximal_compliance(seed, 5.0e4)
+    path = tmp_path / "tuning_diagnostics.json"
+    path.write_text(json.dumps({"proximal_compliance": summary}), encoding="utf-8")
+    record = matched_wall_elasticity_modulus(path, 0.2)
+    assert record["elasticity_modulus"] == pytest.approx(summary["matched_uniform_wall_eh"] / 0.2)
+    assert record["volume_weighted_radius_cm"] == pytest.approx(summary["volume_weighted_radius_cm"])
+    assert record["tuning_diagnostics"] == str(path)
+
+
+def test_matched_wall_elasticity_modulus_requires_proximal_compliance(tmp_path):
+    path = tmp_path / "tuning_diagnostics.json"
+    path.write_text(json.dumps({"proximal_compliance": None}), encoding="utf-8")
+    with pytest.raises(ValueError, match="matched_uniform_wall_eh"):
+        matched_wall_elasticity_modulus(path, 0.2)
+    with pytest.raises(ValueError, match="shell_thickness"):
+        matched_wall_elasticity_modulus(path, 0.0)
 
 
 # -------------------------------------------------------------- leaf resistance
