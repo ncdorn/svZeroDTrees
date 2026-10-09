@@ -129,6 +129,10 @@ class MeshComplete(SimulationFile):
     def rename_vtps(self):
         '''
         convert surface names from cap_l_pa_n_x.vtp (Derrick's naming convention) to cap_lpa_n.vtp
+
+        Renames files in place and is lossy (wall_blend_* names collide), and
+        this object's surface list is not refreshed.  Explicit use only; never
+        call it on patient data.
         '''
  
         for filename in os.listdir(self.mesh_surfaces_dir):

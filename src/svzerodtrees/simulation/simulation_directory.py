@@ -175,17 +175,17 @@ class SimulationDirectory:
             print('zerod model not found! you will need to create one or add one...')
             zerod_config = None
 
-        # check for mesh complete
+        # check for mesh complete.  Surfaces keep their on-disk names: the
+        # coupler, outlet mapping, and pa_side() all key on them, and the
+        # directory may be read-only patient data (no rename_vtps here).
 
         if os.path.exists(os.path.join(path, mesh_complete)):
             # relative path is specified
             mesh_complete = MeshComplete(os.path.join(path, mesh_complete))
-            mesh_complete.rename_vtps()
             print('mesh-complete found and loaded')
         elif os.path.exists(mesh_complete):
             # absolute path is specified
             mesh_complete = MeshComplete(mesh_complete)
-            mesh_complete.rename_vtps()
             print('mesh-complete found and loaded')
         else:
             print('mesh-complete not found')

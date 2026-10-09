@@ -484,3 +484,27 @@ def test_from_directory_generates_when_tuned_source_lacks_coupling_blocks(monkey
     assert generate_calls[0][1]["mesh_complete"].path == str(mesh_dir)
     payload = json.loads((tmp_path / "svzerod_3Dcoupling.json").read_text(encoding="utf-8"))
     assert payload["external_solver_coupling_blocks"]
+
+
+def test_from_directory_keeps_mesh_surface_names(monkeypatch, tmp_path: Path):
+    # TST-STAN-2 (2026-10-09): renaming l_pa_*_x.vtp caps on load left the
+    # preop svFSIplus.xml pointing at files that no longer existed.
+    surfaces = tmp_path / "mesh-complete" / "mesh-surfaces"
+    surfaces.mkdir(parents=True)
+    (surfaces / "l_pa_1_1_x.vtp").write_text("", encoding="utf-8")
+
+    class FakeMeshComplete:
+        def __init__(self, path):
+            self.path = str(path)
+
+        def rename_vtps(self):
+            raise AssertionError("mesh surfaces must not be renamed on load")
+
+    monkeypatch.setattr(simulation_directory_module, "MeshComplete", FakeMeshComplete)
+    monkeypatch.setattr(simulation_directory_module, "SvMPxml", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(simulation_directory_module, "SolverRunscript", lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(simulation_directory_module, "SvZeroDdata", lambda path: SimpleNamespace(path=path))
+
+    SimulationDirectory.from_directory(path=str(tmp_path), mesh_complete="mesh-complete")
+
+    assert sorted(p.name for p in surfaces.iterdir()) == ["l_pa_1_1_x.vtp"]
