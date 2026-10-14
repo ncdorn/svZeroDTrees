@@ -114,7 +114,7 @@ bcs:
 | `cap_name` | Match normalized cap stems/names to normalized outlet BC names. |
 | `centerline` | Pair each cap with an outlet BC through the centerline geometry (see below). Requires `outlet_mapping_centerline`. |
 | `serialized_cap_order` | Pair canonical pulmonary cap order with the original serialized non-inflow BC order. This is an explicit choice. |
-| `explicit` | Require a complete cap-to-BC mapping supplied in `outlet_mapping`. |
+| `explicit` | Require a complete cap-to-BC mapping supplied in `outlet_mapping`. An `outlet_mapping_centerline` set alongside it only supplies proximal-compliance branch lengths; it never pairs caps (a later iteration reusing the previous iteration's validated mapping). |
 
 Canonical cap order is the existing pulmonary VTP filename order. Canonical BC
 order is the original `boundary_conditions` JSON list after FLOW/inflow

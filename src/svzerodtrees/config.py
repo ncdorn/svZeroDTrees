@@ -585,10 +585,11 @@ def _parse_impedance_config(
 
     if tuning_model == "full_pa" and mode is None:
         mode = "auto"
-    if mapping_centerline is not None and mode not in {"auto", "centerline"}:
+    if mapping_centerline is not None and mode not in {"auto", "centerline", "explicit"}:
         raise ValueError(
             "bcs.impedance.outlet_mapping_centerline is used only by "
-            "outlet_mapping_mode 'auto' or 'centerline'"
+            "outlet_mapping_mode 'auto' or 'centerline' (or as branch lengths "
+            "with 'explicit')"
         )
 
     use_mean_default = tuning_model != "full_pa"

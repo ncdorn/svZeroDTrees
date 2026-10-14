@@ -567,7 +567,9 @@ def _validate_full_pa_preflight(
         is_pulmonary=True,
         outlet_mapping_mode=outlet_mapping_mode,
         outlet_mapping=outlet_mapping,
-        centerline=outlet_mapping_centerline,
+        centerline=(
+            outlet_mapping_centerline if outlet_mapping_mode in {"auto", "centerline"} else None
+        ),
         seed_payload=seed_payload,
     )
     records = getattr(resolved_mapping, "records", None)
@@ -708,12 +710,16 @@ def _resolve_impedance_config(
                 "impedance tuning outlet_mapping_mode='centerline' requires "
                 "outlet_mapping_centerline"
             )
+        # With an explicit mapping the centerline only supplies proximal
+        # compliance branch lengths (a later iteration reusing the previous
+        # iteration's validated mapping); it never pairs caps.
         if merged["outlet_mapping_centerline"] is not None and merged[
             "outlet_mapping_mode"
-        ] not in {"auto", "centerline"}:
+        ] not in {"auto", "centerline", "explicit"}:
             raise ValueError(
                 "impedance tuning outlet_mapping_centerline is used only by "
-                "outlet_mapping_mode 'auto' or 'centerline'"
+                "outlet_mapping_mode 'auto' or 'centerline' (or as branch lengths "
+                "with 'explicit')"
             )
         if merged["outlet_mapping"] is not None and merged["outlet_mapping_mode"] != "explicit":
             raise ValueError(

@@ -2612,6 +2612,56 @@ def test_resolve_impedance_config_outlet_mapping_centerline_contract(config, mes
         _resolve_impedance_config(payload)
 
 
+def test_explicit_mapping_keeps_centerline_for_branch_lengths_only(monkeypatch, tmp_path):
+    # A later full-PA iteration reuses the previous iteration's validated
+    # mapping (its calibrated seed has no centerline_node_ids); the centerline
+    # still supplies proximal-compliance branch lengths but never pairs caps.
+    from svzerodtrees.tuning import iteration as iteration_module
+
+    pairs = [{"cap_name": f"cap{i}", "bc_name": f"OUT{i}"} for i in range(3)]
+    cfg = _resolve_impedance_config(
+        {
+            "tuning_model": "full_pa",
+            "outlet_mapping_mode": "explicit",
+            "outlet_mapping": pairs,
+            "outlet_mapping_centerline": "centerlines.vtp",
+            "tune_space": _tune_space_with_xi(),
+        }
+    )
+    assert cfg["outlet_mapping_mode"] == "explicit"
+    assert cfg["outlet_mapping_centerline"] == "centerlines.vtp"
+
+    seen = {}
+
+    def fake_validate(config_handler, mesh_surfaces, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(records=[None] * 3)
+
+    monkeypatch.setattr(iteration_module, "validate_cap_to_bc_mapping", fake_validate)
+    seed = {
+        "boundary_conditions": [{"bc_name": "INFLOW", "bc_type": "FLOW"}]
+        + [{"bc_name": f"OUT{i}", "bc_type": "RESISTANCE"} for i in range(3)],
+        "vessels": [
+            {"vessel_id": 0, "vessel_name": "mpa", "boundary_conditions": {"inlet": "INFLOW"}}
+        ]
+        + [
+            {"vessel_id": i + 1, "vessel_name": f"b{i}", "boundary_conditions": {"outlet": f"OUT{i}"}}
+            for i in range(3)
+        ],
+    }
+    iteration_module._validate_full_pa_preflight(
+        seed_payload=seed,
+        config_handler=SimpleNamespace(),
+        mesh_surfaces=tmp_path,
+        convert_to_cm=False,
+        outlet_mapping_mode="explicit",
+        outlet_mapping=pairs,
+        outlet_mapping_centerline=tmp_path / "centerlines.vtp",
+    )
+    assert seen["centerline"] is None
+    assert seen["outlet_mapping"] == pairs
+
+
 def test_resolve_impedance_config_full_pa_preserves_explicit_compatibility_controls():
     cfg = _resolve_impedance_config(
         {
