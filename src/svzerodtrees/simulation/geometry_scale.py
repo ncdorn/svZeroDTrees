@@ -14,7 +14,8 @@ Scaling rules (lengths times s, same fluid and wall material):
 - mesh and centerline coordinates, ``Path``, radii, section sizes: x s;
   ``CenterlineSectionArea``: x s**2;
 - 0D vessels: ``vessel_length`` x s, ``R_poiseuille`` (8 mu L / pi r^4) x s**-3,
-  ``L`` (rho L / pi r^2) x s**-1, ``C`` (3 pi r^3 L / 2 E h) x s**4,
+  ``L`` (rho L / pi r^2) x s**-1, ``C`` (3 A L / 2 (Eh/r)) x s**3 at constant
+  Eh/r (the proximal-compliance and large-radius Olufsen wall model),
   ``stenosis_coefficient`` (~ 1 / A^2) x s**-4; ``geometric_params`` areas x s**2
   and lengths/radii x s; junction ``areas`` x s**2 and ``lengths`` x s;
 - boundary conditions, simulation parameters, tangents, ids: unchanged.
@@ -51,7 +52,9 @@ _CENTERLINE_AREA_ARRAYS = ("CenterlineSectionArea",)
 _VESSEL_VALUE_EXPONENTS = {
     "R_poiseuille": -3,
     "L": -1,
-    "C": 4,
+    # s**4 (constant E h) raised STAN-9's baseline compliance enough to tip its
+    # near-zero LPA flow split negative in learnedZeroD's features (2026-10-15).
+    "C": 3,
     "stenosis_coefficient": -4,
 }
 _GEOMETRIC_AREA_KEYS = ("inlet_area", "outlet_area", "area")

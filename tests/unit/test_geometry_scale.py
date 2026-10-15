@@ -48,7 +48,7 @@ def test_scale_zerod_payload_follows_poiseuille_rules():
         "vessels": [
             {
                 "vessel_length": 2.0,
-                "zero_d_element_values": {"R_poiseuille": 8.0, "L": 3.0, "C": math.inf, "stenosis_coefficient": 0.5},
+                "zero_d_element_values": {"R_poiseuille": 8.0, "L": 3.0, "C": 2.0, "stenosis_coefficient": 0.5},
                 "geometric_params": {"inlet_area": 1.0, "outlet_area": 2.0},
                 "boundary_conditions": {"inlet": "INFLOW"},
             }
@@ -62,7 +62,9 @@ def test_scale_zerod_payload_follows_poiseuille_rules():
     assert vessel["vessel_length"] == pytest.approx(2.0 * S)
     assert values["R_poiseuille"] == pytest.approx(8.0 / S**3)
     assert values["L"] == pytest.approx(3.0 / S)
-    assert math.isinf(values["C"])
+    assert values["C"] == pytest.approx(2.0 * S**3)
+    infinite = scale_zerod_payload({"vessels": [{"zero_d_element_values": {"C": math.inf}}]}, S)
+    assert math.isinf(infinite["vessels"][0]["zero_d_element_values"]["C"])
     assert values["stenosis_coefficient"] == pytest.approx(0.5 / S**4)
     assert vessel["geometric_params"] == pytest.approx({"inlet_area": S**2, "outlet_area": 2 * S**2})
     assert scaled["junctions"][0]["areas"] == pytest.approx([S**2, 0.5 * S**2])
