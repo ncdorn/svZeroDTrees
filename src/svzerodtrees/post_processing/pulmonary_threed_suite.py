@@ -18,6 +18,7 @@ import pyvista as pv
 
 from ..simulation.simulation_directory import SimulationDirectory
 from ..tune_bcs.clinical_targets import ClinicalTargets
+from .centerline_resample import densify_short_branches
 from .centerline_timeseries import (
     CENTERLINE_TIMESERIES_SCHEMA_VERSION,
     _atomic_write_json,
@@ -34,6 +35,9 @@ CGS_TO_MMHG = 1333.224
 _RESISTANCE_MAP_CAMERA_FILL_FACTOR = 2.33
 _RESISTANCE_MAP_ANATOMY_OPACITY = 0.12
 
+
+
+CENTERLINE_RESAMPLED_FILENAME = "centerline_resampled.vtp"
 
 def _extract_result_step(path: str | Path) -> int:
     match = re.search(r"result_(\d+)\.vtu$", Path(path).name)
@@ -763,7 +767,17 @@ def run_pulmonary_threed_postprocess_suite(
     camera_offset_dir: Sequence[float] | None = None,
     camera_view_up: Sequence[float] | None = None,
     tuned_zerod_config_path: str | Path | None = None,
+    min_centerline_points_per_branch: int | None = None,
 ) -> dict[str, Any]:
+    """Run the preop/postop 3D postprocess suite.
+
+    ``min_centerline_points_per_branch`` densifies branches with fewer points
+    (``centerline_resample.densify_short_branches``) in a copy of the
+    centerline written to ``output_dir/centerline_resampled.vtp``; svSlicer and
+    the published centerline timeseries use that copy, so calibration gets an
+    interior cross-section on short branches (e.g. a two-point MPA).  The MPA
+    pressure CSV keeps the original centerline.
+    """
     if cycle_duration_s is None:
         if inflow_csv is None:
             raise ValueError("one of cycle_duration_s or inflow_csv is required")
@@ -879,10 +893,22 @@ def run_pulmonary_threed_postprocess_suite(
         steps["frames"] = {"status": "completed", "result": frames_result}
         metadata["frames"] = frames_result
 
+        slicing_centerline = Path(centerline)
+        if min_centerline_points_per_branch:
+            active_step = "centerline_resampling"
+            resampling = densify_short_branches(
+                centerline,
+                output_path / CENTERLINE_RESAMPLED_FILENAME,
+                min_points_per_branch=int(min_centerline_points_per_branch),
+            )
+            metadata["centerline_resampling"] = resampling
+            outputs["centerline_resampled_vtp"] = resampling["output"]
+            slicing_centerline = Path(resampling["output"])
+
         active_step = "resistance_map"
         resistance_result = compute_pulmonary_resistance_map(
             svslicer_path=svslicer_path,
-            centerline=str(centerline),
+            centerline=str(slicing_centerline),
             frames_csv=str(frames_csv),
             output_dir=str(resistance_dir),
             cycle_duration_s=float(cycle_duration_s),
@@ -908,7 +934,7 @@ def run_pulmonary_threed_postprocess_suite(
         centerline_timeseries_result = publish_centerline_timeseries(
             resistance_map_metadata_json=resistance_result["metadata_json"],
             output_dir=output_path,
-            reference_centerline=centerline,
+            reference_centerline=slicing_centerline,
             suite_metadata_path=metadata_path,
             tuned_zerod_config_path=tuned_zerod_config_path,
         )
@@ -935,7 +961,7 @@ def run_pulmonary_threed_postprocess_suite(
         )
         resistance_systolic_result = _compute_pulmonary_resistance_map_for_selected_frames(
             svslicer_path=svslicer_path,
-            centerline=str(centerline),
+            centerline=str(slicing_centerline),
             selected_frames=systolic_frames,
             output_dir=str(resistance_systolic_dir),
             cycle_duration_s=float(cycle_duration_s),

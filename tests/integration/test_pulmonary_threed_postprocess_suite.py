@@ -8,6 +8,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pyvista as pv
+import shutil
+
 import pytest
 import vtk
 from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
@@ -304,7 +306,11 @@ def test_select_systolic_frame_from_artifacts_errors_without_finite_last_cycle_p
         )
 
 
-def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypatch, tmp_path: Path):
+@pytest.mark.parametrize("min_points", [None, 2])
+def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(
+    monkeypatch, tmp_path: Path, min_points
+):
+    sliced_centerlines = []
     centerline_path = tmp_path / "centerlines.vtp"
     _write_centerline(centerline_path)
     sim_dir = tmp_path / "preop"
@@ -347,6 +353,7 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
         assert "max_frames" not in kwargs
         assert kwargs["workers"] == "auto"
         assert kwargs["keep_intermediate_centerlines"] is True
+        sliced_centerlines.append(kwargs["centerline"])
         resistance_dir = Path(kwargs["output_dir"])
         resistance_dir.mkdir(parents=True, exist_ok=True)
         summary = resistance_dir / "branch_resistance_summary.csv"
@@ -356,7 +363,7 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
         intermediate_dir = resistance_dir / "intermediate_centerlines"
         intermediate_dir.mkdir(parents=True, exist_ok=True)
         mapped_frame = intermediate_dir / "0000_result_0002_centerline.vtp"
-        _write_mapped_frame(mapped_frame, centerline_path)
+        _write_mapped_frame(mapped_frame, Path(kwargs["centerline"]))
         pd.DataFrame([{"branch_id": 1, "resistance_mean": 3.0}]).to_csv(summary, index=False)
         pd.DataFrame([{"branch_id": 1, "rank": 1}]).to_csv(ranked, index=False)
         pv.Line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)).save(vtp)
@@ -455,6 +462,16 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
         fake_render_png,
     )
 
+    def fake_densify(source, output, *, min_points_per_branch):
+        # The resampler itself is covered in test_centerline_resample.py.
+        shutil.copyfile(source, output)
+        return {"output": str(output), "min_points_per_branch": min_points_per_branch}
+
+    monkeypatch.setattr(
+        "svzerodtrees.post_processing.pulmonary_threed_suite.densify_short_branches",
+        fake_densify,
+    )
+
     output_dir = tmp_path / "results" / "postprocess"
     result = run_pulmonary_threed_postprocess_suite(
         simulation_dir=sim_dir,
@@ -468,8 +485,15 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
         camera_offset_dir=[0.25, -0.5, 0.75],
         camera_view_up=[0.0, 0.0, 1.0],
         tuned_zerod_config_path=tuned_config,
+        min_centerline_points_per_branch=min_points,
     )
 
+    resampled = output_dir / "centerline_resampled.vtp"
+    expected_centerline = centerline_path if min_points is None else resampled
+    assert sliced_centerlines == [str(expected_centerline)]
+    assert resampled.exists() is (min_points is not None)
+    if min_points is not None:
+        assert result["centerline_resampling"]["min_points_per_branch"] == min_points
     assert (output_dir / "mpa_pressure_vs_time.csv").exists()
     assert (output_dir / "mpa_pressure_vs_time.png").exists()
     assert (output_dir / "flow_split_comparison.csv").exists()
@@ -502,7 +526,7 @@ def test_run_pulmonary_threed_postprocess_suite_writes_expected_outputs(monkeypa
     assert artifact["frame_indices"] == [0]
     assert artifact["timestamps_s"] == [pytest.approx(0.2)]
     assert artifact["reference_centerline"] == os.path.relpath(
-        centerline_path, output_dir
+        expected_centerline, output_dir
     ).replace(os.sep, "/")
     assert result["steps"]["resistance_map_systolic"]["status"] == "completed"
     assert "resistance_map_systolic" in result
