@@ -282,6 +282,7 @@ impedance_config:
   # keep_diastolic_target: false    # keep the diastolic term when its target < Pd
   # objective: {type: likelihood, pressure_sigma_mmhg: 2.0, split_sigma: 0.02, target_sigma: 1.0}
   # proximal_compliance: {wall_ehr: 5.0e+4}   # full_pa; thin-wall C on rigid seed vessels
+  # proximal_compliance: {wall_ehr: 5.0e+4, tied_k3_ref: 1.0e+5}  # + tune_space stiffness_scale: tied s
   # tree_max_nodes: 1000000         # structured-tree node budget (default 100000)
   # polish: {maxfev: 100}           # full_pa + objective_tree_policy; per-cap re-tune
   # leaf_resistance: {downstream_fraction: 0.668}  # full_pa + measured; capillary/venous leaf R
@@ -399,6 +400,24 @@ Further full-PA controls (all default to historical behavior):
   A rigid vessel without geometry is an error; `convert_to_cm: true` is
   rejected (cm-g-s seed assumed). Preflight, tuning, and the exported config
   all use this seed.
+- Tied stiffness multiplier: `proximal_compliance.tied_k3_ref` plus a
+  `stiffness_scale` tune-space parameter s (free or fixed; free usually as
+  `{lb: 0.5, ub: 20, to_native: positive, from_native: log}`). Every
+  objective evaluation sets Eh/r = s * `wall_ehr` on every seed vessel
+  (re-applied through `apply_proximal_compliance(..., overwrite=True)`, so C
+  kept from an earlier iteration is replaced too) and
+  `comp.lpa.k3 = comp.rpa.k3 = s * tied_k3_ref`; `k1`/`k2` stay as
+  configured (`tune_bcs/tied_stiffness.py`). The two keys require each
+  other; `comp.{lpa,rpa}.k3` must not appear in the tune space, s must be
+  positive, and `compliance_model` must be `olufsen`
+  (`validate_stiffness_scale`). The seed is first written at s = 1 (the
+  tuning model's base), then rewritten at the selected s before the final
+  trees are built, so `seed_with_proximal_compliance.json`, the exported
+  config, and `tuning_diagnostics.json` (`proximal_compliance.wall_ehr`,
+  `matched_uniform_wall_eh`, plus `stiffness_scale`, `wall_ehr_ref`,
+  `tied_k3_ref`, `tree_k3`) describe the selected s.
+  `optimized_params.csv` gains `stiffness_scale` and `proximal_wall_ehr`
+  columns; `stiffness_scale` seeds the next iteration's x0.
 - `tree_max_nodes` sets the node budget of every tree built in tuning and final
   assignment. Larger trees are truncated (frontier leaves collapsed) and
   flagged in `tuning_diagnostics.json`; the budget is stored in the tree

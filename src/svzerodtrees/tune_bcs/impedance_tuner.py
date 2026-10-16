@@ -8,6 +8,8 @@ from ..tune_bcs.assign_bcs import construct_impedance_trees
 from ..microvasculature import TreeParameters, compliance as comp_mod
 from ..microvasculature.structured_tree.asymmetry import resolve_branch_scaling
 from ..tune_bcs.tune_space import TuneSpace
+from ..tune_bcs.pipeline_options import STIFFNESS_SCALE_PARAM
+from ..tune_bcs.tied_stiffness import PROXIMAL_WALL_EHR_PARAM, TiedStiffness
 from ..tune_bcs.objective import resolve_tuning_objective
 from ..tune_bcs.periodicity import (
     PeriodicEvaluation,
@@ -60,7 +62,7 @@ _CSV_PER_PA_COLUMNS: dict[str, str] = {
     "diameter": "{pa}.diameter",
 }
 # These columns are shared across both PA sides; read from the lpa row.
-_CSV_SHARED_COLUMNS: tuple[str, ...] = ("lrr", "d_min")
+_CSV_SHARED_COLUMNS: tuple[str, ...] = ("lrr", "d_min", STIFFNESS_SCALE_PARAM)
 
 
 def _clip_to_bounds_within_tolerance(value, lb, ub, *, param_name, source, rel_tol=1e-9):
@@ -218,7 +220,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
                  keep_diastolic_target=False,
                  tree_max_nodes=None,
                  leaf_downstream_fraction=None,
-                 periodic_evaluation=None):
+                 periodic_evaluation=None,
+                 tied_stiffness: TiedStiffness | None = None):
         super().__init__(config_handler, mesh_surfaces_path, clinical_targets)
         self.tune_space = tune_space
         self.compliance_model = (compliance_model or "").lower()
@@ -281,6 +284,14 @@ class ImpedanceTuner(BoundaryConditionTuner):
         # Periodicity of the most recent successful full_pa evaluation; after
         # tune() it describes the selected point.
         self.last_periodicity = None
+        # full_pa only: tuned stiffness multiplier s sets the proximal Eh/r
+        # and the tree k3 of every evaluation (tied_stiffness.py).
+        self.tied_stiffness = tied_stiffness
+        if self.tied_stiffness is not None:
+            if self.tuning_model != "full_pa":
+                raise ValueError("tied_stiffness is supported only for tuning_model='full_pa'")
+            if self.compliance_model != "olufsen":
+                raise ValueError("tied_stiffness requires compliance_model='olufsen'")
 
         # grid search params
         self.grid_search_init = grid_search_init
@@ -331,6 +342,12 @@ class ImpedanceTuner(BoundaryConditionTuner):
         x = np.array(x, dtype=float, copy=True)
         x[idx] = p.from_native(native_value)
         return x
+
+    def _native_params(self, x) -> dict[str, float]:
+        """Native parameters of ``x``, with any tied-stiffness values derived from s."""
+        params = self.tune_space.vector_to_param_dict(np.asarray(x, dtype=float))
+        tied = getattr(self, "tied_stiffness", None)
+        return params if tied is None else tied.resolve_params(params)
 
     def _make_pa_config(self):
         if len(self.config_handler.vessel_map.values()) == 5:
@@ -586,7 +603,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
         )
 
     def _evaluate_model(self, x: np.ndarray, provided_model=None):
-        params = self.tune_space.vector_to_param_dict(x)
+        params = self._native_params(x)
         lpa_params, rpa_params = self._build_tree_params(params)
 
         if self.tuning_model == "full_pa":
@@ -594,6 +611,10 @@ class ImpedanceTuner(BoundaryConditionTuner):
             if base_model is None:
                 raise ValueError("full_pa tuning model has not been initialized")
             model = copy.deepcopy(base_model)
+            tied = getattr(self, "tied_stiffness", None)
+            if tied is not None:
+                # Proximal C follows this candidate's s (re-applied every evaluation).
+                tied.apply(model, tied.scale(params))
             objective_tree_options = self._tree_assignment_options_for_objective()
             construct_impedance_trees(
                 model,
@@ -1031,7 +1052,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
             error = self._last_evaluation_error
         finally:
             self._augmented_mode, self._loss_weights = saved[0], saved[1]
-        params = self.tune_space.vector_to_param_dict(np.asarray(x, dtype=float))
+        params = self._native_params(x)
         if error is not None or not breakdown:
             return {"loss": float("inf"), "params": params, "error": error}
         return {
@@ -1054,7 +1075,10 @@ class ImpedanceTuner(BoundaryConditionTuner):
             capability_error = _solver_capability_error(e)
             if capability_error is not None:
                 raise capability_error from e
-            params = self.tune_space.vector_to_param_dict(x)
+            try:
+                params = self._native_params(x)
+            except Exception:
+                params = self.tune_space.vector_to_param_dict(x)
             self._last_evaluation_error = f"{type(e).__name__}: {e}"
             print(f"[loss_fn] simulation error: {e} params={params}")
             return 1e9
@@ -1092,6 +1116,11 @@ class ImpedanceTuner(BoundaryConditionTuner):
                 lpa_params.to_csv_row(loss=final_loss, flow_split=1 - rpa_split, p_mpa=p_mpa),
                 rpa_params.to_csv_row(loss=final_loss, flow_split=rpa_split, p_mpa=p_mpa)
             ]
+            if getattr(self, "tied_stiffness", None) is not None:
+                # Shared columns: s seeds the next iteration (_seed_x0_from_csv).
+                for row in rows:
+                    row[STIFFNESS_SCALE_PARAM] = params[STIFFNESS_SCALE_PARAM]
+                    row["proximal_wall_ehr"] = params[PROXIMAL_WALL_EHR_PARAM]
             keys = sorted({k for r in rows for k in r})
             csv_path = self._opt_csv_path or "optimized_params.csv"
             with open(csv_path, "w", newline="") as f:

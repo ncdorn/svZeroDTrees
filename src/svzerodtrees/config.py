@@ -14,6 +14,7 @@ from .tune_bcs.objective import resolve_tuning_objective
 from .tune_bcs.periodicity import periodic_evaluation_payload
 from .tune_bcs.pipeline_options import (
     IMPEDANCE_CONFIG_KEYS,
+    validate_stiffness_scale,
     validate_tune_space_names,
     resolve_outlet_parameters,
     resolve_leaf_resistance,
@@ -679,6 +680,14 @@ def _parse_impedance_config(
             "bcs.impedance.proximal_compliance assumes a cm-g-s seed; it cannot be "
             "combined with convert_to_cm=True"
         )
+    validate_stiffness_scale(
+        proximal_compliance,
+        free={item.name: item.lb for item in (tune_space.free if tune_space else [])},
+        fixed={item.name: item.value for item in (tune_space.fixed if tune_space else [])},
+        tied_names=[item.name for item in (tune_space.tied if tune_space else [])],
+        compliance_model=compliance_model,
+        label="bcs.impedance",
+    )
     tree_max_nodes = resolve_tree_max_nodes(
         data.get("tree_max_nodes"), label="bcs.impedance.tree_max_nodes"
     )

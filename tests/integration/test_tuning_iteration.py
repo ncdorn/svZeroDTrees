@@ -3279,3 +3279,133 @@ def test_run_impedance_tuning_for_iteration_missing_prev_csv_passes_none(monkeyp
     # detects it's missing and warns. Here we check the string was passed.
     assert len(tune_calls) == 1
     assert tune_calls[0]["initial_params_csv"] == str(missing_csv)
+
+
+def test_run_impedance_tuning_for_iteration_tied_stiffness_publishes_selected_scale(
+    monkeypatch, tmp_path: Path
+):
+    """stiffness_scale: tune on the s = 1 reference seed, publish the seed at the selected s."""
+    from svzerodtrees.microvasculature import TreeParameters
+    from svzerodtrees.microvasculature.compliance import OlufsenCompliance
+
+    selected_s, wall_ehr_ref, k3_ref = 6.56, 5.0e4, 1.0e5
+    payload = _full_pa_multi_outlet_payload()
+    for vessel in payload["vessels"]:
+        # C = 1.0 stands for compliance kept from an earlier iteration.
+        vessel["geometric_params"] = {"inlet_area": 2.0, "outlet_area": 1.0}
+    seed = tmp_path / "full_pa_zerod.json"
+    seed.write_text(json.dumps(payload), encoding="utf-8")
+    mesh_surfaces = tmp_path / "mesh-surfaces"
+    mesh_surfaces.mkdir()
+    targets = tmp_path / "clinical_targets.csv"
+    targets.write_text("target,value\n", encoding="utf-8")
+    inflow_path = _write_constant_inflow_csv(tmp_path, 6.0)
+    calls: dict[str, object] = {}
+
+    def _seed_c(path):
+        return [v["zero_d_element_values"]["C"] for v in json.loads(Path(path).read_text())["vessels"]]
+
+    class BC:
+        def __init__(self, name: str):
+            self.name = name
+
+    class DummyConfigHandler:
+        bcs = {name: BC(name) for name in ("INFLOW", "LPA_1", "LPA_2", "RPA_1", "RPA_2")}
+
+        @classmethod
+        def from_json(cls, path: str, is_pulmonary: bool = False):
+            calls.setdefault("from_json", []).append(path)
+            return cls()
+
+        def to_json(self, path: str):
+            Path(path).write_text(json.dumps(_full_pa_impedance_snapshot_payload()), encoding="utf-8")
+
+    class DummyClinicalTargets:
+        wedge_p = 12.0
+
+        @classmethod
+        def from_csv(cls, path: str, **kwargs):
+            return cls()
+
+    class DummyTuner:
+        def __init__(self, *args, **kwargs):
+            calls["tuner_kwargs"] = kwargs
+
+        def tune(self, nm_iter: int = 1, initial_params_csv=None):
+            # The tuning model is built from the s = 1 reference seed.
+            calls["seed_c_during_tuning"] = _seed_c(calls["from_json"][-1])
+            calls["n_from_json_at_tune"] = len(calls["from_json"])
+            rows = "".join(
+                f"{pa},2.4,0.6,0.01,10.0,0.3,OlufsenCompliance,2.6e5,-14.0,{selected_s * k3_ref},"
+                f"{selected_s},{selected_s * wall_ehr_ref}\n"
+                for pa in ("lpa", "rpa")
+            )
+            (Path.cwd() / OPTIMIZED_PARAMS_FILENAME).write_text(
+                "pa,xi,eta_sym,d_min,lrr,diameter,compliance model,k1,k2,k3,"
+                "stiffness_scale,proximal_wall_ehr\n" + rows,
+                encoding="utf-8",
+            )
+            (Path.cwd() / PA_CONFIG_SNAPSHOT_FILENAME).write_text(
+                json.dumps(_full_pa_impedance_snapshot_payload()), encoding="utf-8"
+            )
+            Path(str(calls["tuner_kwargs"]["log_file"])).write_text("log", encoding="utf-8")
+
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ConfigHandler", DummyConfigHandler)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ClinicalTargets", DummyClinicalTargets)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.ImpedanceTuner", DummyTuner)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.validate_cap_to_bc_mapping", lambda *_a, **_k: {})
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.construct_impedance_trees", lambda *_a, **_k: None)
+    monkeypatch.setattr("svzerodtrees.tuning.iteration.get_pa_outlet_scale", lambda *_a, **_k: 2.0)
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration.build_tuning_diagnostics",
+        lambda **kwargs: {"proximal_compliance": kwargs["proximal_summary"]},
+    )
+    monkeypatch.setattr(
+        "svzerodtrees.tuning.iteration._load_tree_params",
+        lambda _path: tuple(
+            TreeParameters(name=side, lrr=10.0, diameter=0.3, d_min=0.01, alpha=0.9, beta=0.6,
+                           compliance_model=OlufsenCompliance(k1=2.6e5, k2=-14.0, k3=selected_s * k3_ref))
+            for side in ("lpa", "rpa")
+        ),
+    )
+    tune_space = {
+        "free": [
+            {"name": "lpa.xi", "init": 2.46, "lb": 2.1, "ub": 3.0},
+            {"name": "stiffness_scale", "init": 7.0, "lb": 0.5, "ub": 20.0,
+             "to_native": "positive", "from_native": "log"},
+        ],
+        "fixed": [{"name": "comp.lpa.k1", "value": 2.6e5}, {"name": "comp.lpa.k2", "value": -14.0}],
+        "tied": [
+            {"name": "comp.rpa.k1", "other": "comp.lpa.k1", "fn": "identity"},
+            {"name": "comp.rpa.k2", "other": "comp.lpa.k2", "fn": "identity"},
+        ],
+    }
+    result = run_impedance_tuning_for_iteration(
+        iteration_dir=tmp_path / "iter-01",
+        seed_config=seed,
+        mesh_surfaces=mesh_surfaces,
+        clinical_targets=targets,
+        inflow_path=inflow_path,
+        impedance_config={
+            "tuning_model": "full_pa",
+            "compliance_model": "olufsen",
+            "outlet_mapping_mode": "cap_name",
+            "proximal_compliance": {"wall_ehr": wall_ehr_ref, "tied_k3_ref": k3_ref},
+            "tune_space": tune_space,
+        },
+    )
+
+    c_ref = 3.0 * 1.5 * 1.0 / (2.0 * wall_ehr_ref)
+    tied = calls["tuner_kwargs"]["tied_stiffness"]
+    assert (tied.wall_ehr_ref, tied.k3_ref) == (wall_ehr_ref, k3_ref)
+    # Kept C (1.0) is overwritten: proximal C follows s.
+    assert calls["seed_c_during_tuning"] == pytest.approx([c_ref] * 7)
+    published_seed = Path(result["seed_with_proximal_compliance"])
+    # The exported model is built from the seed at the selected s.
+    assert calls["from_json"][calls["n_from_json_at_tune"]] == str(published_seed)
+    assert _seed_c(published_seed) == pytest.approx([c_ref / selected_s] * 7)
+    proximal = json.loads(Path(result["tuning_diagnostics"]).read_text())["proximal_compliance"]
+    assert proximal["stiffness_scale"] == pytest.approx(selected_s)
+    assert proximal["wall_ehr"] == pytest.approx(selected_s * wall_ehr_ref)
+    assert proximal["tree_k3"] == pytest.approx(selected_s * k3_ref)
+    assert proximal["n_kept_existing"] == 0

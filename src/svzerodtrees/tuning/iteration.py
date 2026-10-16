@@ -48,7 +48,9 @@ from svzerodtrees.tune_bcs.tuning_diagnostics import (
     write_seed_with_proximal_compliance,
 )
 from svzerodtrees.tune_bcs.pipeline_options import (
+    STIFFNESS_SCALE_PARAM,
     SUPPORTED_IMPEDANCE_KEYS,
+    validate_stiffness_scale,
     validate_tune_space_names,
     resolve_leaf_resistance,
     resolve_outlet_parameters,
@@ -61,6 +63,7 @@ from svzerodtrees.microvasculature.structured_tree.dc_resistance import (
 )
 from svzerodtrees.tune_bcs.tree_policy import resolve_objective_tree_policy
 from svzerodtrees.tune_bcs.impedance_tuner import ImpedanceTuner
+from svzerodtrees.tune_bcs.tied_stiffness import TiedStiffness
 from svzerodtrees.tune_bcs.nm_stopping import resolve_nelder_mead_stopping
 from svzerodtrees.tune_bcs.periodicity import (
     payload_with_cycles,
@@ -882,6 +885,14 @@ def _resolve_impedance_config(
                 "it cannot be combined with convert_to_cm=True"
             )
         merged["proximal_compliance"] = proximal
+    validate_stiffness_scale(
+        proximal,
+        free={entry["name"]: entry["lb"] for entry in merged["tune_space"]["free"]},
+        fixed={entry["name"]: entry["value"] for entry in merged["tune_space"]["fixed"]},
+        tied_names=[entry["name"] for entry in merged["tune_space"]["tied"]],
+        compliance_model=merged["compliance_model"],
+        label="impedance tuning",
+    )
     max_nodes = resolve_tree_max_nodes(
         merged.pop("tree_max_nodes", None), label="impedance tuning tree_max_nodes"
     )
@@ -1160,6 +1171,21 @@ def _validate_required_xi_in_optimized_csv(
                 f"optimized_params.csv must include a finite xi value for pa={pa} "
                 f"because tune_space includes {pa}.xi"
             )
+
+
+def _selected_stiffness_scale(opt_csv: Path) -> float:
+    """The tied stiffness multiplier s recorded in optimized_params.csv."""
+    frame = pd.read_csv(opt_csv)
+    if STIFFNESS_SCALE_PARAM not in frame.columns:
+        raise ValueError(
+            f"optimized_params.csv has no '{STIFFNESS_SCALE_PARAM}' column although "
+            "the tied stiffness multiplier was tuned"
+        )
+    values = pd.to_numeric(frame[STIFFNESS_SCALE_PARAM], errors="coerce").to_numpy(dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size == 0 or not np.all(values > 0.0) or not np.allclose(values, values[0]):
+        raise ValueError(f"optimized_params.csv has an invalid '{STIFFNESS_SCALE_PARAM}': {values}")
+    return float(values[0])
 
 
 def _load_tree_params(opt_csv: Path) -> tuple[TreeParameters, TreeParameters]:
@@ -1503,23 +1529,37 @@ def run_impedance_tuning_for_iteration(
     validate_outlet_pressure(targets)
     tune_space = _build_tune_space_from_config(tuning["tune_space"])
     proximal_summary = None
+    tied_stiffness = None
+    source_seed_path = seed_config_path
+    branch_lengths = None
     if tuning.get("proximal_compliance") is not None:
         # The tuning model, preflight, and exported config all use the seed
         # with proximal compliance, so the published model is the tuned one.
         # Raw learnedZeroD seeds keep branch length only in the centerline.
-        branch_lengths = None
         if mapping_centerline is not None:
             _, centerline_lengths = centerline_branches(mapping_centerline)
             scale = 0.1 if bool(tuning["convert_to_cm"]) else 1.0
             branch_lengths = {
                 branch_id: scale * length for branch_id, length in centerline_lengths.items()
             }
+        k3_ref = tuning["proximal_compliance"].get("tied_k3_ref")
+        # With the tied stiffness multiplier this is the s = 1 reference seed;
+        # every evaluation re-applies C at its own s, and the seed is
+        # rewritten at the selected s after tuning.
         seed_config_path, proximal_summary = write_seed_with_proximal_compliance(
             seed_config_path,
             output_dir,
             float(tuning["proximal_compliance"]["wall_ehr"]),
             branch_lengths,
+            overwrite=k3_ref is not None,
         )
+        if k3_ref is not None:
+            tied_stiffness = TiedStiffness(
+                wall_ehr_ref=float(tuning["proximal_compliance"]["wall_ehr"]),
+                k3_ref=float(k3_ref),
+                seed_payload=_load_json_payload(seed_config_path),
+                branch_lengths=branch_lengths,
+            )
     expected_snapshot_co = _expected_snapshot_inflow_cardiac_output(
         seed_config=seed_config_path,
         mesh_surfaces=mesh_surfaces_path,
@@ -1578,6 +1618,7 @@ def run_impedance_tuning_for_iteration(
             tree_max_nodes=tuning.get("tree_max_nodes"),
             leaf_downstream_fraction=_leaf_downstream_fraction(tuning),
             periodic_evaluation=tuning.get("periodic_evaluation"),
+            tied_stiffness=tied_stiffness,
         )
         prev_csv = str(previous_optimized_params) if previous_optimized_params is not None else None
         if prev_csv is not None and os.path.isfile(prev_csv):
@@ -1631,6 +1672,22 @@ def run_impedance_tuning_for_iteration(
         required_pa=required_xi_pa,
     )
     lpa_params, rpa_params = _load_tree_params(optimized_csv)
+    if tied_stiffness is not None:
+        # Publish the seed at the selected s, the s of the exported trees' k3.
+        selected_s = _selected_stiffness_scale(optimized_csv)
+        seed_config_path, proximal_summary = write_seed_with_proximal_compliance(
+            source_seed_path,
+            output_dir,
+            tied_stiffness.wall_ehr(selected_s),
+            branch_lengths,
+            overwrite=True,
+        )
+        proximal_summary.update({
+            STIFFNESS_SCALE_PARAM: selected_s,
+            "wall_ehr_ref": tied_stiffness.wall_ehr_ref,
+            "tied_k3_ref": tied_stiffness.k3_ref,
+            "tree_k3": tied_stiffness.k3(selected_s),
+        })
     tuned_config = ConfigHandler.from_json(str(seed_config_path), is_pulmonary=True)
     construct_kwargs = {
         "d_min": float(tuning["d_min"]),

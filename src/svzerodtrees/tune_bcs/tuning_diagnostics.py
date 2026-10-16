@@ -64,13 +64,17 @@ def apply_proximal_compliance(
     seed_payload: Mapping[str, Any],
     wall_ehr: float,
     branch_lengths: Mapping[int, float] | None = None,
+    *,
+    overwrite: bool = False,
 ) -> tuple[dict, dict]:
     """Fill rigid seed vessels with C = 3 A L / (2 wall_ehr).
 
     Vessels whose C already exceeds RIGID_COMPLIANCE_THRESHOLD (e.g. compliance
-    calibrated against a 3D run in a later iteration) keep their value.  A
-    rigid vessel without ``geometric_params`` / ``vessel_length`` is an error,
-    except that learnedZeroD connector vessels take their length from
+    calibrated against a 3D run in a later iteration) keep their value unless
+    ``overwrite`` is set; the tied stiffness multiplier (``tied_stiffness.py``)
+    overwrites, because there the proximal C is a function of the tuned s.  A
+    vessel that needs C but has no ``geometric_params`` / ``vessel_length`` is
+    an error, except that learnedZeroD connector vessels take their length from
     ``branch_lengths`` (cm by centerline ``BranchId``) when given.
     Returns the updated payload and a summary with per-category counts.
     """
@@ -94,7 +98,7 @@ def apply_proximal_compliance(
             area, length = geometry
             volume += area * length
             volume_radius += area * length * math.sqrt(area / math.pi)
-        if existing > RIGID_COMPLIANCE_THRESHOLD:
+        if existing > RIGID_COMPLIANCE_THRESHOLD and not overwrite:
             kept.append(name)
             kept_total += existing
             continue
@@ -123,6 +127,7 @@ def apply_proximal_compliance(
         "n_vessels": len(vessels),
         "n_applied": len(applied),
         "n_kept_existing": len(kept),
+        "overwrite_existing": bool(overwrite),
         "n_branch_length_from_centerline": len(folded_lengths),
         "n_junction_values_moved_to_vessel": moved,
         "n_negative_l_clamped": len(clamped),
@@ -246,9 +251,13 @@ def write_seed_with_proximal_compliance(
     output_dir: str | Path,
     wall_ehr: float,
     branch_lengths: Mapping[int, float] | None = None,
+    *,
+    overwrite: bool = False,
 ) -> tuple[Path, dict[str, Any]]:
     payload = json.loads(Path(seed_path).read_text(encoding="utf-8"))
-    updated, summary = apply_proximal_compliance(payload, wall_ehr, branch_lengths)
+    updated, summary = apply_proximal_compliance(
+        payload, wall_ehr, branch_lengths, overwrite=overwrite
+    )
     out = (Path(output_dir) / SEED_WITH_PROXIMAL_COMPLIANCE_FILENAME).resolve()
     out.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
     summary = {

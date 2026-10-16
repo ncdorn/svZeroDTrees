@@ -160,13 +160,25 @@ outlet pressure represents the pressure downstream of the arterial tree.
 - **Later iterations**: compliance already present (calibrated against 3D) is
   kept; only rigid vessels are filled.
 
+- **Tied to the trees (cohort default since 2026-10-16)**: with
+  `proximal_compliance.tied_k3_ref` and a free `stiffness_scale` s, the
+  proximal Eh/r = s * `wall_ehr` and the tree k3 = s * `tied_k3_ref` (1e5)
+  are tuned along one direction, and every seed vessel's C is recomputed per
+  evaluation (kept C is overwritten). Under the full-PA objective the two
+  stiffnesses act on sys/dia with nearly the same signature (corr -0.99); above
+  k3 ~ 8e5 only their combination (total compliance ~0.45 mL/mmHg) is
+  identified, so freeing both adds an unresolvable direction. s in [0.5, 20]
+  (log); the TST-STAN-3 fit lands at s ~ 6.6-8.
+  Evidence: `examples/adaptation/tst3-stiffness-identifiability/FINDINGS.md`.
+
 ### 2.5 Tree wall stiffness (Olufsen form)
 `Eh/r = k1 exp(k2 r) + k3`.
 - **k1 = 2.6e5 dyn/cm^2, k2 = -14 cm^-1, fixed** (pulmonary small arteries,
   Colebank 2021 / Bartolo et al. 2022), replacing the systemic k1 = 2e7.
   k1 and k2 are not identifiable from pulmonary pressure data (Paun et al.
   2020); tuning k2 in [-50, -10] went to the bound for 0.3 mmHg.
-- **k3: the single compliance knob, free in [5e4, 4e5] (log-scaled)**, the
+- **Superseded 2026-10-16 by the tied multiplier (§2.4); k3 = s * 1e5.**
+  Before: **k3, the single compliance knob, free in [5e4, 4e5] (log-scaled)**, the
   control pulmonary range (Krenz & Dawson to recent control large-artery values).
   It sets large-vessel stiffness, which holds most of the compliance, and pulse
   pressure varies 15-58 mmHg across the cohort.
@@ -178,7 +190,7 @@ outlet pressure represents the pressure downstream of the arterial tree.
   tree-root Eh/r 60-7,500 dyn/cm^2, k2 ~ -65 to -71 (literature -14 to -22.5),
   and 31-35 mL/mmHg of tree compliance (~25x the SV/PP estimate).
 
-### 2.6 Morphometry: xi in [2.33, 3.0], eta_sym in [0.3, 1.0], per side
+### 2.6 Morphometry: xi in [2.1, 3.0], eta_sym in [0.3, 1.0], per side
 - **xi** (`r_p^xi = r_1^xi + r_2^xi`): 3 is Murray's law, 2.33-3 Uylings'
   theoretical range; measured pulmonary values are 2.76 (Huang 1996 casts,
   used by Olufsen 2012) and 2.1-2.6 (image-based, Miles et al. 2025). The
@@ -192,6 +204,12 @@ outlet pressure represents the pressure downstream of the arterial tree.
   (tree resistance -18%, compliance -31% from 0.6 to 0.84 at xi 3) and barely
   within 0.85-1.0, so it is constrained but not pinned there.
 - **Per side**: xi and eta per PA set side resistance and the LPA/RPA split.
+- **xi >= 2.1 for the cohort (2026-10-16; was 2.33)**: the 2.33 floor is Uylings'
+  theoretical value, and it pinned rpa xi and left mean pressure and split
+  short (chi2 8.2). The measured pulmonary range reaches 2.1; with xi >= 2.1
+  (lrr 10, tied stiffness) the fit is chi2 0.29 with rpa xi 2.17 inside the
+  bound. TST-STAN-5 pins xi at the upper bound 3, so the lower floor does not
+  bind there. A free lrr was not identifiable (FINDINGS.md follow-up).
 
 ### 2.7 lrr = 10, d_min = 0.01 cm
 - Olufsen et al. 2012 fit `l = 12.4 r^1.10` to Huang 1996 (lrr ~7-13 over these
@@ -295,7 +313,7 @@ compliance vs bracket, truncation), then:
 | symptom | likely cause | change (most defensible first) |
 |---|---|---|
 | Diastolic far too low (regurgitant patient) | proximal impedance too high / proximal compliance too low | measure proximal stiffness from cine MRI area change (Eh/r ~ 1.5 PP / (dA/A)); recalibrate the seed's proximal resistance against 3D; model the inlet as RV + regurgitant valve instead of prescribed backflow; report as a limitation |
-| Diastolic too high / pulse too small (no PR) | too much compliance or Pd too high | fix k3 at 1e5 or allow stiffer k3 (pulmonary-hypertension range up to ~8e6 for high-pressure patients, e.g. TST-STAN-3); lower `wall_ehr` stiffness only with data; check `diastolic_offset_mmhg` |
+| Diastolic too high / pulse too small (no PR) | too much compliance or Pd too high | check whether `stiffness_scale` sits at its upper bound (20) and raise it (k3 up to ~8e6 is the pulmonary-hypertension range); check `diastolic_offset_mmhg` |
 | Systolic too high | proximal / root impedance too high | as for low diastolic; check k3 at its upper bound |
 | Mean off with xi or eta at a bound | total resistance out of range | check the flow source (MRI vs cath; consider rescaling the inflow to cath flow); lrr within 7-13; d_min; outlet policy |
 | Split off | side resistance | free eta per side (already); check outlet mapping and split source |
