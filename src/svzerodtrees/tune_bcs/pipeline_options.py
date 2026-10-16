@@ -18,6 +18,10 @@ control defaults to the historical behavior when omitted.
   DC resistance (the capillary + venous bed).  Requires
   ``wedge_pressure_policy: measured`` (outlet at PCWP) so the capillary and
   venous drop is not counted twice.
+- ``periodic_evaluation``: ``{min_cycles, max_cycles, mean_pressure_tol_mmhg}``
+  or ``{enabled: false}``; how many cardiac cycles each full-PA evaluation
+  runs (see ``periodicity.py``).  Omitted means the defaults (6 / 24 /
+  0.1 mmHg), not the seed's cycle count.
 """
 
 from __future__ import annotations
@@ -58,6 +62,7 @@ IMPEDANCE_CONFIG_KEYS = (
     "polish",
     "leaf_resistance",
     "stopping",
+    "periodic_evaluation",
     "tune_space",
 )
 # The iteration service also accepts the deprecated legacy mapping flag.

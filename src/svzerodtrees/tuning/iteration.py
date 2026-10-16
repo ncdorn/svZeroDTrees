@@ -62,6 +62,13 @@ from svzerodtrees.microvasculature.structured_tree.dc_resistance import (
 from svzerodtrees.tune_bcs.tree_policy import resolve_objective_tree_policy
 from svzerodtrees.tune_bcs.impedance_tuner import ImpedanceTuner
 from svzerodtrees.tune_bcs.nm_stopping import resolve_nelder_mead_stopping
+from svzerodtrees.tune_bcs.periodicity import (
+    payload_with_cycles,
+    periodic_evaluation_payload,
+    resolve_periodic_evaluation,
+    simulate_until_periodic,
+    vessel_pressure_series,
+)
 from svzerodtrees.tune_bcs.rcr_tuner import RCRTuner, write_rcr_params_csv
 from svzerodtrees.tune_bcs.tune_space import (
     FixedParam,
@@ -166,10 +173,14 @@ def _optimized_csv_fit(path: Path) -> dict[str, Any] | None:
 PUBLISHED_SOLVER_TOLERANCES = (None, 1e-7, 1e-6, 1e-5)
 
 
-def _score_published_full_pa_model(config_path: Path) -> dict[str, Any]:
+def _score_published_full_pa_model(
+    config_path: Path, periodic_evaluation: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     """Simulate the exported per-cap model and return its MPA pressures/split.
 
-    On Newton non-convergence the absolute tolerance is relaxed in the raw
+    The model runs until its MPA pressure is periodic (``periodic_evaluation``,
+    as the optimizer did); the file keeps the seed's cycle count.  On Newton
+    non-convergence the absolute tolerance is relaxed in the raw
     config (ConfigHandler's SimParams drops unknown simulation_parameters);
     converged results are insensitive to this tolerance.  Failure is reported,
     never raised.
@@ -178,6 +189,11 @@ def _score_published_full_pa_model(config_path: Path) -> dict[str, Any]:
 
     handler = ConfigHandler.from_json(str(config_path), is_pulmonary=True)
     raw = _load_json_payload(Path(config_path))
+    settings = resolve_periodic_evaluation(periodic_evaluation)
+    seed_cycles = (raw.get("simulation_parameters") or {}).get("number_of_cardiac_cycles")
+    mpa_series = vessel_pressure_series(
+        lambda frame: ImpedanceTuner._vessel_result(frame, handler.mpa)
+    )
     errors: list[str] = []
     for tolerance in PUBLISHED_SOLVER_TOLERANCES:
         payload = json.loads(json.dumps(raw))
@@ -185,7 +201,13 @@ def _score_published_full_pa_model(config_path: Path) -> dict[str, Any]:
             payload.setdefault("simulation_parameters", {})["absolute_tolerance"] = tolerance
         try:
             with contextlib.redirect_stdout(open(os.devnull, "w")):
-                result = simulate_pysvzerod(payload)
+                result, periodicity = simulate_until_periodic(
+                    lambda n_cycles: simulate_pysvzerod(payload_with_cycles(payload, n_cycles)),
+                    mpa_series,
+                    cycle_duration=ImpedanceTuner._full_pa_cycle_duration(handler),
+                    seed_cycles=seed_cycles,
+                    settings=settings,
+                )
         except RuntimeError as exc:
             errors.append(f"tol={tolerance}: {exc}")
             continue
@@ -210,6 +232,8 @@ def _score_published_full_pa_model(config_path: Path) -> dict[str, Any]:
             "inflow_mean_flow": inflow_mean,
             "solver_absolute_tolerance": tolerance,
             "solver_retries": errors,
+            # Cycles simulated and final cycle-to-cycle MPA pressure drift.
+            "periodicity": periodicity,
         }
     return {"error": "published model did not converge", "solver_retries": errors}
 
@@ -318,11 +342,17 @@ def _run_per_cap_polish(
         shutil.copyfile(shared_csv, optimized)
         if shared_snapshot.exists():
             shutil.copyfile(shared_snapshot, snapshot)
-        summary.update({"used": "shared", "error": f"{type(exc).__name__}: {exc}"})
+        summary.update({"used": "shared", "error": f"{type(exc).__name__}: {exc}",
+                        "shared_periodicity": getattr(tuner, "last_periodicity", None)})
         with open(opt_log, "a", encoding="utf-8") as fh:
             fh.write(f"per-cap polish failed ({summary['error']}); shared result kept\n")
         return summary, best_x
-    summary.update({"used": "per_cap", "polished_fit": _optimized_csv_fit(optimized)})
+    summary.update({
+        "used": "per_cap",
+        "polished_fit": _optimized_csv_fit(optimized),
+        "shared_periodicity": getattr(tuner, "last_periodicity", None),
+        "periodicity": getattr(polisher, "last_periodicity", None),
+    })
     return summary, getattr(polisher, "best_x", best_x)
 
 
@@ -873,6 +903,11 @@ def _resolve_impedance_config(
     )
     if leaf is not None:
         merged["leaf_resistance"] = leaf
+    periodic = periodic_evaluation_payload(
+        merged.pop("periodic_evaluation", None), label="impedance tuning periodic_evaluation"
+    )
+    if periodic is not None:
+        merged["periodic_evaluation"] = periodic
 
     return merged
 
@@ -1542,6 +1577,7 @@ def run_impedance_tuning_for_iteration(
             keep_diastolic_target=bool(tuning.get("keep_diastolic_target", False)),
             tree_max_nodes=tuning.get("tree_max_nodes"),
             leaf_downstream_fraction=_leaf_downstream_fraction(tuning),
+            periodic_evaluation=tuning.get("periodic_evaluation"),
         )
         prev_csv = str(previous_optimized_params) if previous_optimized_params is not None else None
         if prev_csv is not None and os.path.isfile(prev_csv):
@@ -1559,6 +1595,7 @@ def run_impedance_tuning_for_iteration(
 
         polish_summary = None
         final_x = getattr(tuner, "best_x", None)
+        optimizer_periodicity = getattr(tuner, "last_periodicity", None)
         if tuning.get("polish") is not None:
             polish_summary, final_x = _run_per_cap_polish(
                 tuner=tuner,
@@ -1566,6 +1603,8 @@ def run_impedance_tuning_for_iteration(
                 output_dir=output_dir,
                 opt_log=opt_log,
             )
+            if polish_summary.get("periodicity") is not None:
+                optimizer_periodicity = polish_summary["periodicity"]
 
     optimized_csv = output_dir / OPTIMIZED_PARAMS_FILENAME
     pa_snapshot = output_dir / PA_CONFIG_SNAPSHOT_FILENAME
@@ -1667,7 +1706,9 @@ def run_impedance_tuning_for_iteration(
     if tuning["tuning_model"] == "full_pa":
         # Scored separately so a scoring failure keeps the rest of the report.
         try:
-            published_fit = _score_published_full_pa_model(tuned_zerod_config)
+            published_fit = _score_published_full_pa_model(
+                tuned_zerod_config, tuning.get("periodic_evaluation")
+            )
         except Exception as exc:
             published_fit = {"error": f"{type(exc).__name__}: {exc}"}
     try:
@@ -1681,6 +1722,7 @@ def run_impedance_tuning_for_iteration(
             published_fit=published_fit,
             optimizer_fit=_optimized_csv_fit(optimized_csv),
             bound_flags=_bound_flags(tune_space, final_x),
+            optimizer_periodicity=optimizer_periodicity,
         )
     except Exception as exc:  # diagnostics must never fail a completed tuning
         diagnostics = {"error": f"{type(exc).__name__}: {exc}"}
@@ -1923,8 +1965,14 @@ def summarize_pulmonary_zerod_config(
     config: str | Path | Mapping[str, Any],
     *,
     force_last_cycle: bool = False,
+    periodic_evaluation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Run a pulmonary 0D config and extract MPA pressure plus branch-flow metrics."""
+    """Run a pulmonary 0D config and extract MPA pressure plus branch-flow metrics.
+
+    When the config has a cardiac period, it runs until the MPA pressure is
+    periodic (``periodic_evaluation``; defaults when None, ``{"enabled":
+    False}`` keeps the config's cycle count).  The config is not modified.
+    """
 
     config_payload, config_path = _load_pulmonary_config(config)
     handler = ConfigHandler(config_payload, is_pulmonary=True)
@@ -1937,8 +1985,17 @@ def summarize_pulmonary_zerod_config(
             "could not identify MPA/LPA/RPA vessels; expected a pulmonary config"
         )
 
-    result = simulate_pysvzerod(config_payload)
     cycle_duration = _inflow_period_from_config(config_payload)
+    settings = resolve_periodic_evaluation(periodic_evaluation)
+    if cycle_duration is None:
+        settings = None  # no period: cycles cannot be compared
+    result, periodicity = simulate_until_periodic(
+        lambda n_cycles: simulate_pysvzerod(payload_with_cycles(config_payload, n_cycles)),
+        vessel_pressure_series(lambda frame: _result_for_vessel(frame, _vessel_name(mpa, "mpa"))),
+        cycle_duration=cycle_duration,
+        seed_cycles=(config_payload.get("simulation_parameters") or {}).get("number_of_cardiac_cycles"),
+        settings=settings,
+    )
     use_last_cycle = force_last_cycle or cycle_duration is not None
 
     mpa_rows = _result_for_vessel(result, _vessel_name(mpa, "mpa"))
@@ -1974,6 +2031,8 @@ def summarize_pulmonary_zerod_config(
         "lpa_flow": float(lpa_flow),
         "rpa_flow": float(rpa_flow),
         "rpa_split": float(rpa_flow / mpa_flow),
+        # Cycles simulated and final cycle-to-cycle MPA pressure drift.
+        "periodicity": periodicity,
     }
 
 

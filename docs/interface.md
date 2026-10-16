@@ -285,6 +285,7 @@ impedance_config:
   # tree_max_nodes: 1000000         # structured-tree node budget (default 100000)
   # polish: {maxfev: 100}           # full_pa + objective_tree_policy; per-cap re-tune
   # leaf_resistance: {downstream_fraction: 0.668}  # full_pa + measured; capillary/venous leaf R
+  # periodic_evaluation: {min_cycles: 6, max_cycles: 24, mean_pressure_tol_mmhg: 0.1}  # default; {enabled: false} = seed cycles
   # Optional; trees used inside the optimizer only (see below).
   # objective_tree_policy:
   #   use_mean: true
@@ -425,6 +426,19 @@ Further full-PA controls (all default to historical behavior):
   published model's outlets). Evaluated on TST-STAN-5 and not adopted
   (chi2 50.6 vs 17.2; [`pulmonary_tuning_model.md`](pulmonary_tuning_model.md)
   §2.3).
+- `periodic_evaluation: {min_cycles, max_cycles, mean_pressure_tol_mmhg}`
+  (full_pa; defaults 6 / 24 / 0.1 mmHg, also when omitted) sets how many
+  cardiac cycles every objective evaluation, the per-cap polish, and the
+  published-fit scoring simulate. Each runs at least `min_cycles` (or the
+  seed's count if larger) and doubles the count up to `max_cycles` until the
+  last two cycles' mean MPA pressure differ by less than the tolerance. The
+  count is overridden only for the solve: the snapshot, the exported
+  `svzerod_3d_coupling` config, and the seed keep their own
+  `simulation_parameters`. `{enabled: false}` scores the seed's cycle count
+  (the behavior before 2026-10-15, which scored cycle 2 of a cold start for
+  learnedZeroD seeds). `summarize_pulmonary_zerod_config` runs a config until
+  periodic the same way (keyword `periodic_evaluation`) and returns
+  `periodicity`.
 - After export, the per-cap model is simulated once (relaxing the solver
   absolute tolerance on Newton non-convergence) and reported as
   `published_fit` beside `optimizer_fit` in `tuning_diagnostics.json`, which

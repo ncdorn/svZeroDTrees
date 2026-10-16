@@ -341,6 +341,7 @@ def build_tuning_diagnostics(
     published_fit: Mapping[str, Any] | None = None,
     optimizer_fit: Mapping[str, Any] | None = None,
     bound_flags: list | None = None,
+    optimizer_periodicity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     trees = summarize_trees(tree_diagnostics)
     proximal_ml = float(proximal_summary["total_compliance_ml_per_mmhg"]) if proximal_summary else 0.0
@@ -374,8 +375,30 @@ def build_tuning_diagnostics(
         "inflow_consistency": _inflow_consistency(published_fit, inflow_path),
         "leaf_resistance": _leaf_resistance_summary(tuning, tree_diagnostics, published_fit, targets),
         "parameters_at_bounds": list(bound_flags or []),
+        "periodicity": _periodicity_summary(tuning, optimizer_periodicity, published_fit),
         "svzerodtrees_version": _package_version(),
         "peak_rss_gb": _peak_rss_gb(),
+    }
+
+
+def _periodicity_summary(tuning, optimizer_periodicity, published_fit):
+    """Cycles used and final cycle-to-cycle MPA pressure drift per evaluation.
+
+    ``optimizer`` is the selected point's last objective evaluation (the
+    polish's when one ran); ``published`` is the exported per-cap model.
+    """
+    from .periodicity import resolve_periodic_evaluation
+
+    settings = resolve_periodic_evaluation(tuning.get("periodic_evaluation"))
+    published = (published_fit or {}).get("periodicity")
+
+    def _short(info):
+        return {k: v for k, v in info.items() if k != "settings"} if info else None
+
+    return {
+        "settings": {"enabled": False} if settings is None else {"enabled": True, **settings.to_dict()},
+        "optimizer": _short(optimizer_periodicity),
+        "published": _short(published),
     }
 
 

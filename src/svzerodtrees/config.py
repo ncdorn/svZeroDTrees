@@ -11,6 +11,7 @@ from .tune_bcs.tree_policy import resolve_objective_tree_policy
 from .tune_bcs.nm_stopping import resolve_nelder_mead_stopping
 from .tune_bcs.clinical_targets import WEDGE_PRESSURE_POLICIES
 from .tune_bcs.objective import resolve_tuning_objective
+from .tune_bcs.periodicity import periodic_evaluation_payload
 from .tune_bcs.pipeline_options import (
     IMPEDANCE_CONFIG_KEYS,
     validate_tune_space_names,
@@ -121,6 +122,8 @@ class ImpedanceConfig:
     leaf_resistance: Optional[Dict[str, Any]] = None
     # Resolved Nelder-Mead stopping policy; None keeps maxiter-only runs.
     stopping: Optional[Dict[str, Any]] = None
+    # Cycles per full_pa evaluation; None = defaults (run until periodic).
+    periodic_evaluation: Optional[Dict[str, Any]] = None
     tune_space: Optional[TuneSpace] = None
 
 
@@ -720,6 +723,9 @@ def _parse_impedance_config(
         polish=polish,
         leaf_resistance=leaf_resistance,
         stopping=None if stopping is None else stopping.to_dict(),
+        periodic_evaluation=periodic_evaluation_payload(
+            data.get("periodic_evaluation"), label="bcs.impedance.periodic_evaluation"
+        ),
         tune_space=tune_space,
     )
 
@@ -815,7 +821,7 @@ def impedance_config_to_mapping(config: ImpedanceConfig) -> Dict[str, Any]:
         payload["diastolic_offset_mmhg"] = float(config.diastolic_offset_mmhg)
     if getattr(config, "keep_diastolic_target", False):
         payload["keep_diastolic_target"] = True
-    for key in ("objective", "proximal_compliance", "polish", "leaf_resistance"):
+    for key in ("objective", "proximal_compliance", "polish", "leaf_resistance", "periodic_evaluation"):
         value = getattr(config, key, None)
         if value is not None:
             payload[key] = dict(value)

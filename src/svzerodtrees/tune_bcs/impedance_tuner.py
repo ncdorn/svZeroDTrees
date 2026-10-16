@@ -9,6 +9,12 @@ from ..microvasculature import TreeParameters, compliance as comp_mod
 from ..microvasculature.structured_tree.asymmetry import resolve_branch_scaling
 from ..tune_bcs.tune_space import TuneSpace
 from ..tune_bcs.objective import resolve_tuning_objective
+from ..tune_bcs.periodicity import (
+    PeriodicEvaluation,
+    override_simparams,
+    resolve_periodic_evaluation,
+    simulate_until_periodic,
+)
 from ..tune_bcs.nm_stopping import (
     STOP_TARGET_MET,
     resolve_nelder_mead_stopping,
@@ -211,7 +217,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
                  objective=None,
                  keep_diastolic_target=False,
                  tree_max_nodes=None,
-                 leaf_downstream_fraction=None):
+                 leaf_downstream_fraction=None,
+                 periodic_evaluation=None):
         super().__init__(config_handler, mesh_surfaces_path, clinical_targets)
         self.tune_space = tune_space
         self.compliance_model = (compliance_model or "").lower()
@@ -267,6 +274,13 @@ class ImpedanceTuner(BoundaryConditionTuner):
             raise ValueError("leaf_downstream_fraction is supported only for tuning_model='full_pa'")
         if self.tree_max_nodes is not None and self.tree_max_nodes <= 0:
             raise ValueError("tree_max_nodes must be > 0")
+        # full_pa only: run each evaluation until the MPA pressure is periodic
+        # instead of scoring the seed's (often transient) cycle count.  None
+        # resolves to the defaults; {"enabled": False} keeps the seed count.
+        self.periodic_evaluation = resolve_periodic_evaluation(periodic_evaluation)
+        # Periodicity of the most recent successful full_pa evaluation; after
+        # tune() it describes the selected point.
+        self.last_periodicity = None
 
         # grid search params
         self.grid_search_init = grid_search_init
@@ -476,13 +490,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
         mpa_result = self._vessel_result(result, config_handler.mpa)
         rpa_result = self._vessel_result(result, config_handler.rpa)
 
-        cycle_duration = getattr(config_handler.simparams, "cardiac_period", None)
-        if cycle_duration is None:
-            inflow_times = getattr(config_handler.bcs["INFLOW"], "t", None)
-            if inflow_times:
-                inflow_arr = np.asarray(inflow_times, dtype=float)
-                if inflow_arr.size >= 2:
-                    cycle_duration = float(inflow_arr.max() - inflow_arr.min())
+        cycle_duration = ImpedanceTuner._full_pa_cycle_duration(config_handler)
 
         if cycle_duration is not None and np.isfinite(cycle_duration) and cycle_duration > 0.0:
             mpa_time = np.asarray(mpa_result.time, dtype=float)
@@ -540,6 +548,43 @@ class ImpedanceTuner(BoundaryConditionTuner):
             expected_cardiac_output=expected_snapshot_cardiac_output,
         )
 
+    @staticmethod
+    def _full_pa_cycle_duration(config_handler):
+        cycle_duration = getattr(config_handler.simparams, "cardiac_period", None)
+        if cycle_duration is None:
+            inflow_times = getattr(config_handler.bcs["INFLOW"], "t", None)
+            if inflow_times:
+                inflow_arr = np.asarray(inflow_times, dtype=float)
+                if inflow_arr.size >= 2:
+                    cycle_duration = float(inflow_arr.max() - inflow_arr.min())
+        return cycle_duration
+
+    def _simulate_full_pa_until_periodic(self, model):
+        """Simulate ``model`` until its MPA pressure is periodic.
+
+        The cycle count is overridden on the model only for the duration of
+        the solve, after the snapshot was written, so published files keep
+        the seed's simulation parameters.
+        """
+        simparams = getattr(model, "simparams", None)
+
+        def _simulate(n_cycles):
+            with override_simparams(simparams, n_cycles):
+                return model.simulate()
+
+        def _mpa_series(result):
+            rows = self._vessel_result(result, model.mpa)
+            return np.asarray(rows.time, dtype=float), np.asarray(rows.pressure_in, dtype=float) / 1333.2
+
+        seed_cycles = getattr(simparams, "number_of_cardiac_cycles", None)
+        return simulate_until_periodic(
+            _simulate,
+            _mpa_series,
+            cycle_duration=self._full_pa_cycle_duration(model),
+            seed_cycles=seed_cycles,
+            settings=getattr(self, "periodic_evaluation", PeriodicEvaluation()),
+        )
+
     def _evaluate_model(self, x: np.ndarray, provided_model=None):
         params = self.tune_space.vector_to_param_dict(x)
         lpa_params, rpa_params = self._build_tree_params(params)
@@ -575,8 +620,9 @@ class ImpedanceTuner(BoundaryConditionTuner):
             self._write_and_validate_snapshot(model)
             if not self._impedance_bcs_are_finite(model):
                 raise ValueError("full_pa impedance BC contains non-finite values")
-            result = model.simulate()
+            result, periodicity = self._simulate_full_pa_until_periodic(model)
             metrics = self._compute_full_pa_metrics(model, result)
+            metrics["periodicity"] = periodicity
             print(
                 f'full PA config SIMULATED, rpa split: {metrics["rpa_split"]}, '
                 f'p_mpa = {metrics["P_mpa"]}\n params: {params}'
@@ -1013,6 +1059,8 @@ class ImpedanceTuner(BoundaryConditionTuner):
             print(f"[loss_fn] simulation error: {e} params={params}")
             return 1e9
         self._n_successful_evaluations += 1
+        if metrics.get("periodicity") is not None:
+            self.last_periodicity = metrics["periodicity"]
 
         p_mpa = metrics["P_mpa"]
         rpa_split = metrics["rpa_split"]
@@ -1034,6 +1082,7 @@ class ImpedanceTuner(BoundaryConditionTuner):
                     "rpa_split": rpa_split,
                 },
                 "params": params,
+                "periodicity": metrics.get("periodicity"),
             }
 
         if finalize:

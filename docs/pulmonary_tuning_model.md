@@ -221,6 +221,28 @@ outlet pressure represents the pressure downstream of the arterial tree.
 - **Robustness**: 7/8 Sobol multi-starts reached the same optimum in
   TST-STAN-5 (chi2 17.2-17.6).
 
+### 2.10 Periodic evaluation (`periodic_evaluation`, default on)
+- **Problem**: learnedZeroD seeds carry `number_of_cardiac_cycles: 2` with
+  `steady_initial: false`. Until 2026-10-15 every full-PA evaluation scored
+  cycle 2 of that cold start, while the compliance was still filling. On
+  TST-STAN-3 iter-2 the tuning reported 42.8/7.6/25.3 mmHg; the same model is
+  45.4/15.2/28.0 at cycle 3 and 46.3/15.4/28.7 from cycle 5 on, which matches
+  the 3D (48/15.5/28). The optimizer therefore fitted a transient. Parameters
+  tuned before this date are biased, mostly toward too low a diastolic
+  pressure.
+- **Fix**: the objective, the per-cap polish, and the published-fit scoring
+  run at least `min_cycles` (6) and double the count, up to `max_cycles` (24),
+  until the last two cycles' mean MPA pressure differ by less than
+  `mean_pressure_tol_mmhg` (0.1 mmHg). The count is overridden only for the
+  solve. Written files keep the seed's `simulation_parameters` (the 3D-coupled
+  config does not use the cycle count).
+- **Limit**: the drift test bounds the change between cycles, not the
+  distance to the periodic state. With a slow decay (ratio r per cycle), the
+  remaining offset is about drift x r/(1 - r). `estimated_residual_mmhg`
+  reports this estimate. Raise `min_cycles` if it exceeds ~0.1 mmHg.
+- **Cost**: about 3x per evaluation (6 vs 2 cycles) when the first run
+  converges, as on TST-STAN-3.
+
 ## 3. Validation and diagnostics (`tuning_diagnostics.json`)
 - **SV/PP compliance bracket**: total compliance (tree static + proximal)
   should lie between regurgitant volume / PP (lower) and forward stroke volume
@@ -232,6 +254,13 @@ outlet pressure represents the pressure downstream of the arterial tree.
 - **Published vs optimizer fit** with per-target errors and chi2. A failure
   to score the published model is recorded as `published_fit.error`; the rest
   of the report is still written.
+- **Periodicity** (`periodicity`): settings, and for the selected optimizer
+  evaluation (the polish's when it ran) and the published model, the cycles
+  simulated (`cycles_used`, `attempts`), the final cycle-to-cycle drift
+  (`final_drift_mmhg` for the mean, `final_cycle_drift_mmhg` for
+  sys/dia/mean), `estimated_residual_mmhg`, `converged`, and the last cycles'
+  pressures. `converged: false` means the fit is scored on a transient.
+  `published_fit.periodicity` and `polish.periodicity` carry the same data.
 - **Inflow consistency**: mean flow of the exported model (which keeps the
   seed's inflow) vs the `inflow.csv` mean the optimizer used; more than 1%
   apart means the published and optimizer fits were computed at different
