@@ -401,6 +401,27 @@ calibrated model's composite score is no worse than the uncalibrated model's
 `calibration.targets` retains `strict_network` behavior
 during the version-1 compatibility window.
 
+The 3D LPA and RPA target flows come from the target vessel's median
+cross-section, not from its interface sample. Each target flow is the flow
+trace of the centerline slice whose cycle-mean flow is the median over that
+vessel's path range. The `interface` setting still selects the 0D replay column
+and the solver observations. The reason: once the solution is periodic,
+cycle-mean flow is the same at every slice of an unbranched vessel, but slices
+next to a junction can cut through the parent lumen. On TST-STAN-1
+(2026-10-20) the first 0.13 cm of the RPA and 0.33 cm of the LPA read the whole
+MPA flow, so the junction-interface sample gave a 3D split of 0.50 against 0.68
+from the outlets. The median is robust while fewer than half of a vessel's
+slices are contaminated.
+
+`observations_3d.{rpa,lpa}_flow` in `calibration_targets.json` records:
+- `sampling`: the selected path, the candidate slice count, the slice-mean flow
+  range, and the junction-interface mean for comparison.
+- `outlet_mass_balance`: the branch mean against the summed cycle-mean flows of
+  the outlets the vessel drains. `consistent: false` beyond a 5% relative
+  difference is advisory and flags a branch whose slices are still unreliable.
+
+The solver observations (`y`) still use the interface samples.
+
 ## Calibration quality gates and outputs
 
 The unchanged standard `pysvzerod.calibrate(config)` API remains the only

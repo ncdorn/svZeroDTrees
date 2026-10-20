@@ -1677,3 +1677,53 @@ def test_assemble_calibration_payload_rejects_nonfinite_input_parameters(tmp_pat
             zerod_config_path=str(zerod),
             calibration=_calibration_config(tmp_path),
         )
+
+
+def test_split_target_uses_median_slice_not_contaminated_junction_slice(tmp_path):
+    """TST-STAN-1: slices at the start of each daughter branch cut through the
+    MPA lumen and read the whole MPA flow.  The split target must use the
+    vessel's median cross-section and agree with the outlets it drains."""
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "mapped.vtp"
+    zerod = tmp_path / "zerod.json"
+    branch_ids = [0] * 5 + [1] * 5 + [2] * 5
+    paths = [0.0, 0.25, 0.5, 0.75, 1.0] * 3
+    # MPA 10; RPA's first two slices and LPA's first slice include the MPA.
+    flow = [10.0] * 5 + [10.0, 10.0, 6.0, 6.0, 6.0] + [10.0, 4.0, 4.0, 4.0, 4.0]
+    pressure = [100.0, 98.0, 96.0, 94.0, 92.0] + [92.0, 90.0, 88.0, 86.0, 84.0] + [92.0, 91.0, 90.0, 89.0, 88.0]
+    _write_polydata(centerline, branch_ids=branch_ids, paths=paths)
+    frames = 4
+    _write_polydata(
+        mapped,
+        branch_ids=branch_ids,
+        paths=paths,
+        extra_arrays={
+            **{f"pressure_{i}": pressure for i in range(frames)},
+            **{f"flow_{i}": flow for i in range(frames)},
+        },
+    )
+    _write_timeseries_metadata(
+        tmp_path / "mapped_metadata.json", frame_count=frames, point_count=15, flow_array="flow"
+    )
+    _write_zerod_config(zerod)
+    calibration = _target_focused_calibration_config(tmp_path)
+    calibration.data_source.flow_array = "flow"
+    calibration.data_source.area_array = None
+    calibration.targets.rpa_flow_split.interface = "upstream"
+
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(zerod),
+        calibration=calibration,
+    )
+
+    targets = assembly.target_observations
+    for role, expected in (("rpa_flow", 6.0), ("lpa_flow", 4.0)):
+        observation = targets[role]
+        assert observation["values"] == pytest.approx([expected] * frames)
+        assert observation["sampling"]["method"] == "branch_median_slice"
+        assert observation["sampling"]["interface_mean_flow"] == pytest.approx(10.0)
+        balance = observation["outlet_mass_balance"]
+        assert balance["outlet_mean_flow_sum"] == pytest.approx(expected)
+        assert balance["consistent"] is True
+    # The solver observations keep the junction-interface sample.
+    assert assembly.solver_payload["y"]["flow:J0:branch1_seg0"] == pytest.approx([10.0] * frames)

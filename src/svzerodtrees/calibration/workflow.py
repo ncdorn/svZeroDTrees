@@ -1258,6 +1258,78 @@ def _target_interface_series(
     return pressure, flow
 
 
+def _branch_median_flow_series(
+    branch_series: BranchSeries,
+    topology: VesselTopology,
+) -> tuple[np.ndarray, Dict[str, Any]] | None:
+    """Flow trace of the median cross-section along one target vessel.
+
+    Cycle-mean flow is the same at every cross-section of an unbranched
+    vessel once the solution is periodic, but slices near a junction can cut
+    through the parent lumen: on TST-STAN-1 the first 0.13 cm of the RPA and
+    0.33 cm of the LPA read the whole MPA flow, so the junction-interface
+    sample gave a split of 0.50 against 0.68 from the outlets.  The slice
+    whose cycle-mean flow is the median over the vessel's path range is
+    unaffected while fewer than half of its slices are contaminated.
+    """
+    paths = np.asarray(branch_series.paths, dtype=np.float64)
+    flows = np.asarray(branch_series.flow_series, dtype=np.float64)
+    tolerance = max(_PATH_TOLERANCE_ABS, 1e-6 * max(1.0, abs(float(paths[-1]))))
+    in_range = np.where(
+        (paths >= topology.start_path - tolerance) & (paths <= topology.end_path + tolerance)
+    )[0]
+    if in_range.size == 0 or flows.ndim != 2 or flows.shape[1] != paths.size:
+        return None
+    means = flows[:, in_range].mean(axis=0)
+    if not np.isfinite(means).all():
+        return None
+    # Lower median for an even count, so the choice is one actual slice.
+    order = np.argsort(means, kind="stable")
+    selected = int(in_range[order[(in_range.size - 1) // 2]])
+    sampling = {
+        "method": "branch_median_slice",
+        "selected_path": float(paths[selected]),
+        "candidate_slice_count": int(in_range.size),
+        "path_range": [float(topology.start_path), float(topology.end_path)],
+        "slice_mean_flow_min": float(means.min()),
+        "slice_mean_flow_median": float(means[order[(in_range.size - 1) // 2]]),
+        "slice_mean_flow_max": float(means.max()),
+    }
+    return flows[:, selected], sampling
+
+
+def _subtree_outlet_flow_keys(
+    solver_config: Dict[str, Any],
+    vessel_name: str,
+    downstream_names: Dict[str, str],
+) -> list[str]:
+    """Observation keys of the outlet interfaces draining ``vessel_name``."""
+    vessels = list(solver_config.get("vessels") or [])
+    by_name = {str(v["vessel_name"]): v for v in vessels}
+    id_to_name = {int(v["vessel_id"]): str(v["vessel_name"]) for v in vessels}
+    children: Dict[str, list[str]] = {}
+    for junction in solver_config.get("junctions") or []:
+        outlets = [id_to_name[int(i)] for i in junction.get("outlet_vessels") or []]
+        for vessel_id in junction.get("inlet_vessels") or []:
+            children.setdefault(id_to_name[int(vessel_id)], []).extend(outlets)
+    keys: list[str] = []
+    stack, seen = [vessel_name], set()
+    while stack:
+        name = stack.pop()
+        if name in seen or name not in by_name:
+            continue
+        seen.add(name)
+        if (by_name[name].get("boundary_conditions") or {}).get("outlet"):
+            keys.append(f"flow:{name}:{downstream_names[name]}")
+        stack.extend(children.get(name, []))
+    return sorted(keys)
+
+
+# Advisory tolerance of the split mass-balance check: a target branch's flow
+# against the sum of the outlet flows it drains (cycle means).
+_SPLIT_MASS_BALANCE_RTOL = 0.05
+
+
 def _assemble_target_observations(
     *,
     targets: Any,
@@ -1266,6 +1338,9 @@ def _assemble_target_observations(
     observation_timing: ObservationTiming,
     upstream_names: Dict[str, str],
     downstream_names: Dict[str, str],
+    vessel_topology: Dict[str, VesselTopology] | None = None,
+    branch_series_by_id: Dict[int, BranchSeries] | None = None,
+    solver_config: Dict[str, Any] | None = None,
 ) -> tuple[Dict[str, Any], Dict[str, str], list[float]]:
     """Capture explicitly configured pulmonary target traces from ``y``.
 
@@ -1273,6 +1348,12 @@ def _assemble_target_observations(
     target-focused run therefore needs the resolved endpoint and the metadata
     phase grid retained alongside the assembled payload; it must not recreate
     target traces from vessel numbers or replay output later.
+
+    The LPA/RPA flows are the exception: when the branch series are given they
+    come from each vessel's median cross-section
+    (``_branch_median_flow_series``), because junction-interface slices can
+    include the parent lumen.  ``outlet_mass_balance`` compares each with the
+    outlet flows it drains (advisory).
     """
     if targets is None:
         return {}, {}, []
@@ -1335,6 +1416,36 @@ def _assemble_target_observations(
                 if endpoint == "upstream"
                 else f"flow:{vessel}:{connection}"
             )
+        observation: Dict[str, Any] = {}
+        if (
+            quantity == "flow"
+            and vessel_topology is not None
+            and branch_series_by_id is not None
+            and vessel in vessel_topology
+            and vessel_topology[vessel].branch_id in branch_series_by_id
+        ):
+            median = _branch_median_flow_series(
+                branch_series_by_id[vessel_topology[vessel].branch_id],
+                vessel_topology[vessel],
+            )
+            if median is not None:
+                values, sampling = median
+                sampling["interface_mean_flow"] = float(np.mean(flow))
+                observation["sampling"] = sampling
+            if solver_config is not None:
+                outlet_keys = _subtree_outlet_flow_keys(solver_config, vessel, downstream_names)
+                if outlet_keys and all(key in y for key in outlet_keys):
+                    branch_mean = float(np.mean(values))
+                    outlet_mean = float(sum(np.mean(y[key]) for key in outlet_keys))
+                    relative = abs(branch_mean - outlet_mean) / max(abs(outlet_mean), _FLOW_EPS)
+                    observation["outlet_mass_balance"] = {
+                        "branch_mean_flow": branch_mean,
+                        "outlet_mean_flow_sum": outlet_mean,
+                        "outlet_count": len(outlet_keys),
+                        "relative_difference": float(relative),
+                        "tolerance": _SPLIT_MASS_BALANCE_RTOL,
+                        "consistent": bool(relative <= _SPLIT_MASS_BALANCE_RTOL),
+                    }
         observations[role] = {
             "phases": [float(value) for value in phases],
             "values": [float(value) for value in values],
@@ -1344,6 +1455,7 @@ def _assemble_target_observations(
             "interface": detail.get("requested_interface"),
             "endpoint": endpoint,
             "variable": variable_name,
+            **observation,
         }
         units[role] = timing.pressure_units if quantity == "pressure" else timing.flow_units
     return observations, units, [float(value) for value in phases]
@@ -2015,6 +2127,9 @@ def assemble_calibration_payload(
         observation_timing=observation_timing,
         upstream_names=upstream_names,
         downstream_names=downstream_names,
+        vessel_topology=vessel_topology,
+        branch_series_by_id=branch_series_by_id,
+        solver_config=solver_config,
     )
 
     payload = json.loads(json.dumps(solver_config))
