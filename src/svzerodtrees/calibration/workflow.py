@@ -1027,6 +1027,73 @@ def _sample_interface(
     return pressure_values, flow_values, sampling
 
 
+# A slice is clean when its cycle-mean flow lies within this relative distance
+# of the vessel's median slice-mean flow.
+_JUNCTION_FLOW_RTOL = 0.05
+
+
+def _inset_junction_flow(
+    branch_series: BranchSeries,
+    topology: VesselTopology,
+    flow_values: list[float],
+    *,
+    end: str,
+) -> tuple[list[float], Dict[str, Any]]:
+    """Move a junction-interface flow sample off slices that cut the parent lumen.
+
+    Cycle-mean flow is the same at every slice of an unbranched vessel once the
+    solution is periodic, but slices next to a junction can include the parent
+    (or a daughter) lumen: on TST-STAN-1 the first 0.13 cm of the RPA read the
+    whole MPA flow.  The vessel's median slice-mean flow is the reference.  If
+    the interface sample is within ``_JUNCTION_FLOW_RTOL`` of it, it is kept;
+    otherwise the flow comes from the first clean slice walking into the vessel
+    from the junction.  Pressure stays at the interface, where the 0D junction
+    equates the connected pressures.  A vessel with fewer than
+    ``_MIN_USABLE_INTERFACE_SAMPLES`` slices in its range cannot be checked and
+    keeps the interface sample.
+    """
+    paths = np.asarray(branch_series.paths, dtype=np.float64)
+    flows = np.asarray(branch_series.flow_series, dtype=np.float64)
+    tolerance = max(_PATH_TOLERANCE_ABS, 1e-6 * max(1.0, abs(float(paths[-1]))))
+    in_range = np.where(
+        (paths >= topology.start_path - tolerance) & (paths <= topology.end_path + tolerance)
+    )[0]
+    interface_mean = float(np.mean(flow_values))
+    record: Dict[str, Any] = {
+        "method": "vessel_median_slice_flow",
+        "candidate_slice_count": int(in_range.size),
+        "relative_tolerance": _JUNCTION_FLOW_RTOL,
+        "interface_mean_flow": interface_mean,
+    }
+    if in_range.size < _MIN_USABLE_INTERFACE_SAMPLES:
+        record["status"] = "unverified_short_vessel"
+        return flow_values, record
+
+    walk = in_range if end == "upstream" else in_range[::-1]
+    means = flows[:, walk].mean(axis=0)
+    # Lower median, so the reference is one actual (and therefore clean) slice.
+    reference = float(np.sort(means, kind="stable")[(means.size - 1) // 2])
+    limit = _JUNCTION_FLOW_RTOL * max(abs(reference), _FLOW_EPS)
+    record["reference_mean_flow"] = reference
+    if abs(interface_mean - reference) <= limit:
+        record["status"] = "clean"
+        return flow_values, record
+
+    contaminated = int(np.argmax(np.abs(means - reference) <= limit))
+    selected = int(walk[contaminated])
+    requested = topology.start_path if end == "upstream" else topology.end_path
+    record.update(
+        {
+            "status": "inset",
+            "contaminated_slice_count": contaminated,
+            "flow_selected_path": float(paths[selected]),
+            "flow_inset_distance": float(abs(paths[selected] - requested)),
+            "selected_mean_flow": float(means[contaminated]),
+        }
+    )
+    return [float(value) for value in flows[:, selected]], record
+
+
 def _selected_parameters(
     block_names: Iterable[str],
     *,
@@ -2087,6 +2154,17 @@ def assemble_calibration_payload(
             interface_kind=downstream_kind,
             excluded=excluded,
         )
+        if upstream_kind == "internal":
+            proximal_flow, proximal_sampling["flow_check"] = _inset_junction_flow(
+                branch_series, topology, proximal_flow, end="upstream"
+            )
+        if downstream_kind == "internal":
+            distal_flow, distal_sampling["flow_check"] = _inset_junction_flow(
+                branch_series, topology, distal_flow, end="downstream"
+            )
+        for sampling in (proximal_sampling, distal_sampling):
+            if sampling.get("flow_check", {}).get("status") == "inset":
+                sampling["paired_observation"] = False
         interface_sampling[f"{vessel_name}:upstream"] = proximal_sampling
         interface_sampling[f"{vessel_name}:downstream"] = distal_sampling
 

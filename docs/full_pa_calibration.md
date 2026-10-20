@@ -415,12 +415,59 @@ slices are contaminated.
 
 `observations_3d.{rpa,lpa}_flow` in `calibration_targets.json` records:
 - `sampling`: the selected path, the candidate slice count, the slice-mean flow
-  range, and the junction-interface mean for comparison.
+  range, and the interface observation's mean (after the junction inset below)
+  for comparison.
 - `outlet_mass_balance`: the branch mean against the summed cycle-mean flows of
   the outlets the vessel drains. `consistent: false` beyond a 5% relative
   difference is advisory and flags a branch whose slices are still unreliable.
 
-The solver observations (`y`) still use the interface samples.
+### Junction-interface flow observations
+
+The same contamination biases the solver observations (`y`): a vessel's
+R is fit from its pressure drop against its inlet flow, so a daughter whose
+first slices read the parent flow gets an R that is too low. Every
+junction-side (internal) interface therefore checks its flow sample:
+
+- The reference is the vessel's lower-median slice cycle-mean flow over its
+  path range.
+- If the interface sample's cycle mean is within 5% of the reference, it is
+  kept (`status: clean`).
+- Otherwise the flow observation is the trace of the first slice within 5%,
+  walking into the vessel from the junction (`status: inset`). The reference
+  slice itself qualifies, so a slice is always found.
+- The pressure observation stays at the interface. The 0D junction equates the
+  pressures of the vessels it connects, and on TST-STAN-1 the pressure across
+  the contaminated slices changes by about the vessel's own mean pressure drop.
+  Any junction entry loss is therefore carried by the daughter's R.
+- A vessel with fewer than three slices in its range cannot be checked and
+  keeps the interface sample (`status: unverified_short_vessel`). These are
+  mostly the 0.01 cm connectors that chain a multi-way junction into
+  bifurcations. They sit inside the junction region, so they still read the
+  parent flow.
+
+`interface_sampling.<vessel>:<end>.flow_check` (also under
+`observation_qc.selected_interfaces`) records the status, reference and
+interface cycle-mean flows, the candidate slice count, and, for an inset, the
+contaminated slice count, `flow_selected_path`, and `flow_inset_distance`.
+`selected_path` stays the pressure path. `paired_observation` is `false` when
+the flow comes from a different slice than the pressure.
+
+On the 2026-10-16 runs (iteration 1, assembled 2026-10-20, no calibration):
+
+| Run | Internal interfaces inset / clean / unverified | Median junction imbalance | RPA inlet flow (mL/s) | LPA inlet flow (mL/s) |
+|---|---|---|---|---|
+| TST-STAN-1 | 34 / 26 / 24 | 0.33 → 0.19 | 11.94 → 8.16 | 11.98 → 3.77 |
+| TST-STAN-3 | 12 / 22 / 8 | 0.32 → 0.14 | 33.36 → 30.18 | 30.59 (clean) |
+| TST-STAN-5 | 2 / 38 / 26 | 0.08 → 0.08 | clean | clean |
+
+Junction imbalance is the relative RMS of the junction mass-balance QC metric.
+The largest inset was 0.32 cm (TST-STAN-1 LPA). The implied steady R (mean
+pressure drop over mean inlet flow) of the TST-STAN-1 RPA rises from 20.9 to
+30.6, and that of the LPA from 61.9 to 196.5. The maximum junction imbalance
+does not improve, and on TST-STAN-1 and TST-STAN-3 it grows. That residual
+comes from the unverified connector chains: their outlets are now clean, but
+the connector inlet still reads the parent flow. The split targets and the QC
+status are unchanged.
 
 ## Calibration quality gates and outputs
 

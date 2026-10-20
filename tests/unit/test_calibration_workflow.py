@@ -1561,6 +1561,14 @@ def test_assemble_calibration_payload_supports_multiple_segments_per_branch(tmp_
         "usable_sample_count": 6,
         "paired_observation": True,
         "excluded_from_calibration": False,
+        "flow_check": {
+            "method": "vessel_median_slice_flow",
+            "candidate_slice_count": 3,
+            "relative_tolerance": 0.05,
+            "interface_mean_flow": 10.0,
+            "reference_mean_flow": 10.0,
+            "status": "clean",
+        },
     }
 
 
@@ -1721,9 +1729,177 @@ def test_split_target_uses_median_slice_not_contaminated_junction_slice(tmp_path
         observation = targets[role]
         assert observation["values"] == pytest.approx([expected] * frames)
         assert observation["sampling"]["method"] == "branch_median_slice"
-        assert observation["sampling"]["interface_mean_flow"] == pytest.approx(10.0)
+        # The interface observation is already inset past the MPA slices.
+        assert observation["sampling"]["interface_mean_flow"] == pytest.approx(expected)
         balance = observation["outlet_mass_balance"]
         assert balance["outlet_mean_flow_sum"] == pytest.approx(expected)
         assert balance["consistent"] is True
-    # The solver observations keep the junction-interface sample.
-    assert assembly.solver_payload["y"]["flow:J0:branch1_seg0"] == pytest.approx([10.0] * frames)
+    # The solver observations are inset past the contaminated slices too.
+    y = assembly.solver_payload["y"]
+    assert y["flow:J0:branch1_seg0"] == pytest.approx([6.0] * frames)
+    assert y["flow:J0:branch2_seg0"] == pytest.approx([4.0] * frames)
+
+
+def _write_junction_inset_case(tmp_path, *, rpa_flow, lpa_flow, frames=4):
+    """MPA (branch 0) feeding RPA (branch 1) and LPA (branch 2), five slices each."""
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "mapped.vtp"
+    zerod = tmp_path / "zerod.json"
+    branch_ids = [0] * 5 + [1] * 5 + [2] * 5
+    paths = [0.0, 0.25, 0.5, 0.75, 1.0] * 3
+    mpa_flow = [10.0] * 5
+    pressure = [100.0, 98.0, 96.0, 94.0, 92.0] + [92.0, 90.0, 88.0, 86.0, 84.0] + [92.0, 91.0, 90.0, 89.0, 88.0]
+    _write_polydata(centerline, branch_ids=branch_ids, paths=paths)
+    # Each frame scales the steady profile, so frame values identify the slice.
+    scale = [1.0 + 0.1 * i for i in range(frames)]
+    flow = mpa_flow + list(rpa_flow) + list(lpa_flow)
+    _write_polydata(
+        mapped,
+        branch_ids=branch_ids,
+        paths=paths,
+        extra_arrays={
+            **{f"pressure_{i}": pressure for i in range(frames)},
+            **{f"flow_{i}": [value * scale[i] for value in flow] for i in range(frames)},
+        },
+    )
+    _write_timeseries_metadata(
+        tmp_path / "mapped_metadata.json", frame_count=frames, point_count=15, flow_array="flow"
+    )
+    _write_zerod_config(zerod)
+    calibration = _target_focused_calibration_config(tmp_path)
+    calibration.data_source.flow_array = "flow"
+    calibration.data_source.area_array = None
+    calibration.targets.rpa_flow_split.interface = "upstream"
+    return zerod, calibration, scale
+
+
+def test_junction_interface_flow_is_inset_to_first_clean_slice(tmp_path):
+    """Flow moves to the first slice within 5% of the vessel median; pressure
+    stays at the junction interface, where the 0D junction equates pressures."""
+    zerod, calibration, scale = _write_junction_inset_case(
+        tmp_path,
+        rpa_flow=[10.0, 10.0, 6.1, 6.0, 6.0],
+        lpa_flow=[10.0, 4.0, 4.0, 4.0, 4.0],
+    )
+
+    assembly = assemble_calibration_payload(zerod_config_path=str(zerod), calibration=calibration)
+
+    y = assembly.solver_payload["y"]
+    assert y["flow:J0:branch1_seg0"] == pytest.approx([6.1 * s for s in scale])
+    assert y["flow:J0:branch2_seg0"] == pytest.approx([4.0 * s for s in scale])
+    assert y["pressure:J0:branch1_seg0"] == pytest.approx([92.0] * len(scale))
+    rpa = assembly.interface_sampling["branch1_seg0:upstream"]
+    assert rpa["selected_path"] == pytest.approx(0.0)
+    assert rpa["paired_observation"] is False
+    assert rpa["quality_status"] == "interpolated_internal"
+    check = rpa["flow_check"]
+    assert check["status"] == "inset"
+    assert check["contaminated_slice_count"] == 2
+    assert check["flow_selected_path"] == pytest.approx(0.5)
+    assert check["flow_inset_distance"] == pytest.approx(0.5)
+    assert check["interface_mean_flow"] == pytest.approx(10.0 * sum(scale) / len(scale))
+    assert check["reference_mean_flow"] == pytest.approx(6.1 * sum(scale) / len(scale))
+    # The MPA keeps its clean junction-side sample.
+    mpa = assembly.interface_sampling["branch0_seg0:downstream"]
+    assert mpa["flow_check"]["status"] == "clean"
+    assert mpa["paired_observation"] is True
+    # The junction now balances in the observations.
+    balance = assembly.observation_qc["metrics"]["junction_mass_balance"]
+    assert balance["per_junction_relative_rms_error"]["J0"] < 0.02
+
+
+def test_junction_interface_flow_inset_on_the_parent_side(tmp_path):
+    """A parent's last slices can read one daughter's flow; the downstream
+    interface walks back into the parent."""
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "mapped.vtp"
+    zerod = tmp_path / "zerod.json"
+    branch_ids = [0] * 5 + [1] * 5 + [2] * 5
+    paths = [0.0, 0.25, 0.5, 0.75, 1.0] * 3
+    flow = [10.0, 10.0, 10.0, 10.0, 6.0] + [6.0] * 5 + [4.0] * 5
+    _write_polydata(centerline, branch_ids=branch_ids, paths=paths)
+    _write_polydata(
+        mapped,
+        branch_ids=branch_ids,
+        paths=paths,
+        pressure=[100.0, 98.0, 96.0, 94.0, 92.0] + [92.0, 90.0, 88.0, 86.0, 84.0] + [92.0, 91.0, 90.0, 89.0, 88.0],
+        flow=flow,
+    )
+    _write_zerod_config(zerod)
+
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(zerod),
+        calibration=CalibrationConfig(
+            data_source=CalibrationDataSourceConfig(
+                mode="mapped_centerline",
+                mapped_centerline_result=str(mapped),
+                centerline=str(centerline),
+                flow_array="velocity",
+                flow_observation_type="flow",
+            ),
+            parameters=CalibrationParametersConfig(),
+        ),
+    )
+
+    assert assembly.solver_payload["y"]["flow:branch0_seg0:J0"] == pytest.approx([10.0])
+    check = assembly.interface_sampling["branch0_seg0:downstream"]["flow_check"]
+    assert check["status"] == "inset"
+    assert check["contaminated_slice_count"] == 1
+    assert check["flow_selected_path"] == pytest.approx(0.75)
+
+
+def test_short_vessel_junction_flow_is_left_unverified(tmp_path):
+    """Fewer than three slices in a vessel's range cannot give a median
+    reference, so the interface sample is kept and marked unverified."""
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "mapped.vtp"
+    zerod = tmp_path / "zerod.json"
+    paths = [0.0, 0.1635, 0.3, 0.5439, 0.8, 0.9809]
+    _write_polydata(centerline, branch_ids=[0] * 6, paths=paths)
+    _write_polydata(
+        mapped,
+        branch_ids=[0] * 6,
+        paths=paths,
+        pressure=[100.0, 98.0, 96.0, 94.0, 92.0, 90.0],
+        flow=[10.0] * 6,
+    )
+    vessels = [
+        {"vessel_id": 0, "vessel_name": "branch0_seg0", "vessel_length": 0.1635, "boundary_conditions": {"inlet": "INFLOW"}},
+        {"vessel_id": 1, "vessel_name": "branch0_seg1", "vessel_length": 0.05},
+        {"vessel_id": 2, "vessel_name": "branch0_seg2", "vessel_length": 0.9809 - 0.2135, "boundary_conditions": {"outlet": "OUT"}},
+    ]
+    for vessel in vessels:
+        vessel.update(zero_d_element_type="BloodVessel", zero_d_element_values={"R_poiseuille": 1.0})
+    payload = {
+        "boundary_conditions": [
+            {"bc_name": "INFLOW", "bc_type": "FLOW", "bc_values": {"Q": [1.0], "t": [0.0]}},
+            {"bc_name": "OUT", "bc_type": "RESISTANCE", "bc_values": {"R": 1.0}},
+        ],
+        "junctions": [
+            {"junction_name": "J0", "junction_type": "NORMAL_JUNCTION", "inlet_vessels": [0], "outlet_vessels": [1]},
+            {"junction_name": "J1", "junction_type": "NORMAL_JUNCTION", "inlet_vessels": [1], "outlet_vessels": [2]},
+        ],
+        "simulation_parameters": {},
+        "vessels": vessels,
+    }
+    zerod.write_text(json.dumps(payload), encoding="utf-8")
+
+    assembly = assemble_calibration_payload(
+        zerod_config_path=str(zerod),
+        calibration=CalibrationConfig(
+            data_source=CalibrationDataSourceConfig(
+                mode="mapped_centerline",
+                mapped_centerline_result=str(mapped),
+                centerline=str(centerline),
+                flow_array="velocity",
+                flow_observation_type="flow",
+            ),
+            parameters=CalibrationParametersConfig(),
+        ),
+    )
+
+    for end in ("upstream", "downstream"):
+        check = assembly.interface_sampling[f"branch0_seg1:{end}"]["flow_check"]
+        assert check["status"] == "unverified_short_vessel"
+        assert check["candidate_slice_count"] == 1
+        assert assembly.interface_sampling[f"branch0_seg1:{end}"]["paired_observation"] is True
