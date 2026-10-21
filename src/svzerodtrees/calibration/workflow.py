@@ -1094,6 +1094,152 @@ def _inset_junction_flow(
     return [float(value) for value in flows[:, selected]], record
 
 
+def _junction_depths(
+    junctions: list[Dict[str, Any]],
+    id_to_name: Mapping[int, str],
+    upstream_names: Mapping[str, str],
+) -> Dict[str, int]:
+    """Number of junctions between each junction and the network inlet."""
+    by_name = {str(junction["junction_name"]): junction for junction in junctions}
+    depths: Dict[str, int] = {}
+
+    def depth(name: str, visiting: frozenset[str]) -> int:
+        if name in depths:
+            return depths[name]
+        if name in visiting:
+            raise ValueError(f"junction topology contains a cycle through {name}")
+        parents = [
+            upstream_names[id_to_name[int(vessel_id)]]
+            for vessel_id in by_name[name].get("inlet_vessels") or []
+        ]
+        depths[name] = 1 + max(
+            (depth(parent, visiting | {name}) for parent in parents if parent in by_name),
+            default=-1,
+        )
+        return depths[name]
+
+    for name in by_name:
+        depth(name, frozenset())
+    return depths
+
+
+def _reconstruct_connector_flows(
+    *,
+    solver_config: Dict[str, Any],
+    y: Dict[str, list[float]],
+    interface_sampling: Dict[str, Dict[str, Any]],
+    upstream_names: Dict[str, str],
+    downstream_names: Dict[str, str],
+) -> None:
+    """Set unverified short-connector flows from junction mass balance.
+
+    The 0.01 cm connectors that chain a multi-way junction into bifurcations
+    lie inside the junction region, so every slice of them reads the parent
+    flow (8.18 mL/s along the whole TST-STAN-1 RPA chain).  Where a junction
+    has exactly one such connector and every other connection has a checked
+    flow, the connector's flow is the junction's mass balance.  The same trace
+    is used at both ends, since the connector's compliance is negligible, and
+    the solved connector counts as checked at its other junction.  Pressure
+    observations are unchanged.
+
+    Junctions are visited deepest first, so a connector is preferably the sum
+    of the flows leaving its downstream junction.  Only when no such junction
+    can be solved is a connector taken as an inflow minus side-branch flows.
+    The sum never changes sign, whereas the difference amplifies any error in
+    a side branch: on TST-STAN-1 one RPA side branch reads 3.74 mL/s while its
+    outlets drain 1.05 mL/s, and walking from the root would drive the last
+    RPA connector to -0.95 mL/s.  Each solved connector records the sum of the
+    outlet flows it drains as an advisory cross-check.
+    """
+    vessels = list(solver_config.get("vessels") or [])
+    id_to_name = {int(v["vessel_id"]): str(v["vessel_name"]) for v in vessels}
+    junctions = list(solver_config.get("junctions") or [])
+    junction_names = {str(junction["junction_name"]) for junction in junctions}
+    unknown = {
+        name
+        for name in id_to_name.values()
+        if upstream_names.get(name) in junction_names
+        and downstream_names.get(name) in junction_names
+        and all(
+            interface_sampling.get(f"{name}:{end}", {}).get("flow_check", {}).get("status")
+            == "unverified_short_vessel"
+            for end in ("upstream", "downstream")
+        )
+    }
+    if not unknown:
+        return
+
+    depths = _junction_depths(junctions, id_to_name, upstream_names)
+    order = sorted(
+        junctions,
+        key=lambda junction: (-depths[str(junction["junction_name"])], str(junction["junction_name"])),
+    )
+
+    def connections(junction: Dict[str, Any]) -> list[tuple[str, str, str]]:
+        name = str(junction["junction_name"])
+        return [
+            ("inlet", id_to_name[int(i)], f"flow:{id_to_name[int(i)]}:{name}")
+            for i in junction.get("inlet_vessels") or []
+        ] + [
+            ("outlet", id_to_name[int(i)], f"flow:{name}:{id_to_name[int(i)]}")
+            for i in junction.get("outlet_vessels") or []
+        ]
+
+    def unchecked(role: str, vessel_name: str) -> bool:
+        end = "downstream" if role == "inlet" else "upstream"
+        check = interface_sampling.get(f"{vessel_name}:{end}", {}).get("flow_check", {})
+        return check.get("status") == "unverified_short_vessel"
+
+    def solve(junction: Dict[str, Any], *, allow_outlet: bool) -> bool:
+        links = connections(junction)
+        # A short vessel with an external end is not reconstructed, but its
+        # unchecked sample still blocks the balance at this junction.
+        missing = [link for link in links if unchecked(link[0], link[1])]
+        if len(missing) != 1 or missing[0][1] not in unknown:
+            return False
+        role, vessel_name, _key = missing[0]
+        if role == "outlet" and not allow_outlet:
+            return False
+        inflow = sum(np.asarray(y[key]) for r, v, key in links if r == "inlet" and v != vessel_name)
+        outflow = sum(np.asarray(y[key]) for r, v, key in links if r == "outlet" and v != vessel_name)
+        trace = np.asarray(outflow - inflow if role == "inlet" else inflow - outflow, dtype=np.float64)
+        if trace.ndim == 0:
+            return False
+        values = [float(value) for value in trace]
+        y[f"flow:{upstream_names[vessel_name]}:{vessel_name}"] = list(values)
+        y[f"flow:{vessel_name}:{downstream_names[vessel_name]}"] = list(values)
+
+        reconstruction: Dict[str, Any] = {
+            "method": "junction_mass_balance",
+            "junction": str(junction["junction_name"]),
+            "solved_from": "outlets" if role == "inlet" else "inlet",
+            "reconstructed_mean_flow": float(np.mean(trace)),
+        }
+        outlet_keys = _subtree_outlet_flow_keys(solver_config, vessel_name, downstream_names)
+        if outlet_keys and all(key in y for key in outlet_keys):
+            outlet_mean = float(sum(np.mean(y[key]) for key in outlet_keys))
+            reconstruction["outlet_mean_flow_sum"] = outlet_mean
+            reconstruction["outlet_relative_difference"] = float(
+                abs(float(np.mean(trace)) - outlet_mean) / max(abs(outlet_mean), _FLOW_EPS)
+            )
+        for end in ("upstream", "downstream"):
+            sampling = interface_sampling[f"{vessel_name}:{end}"]
+            sampling["flow_check"]["status"] = "reconstructed_mass_balance"
+            sampling["flow_check"]["reconstruction"] = dict(reconstruction)
+            sampling["paired_observation"] = False
+        unknown.discard(vessel_name)
+        return True
+
+    while unknown:
+        # A full deepest-first sweep of outlet sums (list, not generator, so
+        # every junction is visited).
+        if any([solve(junction, allow_outlet=False) for junction in order]):
+            continue
+        # Otherwise one inflow-minus-side-branches solve, then sums again.
+        if not any(solve(junction, allow_outlet=True) for junction in order):
+            break
+
+
 def _selected_parameters(
     block_names: Iterable[str],
     *,
@@ -2178,6 +2324,14 @@ def assemble_calibration_payload(
             if len(values) != observation_count:
                 raise ValueError(f"observation series length mismatch for '{variable_name}'")
             y[variable_name] = [float(value) for value in values]
+
+    _reconstruct_connector_flows(
+        solver_config=solver_config,
+        y=y,
+        interface_sampling=interface_sampling,
+        upstream_names=upstream_names,
+        downstream_names=downstream_names,
+    )
 
     dy = {
         variable_name: _periodic_derivative(values, observation_timing)

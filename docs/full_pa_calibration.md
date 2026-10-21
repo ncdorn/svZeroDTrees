@@ -443,14 +443,43 @@ junction-side (internal) interface therefore checks its flow sample:
   keeps the interface sample (`status: unverified_short_vessel`). These are
   mostly the 0.01 cm connectors that chain a multi-way junction into
   bifurcations. They sit inside the junction region, so they still read the
-  parent flow.
+  parent flow. A short vessel with both ends at junctions is then
+  reconstructed from junction mass balance (below).
 
 `interface_sampling.<vessel>:<end>.flow_check` (also under
 `observation_qc.selected_interfaces`) records the status, reference and
 interface cycle-mean flows, the candidate slice count, and, for an inset, the
 contaminated slice count, `flow_selected_path`, and `flow_inset_distance`.
 `selected_path` stays the pressure path. `paired_observation` is `false` when
-the flow comes from a different slice than the pressure.
+the flow comes from a different slice than the pressure, or from mass balance.
+
+Short connectors are reconstructed after every interface has been checked:
+
+- A junction is solved when exactly one connection still has an unverified
+  flow, and that connection is a short vessel with junctions at both ends.
+  Its flow trace is the junction's mass balance, frame by frame, using the
+  checked (clean, inset or reconstructed) flows of the other connections.
+- The same trace is used at both ends of the connector, since its compliance
+  is negligible. The connector then counts as checked at its other junction.
+  Pressure observations are unchanged.
+- Junctions are visited deepest first, so a connector is the sum of the flows
+  leaving its downstream junction (`solved_from: outlets`). Only when no such
+  junction can be solved is one connector taken as the inflow minus the
+  side-branch flows (`solved_from: inlet`), after which sums are preferred
+  again. A sum of daughter flows never changes sign, but a difference
+  amplifies any error in a side branch. On TST-STAN-1 the RPA side branch
+  `branch39` reads 3.74 mL/s at every slice, while its outlets drain 1.05.
+  Walking down from the root would set the last RPA connector to -0.95 mL/s.
+- A short vessel with an external end (for example a two-slice terminal
+  vessel) is not reconstructed. It keeps `unverified_short_vessel` and blocks
+  the balance at its junction.
+
+A reconstructed interface has `flow_check.status: reconstructed_mass_balance`.
+Its `flow_check.reconstruction` records the `junction` solved, `solved_from`,
+the `reconstructed_mean_flow`, and, as an advisory cross-check,
+`outlet_mean_flow_sum` (the cycle-mean flows of the outlets the connector
+drains) with `outlet_relative_difference`. `interface_mean_flow` keeps the
+discarded sample's cycle mean.
 
 On the 2026-10-16 runs (iteration 1, assembled 2026-10-20, no calibration):
 
@@ -468,6 +497,39 @@ does not improve, and on TST-STAN-1 and TST-STAN-3 it grows. That residual
 comes from the unverified connector chains: their outlets are now clean, but
 the connector inlet still reads the parent flow. The split targets and the QC
 status are unchanged.
+
+Connector reconstruction on the same inputs (assembled 2026-10-21, compared
+with the inset-only assembly above):
+
+| Run | Connectors reconstructed | Median junction imbalance | Max junction imbalance | Junctions > 0.1 |
+|---|---|---|---|---|
+| TST-STAN-1 | 12 | 0.19 → 0.03 | 0.83 → 0.73 | 18 → 6 of 28 |
+| TST-STAN-3 | 4 | 0.14 → 0.02 | 0.80 → 0.11 | 9 → 1 of 14 |
+| TST-STAN-5 | 13 | 0.08 → 0.00 | 0.88 → 0.48 | 8 → 6 of 22 |
+
+On TST-STAN-1 the LPA connectors go from 3.80 to 3.23 and 2.68 mL/s, and the
+last RPA connector from 8.18 to 1.64. All reconstructed connectors are solved
+from outlets. Except on the TST-STAN-1 RPA, each one agrees with the outlets
+it drains within 2%. The split targets and the QC status are unchanged.
+
+The remaining imbalance is of two kinds:
+
+- Pulsatile. At the first bifurcation of each chain the cycle means balance
+  within 1.5%, but the parent's peak-to-peak flow exceeds the daughters' sum
+  (TST-STAN-5 LPA 31.2 against 16.4 mL/s, at relative RMS 0.48; RPA 214
+  against 129, at 0.37). The parent trace is consistent along its length
+  (32.2 at its inlet), so the difference is pulsatile volume stored in the
+  3D junction region, which the 0D connector chain cannot hold. A plain
+  bifurcation shows it too (TST-STAN-1 J0: 0.18 with a 0.0% mean error).
+  Before reconstruction this residual sat at the last bifurcation of each
+  chain. It now sits at the first.
+- Mean, on TST-STAN-1 only. `branch39` (3.74 against 1.05 mL/s drained) and
+  `branch36` (1.14 against 0.56) read too much flow at every slice, so the
+  median-slice check cannot see the contamination. They leave J14, J13 and J12
+  at 0.73, 0.51 and 0.33. Through `branch39` they bias the reconstructed RPA
+  connectors 0 to 2 by about 2.6 mL/s, which the outlet cross-check flags
+  (`outlet_relative_difference` 0.36 to 0.56). The connectors below
+  `branch39` agree with their outlets within 1%.
 
 ## Calibration quality gates and outputs
 
