@@ -2252,6 +2252,8 @@ def assemble_calibration_payload(
     for vessel_name in _reversed_pressure_drop_exclusions(calibration, observation_qc):
         vessel_parameters[vessel_name] = []
         excluded_blocks[vessel_name] = "reversed_3d_pressure_drop"
+    # The QC report's exclusions were captured before this step.
+    observation_qc["exclusions"] = {key: excluded_blocks[key] for key in sorted(excluded_blocks)}
 
     payload = json.loads(json.dumps(solver_config))
     payload["y"] = y

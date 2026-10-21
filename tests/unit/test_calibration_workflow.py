@@ -1922,6 +1922,7 @@ def test_reversed_pressure_drop_vessel_keeps_input_parameters(tmp_path):
     assert flags["branch2_seg0"] == []
     assert flags["branch1_seg0"] == ["R_poiseuille", "C"]
     assert assembly.excluded_blocks["branch2_seg0"] == "reversed_3d_pressure_drop"
+    assert assembly.observation_qc["exclusions"]["branch2_seg0"] == "reversed_3d_pressure_drop"
 
 
 def test_reversed_pressure_drop_exclusion_is_off_by_default_outside_target_focused(tmp_path):
