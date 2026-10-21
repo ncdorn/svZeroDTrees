@@ -1850,7 +1850,9 @@ def test_junction_interface_flow_inset_on_the_parent_side(tmp_path):
 
 def test_short_vessel_junction_flow_is_left_unverified(tmp_path):
     """Fewer than three slices in a vessel's range cannot give a median
-    reference, so the interface sample is kept and marked unverified."""
+    reference, so the interface sample is kept and marked unverified.  A short
+    vessel between two junctions is then reconstructed from mass balance; one
+    with an external end keeps its sample."""
     centerline = tmp_path / "centerline.vtp"
     mapped = tmp_path / "mapped.vtp"
     zerod = tmp_path / "zerod.json"
@@ -1898,8 +1900,184 @@ def test_short_vessel_junction_flow_is_left_unverified(tmp_path):
         ),
     )
 
+    seg0 = assembly.interface_sampling["branch0_seg0:downstream"]
+    assert seg0["flow_check"]["status"] == "unverified_short_vessel"
+    assert seg0["flow_check"]["candidate_slice_count"] == 2
+    assert seg0["paired_observation"] is True
     for end in ("upstream", "downstream"):
         check = assembly.interface_sampling[f"branch0_seg1:{end}"]["flow_check"]
-        assert check["status"] == "unverified_short_vessel"
+        assert check["status"] == "reconstructed_mass_balance"
         assert check["candidate_slice_count"] == 1
-        assert assembly.interface_sampling[f"branch0_seg1:{end}"]["paired_observation"] is True
+        assert check["reconstruction"]["junction"] == "J1"
+        assert check["reconstruction"]["solved_from"] == "outlets"
+
+
+def _write_connector_chain_case(tmp_path, *, side_flow, daughter_flows, short_daughter=False):
+    """Parent P (branch0_seg0) and a 0.01 cm connector (branch0_seg1) on one
+    branch.  J0 splits P into side branch A (branch1) and the connector; J1
+    splits the connector into daughters B (branch2) and C (branch3).
+
+    Every slice of the connector reads the parent flow, as at TST-STAN-1.
+    ``side_flow`` and ``daughter_flows`` are per-frame traces.  With
+    ``short_daughter`` C is a two-slice terminal vessel, which cannot be
+    checked or reconstructed.
+    """
+    frames = len(side_flow)
+    parent = [10.0 + index for index in range(frames)]
+    branch_ids = [0] * 6 + [1] * 5 + [2] * 5
+    paths = [0.0, 0.25, 0.5, 0.75, 1.0, 1.01] + [0.0, 0.25, 0.5, 0.75, 1.0] * 2
+    pressure = (
+        [100.0, 99.0, 98.0, 97.0, 96.0, 95.99]
+        + [95.0, 94.0, 93.0, 92.0, 91.0]
+        + [95.0, 94.5, 94.0, 93.5, 93.0]
+    )
+    c_paths = [0.0, 0.01] if short_daughter else [0.0, 0.25, 0.5, 0.75, 1.0]
+    branch_ids += [3] * len(c_paths)
+    paths += c_paths
+    pressure += [95.0 - 0.5 * index for index in range(len(c_paths))]
+    flows = {}
+    for frame in range(frames):
+        flows[f"flow_{frame}"] = (
+            [parent[frame]] * 6
+            + [side_flow[frame]] * 5
+            + [daughter_flows[0][frame]] * 5
+            + [daughter_flows[1][frame]] * len(c_paths)
+        )
+    centerline = tmp_path / "centerline.vtp"
+    mapped = tmp_path / "mapped.vtp"
+    _write_polydata(
+        centerline, branch_ids=branch_ids, paths=paths, expand_two_point_branches=False
+    )
+    _write_polydata(
+        mapped,
+        branch_ids=branch_ids,
+        paths=paths,
+        extra_arrays={**{f"pressure_{i}": pressure for i in range(frames)}, **flows},
+        expand_two_point_branches=False,
+    )
+    _write_timeseries_metadata(
+        tmp_path / "mapped_metadata.json",
+        frame_count=frames,
+        point_count=len(paths),
+        flow_array="flow",
+    )
+
+    def vessel(vessel_id, name, length, **bcs):
+        return {
+            "vessel_id": vessel_id,
+            "vessel_name": name,
+            "vessel_length": length,
+            "zero_d_element_type": "BloodVessel",
+            "zero_d_element_values": {"R_poiseuille": 1.0},
+            **({"boundary_conditions": bcs} if bcs else {}),
+        }
+
+    payload = {
+        "boundary_conditions": [
+            {"bc_name": "INFLOW", "bc_type": "FLOW", "bc_values": {"Q": [10.0, 10.0], "t": [0.0, 1.0]}},
+            *(
+                {"bc_name": name, "bc_type": "RESISTANCE", "bc_values": {"R": 1.0}}
+                for name in ("OUT_A", "OUT_B", "OUT_C")
+            ),
+        ],
+        "junctions": [
+            {"junction_name": "J0", "junction_type": "NORMAL_JUNCTION", "inlet_vessels": [0], "outlet_vessels": [2, 1]},
+            {"junction_name": "J1", "junction_type": "NORMAL_JUNCTION", "inlet_vessels": [1], "outlet_vessels": [3, 4]},
+        ],
+        "simulation_parameters": {},
+        "vessels": [
+            vessel(0, "branch0_seg0", 1.0, inlet="INFLOW"),
+            vessel(1, "branch0_seg1", 0.01),
+            vessel(2, "branch1_seg0", 1.0, outlet="OUT_A"),
+            vessel(3, "branch2_seg0", 1.0, outlet="OUT_B"),
+            vessel(4, "branch3_seg0", c_paths[-1], outlet="OUT_C"),
+        ],
+    }
+    zerod = tmp_path / "zerod.json"
+    zerod.write_text(json.dumps(payload), encoding="utf-8")
+    calibration = CalibrationConfig(
+        data_source=CalibrationDataSourceConfig(
+            mode="mapped_centerline",
+            mapped_centerline_result=str(mapped),
+            metadata_json=str(tmp_path / "mapped_metadata.json"),
+            centerline=str(centerline),
+            flow_array="flow",
+            flow_observation_type="flow",
+        ),
+        parameters=CalibrationParametersConfig(),
+    )
+    return assemble_calibration_payload(zerod_config_path=str(zerod), calibration=calibration)
+
+
+def test_connector_flow_is_reconstructed_from_downstream_mass_balance(tmp_path):
+    """The connector reads the parent flow; its flow becomes the sum of the
+    daughters at its downstream junction, at both ends and frame by frame."""
+    side = [3.0, 4.5, 3.5]
+    daughters = ([4.0, 4.5, 5.0], [3.0, 2.0, 3.5])
+    assembly = _write_connector_chain_case(tmp_path, side_flow=side, daughter_flows=daughters)
+
+    y = assembly.solver_payload["y"]
+    expected = [b + c for b, c in zip(*daughters)]
+    assert y["flow:J0:branch0_seg1"] == pytest.approx(expected)
+    assert y["flow:branch0_seg1:J1"] == pytest.approx(expected)
+    # Pressure observations stay at the interfaces.
+    assert y["pressure:J0:branch0_seg1"] == pytest.approx([96.0] * 3)
+    assert y["pressure:branch0_seg1:J1"] == pytest.approx([95.99] * 3)
+    for end in ("upstream", "downstream"):
+        sampling = assembly.interface_sampling[f"branch0_seg1:{end}"]
+        assert sampling["paired_observation"] is False
+        check = sampling["flow_check"]
+        assert check["status"] == "reconstructed_mass_balance"
+        assert check["interface_mean_flow"] == pytest.approx(11.0)
+        reconstruction = check["reconstruction"]
+        assert reconstruction["method"] == "junction_mass_balance"
+        assert reconstruction["junction"] == "J1"
+        assert reconstruction["solved_from"] == "outlets"
+        assert reconstruction["reconstructed_mean_flow"] == pytest.approx(22.0 / 3.0)
+        assert reconstruction["outlet_mean_flow_sum"] == pytest.approx(22.0 / 3.0)
+        assert reconstruction["outlet_relative_difference"] == pytest.approx(0.0)
+    balance = assembly.observation_qc["metrics"]["junction_mass_balance"]
+    assert balance["per_junction_relative_rms_error"]["J1"] == pytest.approx(0.0, abs=1e-12)
+    # Parent 10, 11, 12 = side 3, 4.5, 3.5 + connector 7, 6.5, 8.5 at J0.
+    assert balance["per_junction_relative_rms_error"]["J0"] == pytest.approx(0.0, abs=1e-12)
+
+
+def test_connector_reconstruction_prefers_outlet_sum_over_inflow_difference(tmp_path):
+    """A side branch that over-reads (TST-STAN-1 branch39 reads 3.74 mL/s and
+    drains 1.05) would bias an inflow-minus-side-branch connector; the sum of
+    the downstream daughters does not depend on it.  The residual stays at the
+    junction with the bad side branch."""
+    assembly = _write_connector_chain_case(
+        tmp_path, side_flow=[6.0, 6.0, 6.0], daughter_flows=([4.0] * 3, [3.0] * 3)
+    )
+
+    y = assembly.solver_payload["y"]
+    assert y["flow:J0:branch0_seg1"] == pytest.approx([7.0] * 3)
+    balance = assembly.observation_qc["metrics"]["junction_mass_balance"]["per_junction_relative_rms_error"]
+    assert balance["J1"] == pytest.approx(0.0, abs=1e-12)
+    assert balance["J0"] > 0.1
+
+
+def test_connector_is_solved_from_inflow_when_downstream_junction_is_unchecked(tmp_path):
+    """A two-slice terminal daughter blocks the downstream balance, so the
+    connector is the parent inflow minus the side branch.  The terminal
+    daughter is not reconstructed and keeps its sample."""
+    side = [3.0, 3.5, 2.5]
+    assembly = _write_connector_chain_case(
+        tmp_path,
+        side_flow=side,
+        daughter_flows=([4.0] * 3, [1.0] * 3),
+        short_daughter=True,
+    )
+
+    y = assembly.solver_payload["y"]
+    expected = [10.0 + index - side[index] for index in range(3)]
+    assert y["flow:J0:branch0_seg1"] == pytest.approx(expected)
+    assert y["flow:branch0_seg1:J1"] == pytest.approx(expected)
+    check = assembly.interface_sampling["branch0_seg1:downstream"]["flow_check"]
+    assert check["status"] == "reconstructed_mass_balance"
+    assert check["reconstruction"]["junction"] == "J0"
+    assert check["reconstruction"]["solved_from"] == "inlet"
+    terminal = assembly.interface_sampling["branch3_seg0:upstream"]["flow_check"]
+    assert terminal["status"] == "unverified_short_vessel"
+    assert y["flow:J1:branch3_seg0"] == pytest.approx([1.0] * 3)
