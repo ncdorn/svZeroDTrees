@@ -278,6 +278,10 @@ class CalibrationParameterSelectionConfig:
 class CalibrationParametersConfig:
     vessels: CalibrationParameterSelectionConfig = field(default_factory=CalibrationParameterSelectionConfig)
     junctions: CalibrationParameterSelectionConfig = field(default_factory=CalibrationParameterSelectionConfig)
+    # Keep the input parameters of non-target vessels whose 3D cycle-mean pressure
+    # drop runs against their flow (pressure_drop_direction QC).  None means on
+    # under target_focused enforcement and off otherwise.
+    exclude_reversed_pressure_drop: Optional[bool] = None
 
 
 @dataclass
@@ -1639,7 +1643,14 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
     parameters_raw = data.get("parameters")
     if not isinstance(parameters_raw, dict):
         raise ValueError("calibration.parameters is required")
-    _ensure_keys(parameters_raw, ["vessels", "junctions"], "calibration.parameters")
+    _ensure_keys(
+        parameters_raw,
+        ["vessels", "junctions", "exclude_reversed_pressure_drop"],
+        "calibration.parameters",
+    )
+    exclude_reversed = parameters_raw.get("exclude_reversed_pressure_drop")
+    if exclude_reversed is not None and not isinstance(exclude_reversed, bool):
+        raise ValueError("calibration.parameters.exclude_reversed_pressure_drop must be a boolean")
     parameters = CalibrationParametersConfig(
         vessels=_parse_calibration_parameter_selection(
             parameters_raw.get("vessels"),
@@ -1649,6 +1660,7 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             parameters_raw.get("junctions"),
             context="calibration.parameters.junctions",
         ),
+        exclude_reversed_pressure_drop=exclude_reversed,
     )
 
     solver_raw = data.get("solver") or {}

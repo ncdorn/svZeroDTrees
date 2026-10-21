@@ -1903,3 +1903,45 @@ def test_short_vessel_junction_flow_is_left_unverified(tmp_path):
         assert check["status"] == "unverified_short_vessel"
         assert check["candidate_slice_count"] == 1
         assert assembly.interface_sampling[f"branch0_seg1:{end}"]["paired_observation"] is True
+
+
+def _calibrate_flags(assembly):
+    return {v["vessel_name"]: v["calibrate"] for v in assembly.solver_payload["vessels"]}
+
+
+def test_reversed_pressure_drop_vessel_keeps_input_parameters(tmp_path):
+    """branch2_seg0's 3D pressure rises along its flow (70 -> 80 with Q = 4), so
+    R-only calibration would fit R < 0; it is excluded and keeps its input R."""
+    zerod = _write_target_qc_fixture(tmp_path)
+    calibration = _calibration_config(tmp_path)
+    calibration.parameters.exclude_reversed_pressure_drop = True
+
+    assembly = assemble_calibration_payload(zerod_config_path=str(zerod), calibration=calibration)
+
+    flags = _calibrate_flags(assembly)
+    assert flags["branch2_seg0"] == []
+    assert flags["branch1_seg0"] == ["R_poiseuille", "C"]
+    assert assembly.excluded_blocks["branch2_seg0"] == "reversed_3d_pressure_drop"
+
+
+def test_reversed_pressure_drop_exclusion_is_off_by_default_outside_target_focused(tmp_path):
+    zerod = _write_target_qc_fixture(tmp_path)
+    calibration = _calibration_config(tmp_path)  # strict_network, exclusion unset
+
+    assembly = assemble_calibration_payload(zerod_config_path=str(zerod), calibration=calibration)
+
+    assert _calibrate_flags(assembly)["branch2_seg0"] == ["R_poiseuille"]
+    assert "branch2_seg0" not in assembly.excluded_blocks
+
+
+def test_reversed_pressure_drop_never_excludes_target_vessels(tmp_path):
+    """Under target_focused the exclusion defaults on, but the reversed vessel is
+    the LPA target here, so it is still calibrated."""
+    zerod = _write_target_qc_fixture(tmp_path)
+    calibration = _target_focused_calibration_config(tmp_path)
+
+    assembly = assemble_calibration_payload(zerod_config_path=str(zerod), calibration=calibration)
+
+    assert assembly.observation_qc["metrics"]["pressure_drop_direction"]["per_vessel"]["branch2_seg0"]["direction"] == "wrong"
+    assert _calibrate_flags(assembly)["branch2_seg0"] == ["R_poiseuille"]
+    assert "branch2_seg0" not in assembly.excluded_blocks

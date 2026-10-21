@@ -1661,3 +1661,46 @@ def test_render_schema_includes_supported_workflows():
     assert "enforcement: strict_network" in schema
     assert "normalized_rms_tolerance" in schema
     assert "required_consecutive_stable_pairs" in schema
+
+
+def _calibration_config_text(tmp_path, parameters_extra: str) -> str:
+    return f"""
+version: 1
+workflow: calibrate_0d_from_3d
+paths:
+  root: {tmp_path}
+  zerod_config: zerod.json
+  output_config: calibrated.json
+calibration:
+  data_source:
+    mode: mapped_centerline
+    mapped_centerline_result: mapped.vtp
+    centerline: centerline.vtp
+    flow_observation_type: flow
+  parameters:
+    vessels:
+      default: [R_poiseuille]
+    junctions:
+      default: []
+{parameters_extra}
+"""
+
+
+def test_calibration_exclude_reversed_pressure_drop_parses(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(_calibration_config_text(tmp_path, ""), encoding="utf-8")
+    assert load_config(str(cfg_path)).calibration.parameters.exclude_reversed_pressure_drop is None
+
+    cfg_path.write_text(
+        _calibration_config_text(tmp_path, "    exclude_reversed_pressure_drop: false"), encoding="utf-8"
+    )
+    assert load_config(str(cfg_path)).calibration.parameters.exclude_reversed_pressure_drop is False
+
+
+def test_calibration_exclude_reversed_pressure_drop_must_be_boolean(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        _calibration_config_text(tmp_path, "    exclude_reversed_pressure_drop: yes_please"), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="exclude_reversed_pressure_drop must be a boolean"):
+        load_config(str(cfg_path))

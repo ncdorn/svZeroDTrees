@@ -469,6 +469,41 @@ comes from the unverified connector chains: their outlets are now clean, but
 the connector inlet still reads the parent flow. The split targets and the QC
 status are unchanged.
 
+### Vessels with a reversed 3D pressure drop
+
+R-only calibration fits each vessel's pressure drop as R times its flow. If a
+vessel's 3D cycle-mean pressure rises along its flow, the fit has to make R
+negative. In that case the `pressure_drop_direction` QC reports the vessel
+with `direction: wrong`. On short, low-flow vessels the slice-averaged 3D
+pressure cannot resolve the viscous drop.
+
+The evidence, from the 2026-10-16 runs:
+- TST-STAN-1 iteration 2 had 22 of 57 vessels reversed, with a median drop of
+  −0.02 mmHg and a worst case of −0.18 mmHg.
+- All 21 of its negative calibrated resistances were among those 22, and the
+  calibrated model failed its settled replay.
+- Every calibration of those runs had 4 to 21 negative resistances.
+- Total pressure (adding ½ρ(Q/A)²) does not explain them. It turns few
+  positive (TST-STAN-5 10 → 2; TST-STAN-1 22 → 21). Most reversed vessels
+  narrow downstream, and their reversal is far larger than the dynamic
+  pressure.
+
+`calibration.parameters.exclude_reversed_pressure_drop` therefore leaves
+every non-target vessel with `direction: wrong` at its input parameters:
+- Each such vessel's `calibrate` list is emptied, and the vessel is recorded
+  under `exclusions` with the reason `reversed_3d_pressure_drop`.
+- The MPA, LPA and RPA target vessels are always calibrated.
+- The default (`null`) turns it on under `target_focused` enforcement and off
+  otherwise. `true` or `false` overrides that.
+
+On the same three calibrations it gave:
+
+| Calibration | Excluded | Negative R | Replay | Composite |
+|---|---|---|---|---|
+| TST-STAN-1 iteration 2 | 22 | 21 → 0 | fail → pass | 15.3 → 14.3 |
+| TST-STAN-9 iteration 1 | 3 | 5 → 2 | fail → pass | 25.6 → 2.4 |
+| TST-STAN-2 iteration 1 | 9 | 10 → 1 | pass → pass | 21.2 → 2.3 (2.4 before) |
+
 ## Calibration quality gates and outputs
 
 The unchanged standard `pysvzerod.calibrate(config)` API remains the only

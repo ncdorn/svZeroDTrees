@@ -1397,6 +1397,45 @@ def _subtree_outlet_flow_keys(
 _SPLIT_MASS_BALANCE_RTOL = 0.05
 
 
+def _reversed_pressure_drop_exclusions(
+    calibration: CalibrationConfig,
+    observation_qc: Dict[str, Any],
+) -> list[str]:
+    """Non-target vessels whose 3D cycle-mean pressure drop runs against their flow.
+
+    R-only calibration fits dP = R Q, so such a vessel calibrates to R < 0.  On
+    short, low-flow vessels the slice-averaged 3D pressure cannot resolve the
+    viscous drop: TST-STAN-1 iteration 2 had 22 of 57 vessels reversed (median
+    -0.02 mmHg, up to -0.18), all 21 negative calibrated R were among them, and
+    the calibrated model failed its replay.  Excluding them (they keep the
+    input parameters) gave no negative R and a passing replay.  Pressure
+    recovery does not explain them: total pressure fixes few.
+    """
+    setting = calibration.parameters.exclude_reversed_pressure_drop
+    enabled = (
+        str(calibration.observation_qc.enforcement) == "target_focused"
+        if setting is None
+        else bool(setting)
+    )
+    if not enabled:
+        return []
+    per_vessel = (
+        (observation_qc.get("metrics") or {}).get("pressure_drop_direction") or {}
+    ).get("per_vessel") or {}
+    protected: set[str] = set()
+    if calibration.targets is not None:
+        protected = {
+            str(calibration.targets.mpa_pressure.vessel),
+            str(calibration.targets.rpa_flow_split.rpa_vessel),
+            str(calibration.targets.rpa_flow_split.lpa_vessel),
+        }
+    return sorted(
+        name
+        for name, item in per_vessel.items()
+        if item.get("direction") == "wrong" and name not in protected
+    )
+
+
 def _assemble_target_observations(
     *,
     targets: Any,
@@ -2209,6 +2248,10 @@ def assemble_calibration_payload(
         branch_series_by_id=branch_series_by_id,
         solver_config=solver_config,
     )
+
+    for vessel_name in _reversed_pressure_drop_exclusions(calibration, observation_qc):
+        vessel_parameters[vessel_name] = []
+        excluded_blocks[vessel_name] = "reversed_3d_pressure_drop"
 
     payload = json.loads(json.dumps(solver_config))
     payload["y"] = y
