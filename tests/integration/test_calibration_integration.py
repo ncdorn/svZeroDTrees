@@ -1096,6 +1096,10 @@ def test_compliance_fit_fails_without_publishing_when_target_is_out_of_range(mon
     fit = json.loads((tmp_path / "calibration_compliance_fit.json").read_text(encoding="utf-8"))
     assert fit["status"] == "fail"
     assert "outside the 0D range" in fit["reason"]
+    targets = json.loads((tmp_path / "calibration_targets.json").read_text(encoding="utf-8"))
+    assert targets["status"] == "fail"
+    assert "proximal compliance fit failed" in targets["reason"]
+    assert targets["baseline"]["targets"]["composite_score"] >= 0.0
 
 
 def test_compliance_fit_rejects_a_rigid_model(monkeypatch, tmp_path):

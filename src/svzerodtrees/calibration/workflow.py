@@ -3495,8 +3495,10 @@ def _run_settled_replay(
 
 
 COMPLIANCE_FIT_FILENAME = "calibration_compliance_fit.json"
-# Geometric step used to bracket the target pulse pressure outward from 1.
-BRACKET_STEP = 1.5
+# Geometric steps used to bracket the target pulse pressure outward from 1:
+# small first (the fitted multiplier is usually within ~15% of 1 and some
+# models cannot settle far from it), growing to the last value.
+BRACKET_STEPS = (1.1, 1.1, 1.25, 1.5)
 
 
 def _scaled_compliance_config(config: Dict[str, Any], scale: float) -> tuple[Dict[str, Any], int, float]:
@@ -3607,9 +3609,12 @@ def _fit_proximal_compliance_scale(
         # rather than replaying the bounds: an extreme multiplier can need more
         # settling cycles than the replay allows, while the fitted value is
         # usually near 1.  Pulse pressure falls as the multiplier rises.
-        step = BRACKET_STEP if unscaled_pp > target_pp else 1.0 / BRACKET_STEP
+        direction = 1.0 if unscaled_pp > target_pp else -1.0
         near_scale, near_pp, far_scale, far_pp = 1.0, unscaled_pp, None, None
+        attempt = 0
         while far_scale is None:
+            step = BRACKET_STEPS[min(attempt, len(BRACKET_STEPS) - 1)] ** direction
+            attempt += 1
             trial = min(upper, max(lower, near_scale * step))
             if trial == near_scale:
                 fail(
@@ -3904,12 +3909,27 @@ def calibrate_0d_from_mapped_centerline(
     if calibration.parameters.proximal_compliance_scale.enabled:
         # Runs on the calibrated copy before the replay, so the replay, targets
         # and gates below judge the compliance-scaled model.
-        published, compliance_fit = _fit_proximal_compliance_scale(
-            config=published,
-            assembly=assembly,
-            calibration=calibration,
-            report_path=compliance_fit_path,
-        )
+        try:
+            published, compliance_fit = _fit_proximal_compliance_scale(
+                config=published,
+                assembly=assembly,
+                calibration=calibration,
+                report_path=compliance_fit_path,
+            )
+        except ValueError as exc:
+            if calibration.targets is not None:
+                # Keep the baseline score so callers can still compare models.
+                _write_json_atomically(
+                    output_path.parent / "calibration_targets.json",
+                    {
+                        **run_identity,
+                        "status": "fail",
+                        "reason": f"proximal compliance fit failed before target evaluation: {exc}",
+                        "baseline": baseline_summary,
+                    },
+                    indent=2,
+                )
+            raise
         _validate_publishable_solver_config(published)
     replay_path = output_path.parent / "calibration_replay.json"
     if calibration.targets is not None:

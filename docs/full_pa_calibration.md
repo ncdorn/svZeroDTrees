@@ -516,7 +516,8 @@ positive.
 on every compliant vessel's C after the calibrator passes:
 
 - **How it fits:** starting from the calibrated model (multiplier 1), it steps
-  outward by ×1.5 until the 3D pulse pressure is bracketed, then bisects the
+  outward by ×1.1, ×1.1, ×1.25, then ×1.5 until the 3D pulse pressure is
+  bracketed, then bisects the
   multiplier in log space. Stepping outward avoids replaying extreme multipliers
   that cannot settle within the replay's cycle limit. `bounds` (default
   `[0.2, 5.0]`, which must contain 1) caps the search. The fit stops when the
@@ -535,7 +536,8 @@ on every compliant vessel's C after the calibrator passes:
 - **Gating:** the fit runs on the calibrated copy before the replay, so the
   replay, target gates and baseline-improvement policy judge the scaled model.
   If the 3D pulse is outside the 0D range over the bounds, or a replay fails,
-  the fit writes its report and nothing is published.
+  the fit writes its report and nothing is published. `calibration_targets.json`
+  still records the baseline (uncalibrated) score.
 - **Requirements:** it requires `calibration.targets` and is off by default.
   Use it where no later tuning will overwrite C, such as the 0D model that must
   match a final wall-corrected 3D run.
