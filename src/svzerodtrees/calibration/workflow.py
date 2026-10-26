@@ -3495,6 +3495,8 @@ def _run_settled_replay(
 
 
 COMPLIANCE_FIT_FILENAME = "calibration_compliance_fit.json"
+# Geometric step used to bracket the target pulse pressure outward from 1.
+BRACKET_STEP = 1.5
 
 
 def _scaled_compliance_config(config: Dict[str, Any], scale: float) -> tuple[Dict[str, Any], int, float]:
@@ -3557,10 +3559,15 @@ def _fit_proximal_compliance_scale(
                 replay, calibration.targets, assembly.target_observations
             )["mpa_pressure"]
             pulse = float(np.ptp(np.asarray(series["values"], dtype=np.float64)))
+        failed_checks = sorted(
+            name for name, passed in (replay.get("checks") or {}).items() if not passed
+        )
         history.append(
             {
                 "scale": float(scale),
                 "replay_status": replay.get("status"),
+                "replay_failed_checks": failed_checks,
+                "replay_error": replay.get("error"),
                 "pulse_pressure_dyn_per_cm2": pulse,
                 "pulse_pressure_mmhg": mmhg(pulse),
             }
@@ -3596,16 +3603,28 @@ def _fit_proximal_compliance_scale(
         fail("the settled replay of the unscaled model did not pass")
     best_scale, best_pp, best_config = 1.0, unscaled_pp, None
     if abs(unscaled_pp - target_pp) > tolerance:
-        pp_low, cfg_low = evaluate(lower)
-        pp_high, cfg_high = evaluate(upper)
-        if pp_low is None or pp_high is None:
-            fail("the settled replay failed at a bound of the compliance multiplier")
-        if not (pp_high <= target_pp <= pp_low):
-            fail(
-                "the 3D pulse pressure is outside the 0D range over the bounds "
-                f"([{mmhg(pp_high):.2f}, {mmhg(pp_low):.2f}] mmHg for scale {lower:g} to {upper:g})"
-            )
-        log_lo, log_hi = np.log(lower), np.log(upper)
+        # Bracket outward from the calibrated model in steps of BRACKET_STEP
+        # rather than replaying the bounds: an extreme multiplier can need more
+        # settling cycles than the replay allows, while the fitted value is
+        # usually near 1.  Pulse pressure falls as the multiplier rises.
+        step = BRACKET_STEP if unscaled_pp > target_pp else 1.0 / BRACKET_STEP
+        near_scale, near_pp, far_scale, far_pp = 1.0, unscaled_pp, None, None
+        while far_scale is None:
+            trial = min(upper, max(lower, near_scale * step))
+            if trial == near_scale:
+                fail(
+                    "the 3D pulse pressure is outside the 0D range over the bounds "
+                    f"(scale {near_scale:g} gives {mmhg(near_pp):.2f} mmHg, target "
+                    f"{mmhg(target_pp):.2f} mmHg)"
+                )
+            pulse, _candidate = evaluate(trial)
+            if pulse is None:
+                fail(f"the settled replay failed at scale {trial:g} while bracketing the target")
+            if (pulse - target_pp) * (near_pp - target_pp) <= 0.0:
+                far_scale, far_pp = trial, pulse
+            else:
+                near_scale, near_pp = trial, pulse
+        log_lo, log_hi = sorted((np.log(near_scale), np.log(far_scale)))
         best_scale, best_pp, best_config = None, None, None
         for _ in range(int(settings.maximum_iterations)):
             scale = float(np.exp(0.5 * (log_lo + log_hi)))

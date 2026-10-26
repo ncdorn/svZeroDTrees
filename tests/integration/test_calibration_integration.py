@@ -1089,7 +1089,7 @@ def test_compliance_fit_scales_proximal_c_to_match_3d_pulse_pressure(monkeypatch
 
 
 def test_compliance_fit_fails_without_publishing_when_target_is_out_of_range(monkeypatch, tmp_path):
-    config_path, output_path = _compliance_fit_fixture(monkeypatch, tmp_path, bounds="[3.0, 5.0]")
+    config_path, output_path = _compliance_fit_fixture(monkeypatch, tmp_path, bounds="[0.9, 1.1]")
     with pytest.raises(ValueError, match="proximal compliance fit failed"):
         run_from_config_file(str(config_path))
     assert not output_path.exists()

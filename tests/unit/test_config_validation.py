@@ -1735,7 +1735,8 @@ def test_calibration_proximal_compliance_scale_defaults_off_and_parses(tmp_path)
     "block, message",
     [
         ("      enabled: true\n", "requires calibration.targets"),
-        ("      bounds: [2, 1]\n", "0 < lower < upper"),
+        ("      bounds: [2, 1]\n", "lower <= 1 <= upper"),
+        ("      bounds: [1.5, 3]\n", "lower <= 1 <= upper"),
         ("      bounds: [0.5]\n", "two numbers"),
         ("      tolerance_mmhg: 0\n", "positive number"),
         ("      maximum_iterations: 0\n", "positive integer"),

@@ -515,10 +515,16 @@ positive.
 `calibration.parameters.proximal_compliance_scale` instead fits one multiplier
 on every compliant vessel's C after the calibrator passes:
 
-- **How it fits:** it bisects the multiplier in log space inside `bounds`
-  (default `[0.2, 5.0]`). It stops when the settled replay's MPA pulse pressure
-  is within `tolerance_mmhg` (default 0.05) of the 3D target observation's
-  pulse pressure, or fails after `maximum_iterations` (default 40).
+- **How it fits:** starting from the calibrated model (multiplier 1), it steps
+  outward by ×1.5 until the 3D pulse pressure is bracketed, then bisects the
+  multiplier in log space. Stepping outward avoids replaying extreme multipliers
+  that cannot settle within the replay's cycle limit. `bounds` (default
+  `[0.2, 5.0]`, which must contain 1) caps the search. The fit stops when the
+  settled replay's MPA pulse pressure is within `tolerance_mmhg` (default 0.05)
+  of the 3D target observation's pulse pressure, or fails after
+  `maximum_iterations` (default 40).
+- **Diagnostics:** each evaluation records its replay status, failed checks and
+  any error.
 - **What it scales:** only vessels with C above the rigid threshold
   (`RIGID_COMPLIANCE_THRESHOLD`). A rigid model fails clearly, because nothing
   can be scaled.

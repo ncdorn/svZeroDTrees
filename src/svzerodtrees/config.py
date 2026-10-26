@@ -1391,8 +1391,9 @@ def _parse_proximal_compliance_scale(raw: Any) -> ProximalComplianceScaleConfig:
     ):
         raise ValueError(f"{context}.bounds must be two numbers [lower, upper]")
     lower, upper = float(bounds_raw[0]), float(bounds_raw[1])
-    if not (0.0 < lower < upper):
-        raise ValueError(f"{context}.bounds must satisfy 0 < lower < upper")
+    if not (0.0 < lower <= 1.0 <= upper and lower < upper):
+        # The fit brackets outward from the calibrated model (multiplier 1).
+        raise ValueError(f"{context}.bounds must satisfy 0 < lower <= 1 <= upper")
     tolerance = raw.get("tolerance_mmhg", defaults.tolerance_mmhg)
     if isinstance(tolerance, bool) or not isinstance(tolerance, (int, float)) or tolerance <= 0:
         raise ValueError(f"{context}.tolerance_mmhg must be a positive number")
