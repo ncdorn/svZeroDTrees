@@ -291,24 +291,6 @@ class ProximalComplianceScaleConfig:
 
 
 @dataclass
-class ResistanceFloorConfig:
-    """Bound calibrated vessel resistance below by a fraction of its input value.
-
-    Some full-PA models with impedance outlets only time-integrate stably with
-    enough series resistance in front of the outlets; an unbounded R fit can
-    drop it below that (TST-STAN-5).  With ``apply: on_replay_failure`` the
-    floor is used only when the unbounded calibrated model fails its settled
-    replay.  Vessels that fall below the floor are fixed at it and the rest
-    are recalibrated, up to ``maximum_rounds`` times.
-    """
-
-    enabled: bool = False
-    minimum_ratio: float = 0.8
-    apply: str = "on_replay_failure"  # on_replay_failure | always
-    maximum_rounds: int = 10
-
-
-@dataclass
 class CalibrationParametersConfig:
     vessels: CalibrationParameterSelectionConfig = field(default_factory=CalibrationParameterSelectionConfig)
     junctions: CalibrationParameterSelectionConfig = field(default_factory=CalibrationParameterSelectionConfig)
@@ -319,7 +301,6 @@ class CalibrationParametersConfig:
     proximal_compliance_scale: ProximalComplianceScaleConfig = field(
         default_factory=ProximalComplianceScaleConfig
     )
-    resistance_floor: ResistanceFloorConfig = field(default_factory=ResistanceFloorConfig)
 
 
 @dataclass
@@ -1391,29 +1372,6 @@ def _parse_tissue_support(
     )
 
 
-def _parse_resistance_floor(raw: Any) -> ResistanceFloorConfig:
-    context = "calibration.parameters.resistance_floor"
-    if raw is None:
-        return ResistanceFloorConfig()
-    if not isinstance(raw, dict):
-        raise ValueError(f"{context} must be a mapping")
-    _ensure_keys(raw, ["enabled", "minimum_ratio", "apply", "maximum_rounds"], context)
-    defaults = ResistanceFloorConfig()
-    enabled = raw.get("enabled", defaults.enabled)
-    if not isinstance(enabled, bool):
-        raise ValueError(f"{context}.enabled must be a boolean")
-    ratio = raw.get("minimum_ratio", defaults.minimum_ratio)
-    if isinstance(ratio, bool) or not isinstance(ratio, (int, float)) or not 0.0 < float(ratio) < 1.0:
-        raise ValueError(f"{context}.minimum_ratio must be a number in (0, 1)")
-    apply = str(raw.get("apply", defaults.apply)).strip().lower()
-    if apply not in {"on_replay_failure", "always"}:
-        raise ValueError(f"{context}.apply must be one of on_replay_failure|always")
-    rounds = raw.get("maximum_rounds", defaults.maximum_rounds)
-    if isinstance(rounds, bool) or not isinstance(rounds, int) or rounds < 1:
-        raise ValueError(f"{context}.maximum_rounds must be a positive integer")
-    return ResistanceFloorConfig(enabled=enabled, minimum_ratio=float(ratio), apply=apply, maximum_rounds=rounds)
-
-
 def _parse_proximal_compliance_scale(raw: Any) -> ProximalComplianceScaleConfig:
     context = "calibration.parameters.proximal_compliance_scale"
     if raw is None:
@@ -1742,7 +1700,7 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         raise ValueError("calibration.parameters is required")
     _ensure_keys(
         parameters_raw,
-        ["vessels", "junctions", "exclude_reversed_pressure_drop", "proximal_compliance_scale", "resistance_floor"],
+        ["vessels", "junctions", "exclude_reversed_pressure_drop", "proximal_compliance_scale"],
         "calibration.parameters",
     )
     exclude_reversed = parameters_raw.get("exclude_reversed_pressure_drop")
@@ -1761,7 +1719,6 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         proximal_compliance_scale=_parse_proximal_compliance_scale(
             parameters_raw.get("proximal_compliance_scale")
         ),
-        resistance_floor=_parse_resistance_floor(parameters_raw.get("resistance_floor")),
     )
 
     solver_raw = data.get("solver") or {}
@@ -2454,11 +2411,6 @@ calibration:
     #   bounds: [0.2, 5.0]
     #   tolerance_mmhg: 0.05
     #   maximum_iterations: 40
-    # resistance_floor:  # bound calibrated R below by a fraction of its input value
-    #   enabled: false
-    #   minimum_ratio: 0.8
-    #   apply: on_replay_failure  # on_replay_failure | always
-    #   maximum_rounds: 10
   solver:
     initial_damping_factor: 1.0
     maximum_iterations: 100

@@ -84,7 +84,6 @@ calibration:
         J0: [R_poiseuille]
     # exclude_reversed_pressure_drop: null  # null = on under target_focused; keep input params of non-target vessels whose 3D pressure rises along their flow
     # proximal_compliance_scale: {enabled: false, bounds: [0.2, 5.0], tolerance_mmhg: 0.05, maximum_iterations: 40}  # fit one C multiplier so the 0D MPA pulse pressure matches 3D; needs targets
-    # resistance_floor: {enabled: false, minimum_ratio: 0.8, apply: on_replay_failure, maximum_rounds: 10}  # active-set lower bound on calibrated R for time-integration stability
   solver:
     initial_damping_factor: 1.0
     maximum_iterations: 100

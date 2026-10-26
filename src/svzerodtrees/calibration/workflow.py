@@ -3495,75 +3495,6 @@ def _run_settled_replay(
 
 
 COMPLIANCE_FIT_FILENAME = "calibration_compliance_fit.json"
-RESISTANCE_FLOOR_FILENAME = "calibration_resistance_floor.json"
-
-
-def _vessel_resistances(config: Dict[str, Any]) -> Dict[str, float]:
-    return {
-        str(vessel.get("vessel_name")): float((vessel.get("zero_d_element_values") or {}).get("R_poiseuille", 0.0))
-        for vessel in config.get("vessels", [])
-    }
-
-
-def _bounded_resistance_payload(
-    *,
-    assembly: "CalibrationAssembly",
-    calibration: CalibrationConfig,
-) -> tuple[Dict[str, Any] | None, Dict[str, Any]]:
-    """Active-set lower bound on calibrated R (``resistance_floor``).
-
-    Returns the bounded payload (``None`` when the floor is not needed) and a
-    report.  Floored vessels are fixed at ``minimum_ratio`` times their input R
-    and dropped from the calibrated parameter set; the rest are recalibrated.
-    """
-
-    settings = calibration.parameters.resistance_floor
-    report: Dict[str, Any] = {
-        "status": "not_needed",
-        "settings": {
-            "minimum_ratio": float(settings.minimum_ratio),
-            "apply": settings.apply,
-            "maximum_rounds": int(settings.maximum_rounds),
-        },
-        "floored": {},
-        "rounds": [],
-    }
-    input_r = _vessel_resistances(assembly.solver_payload)
-    if settings.apply == "on_replay_failure":
-        unbounded, _ = _normalize_calibrated_config(calibrate_pysvzerod(assembly.solver_payload))
-        replay, _ = _run_settled_replay(config=unbounded, payload=assembly.solver_payload, calibration=calibration)
-        report["unbounded_replay_status"] = replay.get("status")
-        report["unbounded_replay_error"] = replay.get("error")
-        if replay.get("status") == "pass":
-            return None, report
-    payload = copy.deepcopy(assembly.solver_payload)
-    for round_index in range(int(settings.maximum_rounds)):
-        trial = _vessel_resistances(calibrate_pysvzerod(payload))
-        violators = []
-        for vessel in payload.get("vessels", []):
-            name = str(vessel.get("vessel_name"))
-            if "R_poiseuille" not in (vessel.get("calibrate") or []):
-                continue
-            floor = float(settings.minimum_ratio) * input_r[name]
-            if input_r[name] > 0.0 and trial[name] < floor:
-                violators.append(name)
-                vessel["zero_d_element_values"]["R_poiseuille"] = floor
-                vessel["calibrate"] = [item for item in vessel["calibrate"] if item != "R_poiseuille"]
-                report["floored"][name] = {
-                    "input_R": input_r[name],
-                    "unbounded_R": trial[name],
-                    "floored_R": floor,
-                    "round": round_index,
-                }
-        report["rounds"].append({"round": round_index, "floored": violators})
-        if not violators:
-            report["status"] = "applied" if report["floored"] else "not_needed"
-            return payload, report
-    report["status"] = "applied"
-    report["warning"] = "maximum_rounds reached; the last round still floored vessels"
-    return payload, report
-
-
 # Geometric steps used to bracket the target pulse pressure outward from 1:
 # small first (the fitted multiplier is usually within ~15% of 1 and some
 # models cannot settle far from it), growing to the last value.
@@ -3825,17 +3756,6 @@ def calibrate_0d_from_mapped_centerline(
             }
 
     absolute_tolerance, relative_tolerance = _validate_confirmation_tolerances(calibration)
-    resistance_floor: Dict[str, Any] = {"status": "skipped", "reason": "resistance_floor is not enabled"}
-    resistance_floor_path = output_path.parent / RESISTANCE_FLOOR_FILENAME
-    if calibration.parameters.resistance_floor.enabled:
-        # After the baseline (scored on the unmodified input), before the two
-        # calibrator passes, which then run on the bounded problem.
-        bounded_payload, resistance_floor = _bounded_resistance_payload(
-            assembly=assembly, calibration=calibration
-        )
-        _write_json_atomically(resistance_floor_path, {**run_identity, **resistance_floor}, indent=2)
-        if bounded_payload is not None:
-            assembly = replace(assembly, solver_payload=bounded_payload)
     clear_calibration_provenance()
     try:
         first_calibrated = calibrate_pysvzerod(assembly.solver_payload)
@@ -4253,7 +4173,6 @@ def calibrate_0d_from_mapped_centerline(
         "calibration_targets": target_summary,
         "target_quality": target_summary,
         "compliance_fit": compliance_fit,
-        "resistance_floor": resistance_floor,
     }
     summary_path = output_path.parent / "calibration_summary.json"
     _write_json_atomically(summary_path, summary, indent=2)
@@ -4285,7 +4204,6 @@ def calibrate_0d_from_mapped_centerline(
         "target_quality": target_summary,
         "calibration_summary": summary,
         "calibration_summary_report": str(summary_path),
-        "resistance_floor": resistance_floor,
         "compliance_fit": compliance_fit,
         "compliance_fit_report": (
             str(compliance_fit_path) if compliance_fit.get("status") != "skipped" else None
