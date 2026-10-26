@@ -566,6 +566,34 @@ The result goes to `calibration_compliance_fit.json`, which records:
 
 It is also included as `compliance_fit` in `calibration_summary.json`.
 
+### Resistance floor (time-integration stability)
+
+Some full-PA models with impedance outlets time-integrate stably only with
+enough series resistance in front of the outlets. On TST-STAN-5, the R fit to
+its wall-corrected 3D run cut six outlet connectors' R by 21–87%, and each of
+those cuts alone made the settled replay diverge at peak systolic inflow. The
+model is linear, and every outlet kernel is passive, so this is numerical, not
+physical. More Newton iterations did not help. The other four patients'
+calibrations stay below that threshold.
+
+`calibration.parameters.resistance_floor` (off by default) bounds calibrated R
+from below at `minimum_ratio` times the input R (default 0.8):
+- **When it applies:** with `apply: on_replay_failure` (the default), the floor
+  is used only when the unbounded calibrated model fails its settled replay.
+  `always` skips that check.
+- **How it works:** an active-set loop calibrates, fixes every vessel below the
+  floor at the floor, removes it from the calibrated set and recalibrates the
+  rest. It repeats for up to `maximum_rounds` rounds. The usual two calibrator
+  passes, replay and gates then run on the bounded problem.
+- **Baseline:** the uncalibrated model is still scored on the unmodified input.
+
+`calibration_resistance_floor.json` records:
+- the unbounded replay status;
+- each floored vessel's input, unbounded and floored R;
+- the rounds.
+
+It is also included as `resistance_floor` in `calibration_summary.json`.
+
 ## Calibration quality gates and outputs
 
 The unchanged standard `pysvzerod.calibrate(config)` API remains the only
@@ -593,6 +621,7 @@ calibration_replay.json
 calibration_targets.json
 calibration_summary.json
 calibration_compliance_fit.json   # only when proximal_compliance_scale is enabled
+calibration_resistance_floor.json # only when resistance_floor is enabled
 ```
 
 Reports and the returned result share a `run_id` and content digests for the

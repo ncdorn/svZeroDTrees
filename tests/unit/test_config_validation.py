@@ -1754,6 +1754,31 @@ def test_calibration_proximal_compliance_scale_rejects_invalid_settings(tmp_path
         load_config(str(cfg_path))
 
 
+@pytest.mark.parametrize(
+    "block, message",
+    [
+        ("      minimum_ratio: 1.0\n", "minimum_ratio must be a number in \\(0, 1\\)"),
+        ("      apply: sometimes\n", "apply must be one of"),
+        ("      maximum_rounds: 0\n", "maximum_rounds must be a positive integer"),
+        ("      enabled: maybe\n", "enabled must be a boolean"),
+    ],
+)
+def test_calibration_resistance_floor_rejects_invalid_settings(tmp_path, block, message):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        _calibration_config_text(tmp_path, "    resistance_floor:\n" + block), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match=message):
+        load_config(str(cfg_path))
+
+
+def test_calibration_resistance_floor_defaults_off(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(_calibration_config_text(tmp_path, ""), encoding="utf-8")
+    floor = load_config(str(cfg_path)).calibration.parameters.resistance_floor
+    assert (floor.enabled, floor.minimum_ratio, floor.apply, floor.maximum_rounds) == (False, 0.8, "on_replay_failure", 10)
+
+
 def test_calibration_exclude_reversed_pressure_drop_must_be_boolean(tmp_path):
     cfg_path = tmp_path / "cfg.yml"
     cfg_path.write_text(
