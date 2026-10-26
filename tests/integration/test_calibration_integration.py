@@ -1020,3 +1020,95 @@ def test_real_centerline_producer_descriptor_calibrates_and_gates_lineage(
     with pytest.raises(ValueError, match="completed terminal status"):
         run_from_config_file(str(failed_config_path))
     assert len(calls) == 2
+
+
+def _compliance_fit_fixture(monkeypatch, tmp_path, *, bounds: str = "[0.2, 5.0]") -> tuple[Path, Path]:
+    """Compliant copy of the fixture; the fake replay's MPA pulse is 2 mmHg / scale."""
+    fixture_dir = Path(__file__).parents[1] / "fixtures" / "calibration"
+    baseline = json.loads((fixture_dir / "finite_rigid_baseline.json").read_text(encoding="utf-8"))
+    reference_c = 1.0e-4
+    for vessel in baseline["vessels"]:
+        vessel["zero_d_element_values"]["C"] = reference_c
+    baseline_path = tmp_path / "compliant_baseline.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    output_path = tmp_path / "calibrated.json"
+    config_path = tmp_path / "calibrate.yml"
+    _write_fixture_calibration_config(
+        config_path,
+        output_path=output_path,
+        baseline_path=baseline_path,
+        mapped_path=fixture_dir / "mapped_timeseries.vtp",
+        metadata_path=fixture_dir / "mapped_timeseries_metadata.json",
+        target_focused=True,
+        gate_policy="improvement_only",
+    )
+    text = config_path.read_text(encoding="utf-8").replace(
+        "    junctions:\n      default: []\n",
+        "    junctions:\n      default: []\n"
+        f"    proximal_compliance_scale:\n      enabled: true\n      bounds: {bounds}\n"
+        "      tolerance_mmhg: 0.001\n",
+    )
+    config_path.write_text(text, encoding="utf-8")
+
+    def simulate(payload):
+        scale = payload["vessels"][0]["zero_d_element_values"]["C"] / reference_c
+        rows = _fixture_replay_rows()
+        pressure_scale = 1333.2236842105263
+        for row in rows:
+            # _fixture_replay_rows adds a 1 mmHg bump at phase 1; replace it with 2/scale.
+            if int(row["time"]) % 3 == 1:
+                for key in ("pressure_in", "pressure_out"):
+                    row[key] += pressure_scale * (2.0 / scale - 1.0)
+        return rows
+
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.calibrate_pysvzerod",
+        lambda payload: json.loads(json.dumps(payload)),
+    )
+    monkeypatch.setattr("svzerodtrees.calibration.workflow.simulate_pysvzerod", simulate)
+    return config_path, output_path
+
+
+def test_compliance_fit_scales_proximal_c_to_match_3d_pulse_pressure(monkeypatch, tmp_path):
+    config_path, output_path = _compliance_fit_fixture(monkeypatch, tmp_path)
+    result = run_from_config_file(str(config_path))
+    fit = json.loads((tmp_path / "calibration_compliance_fit.json").read_text(encoding="utf-8"))
+    assert fit["status"] == "pass"
+    target = fit["target_pulse_pressure_mmhg"]
+    assert fit["unscaled_pulse_pressure_mmhg"] == pytest.approx(2.0)
+    assert fit["scale"] == pytest.approx(2.0 / target, rel=1e-3)
+    assert fit["fitted_pulse_pressure_mmhg"] == pytest.approx(target, abs=1e-3)
+    assert fit["scaled_vessel_count"] == 3
+    assert fit["run_id"] == result["run_id"]
+    published = json.loads(output_path.read_text(encoding="utf-8"))
+    assert all(
+        vessel["zero_d_element_values"]["C"] == pytest.approx(1.0e-4 * fit["scale"])
+        for vessel in published["vessels"]
+    )
+    assert result["compliance_fit"]["scale"] == pytest.approx(fit["scale"])
+
+
+def test_compliance_fit_fails_without_publishing_when_target_is_out_of_range(monkeypatch, tmp_path):
+    config_path, output_path = _compliance_fit_fixture(monkeypatch, tmp_path, bounds="[3.0, 5.0]")
+    with pytest.raises(ValueError, match="proximal compliance fit failed"):
+        run_from_config_file(str(config_path))
+    assert not output_path.exists()
+    fit = json.loads((tmp_path / "calibration_compliance_fit.json").read_text(encoding="utf-8"))
+    assert fit["status"] == "fail"
+    assert "outside the 0D range" in fit["reason"]
+
+
+def test_compliance_fit_rejects_a_rigid_model(monkeypatch, tmp_path):
+    config_path, output_path = _compliance_fit_fixture(monkeypatch, tmp_path)
+    baseline_path = tmp_path / "compliant_baseline.json"
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    for vessel in baseline["vessels"]:
+        vessel["zero_d_element_values"]["C"] = 0.0
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    monkeypatch.setattr(
+        "svzerodtrees.calibration.workflow.simulate_pysvzerod",
+        lambda _payload: _fixture_replay_rows(),
+    )
+    with pytest.raises(ValueError, match="no compliant vessels"):
+        run_from_config_file(str(config_path))
+    assert not output_path.exists()

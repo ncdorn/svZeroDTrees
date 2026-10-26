@@ -1697,6 +1697,62 @@ def test_calibration_exclude_reversed_pressure_drop_parses(tmp_path):
     assert load_config(str(cfg_path)).calibration.parameters.exclude_reversed_pressure_drop is False
 
 
+def test_calibration_proximal_compliance_scale_defaults_off_and_parses(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(_calibration_config_text(tmp_path, ""), encoding="utf-8")
+    scale = load_config(str(cfg_path)).calibration.parameters.proximal_compliance_scale
+    assert scale.enabled is False and scale.bounds == (0.2, 5.0)
+
+    targets = """  observation_qc:
+    enforcement: target_focused
+  targets:
+    mpa_pressure:
+      vessel: branch0_seg0
+      interface: external_upstream
+    rpa_flow_split:
+      rpa_vessel: branch1_seg0
+      lpa_vessel: branch2_seg0
+      interface: external_downstream
+"""
+    cfg_path.write_text(
+        _calibration_config_text(
+            tmp_path,
+            "    proximal_compliance_scale:\n      enabled: true\n      bounds: [0.5, 2]\n"
+            "      tolerance_mmhg: 0.1\n      maximum_iterations: 12\n" + targets,
+        ),
+        encoding="utf-8",
+    )
+    scale = load_config(str(cfg_path)).calibration.parameters.proximal_compliance_scale
+    assert (scale.enabled, scale.bounds, scale.tolerance_mmhg, scale.maximum_iterations) == (
+        True,
+        (0.5, 2.0),
+        0.1,
+        12,
+    )
+
+
+@pytest.mark.parametrize(
+    "block, message",
+    [
+        ("      enabled: true\n", "requires calibration.targets"),
+        ("      bounds: [2, 1]\n", "0 < lower < upper"),
+        ("      bounds: [0.5]\n", "two numbers"),
+        ("      tolerance_mmhg: 0\n", "positive number"),
+        ("      maximum_iterations: 0\n", "positive integer"),
+        ("      enabled: yes_please\n", "enabled must be a boolean"),
+        ("      tolerance: 0.1\n", "proximal_compliance_scale"),
+    ],
+)
+def test_calibration_proximal_compliance_scale_rejects_invalid_settings(tmp_path, block, message):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(
+        _calibration_config_text(tmp_path, "    proximal_compliance_scale:\n" + block),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match=message):
+        load_config(str(cfg_path))
+
+
 def test_calibration_exclude_reversed_pressure_drop_must_be_boolean(tmp_path):
     cfg_path = tmp_path / "cfg.yml"
     cfg_path.write_text(

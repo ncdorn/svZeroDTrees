@@ -275,6 +275,22 @@ class CalibrationParameterSelectionConfig:
 
 
 @dataclass
+class ProximalComplianceScaleConfig:
+    """Fit one multiplier on every compliant vessel's C after calibration.
+
+    The multiplier is bisected (in log space) until the settled 0D replay's MPA
+    pulse pressure matches the 3D target observation.  Outlet boundary
+    conditions stay fixed.  Requires ``calibration.targets``.
+    """
+
+    enabled: bool = False
+    bounds: tuple[float, float] = (0.2, 5.0)
+    # Labeled input unit; converted to CGS before comparison.
+    tolerance_mmhg: float = 0.05
+    maximum_iterations: int = 40
+
+
+@dataclass
 class CalibrationParametersConfig:
     vessels: CalibrationParameterSelectionConfig = field(default_factory=CalibrationParameterSelectionConfig)
     junctions: CalibrationParameterSelectionConfig = field(default_factory=CalibrationParameterSelectionConfig)
@@ -282,6 +298,9 @@ class CalibrationParametersConfig:
     # drop runs against their flow (pressure_drop_direction QC).  None means on
     # under target_focused enforcement and off otherwise.
     exclude_reversed_pressure_drop: Optional[bool] = None
+    proximal_compliance_scale: ProximalComplianceScaleConfig = field(
+        default_factory=ProximalComplianceScaleConfig
+    )
 
 
 @dataclass
@@ -1353,6 +1372,41 @@ def _parse_tissue_support(
     )
 
 
+def _parse_proximal_compliance_scale(raw: Any) -> ProximalComplianceScaleConfig:
+    context = "calibration.parameters.proximal_compliance_scale"
+    if raw is None:
+        return ProximalComplianceScaleConfig()
+    if not isinstance(raw, dict):
+        raise ValueError(f"{context} must be a mapping")
+    _ensure_keys(raw, ["enabled", "bounds", "tolerance_mmhg", "maximum_iterations"], context)
+    defaults = ProximalComplianceScaleConfig()
+    enabled = raw.get("enabled", defaults.enabled)
+    if not isinstance(enabled, bool):
+        raise ValueError(f"{context}.enabled must be a boolean")
+    bounds_raw = raw.get("bounds", list(defaults.bounds))
+    if (
+        not isinstance(bounds_raw, (list, tuple))
+        or len(bounds_raw) != 2
+        or not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in bounds_raw)
+    ):
+        raise ValueError(f"{context}.bounds must be two numbers [lower, upper]")
+    lower, upper = float(bounds_raw[0]), float(bounds_raw[1])
+    if not (0.0 < lower < upper):
+        raise ValueError(f"{context}.bounds must satisfy 0 < lower < upper")
+    tolerance = raw.get("tolerance_mmhg", defaults.tolerance_mmhg)
+    if isinstance(tolerance, bool) or not isinstance(tolerance, (int, float)) or tolerance <= 0:
+        raise ValueError(f"{context}.tolerance_mmhg must be a positive number")
+    iterations = raw.get("maximum_iterations", defaults.maximum_iterations)
+    if isinstance(iterations, bool) or not isinstance(iterations, int) or iterations < 1:
+        raise ValueError(f"{context}.maximum_iterations must be a positive integer")
+    return ProximalComplianceScaleConfig(
+        enabled=enabled,
+        bounds=(lower, upper),
+        tolerance_mmhg=float(tolerance),
+        maximum_iterations=iterations,
+    )
+
+
 def _parse_calibration_parameter_selection(
     data: Optional[Dict[str, Any]],
     *,
@@ -1645,7 +1699,7 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         raise ValueError("calibration.parameters is required")
     _ensure_keys(
         parameters_raw,
-        ["vessels", "junctions", "exclude_reversed_pressure_drop"],
+        ["vessels", "junctions", "exclude_reversed_pressure_drop", "proximal_compliance_scale"],
         "calibration.parameters",
     )
     exclude_reversed = parameters_raw.get("exclude_reversed_pressure_drop")
@@ -1661,6 +1715,9 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             context="calibration.parameters.junctions",
         ),
         exclude_reversed_pressure_drop=exclude_reversed,
+        proximal_compliance_scale=_parse_proximal_compliance_scale(
+            parameters_raw.get("proximal_compliance_scale")
+        ),
     )
 
     solver_raw = data.get("solver") or {}
@@ -1839,6 +1896,11 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         raise ValueError(
             "calibration.observation_qc.enforcement=target_focused requires "
             "calibration.targets"
+        )
+    if parameters.proximal_compliance_scale.enabled and targets is None:
+        raise ValueError(
+            "calibration.parameters.proximal_compliance_scale requires "
+            "calibration.targets (the 3D MPA pressure target)"
         )
 
     return CalibrationConfig(
@@ -2343,6 +2405,11 @@ calibration:
     junctions:
       default: [R_poiseuille, L]
       overrides: {}
+    # proximal_compliance_scale:  # fit one C multiplier so the 0D MPA pulse pressure matches 3D
+    #   enabled: false
+    #   bounds: [0.2, 5.0]
+    #   tolerance_mmhg: 0.05
+    #   maximum_iterations: 40
   solver:
     initial_damping_factor: 1.0
     maximum_iterations: 100

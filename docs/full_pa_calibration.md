@@ -504,6 +504,57 @@ On the same three calibrations it gave:
 | TST-STAN-9 iteration 1 | 3 | 5 → 2 | fail → pass | 25.6 → 2.4 |
 | TST-STAN-2 iteration 1 | 9 | 10 → 1 | pass → pass | 21.2 → 2.3 (2.4 before) |
 
+### Matching the 3D pulse pressure (proximal compliance multiplier)
+
+R-only calibration cannot change the 0D pulse pressure much, because the
+pulse is set by compliance. Fitting each vessel's C in the calibrator itself
+is a weak alternative: each C is fit locally from the noisy difference between
+inflow and outflow, never against the pulse pressure, and nothing keeps it
+positive.
+
+`calibration.parameters.proximal_compliance_scale` instead fits one multiplier
+on every compliant vessel's C after the calibrator passes:
+
+- **How it fits:** it bisects the multiplier in log space inside `bounds`
+  (default `[0.2, 5.0]`). It stops when the settled replay's MPA pulse pressure
+  is within `tolerance_mmhg` (default 0.05) of the 3D target observation's
+  pulse pressure, or fails after `maximum_iterations` (default 40).
+- **What it scales:** only vessels with C above the rigid threshold
+  (`RIGID_COMPLIANCE_THRESHOLD`). A rigid model fails clearly, because nothing
+  can be scaled.
+- **What it leaves alone:** outlet boundary conditions (the structured-tree
+  impedances) are never changed.
+- **Units:** pressures are compared in CGS. The report also carries labeled
+  mmHg values.
+- **Gating:** the fit runs on the calibrated copy before the replay, so the
+  replay, target gates and baseline-improvement policy judge the scaled model.
+  If the 3D pulse is outside the 0D range over the bounds, or a replay fails,
+  the fit writes its report and nothing is published.
+- **Requirements:** it requires `calibration.targets` and is off by default.
+  Use it where no later tuning will overwrite C, such as the 0D model that must
+  match a final wall-corrected 3D run.
+
+```yaml
+calibration:
+  parameters:
+    vessels: {default: [R_poiseuille]}
+    junctions: {default: []}
+    proximal_compliance_scale:
+      enabled: true
+      bounds: [0.2, 5.0]
+      tolerance_mmhg: 0.05
+      maximum_iterations: 40
+```
+
+The result goes to `calibration_compliance_fit.json`, which records:
+- the multiplier;
+- the target, unscaled and fitted pulse pressures;
+- the number of vessels scaled;
+- the total C before and after (cm⁵/dyn and mL/mmHg);
+- every evaluation.
+
+It is also included as `compliance_fit` in `calibration_summary.json`.
+
 ## Calibration quality gates and outputs
 
 The unchanged standard `pysvzerod.calibrate(config)` API remains the only
@@ -514,7 +565,8 @@ branch-parameter optimizer. The workflow:
 3. invokes calibration twice, replacing only selected parameter values in the
    second payload, and checks fixed-point deltas;
 4. removes calibration-only fields and structurally validates the normalized
-   solver model;
+   solver model, then, when `proximal_compliance_scale` is enabled, fits the
+   compliance multiplier;
 5. replays it through `pysvzerod.simulate` over a bounded settling horizon,
    checking finite, bounded pressure/flow and cycle stability;
 6. evaluates configured MPA/RPA target gates and baseline-improvement policy;
@@ -529,6 +581,7 @@ calibration_confirmation.json
 calibration_replay.json
 calibration_targets.json
 calibration_summary.json
+calibration_compliance_fit.json   # only when proximal_compliance_scale is enabled
 ```
 
 Reports and the returned result share a `run_id` and content digests for the

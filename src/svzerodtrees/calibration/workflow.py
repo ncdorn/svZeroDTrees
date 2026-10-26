@@ -29,6 +29,8 @@ from ..config import CalibrationConfig
 from .replay import build_replay_payload as build_settled_replay_payload
 from .replay import validate_replay as validate_settled_replay
 from .targets import evaluate_pulmonary_targets
+from .targets import _MMHG_TO_BARYE, _pressure_factor
+from ..tune_bcs.tuning_diagnostics import RIGID_COMPLIANCE_THRESHOLD
 
 _VESSEL_NAME_RE = re.compile(r"^branch(?P<branch_id>\d+)_seg(?P<seg_id>\d+)$")
 # learnedZeroD names: ``branch{N}_seg{K}[_{K2}...]_connectorEL`` is the branch's
@@ -3492,6 +3494,149 @@ def _run_settled_replay(
     return replay_summary, validation_settings
 
 
+COMPLIANCE_FIT_FILENAME = "calibration_compliance_fit.json"
+
+
+def _scaled_compliance_config(config: Dict[str, Any], scale: float) -> tuple[Dict[str, Any], int, float]:
+    """Copy ``config`` with every compliant vessel's C multiplied by ``scale``.
+
+    Returns the copy, the number of scaled vessels and their summed C (cm^5/dyn)
+    before scaling.  Effectively rigid vessels (C below the rigid threshold) are
+    left alone, so a rigid seed cannot be made compliant this way.
+    """
+    scaled = copy.deepcopy(config)
+    count = 0
+    total = 0.0
+    for vessel in scaled.get("vessels", []):
+        values = vessel.get("zero_d_element_values") or {}
+        compliance = values.get("C")
+        if isinstance(compliance, (int, float)) and np.isfinite(compliance) and compliance > RIGID_COMPLIANCE_THRESHOLD:
+            total += float(compliance)
+            values["C"] = float(compliance) * scale
+            count += 1
+    return scaled, count, total
+
+
+def _fit_proximal_compliance_scale(
+    *,
+    config: Dict[str, Any],
+    assembly: CalibrationAssembly,
+    calibration: CalibrationConfig,
+    report_path: Path,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Scale proximal C so the settled 0D MPA pulse pressure matches the 3D.
+
+    Pulse pressure falls monotonically as compliance rises, so the multiplier
+    is bisected in log space inside the configured bounds.  Pressures are
+    compared in CGS (dyn/cm^2); the report also carries labeled mmHg values.
+    Outlet boundary conditions are not touched.
+    """
+    settings = calibration.parameters.proximal_compliance_scale
+    target_record = assembly.target_observations.get("mpa_pressure")
+    if not isinstance(target_record, dict):
+        raise ValueError("proximal compliance fit requires a 3D MPA pressure target observation")
+    _unit, to_mmhg = _pressure_factor(str(target_record.get("units")))
+    target_values = np.asarray(target_record.get("values"), dtype=np.float64)
+    target_pp = float(np.ptp(target_values)) * to_mmhg * _MMHG_TO_BARYE
+    tolerance = float(settings.tolerance_mmhg) * _MMHG_TO_BARYE
+    lower, upper = (float(v) for v in settings.bounds)
+
+    def mmhg(value: float | None) -> float | None:
+        return None if value is None else float(value) / _MMHG_TO_BARYE
+
+    history: list[Dict[str, Any]] = []
+
+    def evaluate(scale: float) -> tuple[float | None, Dict[str, Any]]:
+        candidate, _count, _total = _scaled_compliance_config(config, scale)
+        replay, _settings = _run_settled_replay(
+            config=candidate, payload=assembly.solver_payload, calibration=calibration
+        )
+        pulse = None
+        if replay.get("status") == "pass":
+            series = _replay_target_observations(
+                replay, calibration.targets, assembly.target_observations
+            )["mpa_pressure"]
+            pulse = float(np.ptp(np.asarray(series["values"], dtype=np.float64)))
+        history.append(
+            {
+                "scale": float(scale),
+                "replay_status": replay.get("status"),
+                "pulse_pressure_dyn_per_cm2": pulse,
+                "pulse_pressure_mmhg": mmhg(pulse),
+            }
+        )
+        return pulse, candidate
+
+    _unused, scaled_count, total_before = _scaled_compliance_config(config, 1.0)
+    report: Dict[str, Any] = {
+        "status": "fail",
+        "settings": {
+            "bounds": [lower, upper],
+            "tolerance_mmhg": float(settings.tolerance_mmhg),
+            "maximum_iterations": int(settings.maximum_iterations),
+        },
+        "target_pulse_pressure_dyn_per_cm2": target_pp,
+        "target_pulse_pressure_mmhg": mmhg(target_pp),
+        "scaled_vessel_count": scaled_count,
+        "compliance_before_cm5_per_dyn": total_before,
+        "compliance_before_ml_per_mmhg": total_before * _MMHG_TO_BARYE,
+        "evaluations": history,
+    }
+
+    def fail(reason: str) -> None:
+        report["reason"] = reason
+        _write_json_atomically(report_path, report, indent=2)
+        raise ValueError(f"proximal compliance fit failed: {reason}; report: {report_path}")
+
+    if scaled_count == 0:
+        fail("the calibrated model has no compliant vessels to scale")
+    unscaled_pp, _ = evaluate(1.0)
+    report["unscaled_pulse_pressure_mmhg"] = mmhg(unscaled_pp)
+    if unscaled_pp is None:
+        fail("the settled replay of the unscaled model did not pass")
+    best_scale, best_pp, best_config = 1.0, unscaled_pp, None
+    if abs(unscaled_pp - target_pp) > tolerance:
+        pp_low, cfg_low = evaluate(lower)
+        pp_high, cfg_high = evaluate(upper)
+        if pp_low is None or pp_high is None:
+            fail("the settled replay failed at a bound of the compliance multiplier")
+        if not (pp_high <= target_pp <= pp_low):
+            fail(
+                "the 3D pulse pressure is outside the 0D range over the bounds "
+                f"([{mmhg(pp_high):.2f}, {mmhg(pp_low):.2f}] mmHg for scale {lower:g} to {upper:g})"
+            )
+        log_lo, log_hi = np.log(lower), np.log(upper)
+        best_scale, best_pp, best_config = None, None, None
+        for _ in range(int(settings.maximum_iterations)):
+            scale = float(np.exp(0.5 * (log_lo + log_hi)))
+            pulse, candidate = evaluate(scale)
+            if pulse is None:
+                fail(f"the settled replay failed at scale {scale:g}")
+            if best_pp is None or abs(pulse - target_pp) < abs(best_pp - target_pp):
+                best_scale, best_pp, best_config = scale, pulse, candidate
+            if abs(pulse - target_pp) <= tolerance:
+                break
+            if pulse > target_pp:
+                log_lo = np.log(scale)
+            else:
+                log_hi = np.log(scale)
+        else:
+            fail("the pulse pressure did not reach tolerance within maximum_iterations")
+    fitted = config if best_config is None else best_config
+    report.update(
+        {
+            "status": "pass",
+            "scale": float(best_scale),
+            "fitted_pulse_pressure_dyn_per_cm2": float(best_pp),
+            "fitted_pulse_pressure_mmhg": mmhg(best_pp),
+            "compliance_after_cm5_per_dyn": total_before * float(best_scale),
+            "compliance_after_ml_per_mmhg": total_before * float(best_scale) * _MMHG_TO_BARYE,
+        }
+    )
+    _write_json_atomically(report_path, report, indent=2)
+    return fitted, report
+
+
 def calibrate_0d_from_mapped_centerline(
     *,
     zerod_config_path: str,
@@ -3735,6 +3880,18 @@ def calibrate_0d_from_mapped_centerline(
         confirmation_calibrated
     )
     _validate_publishable_solver_config(published)
+    compliance_fit: Dict[str, Any] = {"status": "skipped", "reason": "proximal_compliance_scale is not enabled"}
+    compliance_fit_path = output_path.parent / COMPLIANCE_FIT_FILENAME
+    if calibration.parameters.proximal_compliance_scale.enabled:
+        # Runs on the calibrated copy before the replay, so the replay, targets
+        # and gates below judge the compliance-scaled model.
+        published, compliance_fit = _fit_proximal_compliance_scale(
+            config=published,
+            assembly=assembly,
+            calibration=calibration,
+            report_path=compliance_fit_path,
+        )
+        _validate_publishable_solver_config(published)
     replay_path = output_path.parent / "calibration_replay.json"
     if calibration.targets is not None:
         try:
@@ -3949,6 +4106,9 @@ def calibrate_0d_from_mapped_centerline(
     target_summary.update(run_identity)
     target_summary["baseline"] = baseline_summary
     _write_json_atomically(target_path, target_summary, indent=2)
+    if compliance_fit.get("status") != "skipped":
+        compliance_fit.update(run_identity)
+        _write_json_atomically(compliance_fit_path, compliance_fit, indent=2)
 
     summary = {
         **run_identity,
@@ -3968,6 +4128,7 @@ def calibrate_0d_from_mapped_centerline(
         "replay_stability": replay_summary,
         "calibration_targets": target_summary,
         "target_quality": target_summary,
+        "compliance_fit": compliance_fit,
     }
     summary_path = output_path.parent / "calibration_summary.json"
     _write_json_atomically(summary_path, summary, indent=2)
@@ -3999,5 +4160,9 @@ def calibrate_0d_from_mapped_centerline(
         "target_quality": target_summary,
         "calibration_summary": summary,
         "calibration_summary_report": str(summary_path),
+        "compliance_fit": compliance_fit,
+        "compliance_fit_report": (
+            str(compliance_fit_path) if compliance_fit.get("status") != "skipped" else None
+        ),
         "solver_provenance": confirmation_provenance,
     }
