@@ -1132,3 +1132,27 @@ def test_report_only_publishes_a_worse_but_stable_model(monkeypatch, tmp_path):
     assert report["component_gates_advisory"] is True
     assert report["baseline_policy"]["status"] == "fail"
     assert report["baseline_policy"]["passed"] is True and report["baseline_policy"]["required"] is False
+
+
+def test_rho_infty_applies_to_every_replay_and_the_published_model(monkeypatch, tmp_path):
+    config_path, output_path = _improvement_only_fixture(monkeypatch, tmp_path, candidate_offset=6.0)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            "    cycle_stability_tolerance: 1.0e-3\n",
+            "    cycle_stability_tolerance: 1.0e-3\n    rho_infty: 0.2\n",
+        ),
+        encoding="utf-8",
+    )
+    seen = []
+    simulate = calibration_workflow.simulate_pysvzerod
+
+    def recording_simulate(payload):
+        seen.append(payload["simulation_parameters"].get("rho_infty"))
+        return simulate(payload)
+
+    monkeypatch.setattr("svzerodtrees.calibration.workflow.simulate_pysvzerod", recording_simulate)
+    result = run_from_config_file(str(config_path))
+    assert seen and all(value == 0.2 for value in seen)
+    published = json.loads(output_path.read_text(encoding="utf-8"))
+    assert published["simulation_parameters"]["rho_infty"] == 0.2
+    assert result["calibration_summary"]["integration"] == {"rho_infty": 0.2}

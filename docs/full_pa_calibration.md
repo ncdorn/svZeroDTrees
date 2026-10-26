@@ -566,6 +566,31 @@ The result goes to `calibration_compliance_fit.json`, which records:
 
 It is also included as `compliance_fit` in `calibration_summary.json`.
 
+### Time-integration damping (`solver.rho_infty`)
+
+svZeroDSolver integrates with generalized-α. Its spectral radius `rho_infty`
+(default 0.5) sets how strongly spurious high-frequency modes are damped.
+
+On TST-STAN-5:
+- **The failure:** the model calibrated to its wall-corrected 3D run diverged
+  at peak systolic inflow at `rho_infty` 0.5.
+- **What it wasn't:** the model is linear and every outlet impedance kernel is
+  passive. More Newton iterations did not help, and neither did bounding the
+  calibrated resistances: even at ≥ 0.95× the input values it still diverged,
+  only later.
+- **What fixed it:** at `rho_infty` 0.2 it is stable. That setting changes the
+  tuned model's MPA pressures by ≤ 0.02 mmHg.
+
+`calibration.solver.rho_infty` (default `null`, which keeps the model's own
+setting) applies one spectral radius to:
+- the baseline replay,
+- every candidate replay, including the compliance fit,
+- the published model.
+
+The scores therefore compare like with like, and anything that simulates the
+published model uses the same integration. `calibration_summary.json` records it
+under `integration`.
+
 ## Calibration quality gates and outputs
 
 The unchanged standard `pysvzerod.calibrate(config)` API remains the only

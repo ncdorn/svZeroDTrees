@@ -1754,6 +1754,22 @@ def test_calibration_proximal_compliance_scale_rejects_invalid_settings(tmp_path
         load_config(str(cfg_path))
 
 
+def _calibration_text_with_solver(tmp_path, solver_line: str) -> str:
+    return _calibration_config_text(tmp_path, "") + f"  solver:\n    {solver_line}\n"
+
+
+def test_calibration_solver_rho_infty_parses_and_validates(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(_calibration_config_text(tmp_path, ""), encoding="utf-8")
+    assert load_config(str(cfg_path)).calibration.solver.rho_infty is None
+    cfg_path.write_text(_calibration_text_with_solver(tmp_path, "rho_infty: 0.2"), encoding="utf-8")
+    assert load_config(str(cfg_path)).calibration.solver.rho_infty == 0.2
+    for bad in ("1.5", "-0.1", "true"):
+        cfg_path.write_text(_calibration_text_with_solver(tmp_path, f"rho_infty: {bad}"), encoding="utf-8")
+        with pytest.raises(ValueError, match="rho_infty must be a number in"):
+            load_config(str(cfg_path))
+
+
 def test_calibration_exclude_reversed_pressure_drop_must_be_boolean(tmp_path):
     cfg_path = tmp_path / "cfg.yml"
     cfg_path.write_text(

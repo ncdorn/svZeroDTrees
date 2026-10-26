@@ -318,6 +318,10 @@ class CalibrationSolverConfig:
     replay_minimum_cycles: int = 3
     replay_maximum_cycles: int = 10
     required_consecutive_stable_pairs: int = 1
+    # Generalized-alpha spectral radius for every replay and the published
+    # model (None keeps the model's own setting, svZeroDSolver default 0.5).
+    # Lower values damp spurious high-frequency modes more strongly.
+    rho_infty: Optional[float] = None
 
 
 @dataclass
@@ -1740,9 +1744,17 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             "replay_minimum_cycles",
             "replay_maximum_cycles",
             "required_consecutive_stable_pairs",
+            "rho_infty",
         ],
         "calibration.solver",
     )
+    rho_infty = solver_raw.get("rho_infty")
+    if rho_infty is not None and (
+        isinstance(rho_infty, bool)
+        or not isinstance(rho_infty, (int, float))
+        or not 0.0 <= float(rho_infty) <= 1.0
+    ):
+        raise ValueError("calibration.solver.rho_infty must be a number in [0, 1] or null")
     solver = CalibrationSolverConfig(
         initial_damping_factor=float(solver_raw.get("initial_damping_factor", 1.0)),
         maximum_iterations=int(solver_raw.get("maximum_iterations", 100)),
@@ -1774,6 +1786,7 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             solver_raw.get("required_consecutive_stable_pairs", 1),
             context="calibration.solver.required_consecutive_stable_pairs",
         ),
+        rho_infty=None if rho_infty is None else float(rho_infty),
     )
     if (
         not np.isfinite(solver.initial_damping_factor)
@@ -2425,6 +2438,7 @@ calibration:
     replay_minimum_cycles: 3
     replay_maximum_cycles: 10
     required_consecutive_stable_pairs: 1
+    # rho_infty: null  # generalized-alpha spectral radius for replays and the published model
   input_normalization:
     infinite_vessel_compliance: error  # error | zero
   observation_qc:

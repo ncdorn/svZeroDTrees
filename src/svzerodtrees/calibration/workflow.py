@@ -3495,6 +3495,15 @@ def _run_settled_replay(
 
 
 COMPLIANCE_FIT_FILENAME = "calibration_compliance_fit.json"
+
+
+def _apply_integration_settings(config: Dict[str, Any], calibration: CalibrationConfig) -> Dict[str, Any]:
+    """Set the configured generalized-alpha spectral radius on a solver config."""
+
+    rho_infty = calibration.solver.rho_infty
+    if rho_infty is not None:
+        config.setdefault("simulation_parameters", {})["rho_infty"] = float(rho_infty)
+    return config
 # Geometric steps used to bracket the target pulse pressure outward from 1:
 # small first (the fitted multiplier is usually within ~15% of 1 and some
 # models cannot settle far from it), growing to the last value.
@@ -3733,6 +3742,8 @@ def calibrate_0d_from_mapped_centerline(
             baseline_config, _baseline_normalization = _normalize_calibrated_config(
                 assembly.solver_payload
             )
+            # Same time integration as the candidate, so the scores compare.
+            _apply_integration_settings(baseline_config, calibration)
             baseline_replay, _baseline_validation = _run_settled_replay(
                 config=baseline_config,
                 payload=assembly.solver_payload,
@@ -3903,6 +3914,7 @@ def calibrate_0d_from_mapped_centerline(
     published, output_normalization = _normalize_calibrated_config(
         confirmation_calibrated
     )
+    _apply_integration_settings(published, calibration)
     _validate_publishable_solver_config(published)
     compliance_fit: Dict[str, Any] = {"status": "skipped", "reason": "proximal_compliance_scale is not enabled"}
     compliance_fit_path = output_path.parent / COMPLIANCE_FIT_FILENAME
@@ -4173,6 +4185,7 @@ def calibrate_0d_from_mapped_centerline(
         "calibration_targets": target_summary,
         "target_quality": target_summary,
         "compliance_fit": compliance_fit,
+        "integration": {"rho_infty": calibration.solver.rho_infty},
     }
     summary_path = output_path.parent / "calibration_summary.json"
     _write_json_atomically(summary_path, summary, indent=2)
