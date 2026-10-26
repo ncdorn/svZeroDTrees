@@ -4092,6 +4092,11 @@ def calibrate_0d_from_mapped_centerline(
                     "reason": "improvement_only requires scored baseline and candidate models",
                 }
             status = "pass" if improved else "fail"
+        elif gate_policy == "report_only":
+            # Publish any scored, replay-stable model; the target gates and the
+            # baseline comparison are reported but never block publication.
+            status = "pass" if isinstance(candidate_score, (int, float)) else "fail"
+            baseline_policy = {**baseline_policy, "required": False, "passed": True, "advisory": True}
         else:
             status = (
                 "pass"
@@ -4106,7 +4111,7 @@ def calibrate_0d_from_mapped_centerline(
                 "candidate": candidate_targets,
                 "baseline_policy": baseline_policy,
                 "component_gates": candidate_targets.get("gate_results", {}),
-                "component_gates_advisory": gate_policy == "improvement_only",
+                "component_gates_advisory": gate_policy in {"improvement_only", "report_only"},
             }
         )
         target_path = output_path.parent / "calibration_targets.json"

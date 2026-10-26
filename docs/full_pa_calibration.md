@@ -397,7 +397,10 @@ optimizer. `targets.gate_policy` (`absolute` by default) selects what must
 pass: `absolute` requires both tolerances; `improvement_only` publishes when the
 calibrated model's composite score is no worse than the uncalibrated model's
 (both scored, replay passed) and reports the tolerance gates as advisory
-(`component_gates_advisory` in `calibration_targets.json`). Omitting
+(`component_gates_advisory` in `calibration_targets.json`); `report_only`
+publishes any scored, replay-stable calibrated model and reports the tolerance
+gates and the baseline comparison as advisory, for a 0D model that must match a
+3D run rather than improve on another 0D model. Omitting
 `calibration.targets` retains `strict_network` behavior
 during the version-1 compatibility window.
 

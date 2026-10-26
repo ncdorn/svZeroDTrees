@@ -1557,9 +1557,9 @@ def _parse_calibration_targets(
             f"{context}.require_improvement_over_baseline must be a boolean"
         )
     gate_policy = str(data.get("gate_policy", "absolute")).strip().lower()
-    if gate_policy not in {"absolute", "improvement_only"}:
+    if gate_policy not in {"absolute", "improvement_only", "report_only"}:
         raise ValueError(
-            f"{context}.gate_policy must be one of absolute|improvement_only"
+            f"{context}.gate_policy must be one of absolute|improvement_only|report_only"
         )
     return CalibrationTargetsConfig(
         mpa_pressure=mpa,

@@ -1116,3 +1116,19 @@ def test_compliance_fit_rejects_a_rigid_model(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="no compliant vessels"):
         run_from_config_file(str(config_path))
     assert not output_path.exists()
+
+
+def test_report_only_publishes_a_worse_but_stable_model(monkeypatch, tmp_path):
+    config_path, output_path = _improvement_only_fixture(monkeypatch, tmp_path, candidate_offset=14.0)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace("gate_policy: improvement_only", "gate_policy: report_only"),
+        encoding="utf-8",
+    )
+    run_from_config_file(str(config_path))
+    assert output_path.exists()
+    report = json.loads((tmp_path / "calibration_targets.json").read_text(encoding="utf-8"))
+    assert report["status"] == "pass"
+    assert report["gate_policy"] == "report_only"
+    assert report["component_gates_advisory"] is True
+    assert report["baseline_policy"]["status"] == "fail"
+    assert report["baseline_policy"]["passed"] is True and report["baseline_policy"]["required"] is False
