@@ -499,6 +499,20 @@ every non-target vessel with `direction: wrong` at its input parameters:
 - The default (`null`) turns it on under `target_focused` enforcement and off
   otherwise. `true` or `false` overrides that.
 
+`calibration.parameters.fixed_vessels` (a list of vessel names, default empty)
+keeps the named vessels at their input parameters while their interfaces stay
+observed, so a fixed MPA, LPA or RPA target vessel still supplies its pressure
+or split observations.
+- Fixed vessels are recorded under `exclusions` with the reason
+  `fixed_vessel_parameters`. Unknown names fail.
+- An empty `vessels.overrides` entry is different: it also excludes the
+  vessel's interfaces, and the target QC then fails
+  (`target_sampling_resolution`) for a target vessel.
+- Use: a post-stent 3D run where the pressure rises along a stented target
+  vessel (pressure recovery). TST-STAN-1's LPA connector fitted R 19 -> -157,
+  and the replay diverged. svzt-agent's post-op calibration fixes any vessel
+  the first fit drives negative and calibrates once more.
+
 On the same three calibrations it gave:
 
 | Calibration | Excluded | Negative R | Replay | Composite |

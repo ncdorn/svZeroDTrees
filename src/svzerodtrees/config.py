@@ -298,6 +298,10 @@ class CalibrationParametersConfig:
     # drop runs against their flow (pressure_drop_direction QC).  None means on
     # under target_focused enforcement and off otherwise.
     exclude_reversed_pressure_drop: Optional[bool] = None
+    # Vessels that keep their input parameters but stay observed, target
+    # vessels included (an empty ``vessels.overrides`` entry also drops the
+    # vessel's observations, so it cannot fix a target vessel).
+    fixed_vessels: List[str] = field(default_factory=list)
     proximal_compliance_scale: ProximalComplianceScaleConfig = field(
         default_factory=ProximalComplianceScaleConfig
     )
@@ -1704,12 +1708,15 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
         raise ValueError("calibration.parameters is required")
     _ensure_keys(
         parameters_raw,
-        ["vessels", "junctions", "exclude_reversed_pressure_drop", "proximal_compliance_scale"],
+        ["vessels", "junctions", "exclude_reversed_pressure_drop", "fixed_vessels", "proximal_compliance_scale"],
         "calibration.parameters",
     )
     exclude_reversed = parameters_raw.get("exclude_reversed_pressure_drop")
     if exclude_reversed is not None and not isinstance(exclude_reversed, bool):
         raise ValueError("calibration.parameters.exclude_reversed_pressure_drop must be a boolean")
+    fixed_vessels = parameters_raw.get("fixed_vessels") or []
+    if not isinstance(fixed_vessels, list) or not all(isinstance(name, str) and name for name in fixed_vessels):
+        raise ValueError("calibration.parameters.fixed_vessels must be a list of vessel names")
     parameters = CalibrationParametersConfig(
         vessels=_parse_calibration_parameter_selection(
             parameters_raw.get("vessels"),
@@ -1720,6 +1727,7 @@ def _parse_calibration(root: str, data: Dict[str, Any]) -> CalibrationConfig:
             context="calibration.parameters.junctions",
         ),
         exclude_reversed_pressure_drop=exclude_reversed,
+        fixed_vessels=sorted(set(fixed_vessels)),
         proximal_compliance_scale=_parse_proximal_compliance_scale(
             parameters_raw.get("proximal_compliance_scale")
         ),

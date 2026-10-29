@@ -1946,3 +1946,31 @@ def test_reversed_pressure_drop_never_excludes_target_vessels(tmp_path):
     assert assembly.observation_qc["metrics"]["pressure_drop_direction"]["per_vessel"]["branch2_seg0"]["direction"] == "wrong"
     assert _calibrate_flags(assembly)["branch2_seg0"] == ["R_poiseuille"]
     assert "branch2_seg0" not in assembly.excluded_blocks
+
+
+def test_fixed_vessels_keep_input_parameters_and_stay_observed(tmp_path):
+    """A fixed vessel keeps its input R even when it is the LPA target, and its
+    interfaces stay qualified for the target split (an empty override would
+    exclude them)."""
+    zerod = _write_target_qc_fixture(tmp_path)
+    calibration = _target_focused_calibration_config(tmp_path)
+    calibration.parameters.fixed_vessels = ["branch2_seg0"]
+
+    assembly = assemble_calibration_payload(zerod_config_path=str(zerod), calibration=calibration)
+
+    assert _calibrate_flags(assembly)["branch2_seg0"] == []
+    assert assembly.excluded_blocks["branch2_seg0"] == "fixed_vessel_parameters"
+    assert assembly.observation_qc["exclusions"]["branch2_seg0"] == "fixed_vessel_parameters"
+    for end in ("upstream", "downstream"):
+        assert assembly.interface_sampling[f"branch2_seg0:{end}"]["excluded_from_calibration"] is False
+    assert assembly.observation_qc["checks"]["target_sampling_resolution"] is True
+    assert assembly.observation_qc["status"] == "pass"
+
+
+def test_fixed_vessels_reject_unknown_names(tmp_path):
+    zerod = _write_target_qc_fixture(tmp_path)
+    calibration = _target_focused_calibration_config(tmp_path)
+    calibration.parameters.fixed_vessels = ["branch9_seg0"]
+
+    with pytest.raises(ValueError, match="fixed_vessels references unknown vessels"):
+        assemble_calibration_payload(zerod_config_path=str(zerod), calibration=calibration)

@@ -1777,3 +1777,19 @@ def test_calibration_exclude_reversed_pressure_drop_must_be_boolean(tmp_path):
     )
     with pytest.raises(ValueError, match="exclude_reversed_pressure_drop must be a boolean"):
         load_config(str(cfg_path))
+
+
+def test_calibration_fixed_vessels_parses(tmp_path):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(_calibration_config_text(tmp_path, ""), encoding="utf-8")
+    assert load_config(str(cfg_path)).calibration.parameters.fixed_vessels == []
+
+    cfg_path.write_text(
+        _calibration_config_text(tmp_path, "    fixed_vessels: [branch1_seg0, branch0_seg0, branch1_seg0]"),
+        encoding="utf-8",
+    )
+    assert load_config(str(cfg_path)).calibration.parameters.fixed_vessels == ["branch0_seg0", "branch1_seg0"]
+
+    cfg_path.write_text(_calibration_config_text(tmp_path, "    fixed_vessels: branch1_seg0"), encoding="utf-8")
+    with pytest.raises(ValueError, match="fixed_vessels must be a list"):
+        load_config(str(cfg_path))

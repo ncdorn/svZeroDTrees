@@ -2254,6 +2254,14 @@ def assemble_calibration_payload(
     for vessel_name in _reversed_pressure_drop_exclusions(calibration, observation_qc):
         vessel_parameters[vessel_name] = []
         excluded_blocks[vessel_name] = "reversed_3d_pressure_drop"
+    # Fixed after sampling, like the reversed-drop exclusions, so a fixed target
+    # vessel still supplies its MPA-pressure or flow-split observations.
+    unknown_fixed = sorted(set(calibration.parameters.fixed_vessels) - set(vessel_parameters))
+    if unknown_fixed:
+        raise ValueError(f"calibration.parameters.fixed_vessels references unknown vessels: {unknown_fixed}")
+    for vessel_name in calibration.parameters.fixed_vessels:
+        vessel_parameters[vessel_name] = []
+        excluded_blocks[vessel_name] = "fixed_vessel_parameters"
     # The QC report's exclusions were captured before this step.
     observation_qc["exclusions"] = {key: excluded_blocks[key] for key in sorted(excluded_blocks)}
 
