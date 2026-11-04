@@ -11,8 +11,10 @@ Structured tree boundary condition modeling for svZeroD cardiovascular simulatio
 - Python >= 3.12.
 - Validated on Sherlock with `python/3.12.1`.
 - Runtime dependencies are installed via `python3 -m pip install -e .`.
-- Solver-backed workflows additionally require `pysvzerod` from a sibling
-  `svZeroDSolver` checkout.
+- Solver-backed workflows additionally require the svZeroDSolver Python
+  module from a sibling `svZeroDSolver` checkout on upstream `master`. It is
+  named `svzerod` since SimVascular/svZeroDSolver#249; builds that still
+  provide `pysvzerod` are accepted as a fallback.
 - External tools for 3D coupling only: SimVascular `svpre`, `svsolver`, `svpost`
   in PATH, plus `svmultiphysics` for local 3D execution or `sbatch` for SLURM
   execution.
@@ -25,14 +27,15 @@ Structured tree boundary condition modeling for svZeroD cardiovascular simulatio
 **Install**
 ```bash
 git clone https://github.com/ncdorn/svZeroDTrees.git
-git clone https://github.com/ncdorn/svZeroDSolver.git
-python3 -m pip install -e svZeroDSolver
+git clone https://github.com/SimVascular/svZeroDSolver.git
+git -C svZeroDSolver checkout 9cc4a74c
+python3 -m pip install ./svZeroDSolver
 cd svZeroDTrees
 python3 -m pip install -e .
 ```
 
 If you only need non-solver code paths, `svZeroDTrees` can now be installed
-before `pysvzerod`; solver-backed workflows raise an explicit runtime error
+before the solver module; solver-backed workflows raise an explicit runtime error
 until the sibling solver checkout is installed.
 
 **Learned full-PA seed generation**
@@ -136,7 +139,7 @@ For `uv` workflows in this workspace, the sibling `../svZeroDSolver` checkout is
 still supported via the `solver` dependency group:
 ```bash
 UV_CACHE_DIR=/tmp/uv-cache uv sync --group dev --group tests --group build --group solver
-UV_CACHE_DIR=/tmp/uv-cache uv run python3 -c "import svzerodtrees, pysvzerod"
+UV_CACHE_DIR=/tmp/uv-cache uv run python3 -c "import svzerodtrees, svzerod"
 ```
 
 **Sherlock**

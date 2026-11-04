@@ -29,12 +29,12 @@ def _require_real_solver() -> dict[str, Any]:
             "SVZERODTREES_RUN_REAL_SOLVER=1 to run"
         )
 
-    if importlib.util.find_spec("pysvzerod") is None:
-        pytest.skip(
-            "optional pysvzerod is absent; install the pinned external solver"
-        )
+    from svzerodtrees._pysvzerod import SOLVER_MODULE_NAMES, require_pysvzerod_api
 
-    from svzerodtrees._pysvzerod import require_pysvzerod_api
+    if all(importlib.util.find_spec(name) is None for name in SOLVER_MODULE_NAMES):
+        pytest.skip(
+            "optional svzerod/pysvzerod is absent; install the pinned external solver"
+        )
 
     try:
         provenance = require_pysvzerod_api()

@@ -88,7 +88,7 @@ def test_missing_standard_callable_reports_resolved_identity(
     assert "simulate(config)" in message
     assert str(module_file.resolve()) in message
     assert "module SHA-256" in message
-    assert "python3 -m pip install -e ../svZeroDSolver" in message
+    assert "python3 -m pip install ../svZeroDSolver" in message
     assert not calibrate_called
 
 
@@ -108,10 +108,11 @@ def test_missing_calibrate_reports_resolved_identity(monkeypatch, tmp_path):
 
 
 def test_missing_import_reports_required_api_and_install_hint(monkeypatch):
-    def missing_import(_name):
-        raise ModuleNotFoundError("No module named 'pysvzerod'", name="pysvzerod")
+    def missing_import(name):
+        raise ModuleNotFoundError(f"No module named '{name}'", name=name)
 
     monkeypatch.setattr(loader.importlib, "import_module", missing_import)
+    monkeypatch.setattr(loader, "_distribution_installed", lambda _name: False)
 
     with pytest.raises(ModuleNotFoundError, match="Resolved module state") as exc:
         loader.require_pysvzerod_api()
@@ -119,7 +120,101 @@ def test_missing_import_reports_required_api_and_install_hint(monkeypatch):
     message = str(exc.value)
     assert "calibrate(config)" in message
     assert "simulate(config)" in message
-    assert "python3 -m pip install -e ../svZeroDSolver" in message
+    assert "python3 -m pip install ../svZeroDSolver" in message
+    assert "svzerod or pysvzerod" in message
+
+
+def test_svzerod_is_preferred_over_pysvzerod(monkeypatch, tmp_path):
+    module_file = tmp_path / "svzerod.so"
+    module_file.write_bytes(b"solver")
+    module = _fake_solver(module_file=module_file)
+    module.__name__ = "svzerod"
+    requested = []
+
+    def import_module(name):
+        requested.append(name)
+        return module
+
+    monkeypatch.setattr(loader.importlib, "import_module", import_module)
+
+    result = loader.require_pysvzerod_api()
+
+    assert requested == ["svzerod"]
+    assert result["module_name"] == "svzerod"
+
+
+def test_pysvzerod_is_used_when_svzerod_is_not_installed(monkeypatch, tmp_path):
+    module_file = tmp_path / "pysvzerod.so"
+    module_file.write_bytes(b"solver")
+    module = _fake_solver(module_file=module_file)
+    module.__name__ = "pysvzerod"
+    requested = []
+
+    def import_module(name):
+        requested.append(name)
+        if name == "svzerod":
+            raise ModuleNotFoundError("No module named 'svzerod'", name="svzerod")
+        return module
+
+    monkeypatch.setattr(loader.importlib, "import_module", import_module)
+    monkeypatch.setattr(loader, "_distribution_installed", lambda _name: False)
+
+    with pytest.warns(RuntimeWarning, match="pre-rename solver module 'pysvzerod'"):
+        result = loader.require_pysvzerod_api()
+
+    assert requested == ["svzerod", "pysvzerod"]
+    assert result["module_name"] == "pysvzerod"
+
+
+def test_installed_but_unimportable_svzerod_does_not_fall_back(monkeypatch):
+    requested = []
+
+    def import_module(name):
+        requested.append(name)
+        if name == "svzerod":
+            raise ModuleNotFoundError("No module named 'svzerod'", name="svzerod")
+        raise AssertionError("must not fall back to pysvzerod")
+
+    monkeypatch.setattr(loader.importlib, "import_module", import_module)
+    monkeypatch.setattr(loader, "_distribution_installed", lambda name: name == "svzerod")
+
+    with pytest.raises(ModuleNotFoundError, match="distribution is installed"):
+        loader.require_pysvzerod()
+
+    assert requested == ["svzerod"]
+
+
+def test_broken_svzerod_does_not_fall_back_to_pysvzerod(monkeypatch):
+    requested = []
+
+    def import_module(name):
+        requested.append(name)
+        if name == "svzerod":
+            raise ModuleNotFoundError("No module named 'numpy'", name="numpy")
+        raise AssertionError("must not fall back to pysvzerod")
+
+    monkeypatch.setattr(loader.importlib, "import_module", import_module)
+
+    with pytest.raises(ModuleNotFoundError, match="Could not import svzerod") as exc:
+        loader.require_pysvzerod()
+
+    assert requested == ["svzerod"]
+    assert "missing numpy" in str(exc.value)
+
+
+def test_svzerod_import_error_does_not_fall_back(monkeypatch):
+    requested = []
+
+    def import_module(name):
+        requested.append(name)
+        raise ImportError("dlopen failed")
+
+    monkeypatch.setattr(loader.importlib, "import_module", import_module)
+
+    with pytest.raises(ImportError, match="Could not import svzerod"):
+        loader.require_pysvzerod()
+
+    assert requested == ["svzerod"]
 
 
 def test_provenance_is_not_recorded_when_calibrate_fails(monkeypatch):

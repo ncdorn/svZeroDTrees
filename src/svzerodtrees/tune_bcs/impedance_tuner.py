@@ -24,6 +24,7 @@ from ..tune_bcs.nm_stopping import (
 )
 from ..io.inflow_handler import mean_flow_from_path
 from ..numerics import trapezoid
+from .._pysvzerod import loaded_solver_module_path
 from ..io.blocks.boundary_condition import (
     validate_boundary_condition_configs,
     validate_flow_cardiac_output_config,
@@ -32,7 +33,7 @@ from ..io.blocks.boundary_condition import (
 import csv, json, math, os, sys
 import warnings
 
-# Solver errors that no candidate can avoid (e.g. a pysvzerod build without
+# Solver errors that no candidate can avoid (e.g. a solver build without
 # IMPEDANCE BC support).  They must abort tuning instead of being scored as a
 # penalized candidate.
 _SOLVER_CAPABILITY_ERROR_MARKERS = ("Invalid block type",)
@@ -42,11 +43,10 @@ def _solver_capability_error(exc: Exception) -> RuntimeError | None:
     message = str(exc)
     if not any(marker in message for marker in _SOLVER_CAPABILITY_ERROR_MARKERS):
         return None
-    module_path = getattr(sys.modules.get("pysvzerod"), "__file__", "<not imported>")
     return RuntimeError(
-        f"pysvzerod cannot simulate the tuning model ({message}); loaded "
-        f"pysvzerod from {module_path}. Impedance tuning requires a solver "
-        "build with IMPEDANCE boundary-condition support."
+        f"The svZeroDSolver module cannot simulate the tuning model ({message}); "
+        f"loaded {loaded_solver_module_path()}. Impedance tuning requires a "
+        "solver build with IMPEDANCE boundary-condition support."
     )
 
 

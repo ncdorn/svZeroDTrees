@@ -81,16 +81,17 @@ def _impedance_model(cycles: int) -> dict:
 def periodic_reference():
     if os.environ.get("SVZERODTREES_RUN_REAL_SOLVER") != "1":
         pytest.skip("opt-in actual-solver regression; set SVZERODTREES_RUN_REAL_SOLVER=1 to run")
-    if importlib.util.find_spec("pysvzerod") is None:
-        pytest.skip("optional pysvzerod is absent")
-    from svzerodtrees._pysvzerod import simulate_pysvzerod
+    from svzerodtrees._pysvzerod import SOLVER_MODULE_NAMES, simulate_pysvzerod
+
+    if all(importlib.util.find_spec(name) is None for name in SOLVER_MODULE_NAMES):
+        pytest.skip("optional svzerod/pysvzerod is absent")
     from svzerodtrees.tune_bcs.periodicity import cycle_metrics
 
     try:
         result = simulate_pysvzerod(_impedance_model(cycles=40))
     except RuntimeError as exc:
         if "Invalid block type" in str(exc):
-            pytest.skip(f"pysvzerod build lacks IMPEDANCE support: {exc}")
+            pytest.skip(f"solver build lacks IMPEDANCE support: {exc}")
         raise
     mpa = result[result.name == "branch0_seg0"]
     last = cycle_metrics(mpa.time, np.asarray(mpa.pressure_in) / MMHG, PERIOD)[-1]

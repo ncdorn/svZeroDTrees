@@ -2,20 +2,30 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import importlib.metadata
 import inspect
 from functools import lru_cache
 import json
 import os
 from pathlib import Path
+import sys
 import time
+import warnings
 
 REQUIRED_SOLVER_CALLABLES = ("calibrate", "simulate")
 
+# svZeroDSolver renamed its Python module from ``pysvzerod`` to ``svzerod``
+# (SimVascular/svZeroDSolver#249). Prefer the new name and fall back to the
+# old one only when ``svzerod`` is not installed at all, so older builds keep
+# working while clusters move over.
+SOLVER_MODULE_NAMES = ("svzerod", "pysvzerod")
+
 _INSTALL_HINT = (
-    "pysvzerod is required for solver-backed svZeroDTrees workflows. "
-    "Install the sibling svZeroDSolver checkout first with `python3 -m pip "
-    "install -e "
-    "../svZeroDSolver` (or `python3 -m pip install -e "
+    "The svZeroDSolver Python module (`svzerod`, or `pysvzerod` in builds "
+    "older than SimVascular/svZeroDSolver#249) is required for "
+    "solver-backed svZeroDTrees workflows. Install the sibling "
+    "svZeroDSolver checkout first with `python3 -m pip install "
+    "../svZeroDSolver` (or `python3 -m pip install "
     "/home/users/ndorn/svZeroDSolver` on Sherlock), or install the pinned "
     "solver with `uv sync --group solver`."
 )
@@ -25,21 +35,75 @@ _last_calibration_provenance: dict[str, object] | None = None
 
 @lru_cache(maxsize=1)
 def require_pysvzerod():
+    """Import the svZeroDSolver Python module (``svzerod`` or ``pysvzerod``)."""
+    missing: list[str] = []
+    for name in SOLVER_MODULE_NAMES:
+        try:
+            module = importlib.import_module(name)
+        except ModuleNotFoundError as exc:
+            if exc.name != name:
+                # The solver module exists but one of its own dependencies
+                # is missing. Do not silently fall back to another build.
+                raise ModuleNotFoundError(
+                    f"Could not import {name}. Resolved module state: "
+                    f"<unresolved; missing {exc.name or 'import dependency'}>; "
+                    "required callables: calibrate(config), "
+                    f"simulate(config). {_INSTALL_HINT} Original error: {exc}"
+                ) from exc
+            if name == SOLVER_MODULE_NAMES[0] and _distribution_installed(name):
+                # svzerod is installed but its module cannot be found (an
+                # extension built for another Python, or a stale editable
+                # finder). Refuse to silently run an older pysvzerod build.
+                raise ModuleNotFoundError(
+                    f"Could not import {name} although its distribution is "
+                    "installed. Resolved module state: <installed but not "
+                    "importable>; required callables: calibrate(config), "
+                    f"simulate(config). {_INSTALL_HINT} Original error: {exc}",
+                    name=name,
+                ) from exc
+            missing.append(str(exc))
+            continue
+        except ImportError as exc:
+            raise ImportError(
+                f"Could not import {name}. Resolved module state: "
+                "<import failed>; required callables: calibrate(config), "
+                f"simulate(config). {_INSTALL_HINT} Original error: {exc}"
+            ) from exc
+        if name != SOLVER_MODULE_NAMES[0]:
+            warnings.warn(
+                f"svZeroDTrees is using the pre-rename solver module {name!r} "
+                f"from {getattr(module, '__file__', '<unknown>')}; install "
+                "svZeroDSolver master to get the `svzerod` module.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        return module
+    tried = " or ".join(SOLVER_MODULE_NAMES)
+    raise ModuleNotFoundError(
+        f"Could not import {tried}. Resolved module state: "
+        "<unresolved; no solver module installed>; "
+        "required callables: calibrate(config), "
+        f"simulate(config). {_INSTALL_HINT} Original errors: "
+        + "; ".join(missing),
+        name=SOLVER_MODULE_NAMES[0],
+    )
+
+
+def _distribution_installed(name: str) -> bool:
     try:
-        return importlib.import_module("pysvzerod")
-    except ModuleNotFoundError as exc:
-        raise ModuleNotFoundError(
-            "Could not import pysvzerod. Resolved module state: "
-            f"<unresolved; missing {exc.name or 'import dependency'}>; "
-            "required callables: calibrate(config), "
-            f"simulate(config). {_INSTALL_HINT} Original error: {exc}"
-        ) from exc
-    except ImportError as exc:
-        raise ImportError(
-            "Could not import pysvzerod. Resolved module state: "
-            "<import failed>; required callables: calibrate(config), "
-            f"simulate(config). {_INSTALL_HINT} Original error: {exc}"
-        ) from exc
+        importlib.metadata.distribution(name)
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    return True
+
+
+def loaded_solver_module_path() -> str:
+    """Return the file of an already-imported solver module, for diagnostics."""
+    for name in SOLVER_MODULE_NAMES:
+        module = sys.modules.get(name)
+        if module is not None:
+            return f"{name} from {getattr(module, '__file__', '<unknown>')}"
+    return "<not imported>"
 
 
 def _build_identity(module) -> object:
@@ -105,6 +169,7 @@ def pysvzerod_provenance(module=None) -> dict[str, object]:
         module = require_pysvzerod()
     module_path, file_metadata, module_sha256 = _module_file_provenance(module)
     return {
+        "module_name": getattr(module, "__name__", None),
         "module_path": module_path,
         "module_sha256": module_sha256,
         "file_metadata": file_metadata,
@@ -115,6 +180,7 @@ def pysvzerod_provenance(module=None) -> dict[str, object]:
 
 def _solver_identity_for_error(provenance: dict[str, object]) -> str:
     return (
+        f"module name: {provenance.get('module_name')!r}; "
         f"module path: {provenance['module_path']}; "
         f"module SHA-256: {provenance['module_sha256']!r}; "
         f"file metadata: {provenance['file_metadata']!r}; "

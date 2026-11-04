@@ -270,9 +270,9 @@ def test_equivalent_resistance_includes_terminal_boundary_conditions_for_connect
 def test_simulate_defers_missing_pysvzerod_until_solver_call(monkeypatch):
     pysvzerod_loader.require_pysvzerod.cache_clear()
 
-    def _missing_solver(_name):
-        exc = ModuleNotFoundError("No module named 'pysvzerod'")
-        exc.name = "pysvzerod"
+    def _missing_solver(name):
+        exc = ModuleNotFoundError(f"No module named '{name}'")
+        exc.name = name
         raise exc
 
     monkeypatch.setattr(pysvzerod_loader.importlib, "import_module", _missing_solver)

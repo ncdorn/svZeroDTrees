@@ -6,7 +6,10 @@ import numpy as np
 import pandas as pd
 import pytest
 from types import SimpleNamespace
-import pysvzerod
+
+from svzerodtrees._pysvzerod import require_pysvzerod
+
+pysvzerod = require_pysvzerod()
 
 import svzerodtrees.tune_bcs.rcr_tuner as rcr_module
 import svzerodtrees.tune_bcs.assign_bcs as assign_bcs_module

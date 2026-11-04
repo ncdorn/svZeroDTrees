@@ -62,7 +62,7 @@ tests = [
     "pytest-cov",
 ]
 solver = [
-    "pysvzerod; python_version >= '3.9'",
+    "svzerod; python_version >= '3.9'",
 ]
 build = [
     "twine",
@@ -74,15 +74,16 @@ package = true
 default-groups = []
 
 [tool.uv.sources]
-# Resolve a clean solver build from the revision that includes per-block
-# parameter selection; do not depend on local solver metadata extensions.
-pysvzerod = { git = "https://github.com/ncdorn/svZeroDSolver.git", rev = "80eab14a" }
+# Resolve a clean solver build from upstream master at the revision that
+# includes the IMPEDANCE boundary condition (SimVascular/svZeroDSolver#235)
+# and the pysvzerod -> svzerod module rename (#249).
+svzerod = { git = "https://github.com/SimVascular/svZeroDSolver.git", rev = "9cc4a74c" }
 
 [tool.svzerodtrees.solver]
 # Keep the solver source revision explicit so calibration cannot silently use an
 # unrelated installed extension.
-source = "https://github.com/ncdorn/svZeroDSolver.git"
-source_commit = "80eab14a"
+source = "https://github.com/SimVascular/svZeroDSolver.git"
+source_commit = "9cc4a74c"
 required_callables = ["calibrate", "simulate"]
 
 [tool.hatch.build]
