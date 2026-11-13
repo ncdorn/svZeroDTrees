@@ -2,7 +2,7 @@
 from svzerodtrees.pa_naming import pa_side
 import numpy as np
 from ..io import *
-from ..io.blocks.boundary_condition import resolve_impedance_timepoint_contract
+from ..io.blocks.boundary_condition import resolve_impedance_kernel_time_grid
 from ..utils import *
 from ..microvasculature.structured_tree.structuredtree import DEFAULT_MAX_NODES, StructuredTree
 from ..microvasculature.structured_tree.dc_resistance import conductance_matched_diameter
@@ -413,10 +413,12 @@ def construct_impedance_trees(config_handler,
             print(f'RPA std diameter: {rpa_std_dia}')
 
 
-        _, _, kernel_steps = resolve_impedance_timepoint_contract(
-            config_handler.simparams.to_dict()
+        # One cardiac period on the solver grid; the inflow may be sampled at
+        # any resolution (see resolve_impedance_kernel_time_grid).
+        time_array, kernel_steps = resolve_impedance_kernel_time_grid(
+            config_handler.simparams.to_dict(),
+            config_handler.inflows[next(iter(config_handler.inflows))].t,
         )
-        time_array = config_handler.inflows[next(iter(config_handler.inflows))].t
 
         lpa_tree = StructuredTree(name='LPA', time=time_array, simparams=config_handler.simparams, compliance_model=lpa_params.compliance_model)
         print(f'building LPA tree at initial_d={lpa_mean_dia:.4f} with lpa parameters: {lpa_params.summary()}')
@@ -527,8 +529,11 @@ def construct_impedance_trees(config_handler,
             
     else:
         '''build a unique tree for each outlet'''
-        _, _, kernel_steps = resolve_impedance_timepoint_contract(
-            config_handler.simparams.to_dict()
+        # One cardiac period on the solver grid; the inflow may be sampled at
+        # any resolution (see resolve_impedance_kernel_time_grid).
+        time_array, kernel_steps = resolve_impedance_kernel_time_grid(
+            config_handler.simparams.to_dict(),
+            config_handler.bcs['INFLOW'].t,
         )
         for idx, record in enumerate(resolved_mapping.records):
             cap_name = record.cap_path
@@ -553,7 +558,7 @@ def construct_impedance_trees(config_handler,
                 raise ValueError('cap name not recognized')
             
             scaled_d = _scaled_diameter(cap_d, mean_d, std_d)
-            tree = StructuredTree(name=cap_name, time=config_handler.bcs['INFLOW'].t, simparams=config_handler.simparams, compliance_model=params.compliance_model)
+            tree = StructuredTree(name=cap_name, time=time_array, simparams=config_handler.simparams, compliance_model=params.compliance_model)
 
             tree.build(
                 initial_d=scaled_d,

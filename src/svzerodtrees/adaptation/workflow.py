@@ -288,14 +288,19 @@ def _write_m2_adapted_coupler(
         raise ValueError("M2 adaptation requires the postop svzerod_3Dcoupling.json")
     time, kernel_steps = _coupled_kernel_grid(postop_coupler)
     if time is None:
-        time = list(
+        inflow_t = np.asarray(
             _resolve_inflow_time_array(
                 getattr(preop, "svzerod_3Dcoupling", None),
                 postop_coupler,
                 getattr(preop, "zerod_config", None),
-            )
+            ),
+            dtype=float,
         )
         kernel_steps = _impedance_kernel_steps_from_config(postop_coupler)
+        # One period (the inflow span) at the kernel resolution, whatever the
+        # inflow sampling: compute_olufsen_impedance takes dt from this grid.
+        period = float(inflow_t.max() - inflow_t.min())
+        time = np.linspace(0.0, period, kernel_steps + 1).tolist()
     # Work on a copy so the postop coupling config is not mutated.
     coupler = copy.deepcopy(postop_coupler)
     coupler.path = os.path.join(adapted_dir, "svzerod_3Dcoupling.json")

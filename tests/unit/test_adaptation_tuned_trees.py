@@ -458,8 +458,11 @@ def test_m2_rebuilt_adapted_trees_match_the_exported_impedance(tmp_path, monkeyp
     # Diameters and stiffness are both adapted (compliance_gain 1).
     _, coupler = _run_m2(tmp_path, monkeypatch, model="M2")
 
+    # Without a coupled grid the 8-step kernel spans one inflow period, not 8
+    # of the inflow's 15 sampling intervals.
+    one_period = np.linspace(TIME[0], TIME[-1], 8 + 1).tolist()
     for bc_name, (cap, _, _) in CAPS.items():
-        rebuilt = StructuredTree.from_tree_metadata(coupler.tree_params[cap], time=TIME, simparams=SIMPARAMS)
+        rebuilt = StructuredTree.from_tree_metadata(coupler.tree_params[cap], time=one_period, simparams=SIMPARAMS)
         z, _ = rebuilt.compute_olufsen_impedance(tsteps=8)
         np.testing.assert_allclose(coupler.bcs[bc_name].values["z"], z)
 

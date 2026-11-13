@@ -261,6 +261,54 @@ outlet pressure represents the pressure downstream of the arterial tree.
 - **Cost**: about 3x per evaluation (6 vs 2 cycles) when the first run
   converges, as on TST-STAN-3.
 
+### 2.11 Impedance kernel time base (fixed 2026-11-13)
+- **Contract**: svZeroDSolver reads an IMPEDANCE kernel `z` as exactly one
+  cardiac period (the inflow BC's time span) at the solver step, with
+  `len(z) = number_of_time_pts_per_cardiac_cycle - 1`.
+  `compute_olufsen_impedance` takes its step from the mean spacing of the
+  tree's `time`, so that array must be
+  `linspace(0, T, number_of_time_pts_per_cardiac_cycle)`.
+  `resolve_impedance_kernel_time_grid` (`io/blocks/boundary_condition.py`)
+  returns that grid and the step count. `construct_impedance_trees` and
+  `PAConfig.create_impedance_trees` both use it. If
+  `simulation_parameters.cardiac_period` is set, it must equal the inflow span
+  (the solver rejects a mismatch too); it also defines the period for a
+  steady, single-sample inflow.
+- **Bug**: until this fix, `construct_impedance_trees` (shared and per-cap
+  trees) built the trees on the inflow file's own samples. The kernel then
+  spanned `(n_pts - 1) * T / (n_inflow - 1)` instead of `T`, and every
+  harmonic saw the tree impedance at the wrong frequency. The spans in the
+  protocol v1 models were 0.25x the period (1600 inflow points, 400 per
+  cycle), 13.3x (31 inflow points) and 0.049x (1500 inflow points, 75 per
+  cycle). The kernel was correct only when the inflow happened to be sampled
+  at the solver resolution.
+- **Not affected**: the DC value, so mean pressures, flow splits and steady
+  or DC-only adaptation, and the 3D-coupled kernels
+  (`ConfigHandler.regenerate_impedance_bcs_for_coupled_timing` and the M2
+  adapted coupler use `linspace(0, cardiac_period, kernel_steps + 1)`). The
+  reduced PA model (`PAConfig`) already used the right grid for inflows that
+  start at t = 0. The M2 export's fallback for a coupler without a coupled
+  period and step size had the same bug and is fixed too. The M1/M3 export
+  (`MicrovascularAdaptor.createImpedanceBCs`) still builds its trees on the
+  inflow samples. That is masked only because `SimulationDirectory.write_files`
+  regenerates the kernels on the coupled grid.
+- **Affected**: every full-PA 0D pulsatile number, i.e. the tuning objective
+  and its fitted tree parameters, the calibrated (matched) 0D pulse and the
+  calibration's compliance scale. Models written before this fix carry the
+  mis-timed kernels. To reuse one pulsatilely, rebuild its kernels from the
+  tree metadata on the grid above.
+- **Measured effect** (protocol v1 iteration-2 models, same tree parameters,
+  kernels rebuilt): MPA pulse pressure rises by 1.4-13.0 mmHg on four
+  patients (10.5 tuned and 13.0 matched on TST-STAN-3) and falls by 1.1 mmHg
+  on TST-STAN-5. Means and splits are
+  unchanged. Details are in `svz/runs/_kernel_timebase_fix_20261113/README.md`.
+- **Solver robustness**: with correctly timed kernels some models fail
+  Newton at the seeds' 75 points per cycle (TST-STAN-2 within 10 cycles,
+  TST-STAN-3 by 40), and TST-STAN-5 fails at 800. At 400 points every patient
+  runs and is resolution-converged where checked. A re-tune on the fixed code
+  should check the evaluation resolution, because the tuner scores a solver
+  failure as a penalty.
+
 ## 3. Validation and diagnostics (`tuning_diagnostics.json`)
 - **SV/PP compliance bracket**: total compliance (tree static + proximal)
   should lie between regurgitant volume / PP (lower) and forward stroke volume

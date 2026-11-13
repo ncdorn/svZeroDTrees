@@ -371,6 +371,52 @@ def resolve_impedance_timepoint_contract(simparams: Mapping) -> tuple[str, int, 
     )
 
 
+def resolve_impedance_kernel_time_grid(
+    simparams: Mapping,
+    inflow_times: Sequence[float],
+) -> tuple[list[float], int]:
+    """Time grid and step count for a non-coupled 0D IMPEDANCE kernel.
+
+    svZeroDSolver treats an IMPEDANCE kernel ``z`` as exactly one cardiac
+    period sampled at the solver step: period = inflow time span, and
+    ``len(z) = number_of_time_pts_per_cardiac_cycle - 1``.
+    ``StructuredTree.compute_olufsen_impedance`` takes its step from the mean
+    spacing of the tree's time array, so that array must be the solver grid
+    ``linspace(0, period, number_of_time_pts_per_cardiac_cycle)``, not the
+    inflow sampling (which may have any number of points).
+
+    Returns ``(time_grid, kernel_steps)``; pass ``time_grid`` as the tree's
+    ``time`` and ``kernel_steps`` as ``compute_olufsen_impedance(tsteps=...)``.
+    """
+    _, points_per_cycle, kernel_steps = resolve_impedance_timepoint_contract(simparams)
+    times = np.asarray(inflow_times, dtype=np.float64)
+    span = float(times.max() - times.min()) if times.ndim == 1 and times.size >= 2 else float("nan")
+    has_span = math.isfinite(span) and span > 0.0
+
+    # The solver takes the period from the inflow span and requires
+    # simulation_parameters.cardiac_period, when given, to agree with it; with
+    # no usable span it falls back to cardiac_period.
+    declared = simparams.get("cardiac_period")
+    if declared is not None:
+        declared = _ensure_finite_numeric(declared, label="simulation_parameters.cardiac_period")
+        if declared <= 0.0:
+            raise ValueError(f"simulation_parameters.cardiac_period must be positive; got {declared}")
+        if has_span and not math.isclose(declared, span, rel_tol=1e-9, abs_tol=1e-12):
+            raise ValueError(
+                f"simulation_parameters.cardiac_period ({declared}) does not match the "
+                f"inflow time span ({span})"
+            )
+        period = declared
+    elif has_span:
+        period = span
+    else:
+        raise ValueError(
+            "cannot define the impedance kernel period: the inflow needs at least two "
+            "samples spanning a positive time, or set simulation_parameters.cardiac_period"
+        )
+    return np.linspace(0.0, period, points_per_cycle).tolist(), kernel_steps
+
+
 def _resolve_flow_sample_count_config(config: Mapping, *, bc_name: str = "INFLOW") -> int:
     flow_config = _find_boundary_condition_config(config, bc_name=bc_name)
     resolved_name = str(bc_name).strip() or "<unknown>"

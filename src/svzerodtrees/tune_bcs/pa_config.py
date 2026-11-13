@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from .._pysvzerod import simulate_pysvzerod
 from ..io.blocks import Vessel, BoundaryCondition, SimParams
 from ..io.blocks.boundary_condition import (
-    resolve_impedance_timepoint_contract,
+    resolve_impedance_kernel_time_grid,
     validate_boundary_condition_configs,
     validate_impedance_timing_config,
 )
@@ -260,13 +260,11 @@ class PAConfig():
         self.lpa_dist.L = lpa_params.inductance
         self.rpa_dist.L = rpa_params.inductance
 
-        _, sample_count, kernel_steps = resolve_impedance_timepoint_contract(
-            self.simparams.to_dict()
+        # One cardiac period on the solver grid (see resolve_impedance_kernel_time_grid).
+        time_array, kernel_steps = resolve_impedance_kernel_time_grid(
+            self.simparams.to_dict(),
+            self.inflow.t,
         )
-
-        # Inflow samples include both period endpoints; the impedance kernel spans
-        # the intervals between them.
-        time_array = np.linspace(0, self.inflow.t[-1], sample_count).tolist()
 
         self.lpa_tree = StructuredTree(name='lpa_tree', 
                                        time=time_array, 
